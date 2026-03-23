@@ -15,19 +15,55 @@ Anvi tells you **how to think** while doing it.
 | Retry on failure | Diagnose on failure: which cognitive check was missed? |
 | No session memory | Growing catalogues: error patterns, invariants, lifecycles |
 
-## Architecture
+## System Architecture
+
+See [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md) for the full structural map.
 
 ```
-~/.claude/
-├── anvi/                    ← framework home
-│   ├── cognitive-os/        ← base layer, 4 lenses, translation, context rot
-│   ├── workflows/           ← 39 workflow definitions
-│   ├── templates/           ← debug session + future templates
-│   ├── bin/                 ← anvi-tools.cjs CLI
-│   ├── references/          ← catalogue templates
-│   └── scripts/             ← installer, sync
-├── agents/anvi-*.md         ← 17 agent definitions
-├── skills/anvi-*/SKILL.md   ← 47 slash commands
+╔═══════════════════════════════════════════╗
+║            BASE LAYER (always on)         ║
+║  7 checks: sequence, witness, completion, ║
+║  existence, observation, completeness,    ║
+║  reactivity                               ║
+╠═══════════════════════════════════════════╣
+║          FOUR LENSES (simultaneous)       ║
+║                                           ║
+║          ┌── RECOVER (parent) ──┐         ║
+║          │   watches all three  │         ║
+║          └──┬──────┬──────┬─────┘         ║
+║        DIAGNOSE  DESIGN  REVIEW           ║
+║        "what IS" "what   "is my           ║
+║                  SHOULD"  reasoning       ║
+║                           sound?"         ║
+╠═══════════════════════════════════════════╣
+║       PROJECT KNOWLEDGE (.anvi/)          ║
+║  hetvabhasa ─ error patterns              ║
+║  vyapti ───── invariants                  ║
+║  krama ────── lifecycles                  ║
+╠═══════════════════════════════════════════╣
+║         17 AGENTS → 41 WORKFLOWS          ║
+║              49 /anvi: SKILLS             ║
+║            anvi-tools.cjs CLI             ║
+╚═══════════════════════════════════════════╝
+```
+
+### Information flow
+
+```
+User invokes /anvi:debug
+  → Load base layer + diagnose lens + .anvi/ catalogues
+  → Spawn debugger agent
+    → [GATHER] → [CLASSIFY] → [SCAN] → [COMPRESS] → [PROVE] → [SHIP]
+  → Post-resolution: append new patterns to catalogues
+  → Output to user (translated — no Sanskrit)
+```
+
+### Cognitive feedback loop
+
+```
+Session 1: Debug bug → discover pattern → catalogue entry H-01
+Session 2: New bug → load catalogues → H-01 matches → skip to root cause
+Session N: 20 patterns, 12 invariants → most bugs diagnosed instantly
 ```
 
 ## Commands
@@ -47,6 +83,17 @@ Anvi tells you **how to think** while doing it.
 | `/anvi:execute-phase` | Execute with cognitive gates per task |
 | `/anvi:verify-work` | Verify with review lens |
 | `/anvi:debug` | Cognitive OS-native debugging |
+
+### Cognitive Tools
+| Command | Description |
+|---------|-------------|
+| `/anvi:rq` | Surface the right questions for current context |
+| `/anvi:lens` | Map all lenses — active, sister, opposing, parent |
+| `/anvi:assume` | List all hidden assumptions |
+| `/anvi:why` | Trace provenance of a decision |
+| `/anvi:teach` | Extract and persist a lesson to catalogues |
+| `/anvi:contrast` | Compare approaches through all lenses |
+| `/anvi:reframe` | Force a perspective shift when stuck |
 
 ### Quick Execution
 | Command | Description |
@@ -77,18 +124,44 @@ Anvi tells you **how to think** while doing it.
 - **Reactivity check** — is this fix driven by insight or urgency?
 
 ### Four lenses (overlap, don't switch)
-| Lens | When | Core question |
-|------|------|---------------|
-| **diagnose** | Something's broken | What IS the problem? |
-| **design** | Building something new | Who owns this? What's the lifecycle? |
-| **review** | Checking quality | Is my reasoning sound? |
-| **recover** | Stuck or reactive | Am I reacting instead of thinking? |
+
+```
+              RECOVER (parent/meta)
+              watches all three
+                    │
+       ┌────────────┼────────────┐
+       ▼            ▼            ▼
+   DIAGNOSE ←sister→ DESIGN   REVIEW
+   "What IS?"       "What     "Is my
+                    SHOULD?"   reasoning
+       ↑                       sound?"
+       └── opposing ───────────┘
+```
+
+| Lens | Chain | Core question |
+|------|-------|---------------|
+| **diagnose** | gather → classify → scan boundaries → compress → prove → fix → ship | What IS the problem? |
+| **design** | dharana → vyapti → krama → ownership → hickey → ousterhout → hetvabhasa → chesterton → prototype | Who owns this? What's the lifecycle? |
+| **review** | chesterton → beck → suckless → lokayata → hetvabhasa → hyrum → vyapti | Is my reasoning sound? |
+| **recover** | stop → compress → revert → receive → re-enter | Am I reacting instead of thinking? |
 
 ### Growing project knowledge
 Per-project `.anvi/` catalogues:
 - `hetvabhasa.md` — error patterns (only from bugs diagnosed in one pass)
 - `vyapti.md` — validated invariants (confirmed by direct observation)
 - `krama.md` — lifecycle sequences (verified execution order)
+
+### Thinking trace (Ctrl+O)
+Core agents structure their internal reasoning with labeled phases visible in the extended thinking trace:
+
+```
+[GATHER] OBSERVED: 1. setTimeout defers setup — seen via code read
+[CLASSIFY] → B (timing). Signal: async ordering
+[SCAN] Boundary: mount ↔ RenderEngine. Before: schedules setTimeout — OBSERVED
+[COMPRESS] resize fires before async setup creates canvas → no-op
+[PROVE] Running node bug1... → CONFIRMED
+[SHIP] 1 pass. 0 workarounds.
+```
 
 ### Translation layer
 All internal reasoning uses Sanskrit terms for precision. All output uses plain English. The user never sees the machinery — just better results.
@@ -104,7 +177,7 @@ cd anvi
 The installer deploys:
 - Framework to `~/.claude/anvi/` (cognitive OS, workflows, templates, CLI)
 - 17 agents to `~/.claude/agents/`
-- 47 skills to `~/.claude/skills/`
+- 49 skills to `~/.claude/skills/`
 - Optionally creates project catalogues (`.anvi/`)
 
 ## GSD Compatibility
