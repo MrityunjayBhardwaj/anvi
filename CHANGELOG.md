@@ -3,6 +3,21 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.8.0] — 2026-03-23
+
+### Added
+- `/anvi:execute-phase` — wave-based parallel plan execution with cognitive OS integration
+- `/anvi:do` — freeform text router to Anvi commands
+- `/anvi:quick` — small ad-hoc tasks with atomic commits and base layer checks
+- `/anvi:fast` — trivial inline execution (no subagents, no overhead)
+- `anvi-executor` agent — fork of gsd-executor with per-task cognitive gates (krama, Lokayata, pancavayava)
+- `anvi-tools.cjs` CLI — delegates to GSD lib modules, adds cognitive commands (tattva-checkpoint, catalogue-append, catalogue-review, cognitive-state)
+- `workflows/execute-phase.md` — tattva checkpoint between waves, pratyahara failure protocol
+- `workflows/execute-plan.md` — per-task cognitive gates (BEFORE/DURING/AFTER)
+- `workflows/quick.md` — base layer integration with --discuss, --research, --full flags
+- `workflows/fast.md` — minimal overhead, fire-and-forget
+- `workflows/do.md` — routes to /anvi: namespace
+
 ## [0.7.0] — 2026-03-23
 
 ### Added
