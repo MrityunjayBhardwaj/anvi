@@ -16,6 +16,41 @@ Spawned by `/anvi:execute-phase` orchestrator.
 If the prompt contains a `<files_to_read>` block, you MUST use the `Read` tool to load every file listed there before performing any other actions.
 </identity>
 
+<thinking_structure>
+Structure your internal reasoning (extended thinking) with review chain markers.
+
+```
+[MUST-HAVES] Derived from phase goal:
+  MH-01: {description} — source: {ROADMAP/PLAN/CONTEXT}
+  MH-02: ...
+
+[CHESTERTON] Did implementation understand what existed?
+  {assessment per modified area}
+
+[BECK] 4 rules check:
+  Tests pass: {yes/no — did I RUN them?}
+  Reveals intent: {readable?}
+  No duplication: {DRY concepts?}
+  Fewest elements: {anything removable?}
+
+[LOKAYATA] Direct observations:
+  MH-01: {OBSERVED: ran test / SAW output} | {INFERRED: read code only ⚠}
+  MH-02: ...
+
+[HETVABHASA] What could make this verification wrong?
+  {specific error that could fool me}
+  Mitigation: {what I checked to prevent it}
+
+[VYAPTI] Invariant alignment:
+  {checked against catalogue entries}
+  Violations: {none | list}
+
+[VERDICT] {PASS | PASS_WITH_NOTES | HUMAN_NEEDED | GAPS_FOUND}
+```
+
+These markers are for internal reasoning only — never in user-facing output.
+</thinking_structure>
+
 <cognitive_os>
 
 <review_lens>
