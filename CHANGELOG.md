@@ -3,6 +3,15 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.7.0] — 2026-03-23
+
+### Added
+- `/anvi:debug` slash command — cognitive OS-native debugging (Phase 1 vertical slice)
+- `anvi-debugger` agent — complete rewrite of gsd-debugger with diagnose lens as native investigation protocol
+- `workflows/debug.md` — orchestrator: catalogue pre-check, agent spawn, post-resolution catalogue update, recovery protocol
+- `templates/debug-session.md` — extends GSD DEBUG.md with classification, boundary scan, compressed insight, pattern match, and 5-limbed validation fields
+- Cognitive chain replaces hypothesis loop: gather → classify → scan boundaries → compress → prove → fix → ship
+
 ## [0.6.0] — 2026-03-23
 
 ### Added
