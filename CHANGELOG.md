@@ -3,6 +3,16 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.11.0] — 2026-03-23
+
+### Added
+- 23 utility workflows: add-phase, remove-phase, insert-phase, list-phase-assumptions, validate-phase, plan-milestone-gaps, verify-work, verify-phase, add-tests, audit-uat, audit-milestone, map-codebase, ship, pr-branch, review, note, add-todo, check-todos, plant-seed, next, help, health, settings, stats, autonomous, cleanup, ui-phase, ui-review
+- 8 agents: anvi-codebase-mapper, anvi-integration-checker, anvi-nyquist-auditor, anvi-advisor-researcher, anvi-ui-researcher, anvi-ui-checker, anvi-ui-auditor, anvi-user-profiler
+- 25 skill definitions for all utility commands
+- Full GSD command parity under `/anvi:` namespace (47 total skills)
+- Review lens integration in verify-work and review workflows
+- Cognitive metrics in stats workflow
+
 ## [0.10.0] — 2026-03-23
 
 ### Added
