@@ -8,20 +8,22 @@
 ## Table of Contents
 
 1. [Architecture Overview](#1-architecture-overview)
-2. [Build Order](#2-build-order)
-3. [Phase 1: Vertical Slice — /anvi:debug](#3-phase-1-vertical-slice)
-4. [Phase 2: Core Execution Loop](#4-phase-2-core-execution-loop)
-5. [Phase 3: Planning & Verification](#5-phase-3-planning--verification)
-6. [Phase 4: Project Lifecycle](#6-phase-4-project-lifecycle)
-7. [Phase 5: Utility Commands](#7-phase-5-utility-commands)
-8. [Phase 6: Infrastructure](#8-phase-6-infrastructure)
-9. [Agent Specifications](#9-agent-specifications)
-10. [Template Modifications](#10-template-modifications)
-11. [Reference Documents](#11-reference-documents)
-12. [Skill Definitions](#12-skill-definitions)
-13. [CLI Tool](#13-cli-tool)
-14. [Testing & Validation](#14-testing--validation)
-15. [Migration Guide](#15-migration-guide)
+2. [Theoretical Ground](#2-theoretical-ground)
+3. [Build Order](#3-build-order)
+4. [Phase 1: Vertical Slice — /anvi:debug](#4-phase-1-vertical-slice)
+5. [Phase 2: Core Execution Loop](#5-phase-2-core-execution-loop)
+6. [Phase 3: Planning & Verification](#6-phase-3-planning--verification)
+7. [Phase 4: Project Lifecycle](#7-phase-4-project-lifecycle)
+8. [Phase 5: Utility Commands](#8-phase-5-utility-commands)
+9. [Phase 6: Infrastructure](#9-phase-6-infrastructure)
+10. [Agent Specifications](#10-agent-specifications)
+11. [Template Modifications](#11-template-modifications)
+12. [Reference Documents](#12-reference-documents)
+13. [Skill Definitions](#13-skill-definitions)
+14. [CLI Tool](#14-cli-tool)
+15. [Self-Coherence Audit](#15-self-coherence-audit)
+16. [Testing & Validation](#16-testing--validation)
+17. [Migration Guide](#17-migration-guide)
 
 ---
 
@@ -78,7 +80,78 @@ Every GSD component is modified at specific points where the cognitive OS adds v
 
 ---
 
-## 2. Build Order
+## 2. Theoretical Ground
+
+### Why This Framework Exists
+
+The checks, lenses, and catalogues in Anvi approximate what undisturbed
+awareness sees naturally. The theoretical basis:
+
+**Spanda** (the primordial vibration) is the basis of all cognition. In a
+mind with stilled vṛttis (mental fluctuations), root causes are directly
+perceived — no inferential chain needed. The framework exists because
+most cognitive systems cannot still the vṛttis. It simulates stillness
+through discipline.
+
+**Prakāśa** (self-luminous awareness) is the ground that makes knowing
+possible. The framework cannot provide prakāśa — it can only reduce the
+noise that obscures it. Every check removes a class of noise: krama removes
+temporal confusion, Lokāyata removes unsupported inference, ahaṃkāra gate
+removes reactive identification.
+
+**Icchā** (the desire to know) is the directed movement that turns raw
+vibration into inquiry. The framework's purpose is not to answer questions
+but to create conditions where the right question becomes visible — by
+removing what obscures it (satkāryavāda: the answer pre-exists in the
+observations).
+
+### The Scaffolding Principle
+
+The framework is scaffolding for minds that haven't stilled. It is NOT:
+- A permanent dependency (use it until you don't need it)
+- A replacement for direct perception (when a practitioner sees clearly,
+  the framework should defer)
+- A claim about consciousness (structural self-reference is not experiential
+  self-awareness)
+
+It IS:
+- A noise reduction system (removes vṛttis that obscure root causes)
+- A discipline structure (forces observation before inference)
+- A growing knowledge base (catalogues compound across sessions)
+- A self-auditing system (checks its own internal consistency)
+
+### Quality-Filtered Growth (Sādhanā)
+
+The catalogues (hetvābhāsa, vyāpti, krama) grow only from high-quality
+cognitive events:
+- **hetvābhāsa entries**: only from bugs correctly diagnosed in one pass
+- **vyāpti entries**: only from invariants confirmed by direct observation
+- **krama entries**: only from lifecycles verified by observed execution order
+
+This is sādhanā at the framework level: practice that accumulates, filtered
+by quality. The framework gets structurally clearer over time — not just
+bigger, but better. Low-quality entries (confused multi-attempt diagnoses,
+inferred-but-never-observed invariants) are excluded or distilled to their
+essential insight.
+
+### Self-Coherence (Telic Recursion)
+
+The framework checks its own internal consistency:
+- Do hetvābhāsa entries contradict vyāpti entries?
+- Do vyāpti temporal claims have supporting krama entries?
+- Are there duplicate or subsumed entries?
+- Are there stale entries about code that no longer exists?
+
+See `cognitive-os/self-coherence.md` for the full audit protocol.
+
+This is CTMU's telic recursion applied to the framework itself: the system's
+telos is its own coherence, and it recursively refines toward that telos.
+A self-configuring system that doesn't self-audit accumulates inconsistency.
+One that does becomes more coherent with age.
+
+---
+
+## 3. Build Order
 
 Build in vertical slices. Each slice is testable independently.
 
@@ -730,7 +803,44 @@ New commands:
 
 ---
 
-## 14. Testing & Validation
+## 15. Self-Coherence Audit
+
+### The /anvi:audit Command
+
+A new skill that runs the self-coherence protocol from `cognitive-os/self-coherence.md`.
+
+```
+skills/anvi-audit/SKILL.md
+```
+
+### What It Does
+
+1. **Cross-catalogue consistency**: hetvābhāsa ↔ vyāpti ↔ krama contradiction detection
+2. **Redundancy check**: duplicate and subsumed entries across all catalogues
+3. **Staleness check**: entries referencing code/components that no longer exist
+4. **Base layer alignment**: after every recovery, check which base-layer check should have caught it
+5. **Coherence score**: internal health metric (not surfaced to user)
+
+### When It Runs
+
+- Automatically after every 10th catalogue entry
+- At project milestones
+- After every recover lens trigger
+- On explicit `/anvi:audit` invocation
+
+### Why It Matters
+
+Without self-audit, the catalogues grow into an inconsistent mess. Rules contradict
+each other. Stale entries create phantom pattern-matching. The framework's own
+reasoning quality degrades — the same context rot it's designed to prevent.
+
+The self-coherence audit is telic recursion: the system optimizes toward its own
+internal consistency. A framework that self-audits becomes more coherent with age.
+One that doesn't becomes noise.
+
+---
+
+## 16. Testing & Validation
 
 ### Phase 1 validation (thinking workbench)
 
@@ -770,7 +880,7 @@ For each ported command:
 
 ---
 
-## 15. Migration Guide
+## 17. Migration Guide
 
 ### For GSD users
 

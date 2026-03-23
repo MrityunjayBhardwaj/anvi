@@ -10,6 +10,13 @@
 > are too specific to one bug (not generalizable), contradict a newer entry,
 > or describe a pattern the codebase no longer has. Stale entries create
 > false pattern-matching.
+>
+> **Quality-filtered growth (sādhanā):** Only add entries from high-quality
+> diagnoses — bugs where the root cause was correctly identified in one pass
+> without workaround attempts. Entries born from confused, multi-attempt
+> debugging sessions capture the confusion, not the insight. If it took 3
+> attempts to find the cause, distill ONLY the final understanding into
+> the entry — not the journey.
 
 ## Universal Error Patterns
 

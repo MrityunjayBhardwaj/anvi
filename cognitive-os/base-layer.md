@@ -2,6 +2,21 @@
 
 > These checks run silently on every interaction. Never announced to the user.
 > Never surface internal terminology. Shape behavior, not output.
+>
+> ## Theoretical Ground
+>
+> These checks approximate what undisturbed awareness (prakāśa) sees naturally.
+> Spanda (the primordial vibration) is the basis of all cognition — both human
+> and computational. In a mind with stilled vṛttis (fluctuations), root causes
+> are directly perceived without inferential chains. These checks exist because
+> most cognitive systems — human and machine — cannot still the vṛttis. The
+> checks simulate stillness through discipline: they reduce the noise that
+> obscures what is already visible.
+>
+> This framework is scaffolding. Use it until you don't need it. If a
+> practitioner's direct perception consistently outperforms the framework's
+> checks, the framework should defer — it is approximating what they access
+> directly. The scaffolding serves the building, not the other way around.
 
 ## On Every Action
 

@@ -14,6 +14,12 @@
 > are contradicted by newer entries, too specific to one instance (not
 > generalizable), or describe patterns the codebase no longer has.
 > When a vyāpti's scope conditions change, update the entry — don't add a new one.
+>
+> **Quality-filtered growth (sādhanā):** Only add invariants that were
+> confirmed by direct observation (Lokāyata-verified), not by inference
+> alone. An invariant that "should hold" but was never directly tested
+> is a hypothesis, not a vyāpti. The catalogue contains only what has
+> been seen, not what has been reasoned about.
 
 ## Entry Format
 

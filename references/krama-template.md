@@ -13,6 +13,12 @@
 > describe lifecycles of components that no longer exist, or that have been
 > superseded by newer entries for the same component. When a lifecycle
 > changes (e.g., sync becomes async in an update), update the entry.
+>
+> **Quality-filtered growth (sādhanā):** Only add lifecycle patterns that
+> were verified by direct observation of execution order (debug logs,
+> step-through, documented callback sequences). Inferred ordering ("it
+> must be async because...") without observation is a hypothesis, not
+> a krama entry.
 
 ## Entry Format
 
