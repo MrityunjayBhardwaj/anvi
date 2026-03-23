@@ -3,6 +3,19 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [1.0.0] — 2026-03-23
+
+### Added
+- Full installer: deploys framework, 17 agents, 47 skills, CLI in one command
+- Updated README with complete command reference, architecture overview, installation guide
+- GSD coexistence detection in installer
+- Migration instructions for GSD users
+
+### Changed
+- Installer now deploys workflows, agents, templates, CLI, and skills (was: cognitive OS only)
+- README rewritten for v1.0 with GSD diff table, command reference, cognitive OS overview
+- Moved from "Unreleased — v1.0.0" to released v1.0.0
+
 ## [0.11.0] — 2026-03-23
 
 ### Added
@@ -70,13 +83,6 @@ Format: [Semantic Versioning](https://semver.org/)
 - Snapshot-based diff: creates a snapshot of GSD state, compares on next check
 - Installer now copies scripts and /anvi:sync skill
 
-## [Unreleased — v1.0.0]
-
-### Planned
-- Full fork of GSD under `/anvi:` namespace — all workflows, agents, templates, CLI
-- Every agent infused with cognitive OS (not bolted on via hooks)
-- `/anvi:plan-phase`, `/anvi:execute-phase`, `/anvi:progress`, `/anvi:debug`, `/anvi:new-project`, etc.
-- No dependency on GSD installation — Anvi is self-contained
 
 ## [0.5.0] — 2026-03-23
 
