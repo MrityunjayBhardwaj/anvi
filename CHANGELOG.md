@@ -3,6 +3,17 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.9.0] — 2026-03-23
+
+### Added
+- `/anvi:plan-phase` — phase planning with design lens (ownership, lifecycle, pre-mortem, UX precedent)
+- `/anvi:discuss-phase` — adaptive questioning with design-lens gray area identification
+- `/anvi:research-phase` — standalone research with boundary scanning (dharana)
+- `anvi-planner` agent — design lens native: every task gets ownership, lifecycle, and pre-mortem statements
+- `anvi-checker` agent — 13 verification dimensions: 7 standard (GSD) + 6 cognitive (A-F: vyapti alignment, krama correctness, hetvabhasa resistance, observation testability, ownership clarity, UX precedent)
+- `anvi-researcher` agent — boundary scanning before investigation, confidence-tagged findings, source hierarchy
+- `anvi-verifier` agent — review lens: Chesterton, Beck's 4 rules, Lokayata observation, hetvabhasa susceptibility, vyapti alignment
+
 ## [0.8.0] — 2026-03-23
 
 ### Added
