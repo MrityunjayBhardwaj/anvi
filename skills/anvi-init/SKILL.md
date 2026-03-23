@@ -1,5 +1,5 @@
 ---
-name: anvi-init
+name: anvi:init
 description: Initialize Ānvīkṣikī for the current project. Creates .anvi/ catalogues and adds the framework directive to CLAUDE.md. Use when starting Anvi on a new project for the first time.
 argument-hint: [--no-claude-md]
 allowed-tools: [Read, Write, Edit, Bash, Glob, AskUserQuestion]

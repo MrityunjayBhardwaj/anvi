@@ -1,5 +1,5 @@
 ---
-name: anvi-ui-phase
+name: anvi:ui-phase
 description: Generate UI design contract (UI-SPEC.md) for frontend phases
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

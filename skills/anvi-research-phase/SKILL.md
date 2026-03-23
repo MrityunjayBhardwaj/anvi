@@ -1,5 +1,5 @@
 ---
-name: anvi-research-phase
+name: anvi:research-phase
 description: Research how to implement a phase before planning. Standalone command — usually use /anvi:plan-phase instead (which includes research). Use when deeper investigation is needed.
 argument-hint: <phase-number>
 allowed-tools: [Read, Write, Bash, Glob, Grep, Agent, AskUserQuestion]

@@ -1,5 +1,5 @@
 ---
-name: anvi-plan-phase
+name: anvi:plan-phase
 description: Create detailed phase plan (PLAN.md) with design lens and verification loop. Use when the user says "plan phase N", "create plan for phase N", "plan this phase".
 argument-hint: <phase-number> [--skip-research] [--skip-check]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

@@ -1,5 +1,5 @@
 ---
-name: anvi-remove-phase
+name: anvi:remove-phase
 description: Remove a future phase from roadmap and renumber subsequent phases
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

@@ -1,5 +1,5 @@
 ---
-name: anvi-debug
+name: anvi:debug
 description: Systematic debugging with the cognitive OS. Use when something is broken, a test fails, behavior is unexpected, or the user reports a bug. Also use when the user says "debug this", "why is this broken", "find the bug", or "investigate".
 argument-hint: [description of issue]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

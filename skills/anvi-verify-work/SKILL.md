@@ -1,5 +1,5 @@
 ---
-name: anvi-verify-work
+name: anvi:verify-work
 description: Validate built features through conversational UAT
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

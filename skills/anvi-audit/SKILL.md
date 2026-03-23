@@ -1,5 +1,5 @@
 ---
-name: anvi-audit
+name: anvi:audit
 description: Run self-coherence audit on the framework's project catalogues. Checks for contradictions between hetvābhāsa and vyāpti entries, stale entries, duplicates, and base-layer gaps. Use when catalogues have grown, after recoveries, or at milestones.
 allowed-tools: [Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion]
 ---

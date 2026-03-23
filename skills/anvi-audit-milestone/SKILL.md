@@ -1,5 +1,5 @@
 ---
-name: anvi-audit-milestone
+name: anvi:audit-milestone
 description: Audit milestone completion against original intent before archiving
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

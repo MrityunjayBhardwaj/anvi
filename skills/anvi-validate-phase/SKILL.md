@@ -1,5 +1,5 @@
 ---
-name: anvi-validate-phase
+name: anvi:validate-phase
 description: Retroactively audit and fill Nyquist validation gaps for a completed phase
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

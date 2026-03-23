@@ -1,5 +1,5 @@
 ---
-name: anvi-settings
+name: anvi:settings
 description: Configure Anvi workflow toggles and model profile
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

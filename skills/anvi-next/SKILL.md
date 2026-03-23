@@ -1,5 +1,5 @@
 ---
-name: anvi-next
+name: anvi:next
 description: Automatically advance to the next logical step
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

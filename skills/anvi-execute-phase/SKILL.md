@@ -1,5 +1,5 @@
 ---
-name: anvi-execute-phase
+name: anvi:execute-phase
 description: Execute all plans in a phase with wave-based parallelization and cognitive OS checks. Use when the user says "execute phase N", "run phase N", "build phase N".
 argument-hint: <phase-number> [--interactive]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

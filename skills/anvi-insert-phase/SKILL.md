@@ -1,5 +1,5 @@
 ---
-name: anvi-insert-phase
+name: anvi:insert-phase
 description: Insert urgent work as decimal phase between existing phases
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

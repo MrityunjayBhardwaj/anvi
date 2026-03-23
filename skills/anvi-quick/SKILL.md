@@ -1,5 +1,5 @@
 ---
-name: anvi-quick
+name: anvi:quick
 description: Execute a quick task with Anvi guarantees (atomic commits, state tracking) but skip optional agents. Use for small tasks that don't need full phase planning.
 argument-hint: <task description> [--discuss] [--research] [--full]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

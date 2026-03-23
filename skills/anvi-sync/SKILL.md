@@ -1,5 +1,5 @@
 ---
-name: anvi-sync
+name: anvi:sync
 description: Check if GSD has been updated upstream and show what changed. Use when the user says "check for GSD updates", "sync anvi with gsd", or "is anvi up to date".
 allowed-tools: [Bash, Read, Glob, Grep, Write, AskUserQuestion]
 ---

@@ -1,5 +1,5 @@
 ---
-name: anvi-verify-phase
+name: anvi:verify-phase
 description: Verify phase completeness — all plans have summaries
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

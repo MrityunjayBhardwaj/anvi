@@ -1,5 +1,5 @@
 ---
-name: anvi-health
+name: anvi:health
 description: Diagnose planning directory health and optionally repair
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

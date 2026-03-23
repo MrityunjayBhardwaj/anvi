@@ -1,5 +1,5 @@
 ---
-name: anvi-session-report
+name: anvi:session-report
 description: Generate a session report with work summary, outcomes, and cognitive metrics. Use when the user says "session report", "what did we do", "summarize this session".
 argument-hint:
 allowed-tools: [Read, Write, Bash, Glob, Grep]

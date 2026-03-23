@@ -1,5 +1,5 @@
 ---
-name: anvi-session
+name: anvi:session
 description: Load Ānvīkṣikī for this session only without modifying any project files. Use when you want to try the cognitive OS without committing to it, or on projects that aren't initialized with /anvi:init.
 allowed-tools: [Read, Glob, Grep]
 ---

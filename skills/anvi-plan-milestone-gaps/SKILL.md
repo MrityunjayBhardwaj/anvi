@@ -1,5 +1,5 @@
 ---
-name: anvi-plan-milestone-gaps
+name: anvi:plan-milestone-gaps
 description: Create phases to close all gaps identified by milestone audit
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

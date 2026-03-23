@@ -1,5 +1,5 @@
 ---
-name: anvi-discuss-phase
+name: anvi:discuss-phase
 description: Gather phase context through adaptive questioning before planning. Use when the user says "discuss phase N", "brainstorm phase N", "think about phase N". Use --auto to skip interactive questions.
 argument-hint: <phase-number> [--auto]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

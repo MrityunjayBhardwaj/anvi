@@ -1,5 +1,5 @@
 ---
-name: anvi-help
+name: anvi:help
 description: Show available Anvi commands and usage guide
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

@@ -1,5 +1,5 @@
 ---
-name: anvi-check-todos
+name: anvi:check-todos
 description: List pending todos and select one to work on
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

@@ -1,5 +1,5 @@
 ---
-name: anvi-map-codebase
+name: anvi:map-codebase
 description: Analyze codebase with parallel mapper agents
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]

@@ -1,5 +1,5 @@
 ---
-name: anvi-ui-review
+name: anvi:ui-review
 description: Retroactive 6-pillar visual audit of implemented frontend code
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]
