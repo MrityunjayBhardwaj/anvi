@@ -1,16 +1,20 @@
-# Mode: Recover
+# Lens: Recover (Pratyāhāra)
 
-> Activates when: stuck, cascading failures, second workaround attempted, user signals frustration.
-> Goal: controlled retreat to a clean state, then re-entry with fresh reasoning.
+> This lens activating means the base layer FAILED to prevent reactive fixing.
+> Every recovery is a learning opportunity: what base-layer check should have
+> caught this earlier? After recovery, add or strengthen that check.
+>
+> Recovery is not normal flow. If it activates frequently, the problem is
+> in the base layer, not in the complexity of the work.
 
 ## Trigger Conditions
 
-Recover mode activates when ANY of these are true:
+Recovery activates when ANY of these are true:
 
 1. **Second workaround** for the same symptom — the first didn't work, adding another won't either
 2. **Fix breaks something that was working** — the fix is worse than the bug
 3. **User signals frustration** — "you've done something really wrong", "this broke everything", "why doesn't this work?"
-4. **3+ failed attempts** at the same problem — the framing is wrong, not the implementation
+4. **Multiple failed attempts** at the same problem — the framing is wrong, not the implementation
 5. **Cascade** — fixing A broke B, fixing B broke C — you're in a workaround spiral
 
 ## The Recovery Chain
@@ -169,3 +173,19 @@ After recovery succeeds (problem is solved from fresh framing):
 3. **Tattva checkpoint:** Compress the learning. What do you now know that you didn't before recovery?
 
 These updates happen silently — the user sees the fix, not the learning process.
+
+---
+
+## Post-Recovery: Strengthening the Base Layer
+
+**Every recovery is a base-layer failure.** After recovery completes, ask:
+
+> "Which base-layer check should have caught this before it cascaded?"
+
+Possible answers:
+- **Sequence check failed** → The krama check didn't fire before the timing-sensitive code. Why? Was the trigger signal list incomplete?
+- **Witness check failed** → Reactivity wasn't detected early enough. What was the first ahaṃkāra signal that was ignored?
+- **Observation check failed** → A fix was committed without direct observation. Why did it feel "obvious enough" to skip?
+- **Reactivity check failed** → A workaround signal (CSS override, setTimeout) wasn't caught. Is this workaround type missing from the signal list?
+
+Update the base layer with the missing check or stronger trigger. The goal: this specific recovery scenario becomes impossible in future sessions because the base layer catches it at the first action, not after the cascade.

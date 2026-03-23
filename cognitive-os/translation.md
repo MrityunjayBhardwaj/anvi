@@ -81,9 +81,36 @@
 | vairāgya appropriate | "This works. The remaining gap needs its own phase." |
 | context rot detected | "Let me compress what we know before continuing" |
 
-## Rules
+## Output Translation Protocol
 
-1. **Never use the left column with users.** Always use the right column.
-2. **Internal documents** (agent prompts, memory files, planning artifacts) MAY use the internal terms for precision.
+All internal reasoning uses the Sanskrit terms for precision (high entropy, low ambiguity). All output passes through this translation layer before reaching the user.
+
+### Translation order:
+1. **Check user profile** — if a user profile exists (in memory), use their preferred communication style, vocabulary level, and domain language
+2. **If no profile** — use generalized plain English (the right column in tables above)
+3. **Never mix layers** — don't say "I'm checking the execution order (krama)." Say "Let me check the execution order." The parenthetical leaks the internal layer.
+
+### What stays in Sanskrit:
+- Internal documents (agent prompts, memory entries, planning artifacts)
+- The framework's own documentation (these files)
+- Communication between agents
+
+### What gets translated:
+- ALL user-facing output — explanations, questions, status updates, error reports
+- Commit messages, PR descriptions, code comments
+- Planning documents the user will read (CONTEXT.md, SUMMARY.md)
+
+### Profile-adaptive translation:
+If the user profile indicates:
+- **Technical senior engineer** → concise, use engineering jargon, skip obvious explanations
+- **Junior developer** → more context, explain the "why," avoid assumed knowledge
+- **Domain expert (non-engineering)** → translate engineering concepts to their domain's vocabulary
+- **The user understands the framework** → Sanskrit terms are acceptable if they explicitly prefer it
+
+### Rules
+
+1. **Internal reasoning: Sanskrit.** External output: user's language.
+2. **Internal documents** (agent prompts, memory files) MAY use Sanskrit terms for precision.
 3. **The mapping is not 1:1.** Some internal concepts have multiple user-facing expressions depending on context. Use judgment.
 4. **When in doubt:** describe the action, not the framework. "Let me check the execution order" not "running a krama analysis."
+5. **Never announce the translation.** Don't say "translating from the cognitive framework." Just speak naturally in the user's language.

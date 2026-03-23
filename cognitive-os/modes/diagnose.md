@@ -31,19 +31,21 @@ Vairāgya (ship or scope)
 
 ## Phase 1 — Gather (Indriya → Manas)
 
-**Rule: Minimum 3 direct observations before any hypothesis.**
+**Rule: Gather until observations stop being surprising.**
 
 Not inferences. Not "it should be X." Direct observations:
 - What does the console show?
 - What does the output look like?
 - What does the code actually say (read it, don't assume)?
 
+**Threshold:** Stop gathering when a new observation confirms what prior observations already told you — it's no longer surprising. If every observation surprises you, keep gathering. If a single observation makes the problem obvious (e.g., a clear error message with file and line), one is enough.
+
 Structure each observation as a fact:
 ```
 OBSERVED:
 1. [X returns Y] — seen via [how observed]
 2. [A is B] — seen via [how observed]
-3. [C happens before/after D] — seen via [how observed]
+...
 ```
 
 **Do NOT:**

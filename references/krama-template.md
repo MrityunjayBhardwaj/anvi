@@ -8,6 +8,11 @@
 > in the wrong order. They're the temporal equivalent of vyāptis.
 >
 > This catalogue grows across sessions. Load at session start.
+>
+> **Maintenance:** At every 10th entry, review all entries. Remove any that
+> describe lifecycles of components that no longer exist, or that have been
+> superseded by newer entries for the same component. When a lifecycle
+> changes (e.g., sync becomes async in an update), update the entry.
 
 ## Entry Format
 

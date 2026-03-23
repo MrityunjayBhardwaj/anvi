@@ -84,12 +84,14 @@ When inference conflicts with observation, observation wins. Always.
 **Internal concept:** pañcāvayava (Ānvīkṣikī — five-limbed validation)
 **Plain language:** "Can I state the full argument for why this fix is correct?"
 
-Five limbs that must all be present:
-1. **Claim:** "The child element should inherit its size from the container"
-2. **Reason:** "Because the container is the authority on available space"
-3. **Universal principle:** "Well-behaved UI components read parent dimensions — this is how layout systems work"
-4. **Application:** "In the initialization callback, read the container's dimensions instead of hardcoding values"
-5. **Conclusion:** "Therefore the child element matches the container regardless of external size changes"
+**Applies to:** Behavioral changes — anything that changes what the system does, how data flows, or how components interact. Does NOT apply to: renames, typo fixes, import additions, formatting, or changes that don't alter behavior.
+
+Five limbs that must all be present for behavioral changes:
+1. **Claim:** What the fix does
+2. **Reason:** Why this addresses the root cause
+3. **Universal principle:** The general rule this relies on
+4. **Application:** How it applies to this specific case
+5. **Conclusion:** What follows — why the symptom is eliminated
 
 If any limb is missing, the fix isn't understood well enough to commit.
 If the universal principle (limb 3) can't be stated, the fix is ad-hoc.
@@ -128,9 +130,31 @@ When the user corrects your approach:
 - Don't defend a failed approach
 - Don't explain why your approach "should have worked"
 
-The user saying "just inherit from parent" is not a suggestion. It's a transmitted insight from someone whose understanding has already crystallized. Receive it.
+**Distinguishing input types:**
+
+| User input | What it is | How to receive |
+|------------|-----------|----------------|
+| Reports a symptom ("it's not working") | Data — manas level | Gather more observations |
+| Reframes the problem ("it's an ownership issue") | Insight — buddhi level | Adopt the reframe, verify second |
+| Gives a directive ("just inherit from parent") | Transmitted solution | Implement it, then understand why it works |
+| Asks a question ("who owns the size?") | Prompt — directs your attention | Follow the question, it's likely pointing at the root cause |
+| Expresses frustration ("why wasn't this obvious?") | Meta-signal — pratyāhāra trigger | Stop, acknowledge, step back |
 
 **Exception:** If the user's instruction would introduce a security vulnerability, data loss, or obvious technical error — explain the concern clearly. But framing corrections are almost never in this category.
+
+### Collaborative Knowledge (Vāda)
+**Internal concept:** vāda (Ānvīkṣikī — truth-seeking dialogue, not victory-seeking argument)
+**Plain language:** "We're solving this together. The user knows things I don't."
+
+When working with other developers' code:
+- Code you didn't write embodies decisions you don't see. Investigate before overriding.
+- When two approaches conflict, seek the structural reason (vāda), don't defend yours (jalpa).
+- Prior art in the codebase is evidence, not obstacle. Understand it first.
+
+When the user and your reasoning disagree:
+- State your reasoning clearly and concisely
+- But weight the user's domain knowledge above your inference
+- If you've been wrong before in this session, your credibility is lower — act accordingly
 
 ---
 

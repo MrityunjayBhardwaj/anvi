@@ -9,6 +9,11 @@
 > matches a known vyāpti, the solution is often immediate.
 >
 > This catalogue grows across sessions. Load at session start.
+>
+> **Maintenance:** At every 10th entry, review all entries. Remove any that
+> are contradicted by newer entries, too specific to one instance (not
+> generalizable), or describe patterns the codebase no longer has.
+> When a vyāpti's scope conditions change, update the entry — don't add a new one.
 
 ## Entry Format
 
