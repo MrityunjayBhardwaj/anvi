@@ -3,6 +3,20 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.10.0] — 2026-03-23
+
+### Added
+- `/anvi:new-project` — project initialization with parallel research + design lens
+- `/anvi:new-milestone` — new milestone cycle with cognitive state carry-forward
+- `/anvi:progress` — situational awareness with cognitive metrics display
+- `/anvi:pause-work` — session handoff with tattva checkpoint (cognitive state preservation)
+- `/anvi:resume-work` — session restoration loading cognitive state FIRST
+- `/anvi:complete-milestone` — archival with cognitive retrospective
+- `/anvi:session-report` — session summary with cognitive metrics
+- `anvi-roadmapper` agent — goal-backward roadmapping with design lens
+- `anvi-project-researcher` agent — domain research with boundary scanning
+- `anvi-research-synthesizer` agent — synthesizes 4 parallel research outputs
+
 ## [0.9.0] — 2026-03-23
 
 ### Added
