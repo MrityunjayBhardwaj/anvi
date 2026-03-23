@@ -3,6 +3,17 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.4.0] — 2026-03-23
+
+### Added
+- `install.sh` — installer script (copies to ~/.claude/anvi/, optional project catalogue init)
+- `SKILL.md` — Claude Code skill entry point for auto-discovery and /anvi activation
+- Version tagging (v0.1.0, v0.2.0, v0.3.0, v0.4.0)
+- `CHANGELOG.md` — retroactive version history
+
+### Changed
+- README installation section updated with actual installer command
+
 ## [0.3.0] — 2026-03-23
 
 ### Changed

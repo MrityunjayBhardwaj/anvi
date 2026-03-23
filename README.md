@@ -71,9 +71,14 @@ The framework earns its weight on: novel integrations, framework boundary intera
 ## Installation
 
 ```bash
-# TODO: installer script
-cp -r anvi/ ~/.claude/anvi/
+cd /path/to/anvi
+./install.sh
 ```
+
+The installer:
+1. Copies the framework to `~/.claude/anvi/`
+2. Shows the CLAUDE.md directive to add to your project
+3. Optionally creates project-specific catalogues (`.anvi/`) in your project root
 
 ## License
 
