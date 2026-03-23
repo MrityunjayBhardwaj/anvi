@@ -3,6 +3,14 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [Unreleased — v1.0.0]
+
+### Planned
+- Full fork of GSD under `/anvi:` namespace — all workflows, agents, templates, CLI
+- Every agent infused with cognitive OS (not bolted on via hooks)
+- `/anvi:plan-phase`, `/anvi:execute-phase`, `/anvi:progress`, `/anvi:debug`, `/anvi:new-project`, etc.
+- No dependency on GSD installation — Anvi is self-contained
+
 ## [0.5.0] — 2026-03-23
 
 ### Added
