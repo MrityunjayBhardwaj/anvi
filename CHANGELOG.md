@@ -3,6 +3,14 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.6.0] — 2026-03-23
+
+### Added
+- `/anvi:sync` slash command — checks GSD upstream for changes, categorizes them, suggests what to port
+- `scripts/watch-gsd-upstream.sh` — CLI tool for GSD version tracking and diff reporting
+- Snapshot-based diff: creates a snapshot of GSD state, compares on next check
+- Installer now copies scripts and /anvi:sync skill
+
 ## [Unreleased — v1.0.0]
 
 ### Planned
