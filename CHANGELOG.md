@@ -3,6 +3,15 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [0.5.0] — 2026-03-23
+
+### Added
+- `/anvi` slash command — activates cognitive OS for current session, loads base layer + project catalogues, optional lens argument (diagnose/design/review/recover)
+- `/anvi:init` slash command — initializes project with .anvi/ catalogues and CLAUDE.md directive, supports --no-claude-md flag
+- `/anvi:session` slash command — session-only activation without modifying any files
+- Skill definitions in `skills/` directory (anvi, anvi-init, anvi-session)
+- Installer now copies skills to `~/.claude/skills/`
+
 ## [0.4.0] — 2026-03-23
 
 ### Added

@@ -39,7 +39,16 @@ cp "$SCRIPT_DIR/VERSION" "$ANVI_DIR/"
 cp "$SCRIPT_DIR/CHANGELOG.md" "$ANVI_DIR/"
 cp "$SCRIPT_DIR/README.md" "$ANVI_DIR/"
 
+# Install slash commands (/anvi, /anvi:init, /anvi:session)
+SKILLS_DIR="$HOME/.claude/skills"
+echo "Installing skills to ${SKILLS_DIR}..."
+for skill in anvi anvi-init anvi-session; do
+  mkdir -p "$SKILLS_DIR/$skill"
+  cp "$SCRIPT_DIR/skills/$skill/SKILL.md" "$SKILLS_DIR/$skill/"
+done
+
 echo "✓ Framework installed to ${ANVI_DIR}"
+echo "✓ Skills installed: /anvi, /anvi:init, /anvi:session"
 echo ""
 
 # File listing
