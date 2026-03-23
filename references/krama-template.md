@@ -22,7 +22,6 @@ N. [Your code can safely run here]
 
 **Common violation:** [What people get wrong about this ordering]
 **Detection:** [How to verify ordering is correct]
-**Confirmed by:** [Direct observation — date]
 ```
 
 ## Universal Krama Patterns
@@ -30,57 +29,53 @@ N. [Your code can safely run here]
 ### UK1: Constructor → Async Setup → Ready
 **Lifecycle:**
 1. `new Framework(config, container)` — SYNC — creates instance, schedules setup
-2. `setup()` / `componentDidMount()` / `useEffect()` — ASYNC (rAF/microtask/timeout) — creates DOM, initializes
+2. `setup()` / `onReady()` / `init callback` — ASYNC — creates internal state, DOM, resources
 3. Instance is ready for method calls — depends on step 2 completing
 
-**Common violation:** Calling instance methods between step 1 and step 2. The instance exists but isn't initialized.
-**Detection:** Log inside setup/effect AND after constructor. If post-constructor log fires first, methods called there are premature.
-**Applies to:** p5.js, React components, Web Components, any framework with deferred initialization.
+**Common violation:** Calling instance methods between step 1 and step 2. The instance exists but isn't initialized. Methods are either no-ops or throw.
+**Detection:** Log inside setup callback AND immediately after constructor. If post-constructor log fires first, methods called there are premature.
 
 ### UK2: Framework Init → Method Registration → User Code
 **Lifecycle:**
 1. Framework loads — SYNC — defines base classes
-2. `initialize()` / `injectPatternMethods()` — SYNC during evaluate() — registers methods on prototypes
+2. `initialize()` / `bootstrap()` — SYNC during framework's evaluate/run — registers methods on prototypes, sets up global state
 3. User code executes — uses the registered methods
 
-**Common violation:** Installing prototype interceptors before step 2. Step 2 overwrites them.
-**Detection:** After step 2, verify your interceptor is still in place (`typeof obj.method` or comparison with saved reference).
-**Applies to:** Strudel (injectPatternMethods), any plugin system that registers methods during initialization.
+**Common violation:** Installing prototype interceptors before step 2. Step 2 overwrites them. The interceptor silently disappears.
+**Detection:** After step 2, verify your interceptor is still in place (type check, reference comparison, or test call).
 
-### UK3: Transpile → Transform Args → Execute Handler
+### UK3: Pipeline Transform → Execute Handler
 **Lifecycle:**
-1. User writes `obj.method("string")` — source code
-2. Transpiler rewrites to `obj.method(reify("string"))` — SYNC at compile time
-3. `reify("string")` executes — SYNC — returns domain object (e.g., Pattern)
-4. `method(domainObject)` executes — handler receives transformed arg
+1. User writes `obj.method("value")` — source code
+2. Build pipeline rewrites the call — SYNC at compile/transform time — may wrap arguments
+3. Transformed call executes at runtime — handler receives transformed arguments
 
-**Common violation:** Handler assumes it receives the original string. It receives the domain object.
-**Detection:** Log `typeof arg` and `arg` inside the handler. If it's an object instead of a string, the transpiler transformed it.
-**Applies to:** Strudel transpiler (reify), Babel plugins, JSX transforms, any compile-time argument wrapping.
+**Common violation:** Handler assumes it receives the original argument type. The pipeline may have wrapped, coerced, or replaced it.
+**Detection:** Log argument type and value inside the handler. Compare against what the user wrote.
 
-### UK4: Evaluate → Capture → Build State → Restore
+### UK4: Install → Execute → Capture → Restore
 **Lifecycle:**
-1. Install interceptors (setter traps, method wrappers) — SYNC
-2. `repl.evaluate(code)` — ASYNC — triggers framework init + user code
-3. Interceptors fire during step 2 — capture patterns, viz requests, etc.
-4. Evaluate completes — build derived state (schedulers, viz requests map)
-5. Restore interceptors — SYNC in finally block — MUST happen even on error
+1. Install interceptors (hooks, wrappers, traps) — SYNC — before scoped operation
+2. Execute scoped operation — may be ASYNC — triggers interceptors
+3. Interceptors fire during step 2 — capture data into external storage
+4. Scoped operation completes
+5. Restore original state — SYNC in finally block — MUST happen even on error
 
-**Common violation:** Not restoring in `finally` block. If evaluate throws, interceptors remain on the prototype permanently.
-**Detection:** After evaluate (success or failure), verify prototype state is restored to pre-evaluate state.
-**Applies to:** Any monkey-patching during a scoped operation.
+**Common violation:** Not restoring in `finally` block. If the scoped operation throws, interceptors remain permanently installed, corrupting global state.
+**Detection:** After the scoped operation (success or failure), verify global state matches pre-operation state.
 
-### UK5: User Action → Re-evaluate → Cleanup Old → Create New
+### UK5: Cleanup Old → Create New (Re-entry)
 **Lifecycle:**
-1. User clicks Play or code changes — triggers re-evaluation
-2. Cleanup previous state (view zones, renderers, analysers) — SYNC — must complete before step 3
-3. Evaluate new code — ASYNC
-4. Create new state (view zones, renderers) from evaluate results — SYNC after evaluate
+1. Trigger event fires (user action, code change, re-evaluation)
+2. Cleanup previous state (DOM nodes, event listeners, resources) — SYNC — must complete before step 3
+3. Execute new operation — may be ASYNC
+4. Create new state from operation results — SYNC after operation completes
 
-**Common violation:** Creating new state without cleaning up old state. Leads to duplicate renderers, orphaned DOM nodes, memory leaks.
-**Also:** Cleaning up state that's still needed (e.g., destroying view zones on stop instead of pausing them).
-**Detection:** Check for orphaned DOM nodes, duplicate event listeners, or growing memory after repeated play/stop cycles.
+**Common violation:** Creating new state without cleaning up old state. Leads to duplicates, orphaned resources, memory leaks.
+**Also:** Cleaning up state that should persist (e.g., destroying visible elements on pause instead of freezing them).
+**Detection:** Check for orphaned resources, duplicate listeners, or growing memory after repeated trigger cycles.
 
 ## Project-Specific Krama Patterns
 
-_(Add entries as they're discovered during this project)_
+_(Add entries below as they're discovered during this project.)_
+_(Each entry should follow the format above.)_

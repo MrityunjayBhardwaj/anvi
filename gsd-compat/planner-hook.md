@@ -6,8 +6,8 @@
 ## Before Planning
 
 ### Study existing UX before designing new:
-If the feature has an equivalent in an existing system (e.g., Strudel's
-`._pianoroll()` for struCode's `.viz()`), study the existing user experience
+If the feature has an equivalent in an existing system (e.g., a reference
+implementation the project builds on), study the existing user experience
 FIRST. Understand how users interact with it. Then design the technical approach.
 
 **Failure this prevents:** Designing implementation-first (monkey-patch, blanket prop)

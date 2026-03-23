@@ -16,7 +16,7 @@ Before any code that interacts with an external system or framework:
 
 **Trigger signal:** Any code involving: constructors, lifecycle hooks, event handlers, prototype methods, framework initialization, module loading.
 
-**Failure example:** `resizeCanvas()` called after `new p5()` — assumed sync, was async. Canvas never resized.
+**Failure example:** Calling a method on an object right after constructing it, assuming setup is complete. But the constructor deferred setup to an async callback — the method silently no-ops.
 
 ---
 
@@ -85,11 +85,11 @@ When inference conflicts with observation, observation wins. Always.
 **Plain language:** "Can I state the full argument for why this fix is correct?"
 
 Five limbs that must all be present:
-1. **Claim:** "The canvas should inherit its size from the container"
+1. **Claim:** "The child element should inherit its size from the container"
 2. **Reason:** "Because the container is the authority on available space"
-3. **Universal principle:** "Well-behaved UI components read parent dimensions — this is how CSS, React layout, and DOM flow work"
-4. **Application:** "In setup(), read container.clientWidth/clientHeight instead of hardcoding"
-5. **Conclusion:** "Therefore the canvas matches the container regardless of zone height changes"
+3. **Universal principle:** "Well-behaved UI components read parent dimensions — this is how layout systems work"
+4. **Application:** "In the initialization callback, read the container's dimensions instead of hardcoding values"
+5. **Conclusion:** "Therefore the child element matches the container regardless of external size changes"
 
 If any limb is missing, the fix isn't understood well enough to commit.
 If the universal principle (limb 3) can't be stated, the fix is ad-hoc.

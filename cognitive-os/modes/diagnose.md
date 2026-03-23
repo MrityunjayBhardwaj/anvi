@@ -98,7 +98,7 @@ BOUNDARY: [Your code] ↔ [External system/framework]
 
 **This is the unknown-unknowns detector.** You're systematically asking "what haven't I looked at?" for each boundary. Most bugs live at boundaries — and specifically in the parts of boundary behavior you haven't observed.
 
-**The Strudel reify bug was caught here (retroactively):** Question 4 — "what does the framework do to my inputs?" The transpiler converts string arguments to Pattern objects. Never observed until debug output showed objects instead of strings.
+**Common discovery at this step:** Question 4 — "what does the framework do to my inputs?" reveals that the pipeline transforms arguments before the handler sees them. Never observed until debug output shows unexpected types instead of the original values.
 
 ---
 
@@ -110,7 +110,7 @@ Not "maybe X, or maybe Y." One explanation. If you can't find one explanation th
 - Need more observations (return to Phase 1)
 - Have two separate problems (split and diagnose each)
 
-The compression should feel **obvious in hindsight**. "The canvas doesn't know its container" accounts for: overflow, resize no-op, hardcoded size, async setup. One explanation, four facts.
+The compression should feel **obvious in hindsight**. "The child element doesn't know its container's dimensions" accounts for: overflow, resize no-op, hardcoded size, async setup. One explanation, four facts.
 
 **Test:** If someone who hasn't been debugging asks "what's the problem?", can you answer in one sentence? If not, you haven't compressed.
 
@@ -135,7 +135,7 @@ Not "it should be true because [reasoning]." One observation:
 
 **Now — and only now — reason about the fix.**
 
-The fix should follow directly from the diagnosis. If the root cause is "the canvas doesn't know its container," the fix is "tell it about its container." Not CSS overrides, not height constants, not post-mount resize.
+The fix should follow directly from the diagnosis. If the root cause is "the child element doesn't know its container," the fix is "make it read from its container." Not CSS overrides, not hardcoded constants, not post-creation resize attempts.
 
 **Pañcāvayava validation — complete all 5 limbs:**
 
@@ -159,7 +159,7 @@ Draw the timeline after the fix. Verify that the execution order is correct. Wha
 - **Ship it.** Don't optimize further. Don't refactor surrounding code. Don't add "just in case" checks.
 - **If the root cause requires architectural change beyond current scope:** Document the limitation clearly. State what would be needed. Move on. Don't attempt a hack that approximates the architectural fix.
 
-**The orbit hack was a vairāgya failure:** Buddhi said "per-track audio needs architectural change to superdough." Vairāgya should have said "document it, move on." Instead, ahaṃkāra said "let me try orbit reassignment" — a hack that approximated the architectural fix and broke everything.
+**Common vairāgya failure:** Buddhi identifies that a problem needs architectural change beyond current scope. Vairāgya should say "document it, move on." Instead, ahaṃkāra says "let me try a hack that approximates the architectural fix" — which breaks existing functionality without solving the root problem.
 
 ---
 

@@ -32,52 +32,47 @@
 
 ### UV1: Container Ownership
 **Statement:** Wherever a visual element is placed inside a container, the container owns the element's available dimensions.
-**Causal status:** STRUCTURAL — DOM/layout architecture dictates this.
-**Scope:** CSS layout, React component trees, Monaco view zones, any parent-child rendering.
-**Breaks when:** The child has fixed/absolute positioning that takes it out of flow; the child is in an off-DOM fragment (clientWidth = 0).
-**Confirmed by:** Canvas size bug — container was 150px, canvas hardcoded 300x200. Fix: canvas reads container dimensions.
-**Implication:** Never hardcode sizes in child components. Always read from parent or accept as props.
+**Causal status:** STRUCTURAL — layout architecture dictates this.
+**Scope:** CSS layout, component trees, view containers, any parent-child rendering.
+**Breaks when:** The child has fixed/absolute positioning that takes it out of flow; the child is in an off-DOM fragment where parent dimensions read as 0.
+**Implication:** Never hardcode sizes in child components. Always read from parent or accept as props/parameters.
 
 ### UV2: Framework Prototype Sovereignty
 **Statement:** Wherever a framework initializes by writing to prototypes, it will overwrite any pre-installed methods on those prototypes.
-**Causal status:** CAUSAL — assignment overwrites previous value.
-**Scope:** Any framework that uses `X.prototype.method = fn` during initialization (Strudel, p5, many others).
+**Causal status:** CAUSAL — plain assignment overwrites previous value.
+**Scope:** Any framework that uses `X.prototype.method = fn` during initialization.
 **Breaks when:** The framework uses `defineProperty` with `configurable: false` (rare).
-**Confirmed by:** `.viz()` installed before `injectPatternMethods` — silently overwritten.
-**Implication:** Install interceptors AFTER framework initialization, or inside the initialization hook (setter trap pattern).
+**Implication:** Install interceptors AFTER framework initialization, or inside an initialization hook that fires at the right moment.
 
-### UV3: Transpiler Argument Transformation
-**Statement:** Wherever a transpiler processes method calls on domain objects, it may transform arguments before the method handler receives them.
-**Causal status:** CAUSAL — transpiler rewrites the AST.
-**Scope:** Strudel (reify), Babel (plugin transforms), TypeScript (type erasure), any compile-to-JS pipeline.
-**Breaks when:** The method is called from non-transpiled code (direct JS, tests, console).
-**Confirmed by:** `.viz("pianoroll")` → handler received `Pattern { value: "pianoroll" }`, not `"pianoroll"`.
-**Implication:** Always test through the real transpiler pipeline, not just unit tests with direct calls. Handle both raw and transformed argument types.
+### UV3: Pipeline Argument Transformation
+**Statement:** Wherever a build pipeline or framework processes method calls on domain objects, it may transform arguments before the method handler receives them.
+**Causal status:** CAUSAL — the pipeline rewrites calls or wraps arguments.
+**Scope:** Transpilers, macro systems, decorator/middleware pipelines, any compile-to-runtime chain.
+**Breaks when:** The method is called from non-pipeline code (direct calls, tests, REPL).
+**Implication:** Always test through the real pipeline, not just direct calls. Handle both raw and transformed argument types.
 
 ### UV4: Async Construction
-**Statement:** Wherever a constructor defers setup to a callback (requestAnimationFrame, setTimeout, microtask), post-constructor calls may execute before setup completes.
+**Statement:** Wherever a constructor defers setup to a callback (animation frame, timeout, microtask), post-constructor calls may execute before setup completes.
 **Causal status:** CAUSAL — event loop ordering.
-**Scope:** p5.js (setup via rAF), React (useEffect), any framework with async initialization.
+**Scope:** Any framework with deferred initialization — UI libraries, game engines, media APIs.
 **Breaks when:** Construction is fully synchronous.
-**Confirmed by:** `new p5()` then `resizeCanvas()` — resize was no-op because canvas didn't exist yet.
-**Implication:** Wrap post-setup operations inside the setup callback itself, or use a completion callback/promise.
+**Implication:** Wrap post-setup operations inside the setup callback itself, or use a completion signal (callback, promise, event).
 
 ### UV5: Method Chain Identity
-**Statement:** Wherever a method on a domain object returns a new instance (not `this`), properties set on the pre-call object are NOT present on the post-call object.
+**Statement:** Wherever a method on a domain object returns a new instance (not the original), properties set on the pre-call object are NOT present on the post-call object.
 **Causal status:** STRUCTURAL — different object references.
-**Scope:** Immutable/functional APIs, Strudel Patterns, many fluent APIs.
-**Breaks when:** The method explicitly returns `this` (mutable/builder pattern).
-**Confirmed by:** `_pendingViz` set on Pattern A, `.viz()` returned Pattern B, `.p()` called on B which has no `_pendingViz`.
-**Implication:** When intercepting methods that may return new instances, tag the RETURN VALUE, not `this`.
+**Scope:** Immutable/functional APIs, fluent APIs that create new instances, any builder pattern that clones.
+**Breaks when:** The method explicitly returns the same object (mutable builder pattern).
+**Implication:** When intercepting methods that may return new instances, tag the RETURN VALUE, not the original object.
 
 ### UV6: Observation Without Mutation
 **Statement:** Wherever you modify system state to observe it, you change the behavior you're trying to observe.
 **Causal status:** CAUSAL — intervention changes the system.
-**Scope:** Audio routing, network interception, any system where observation requires tapping into data flow.
-**Breaks when:** The observation tap is truly passive (side-tap on a gain node, read-only memory-mapped IO).
-**Confirmed by:** Orbit reassignment to isolate per-track audio — broke all other tracks' routing.
-**Implication:** Design observation as side-taps (connect analyser to existing node), never as re-routing (move audio to different orbit).
+**Scope:** Any system where observation requires tapping into data flow — audio routing, message queues, network streams.
+**Breaks when:** The observation tap is truly passive (read-only tap, side-connection that doesn't redirect).
+**Implication:** Design observation as passive side-taps, never as re-routing or reassignment.
 
 ## Project-Specific Vyāptis
 
-_(Add entries as they're validated during this project)_
+_(Add entries below as they're validated during this project.)_
+_(Each entry should follow the format above.)_

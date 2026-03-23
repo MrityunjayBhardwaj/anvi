@@ -36,7 +36,7 @@ Before thinking about implementation:
 
 **Common failure:** Jumping to "how should the API look?" before understanding "what does the user actually need to do with it?"
 
-**The .viz() design failure (retroactive):** We designed the implementation (monkey-patch Pattern.prototype) before studying how Strudel's inline viz works from the user's perspective. Result: wrong UX model (blanket prop instead of per-pattern opt-in).
+**Common failure:** Designing the technical implementation (hooks, props, internal APIs) before studying how the equivalent feature works from the user's perspective in reference systems. Result: technically functional but wrong UX model.
 
 **Rule:** Study the user's experience of existing solutions before designing the technical approach.
 
@@ -55,10 +55,10 @@ Type: [CAUSAL / STRUCTURAL / EMPIRICAL REGULARITY]
 Implication for design: [How this constrains implementation]
 ```
 
-**Examples from struCode:**
+**Examples:**
 - "Children inherit dimensions from their parent container" — STRUCTURAL — governs all layout decisions
-- "Pattern methods may return new instances, not `this`" — STRUCTURAL — any prototype interception must tag the return value
-- "The transpiler transforms arguments before the handler sees them" — CAUSAL — intercepted methods receive transformed args
+- "Framework methods may return new instances, not `this`" — STRUCTURAL — any method interception must tag the return value
+- "The build pipeline transforms arguments before the handler sees them" — CAUSAL — intercepted methods receive transformed args
 
 **Why this matters:** Violating an invariant produces bugs that feel mysterious. Identifying them upfront means the design respects them by construction.
 
@@ -83,7 +83,7 @@ N. [Your code runs here] — what must be true at this point?
 - Who controls this step — you or the framework?
 - Can this step fail? What happens to subsequent steps?
 
-**The p5 timing bug was a krama failure:** `new p5()` runs setup async, but `resizeCanvas()` was called sync immediately after. No krama mapping was done.
+**Common krama failure:** A framework constructor defers setup to an async callback, but the calling code immediately calls methods that depend on setup being complete. No lifecycle mapping was done.
 
 ---
 
@@ -104,7 +104,7 @@ Single source of truth: [ONE answer — if you can't identify one, that's a desi
 - Nobody owns it → stale, never updated
 - Owner changes it but consumer doesn't know → stale reads
 
-**The canvas size ownership:** The container owns the size. The canvas should read it from the container. When the canvas hardcodes its own size, ownership is violated.
+**Common ownership violation:** A child element hardcodes its own dimensions instead of reading from its container. The container owns the available space — when the child ignores this, it overflows or misaligns.
 
 ---
 
@@ -137,9 +137,9 @@ Questions:
 2. Does the interface leak implementation details?
 3. Is there a simpler interface that gives the same power?
 
-**VizRenderer was a good design:** 5 methods (mount, resize, pause, resume, destroy), rich implementation (P5VizRenderer manages the entire p5 lifecycle). Simple interface, deep module.
+**Good example:** A renderer interface with 5 methods (mount, resize, pause, resume, destroy), while the concrete implementation manages an entire rendering library lifecycle internally. Simple interface, deep module.
 
-**Anti-pattern:** Shallow modules that push complexity to the caller. If every caller needs to know about p5, pixelDensity, createCanvas timing, and ResizeObserver — the module isn't deep enough.
+**Anti-pattern:** Shallow modules that push complexity to the caller. If every caller needs to know about the rendering library's internals, pixel density management, canvas timing, and resize observation — the module isn't deep enough.
 
 ---
 
@@ -180,8 +180,8 @@ Not a full implementation. Not a comprehensive test suite. The single smallest t
 Examples:
 - "Does the framework allow us to intercept this method?" → 5-line test in Node REPL
 - "Does this API expose what we need?" → one console.log
-- "Can we render two independent canvases in the same container?" → minimal HTML file
+- "Can we render two independent instances in the same container?" → minimal HTML file
 
 **If the prototype fails:** The design's core assumption is wrong. Redesign before implementing. The cost of a 5-minute prototype is nothing compared to implementing a full feature on a false assumption.
 
-**The reify bug could have been caught here:** A 3-line prototype calling `.viz("pianoroll")` through `repl.evaluate()` with a console.log in the handler would have shown the argument is a Pattern object, not a string. Cost: 2 minutes. Actual cost of not doing it: 3 debug cycles.
+**Common miss:** A 3-line prototype calling the intercepted method through the real framework pipeline (not a direct call) would reveal argument transformations, prototype overwrites, and timing issues. Cost: 2 minutes. Cost of not doing it: multiple debug cycles.

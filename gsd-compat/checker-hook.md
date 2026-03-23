@@ -62,7 +62,7 @@ For each task that creates new data, modifies existing data, or introduces new s
 ### Dimension F: UX Precedent
 **Check:** If a feature has an equivalent in an existing system, does the plan follow the existing UX model?
 
-1. Does this feature exist in any reference system? (e.g., Strudel for struCode)
+1. Does this feature exist in any reference system the project builds on or is inspired by?
 2. If yes: does the plan follow the reference UX, or invent a new one?
 3. If inventing a new UX: is the deviation justified?
 
