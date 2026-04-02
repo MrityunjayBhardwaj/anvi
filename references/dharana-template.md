@@ -33,6 +33,7 @@
 
 ```
 ### B[N]: [Our Module] <-> [Their Module]
+FILES: [comma-separated list of source files at this boundary — used by hook for deterministic matching]
 ORIGIN: [What observation or failure created this entry — be specific]
 WHY: [What class of problems would be invisible without tracking this boundary]
 HOW: [What observation targets / checks this boundary entry enables]

@@ -1,38 +1,50 @@
 # Enforcement Chain — How Grounding Is Actually Enforced
 
-Six hooks/mechanisms fire at different points. No single point of failure.
+Eight hooks/mechanisms fire at different points. No single point of failure.
 
 ```
+Session starts
+  ↓
+① SessionStart — ground-truth-session-start.js
+   Injects grounding status: "14/47 entries grounded (30%), GT docs: SUPERSONIC,
+   DESKTOP_SP, SONIC_TAU, Gaps: SV15 NOT YET IMPLEMENTED"
+
 User message
   ↓
-① UserPromptSubmit — debug-grounding-gate.js
+② UserPromptSubmit — debug-grounding-gate.js
    Detects debugging keywords → injects Ground Truth doc paths + boundary REFs
    before Claude starts thinking.
 
   ↓
-② Context Routing Protocol — global CLAUDE.md
+③ Context Routing Protocol — global CLAUDE.md
    Classifies message → debugging route now includes reading Ground Truth docs
    for affected boundaries.
 
   ↓
-③ /anvi:debug workflow — workflows/debug.md
+④ /anvi:debug workflow — workflows/debug.md
    step read_ground_truth is MANDATORY. Reads Ground Truth, passes it as
    INPUT to the debugger agent. Agent must cite file:line or declare UNGROUNDED.
    3-round limit, then "read more source" not "try more experiments."
 
   ↓
-④ Diagnose lens — cognitive-os/modes/diagnose.md
+⑤ Diagnose lens — cognitive-os/modes/diagnose.md
    Phase 3 Question 0: "Does Ground Truth doc exist? Read it FIRST."
    Phase 3 Question 7: "How many answers are GROUNDED vs INFERRED?"
 
   ↓
-⑤ PreToolUse:Bash — experiment-protocol-guard.js
+⑥ PreToolUse:Read — catalogue-context-injector.js
+   Fires when READING code at catalogued boundaries.
+   Matches via FILES: field (deterministic) or text fallback.
+   Injects boundary context + Ground Truth REFs before you form opinions.
+
+  ↓
+⑦ PreToolUse:Bash — experiment-protocol-guard.js
    Fires when running diagnostic tools (tools/diagnose-*, capture, raw-osc).
    Checks for artifacts/investigations/exp-*.md with hypothesis + prediction.
    "Write the prediction BEFORE running."
 
   ↓
-⑥ PreToolUse:Write|Edit — catalogue-context-injector.js
+⑧ PreToolUse:Write|Edit — catalogue-context-injector.js
    Fires when editing code at catalogued boundaries.
    Injects: boundary context, error patterns, invariants, Ground Truth REFs.
 ```
@@ -41,21 +53,46 @@ User message
 
 | Hook | Trigger | File |
 |------|---------|------|
+| GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
-| Catalogue context injector | PreToolUse:Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
+| Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 
-## Registered In
+## Boundary Matching
 
-`~/.claude/settings.json` — hooks section.
+The catalogue-context-injector uses two matching strategies:
+
+1. **FILES: field (deterministic)** — dharana boundary entries list their files explicitly:
+   ```
+   ### B2: AudioInterpreter ↔ SuperSonicBridge
+   FILES: src/engine/interpreters/AudioInterpreter.ts, src/engine/SuperSonicBridge.ts, src/engine/SoundLayer.ts
+   ```
+   The hook checks if the tool's file_path matches any entry in the FILES: list.
+
+2. **Text fallback** — if no FILES: field, matches filename/CamelCase parts against boundary content.
+
+FILES: is preferred — it's deterministic and doesn't rely on boundary descriptions mentioning module names.
 
 ## What Each Prevents
 
 | # | Failure mode | Prevented by |
 |---|-------------|-------------|
-| 1 | Forming hypothesis without reading source | ①②③ — Ground Truth injected before thinking starts |
-| 2 | Guessing without citing code | ③④ — agent must cite file:line or say UNGROUNDED |
-| 3 | Running experiments without prediction | ⑤ — protocol guard checks for exp-*.md |
-| 4 | Writing code without knowing boundary context | ⑥ — catalogue injector fires on Write/Edit |
-| 5 | Retrying failed approach endlessly | ③ — 3-round limit, then "read more source" |
-| 6 | Adding ungrounded catalogue entries | ③ — post-resolution update requires REF field |
+| 1 | Starting session without grounding awareness | ① — status injected at session start |
+| 2 | Forming hypothesis without reading source | ②③④ — Ground Truth injected before thinking starts |
+| 3 | Reading code at boundary without knowing its traps | ⑥ — fires on Read, not just Write |
+| 4 | Guessing without citing code | ④⑤ — agent must cite file:line or say UNGROUNDED |
+| 5 | Running experiments without prediction | ⑦ — protocol guard checks for exp-*.md |
+| 6 | Writing code without knowing boundary context | ⑧ — catalogue injector fires on Write/Edit |
+| 7 | Retrying failed approach endlessly | ④ — 3-round limit, then "read more source" |
+| 8 | Adding ungrounded catalogue entries | ④ — post-resolution update requires REF field |
+
+## Registered In
+
+`~/.claude/settings.json` — hooks section. Four hook events:
+- `SessionStart`: ground-truth-session-start.js, gsd-check-update.js
+- `UserPromptSubmit`: debug-grounding-gate.js
+- `PreToolUse:Read`: catalogue-context-injector.js
+- `PreToolUse:Write|Edit`: catalogue-context-injector.js, gsd-prompt-guard.js
+- `PreToolUse:Bash`: experiment-protocol-guard.js
+- `PostToolUse:Bash|Edit|Write|...`: gsd-context-monitor.js
+- `PostToolUse:Read`: anvi-route-logger.js
