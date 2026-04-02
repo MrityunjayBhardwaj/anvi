@@ -56,6 +56,10 @@ Save compressed cognitive state alongside execution state:
 hetvabhasa entries: {N}
 vyapti entries: {N}
 krama entries: {N}
+
+### Ground Truth Status
+Ground Truth docs referenced this session: {list of GROUND_TRUTH_*.md files used}
+New ungrounded observations: {observations about external system behavior not yet backed by Ground Truth docs or catalogue entries — candidates for future /anvi:ground}
 ```
 
 Also use CLI if available:
@@ -78,7 +82,9 @@ Write `.planning/HANDOFF.json` (machine-readable):
   "cognitive_state": {
     "classification": "{type}",
     "insight": "{compressed}",
-    "catalogue_counts": {"hetvabhasa": N, "vyapti": N, "krama": N}
+    "catalogue_counts": {"hetvabhasa": N, "vyapti": N, "krama": N},
+    "ground_truth_referenced": ["GROUND_TRUTH_X.md"],
+    "ungrounded_observations": ["description of observation needing Ground Truth"]
   }
 }
 ```
@@ -114,6 +120,7 @@ node "$CLI_PATH" commit "wip: pause at phase ${PHASE} plan ${PLAN}" --files .pla
 <success_criteria>
 - [ ] Execution state captured
 - [ ] Cognitive state preserved (tattva checkpoint)
+- [ ] Ground Truth usage and ungrounded observations saved
 - [ ] HANDOFF.json + .continue-here.md created
 - [ ] WIP commit made
 </success_criteria>

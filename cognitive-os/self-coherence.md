@@ -82,7 +82,40 @@ For each entry in all three catalogues:
 Action: if stale, either re-verify or remove. Don't keep entries about
 systems that no longer exist — they create phantom pattern-matching.
 
-### 4. Base Layer Alignment
+### 4. Ground Truth Grounding
+
+Every catalogue entry should be grounded through the three-layer chain:
+catalogue entry -> Ground Truth doc -> source code. Ungrounded entries
+are claims without evidence — they may be correct, but they can't be
+verified or updated when the source changes.
+
+**Ungrounded entry count:**
+```
+For each entry E in all four catalogues (hetvabhasa, vyapti, krama, dharana):
+  Does E have a **REF:** field?
+  If no: E is UNGROUNDED — count it
+  If yes but REF says "UNGROUNDED — [reason]": count it as explicitly ungrounded
+```
+
+**Ground Truth doc staleness:**
+```
+For each Ground Truth doc in the inventory (dharana section 5):
+  Has the dependency version changed since lastVerified date?
+  If yes: doc is STALE — pipeline stages may no longer match source
+  Action: re-trace affected stages against current source
+```
+
+**Broken chain detection:**
+```
+For each entry E with a **REF:** pointing to GROUND_TRUTH_*.md#section:
+  Does the referenced Ground Truth doc still exist?
+  Does the referenced section still exist in that doc?
+  If no to either: the chain is BROKEN — the entry's grounding has been
+  invalidated by a doc update or removal
+  Action: re-ground the entry (find the current section, update the REF)
+```
+
+### 5. Base Layer Alignment
 
 After every recovery (pratyāhāra trigger):
 
@@ -97,23 +130,28 @@ Check:
    have informed check X but didn't? → add cross-reference
 ```
 
-### 5. Self-Coherence Score
+### 6. Self-Coherence Score
 
 After the audit, produce a coherence score:
 
 ```
 SELF-COHERENCE AUDIT:
-  Catalogues: {H} hetvābhāsa, {V} vyāpti, {K} krama
+  Catalogues: {H} hetvābhāsa, {V} vyāpti, {K} krama, {D} dharana
   Cross-conflicts found: {N}
   Duplicates found: {N}
   Stale entries found: {N}
   Base layer gaps: {N}
+  Grounding: {X}/{Y} entries have REFs ({N}%)
+  Ground Truth docs stale: {N}
+  Broken REF chains: {N}
 
   Actions taken:
   - Entries merged: {N}
   - Entries removed: {N}
   - Scope conditions tightened: {N}
   - Base layer checks added/updated: {N}
+  - Entries re-grounded: {N}
+  - Ground Truth docs re-traced: {N}
 
   Coherence: {clean | {N} issues remaining}
 ```

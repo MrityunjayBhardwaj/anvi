@@ -46,6 +46,12 @@ Also load cognitive OS state:
 - Read `.anvi/hetvabhasa.md` — known error patterns for this project
 - Read `.anvi/vyapti.md` — known invariants
 - Read `.anvi/krama.md` — known lifecycles
+
+Check Ground Truth coverage for this phase:
+- Read `.anvi/dharana.md` — which external system boundaries does this phase touch?
+- For each boundary: does `artifacts/ref/GROUND_TRUTH_{SYSTEM}.md` exist?
+- If missing: warn "Phase touches {system} boundary without Ground Truth. Consider `/anvi:ground --system {name}` first."
+- This prevents executing changes at external boundaries with ungrounded understanding.
 </step>
 
 <step name="check_interactive_mode">
@@ -176,6 +182,7 @@ This replaces GSD's "retry or skip" with "diagnose and decide."
 - [ ] Pratyahara protocol followed on failures (not blind retry)
 - [ ] Phase verified by verifier agent
 - [ ] New patterns catalogued in .anvi/ (if discovered)
+- [ ] Ground Truth coverage checked for external boundaries before execution
 - [ ] ROADMAP.md and STATE.md updated
 - [ ] No Sanskrit terms in user-facing output
 </success_criteria>

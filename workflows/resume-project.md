@@ -29,6 +29,13 @@ if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tool
    - `.planning/HANDOFF-cognitive.md` or HANDOFF.json cognitive_state
 
 3. Present: "Resuming with {N} known error patterns, {N} validated invariants"
+
+4. Check Ground Truth staleness:
+   - List `artifacts/ref/GROUND_TRUTH_*.md` files
+   - For each, compare the version in the doc header against current dependency versions (package.json, lock files)
+   - If any dependency version changed since the Ground Truth doc was generated:
+     Flag: "Ground Truth doc for {system} may be stale ({dep} updated from {old_ver} to {new_ver})"
+   - This prevents debugging with outdated understanding of external systems
 </step>
 
 <step name="load_execution_state">
@@ -59,6 +66,7 @@ Phase {N}: {name}
 Plan {M}: {status}
 
 Cognitive state: {N} error patterns, {N} invariants, {N} lifecycles
+Ground Truth: {N} docs ({stale count} stale)
 {Active insight from checkpoint, if any}
 
 Last activity: {timestamp}
@@ -79,6 +87,7 @@ Based on state:
 
 <success_criteria>
 - [ ] Cognitive state loaded FIRST
+- [ ] Ground Truth staleness checked (dependency versions vs doc headers)
 - [ ] Execution state loaded
 - [ ] Incomplete work detected
 - [ ] Clear status presented

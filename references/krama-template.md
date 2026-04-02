@@ -89,4 +89,20 @@ N. [Your code can safely run here]
 ## Project-Specific Krama Patterns
 
 _(Add entries below as they're discovered during this project.)_
-_(Each entry should follow the format above.)_
+_(Each entry must include a `**REF:**` field pointing to a Ground Truth doc.)_
+
+### Entry Format (with mandatory REF)
+
+```
+### [ID]: [System/Component Name]
+**Lifecycle:**
+1. [Step 1] — sync/async — `file:line`
+2. [Step 2] — sync/async — depends on [1]
+N. [Your code can safely run here]
+
+**Common violation:** [What people get wrong]
+**Detection:** [How to verify ordering is correct]
+**REF:** [Ground Truth doc]#[section] — traces this lifecycle with code citations
+```
+
+The `**REF:**` field links to the Ground Truth doc that traces this lifecycle end-to-end with `file:line` citations. Every step in the lifecycle should be traceable through: catalogue → Ground Truth → source code.

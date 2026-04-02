@@ -14,4 +14,6 @@ $ARGUMENTS
 Execute the workflow from `~/.claude/anvi/workflows/plan-phase.md`.
 Load cognitive OS: `~/.claude/anvi/cognitive-os/base-layer.md`
 Load design lens: `~/.claude/anvi/cognitive-os/modes/design.md`
-Load project catalogues from `.anvi/` if they exist.
+Load dharana spec: `~/.claude/anvi/cognitive-os/dharana-spec.md`
+Load translation: `~/.claude/anvi/cognitive-os/translation.md`
+Load project catalogues from `.anvi/` if they exist (especially `dharana.md` for boundaries and org health).

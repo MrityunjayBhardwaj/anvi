@@ -80,11 +80,18 @@ If classification is unclear: you need more observations (return to Phase 1), no
 ```
 BOUNDARY: [Your code] ↔ [External system/framework]
 
+0. Does a Ground Truth doc exist for this system?
+   → YES: Read the relevant pipeline stage. Cite file:line for every claim below.
+   → NO: Is source code downloaded? If yes, read it directly. If no, mark OPAQUE.
+   (This is question ZERO — it comes before everything else.)
+
 1. What does this system do when I call it?
-   (Have I observed this, or only read docs/code?)
+   (Have I OBSERVED this, or only read docs/code?)
+   (Ground Truth doc stage reference: ____________)
 
 2. What does it do BEFORE my call?
    (Initialization, setup, method registration)
+   (Ground Truth doc init sequence reference: ____________)
 
 3. What does it do AFTER my call?
    (Post-processing, transformation, wrapping)
@@ -96,7 +103,17 @@ BOUNDARY: [Your code] ↔ [External system/framework]
    (Prototype mutation, global assignment, closure capture)
 
 6. Which of the above have I DIRECTLY OBSERVED vs ASSUMED?
+
+7. Which of the above are GROUNDED (file:line cited) vs INFERRED?
+   (Inferred answers are hypotheses, not facts. They need verification.)
 ```
+
+**Question 0 is the enforcement point.** If a Ground Truth doc exists, questions 1-5 are answered
+BY READING IT, not by inferring from behavior. If no doc exists and the bug is at this boundary,
+the right action is often to generate the doc first (read the source), not to guess.
+
+**Question 7 is the audit.** After scanning, review: how many answers cite file:line?
+If <50% are grounded, you're mostly inferring. Read more source before proceeding.
 
 **This is the unknown-unknowns detector.** You're systematically asking "what haven't I looked at?" for each boundary. Most bugs live at boundaries — and specifically in the parts of boundary behavior you haven't observed.
 

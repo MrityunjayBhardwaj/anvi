@@ -59,6 +59,31 @@ If recover signals detected (2+ failed attempts, cascade, frustration):
 ```
 </step>
 
+<step name="grounding_status">
+**How grounded are the catalogues?**
+
+Check the three-layer grounding chain: Catalogue entry → Ground Truth doc → source code.
+
+```
+Sources (check in order):
+1. .anvi/*.md — scan entries for **REF:** fields
+2. artifacts/ref/GROUND_TRUTH_*.md — list existing Ground Truth docs
+3. package.json / dependency manifests — check versions against Ground Truth doc headers
+```
+
+Output:
+```
+ ── Grounding ──────────────────────────────────
+ Catalogue entries with REFs: {X}/{Y} ({N}%)
+ Ground Truth docs: {list of GROUND_TRUTH_*.md files, or "none"}
+ Stale: {docs where dependency version changed since doc was generated}
+ Ungrounded hotspots: {dharana boundaries with 0 grounded entries}
+```
+
+If grounding is low (<50%) at a boundary being worked on: flag it in Right Questions.
+If a Ground Truth doc is stale: flag it in ASSUMED with "Ground Truth may be outdated."
+</step>
+
 <step name="landscape">
 **What's the terrain?**
 
@@ -166,6 +191,13 @@ Format:
  Position:  {where you are}
  Activity:  {what you're doing}
  Lens:      {active} + {sister}     Recover: {status}
+
+ ── Grounding ─────────────────────────────────
+
+ Catalogue entries with REFs: {X}/{Y} ({N}%)
+ Ground Truth docs: {list or "none"}
+ Stale: {stale docs or "none"}
+ Ungrounded hotspots: {boundaries or "none"}
 
  ── Landscape ──────────────────────────────────────
 
@@ -345,6 +377,7 @@ Format:
 <success_criteria>
 - [ ] Position detected from context
 - [ ] Active lens and recover status shown
+- [ ] Grounding status checked (REF coverage, staleness, hotspots)
 - [ ] Landscape mapped: KNOWN, UNKNOWN, ASSUMED (with ⚠)
 - [ ] Direction given for each item: DEEP, WIDE, STOP, or SKIP
 - [ ] Decision heuristic applied (codebase? safety? tried before?)

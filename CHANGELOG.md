@@ -3,6 +3,35 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [1.1.0] — 2026-04-02
+
+### Added
+- **Ground Truth — Three-Layer Grounded Abstraction**: New core mechanism requiring every catalogue entry to trace through three layers to source code: Catalogue → Ground Truth doc → source file:line
+- **Grounding Check** in base-layer.md: New always-active check — before hypothesizing about external systems, verify against Ground Truth docs or mark boundary as OPAQUE
+- **Ground Truth Meta-Prompt** (`templates/ground-truth-meta-prompt.md`): Produces end-to-end pipeline traces with file:line citations from source code + docs input
+- **Ground Truth Inventory** section in dharana Contents: tracks which reference systems have Ground Truth docs, source code, and staleness
+- **Mandatory `**REF:**` field** in all catalogue templates (hetvabhasa, vyapti, krama): every project-specific entry must reference a Ground Truth doc
+- **"After hitting an opaque boundary"** trigger in dharana instantiation routine: download source, create Ground Truth doc, wire REFs
+
+- **`/anvi:ground` command** — 8-step workflow + skill for establishing grounding on existing projects: audit → identify → download → generate → wire → verify → update dharana → report. Flags: `--audit-only`, `--system [name]`, `--rewire`, `--verify`
+- **Step 6 in `/anvi:init`** — offers Ground Truth setup for new projects
+- **`/anvi:rq` rewrite** — now derives questions from Ground Truth opaque regions, discrepancies, ungrounded entries, and misaligned invariants. Questions ranked by uncertainty-collapse leverage, not activity type alone
+- **`debug-grounding-gate.js` hook** — UserPromptSubmit: detects debugging keywords, injects Ground Truth doc paths + boundary REFs before Claude starts thinking
+- **`experiment-protocol-guard.js` hook** — PreToolUse:Bash: requires experiment protocol (hypothesis + prediction) before running diagnostic tools
+- **6-point enforcement chain** documented in `ENFORCE.md`
+
+### Changed
+- dharana-spec.md: Added Three-Layer Grounding Requirement section before Contents
+- adaptive-observation.md: Added Ground Truth integration to boundary-pair observation
+- base-layer.md: Added Grounding Check between Existence Check and Observation Check
+- hetvabhasa-template.md: Added Entry Format section with mandatory REF + Ground Truth docs instructions
+- vyapti-template.md: Added Entry Format section with mandatory REF
+- krama-template.md: Added Entry Format section with mandatory REF
+- Dharana instantiation routine: Project init now downloads source + creates Ground Truth docs; session start checks Ground Truth staleness; new entries require REFs
+
+### Philosophy
+The Ground Truth mechanism addresses the failure mode where catalogue entries become disconnected from the actual source code they describe. When docs say one thing and code does another, ungrounded catalogue entries propagate the wrong understanding. The three-layer chain ensures every claim can be backtracked to a specific line of code that either confirms or contradicts it.
+
 ## [1.0.0] — 2026-03-23
 
 ### Added

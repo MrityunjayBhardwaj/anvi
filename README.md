@@ -177,8 +177,20 @@ cd anvi
 The installer deploys:
 - Framework to `~/.claude/anvi/` (cognitive OS, workflows, templates, CLI)
 - 17 agents to `~/.claude/agents/`
-- 49 skills to `~/.claude/skills/`
+- 49+ skills to `~/.claude/skills/`
 - Optionally creates project catalogues (`.anvi/`)
+
+### Install modes
+
+| Command | What it does |
+|---------|-------------|
+| `./install.sh` | Interactive — prompts before overwriting existing install |
+| `./install.sh --dev` | **Dev mode** — symlinks repo → live. Edits to repo are immediately live. |
+| `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
+| `./install.sh --sync` | Silent one-way copy from repo → live (no prompts) |
+| `./install.sh --check` | Show repo version vs installed version, don't change anything |
+
+**For contributors:** Use `--dev` during development. The repo IS the live installation — no sync step needed. Use `--no-dev` to switch back to copy mode when done.
 
 ## GSD Compatibility
 

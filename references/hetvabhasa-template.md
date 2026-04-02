@@ -52,5 +52,36 @@
 
 ## Project-Specific Error Patterns
 
-_(Add entries as discovered. Follow the format: Root cause, Detection signal, The trap.)_
+_(Add entries as discovered. Follow the format below.)_
 _(At every 10th entry: review, prune stale/non-generalizable entries.)_
+
+### Entry Format (MANDATORY fields)
+
+```
+## [ID]: [Name]
+**Root cause:** [What actually causes this]
+**Detection signal:** [How you notice it]
+**The trap:** [The wrong fix that's tempting]. Root fix: [the actual fix]
+**REF:** [Ground Truth doc]#[section] — `[source_file:line]` [what the code shows]
+```
+
+The `**REF:**` field is MANDATORY for all project-specific entries. It creates the provenance chain:
+
+```
+Catalogue entry (compact pattern)
+    ↓ REF: GROUND_TRUTH_*.md#stage-N
+Interpretation (how/why/when + code citations)
+    ↓ REF: file:line
+Source code (ground truth)
+```
+
+If you cannot cite a Ground Truth doc, the entry is UNGROUNDED — mark it `**REF:** UNGROUNDED — [reason]` and prioritize grounding it by reading the relevant source code.
+
+### Ground Truth Documents
+
+Ground Truth docs are produced using the meta-prompt at `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`. They trace a system's pipeline end-to-end with `file:line` citations for every behavioral claim. To create one:
+
+1. Download the reference system's source code to `artifacts/ref/sources/[system_name]/`
+2. Apply the meta-prompt with the source files as input
+3. Output: `artifacts/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
+4. Update catalogue REF fields to point to the new doc

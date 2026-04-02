@@ -40,6 +40,8 @@ Before thinking about implementation:
 
 **Rule:** Study the user's experience of existing solutions before designing the technical approach.
 
+**Ground Truth gate:** Does a Ground Truth doc exist for the system being designed against? If yes, use it — cite file:line when claiming "the reference does X." If no, consider creating one before designing: `~/.claude/anvi/templates/ground-truth-meta-prompt.md` has the generation template. Designing against an ungrounded reference is inference about how it works, not knowledge.
+
 ---
 
 ## Phase 2 — Identify Invariant Relationships (Vyāpti)
@@ -61,6 +63,8 @@ Implication for design: [How this constrains implementation]
 - "The build pipeline transforms arguments before the handler sees them" — CAUSAL — intercepted methods receive transformed args
 
 **Why this matters:** Violating an invariant produces bugs that feel mysterious. Identifying them upfront means the design respects them by construction.
+
+**Ground Truth cross-check:** For MISALIGNED vyapti entries, the Ground Truth REF doc shows where the reference system enforces the invariant (file:line). Use this to determine whether the misalignment is intentional divergence or an implementation gap.
 
 ---
 
@@ -155,6 +159,8 @@ Check against known error patterns:
 5. **Workaround error:** Is any part of this design a workaround for something I should be solving differently?
 
 **Also check the project's hetvābhāsa catalogue** (`references/hetvabhasa.md`) for project-specific patterns.
+
+**Ground Truth check:** If a Ground Truth doc covers this boundary, check its discrepancy log — are there known doc-vs-code contradictions that could cause the failure mode you're designing against?
 
 **State the most likely failure mode explicitly.** "This design could fail if the framework overwrites our prototype methods during initialization." Then design for it. The pre-mortem is cheapest insurance available.
 
