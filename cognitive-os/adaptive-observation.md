@@ -17,7 +17,7 @@ If you only observe your side and assume the other matches, you get an entire cl
 
 **Catalogue integration:** Before touching a boundary, check hetvabhasa for known silent-failure patterns at that boundary. The catalogue tells you WHERE to look; the observation tells you WHAT's there.
 
-**Ground Truth integration:** Before hypothesizing about behavior at a boundary, check if a Ground Truth doc exists for the external system (`artifacts/ref/GROUND_TRUTH_*.md`). The Ground Truth doc traces the pipeline with `file:line` citations — read the relevant stage instead of inferring. If no doc exists and the boundary is causing problems, download the source and create one using `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`. The catalogue-context-injector hook automatically surfaces `**REF:**` lines from catalogue entries when you edit files at catalogued boundaries.
+**Ground Truth integration:** Before hypothesizing about behavior at a boundary, check if a Ground Truth doc exists for the external system (`~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md`). The Ground Truth doc traces the pipeline with `file:line` citations — read the relevant stage instead of inferring. If no doc exists and the boundary is causing problems, download the source and create one using `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`. The catalogue-context-injector hook automatically surfaces `**REF:**` lines from catalogue entries when you edit files at catalogued boundaries.
 
 ## Observation-Driven Lens Chaining
 

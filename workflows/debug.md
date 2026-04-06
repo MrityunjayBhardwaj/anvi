@@ -35,7 +35,7 @@ Read these files to inform orchestrator decisions:
 <step name="load_catalogues">
 **Load project catalogues if they exist:**
 
-Check for `.anvi/` (or `artifacts/.anvi/`) in the project:
+Check for `.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`) in the project:
 - `.anvi/hetvabhasa.md` — known error patterns
 - `.anvi/vyapti.md` — known invariants
 - `.anvi/krama.md` — known lifecycle patterns
@@ -63,7 +63,7 @@ BOUNDARY ANALYSIS:
 ```
 
 **If a touched boundary has NO Ground Truth doc:**
-- Check if source code exists at `artifacts/ref/sources/`
+- Check if source code exists at `~/.anvideck/projects/[project]/ref/sources/`
 - If yes: flag that Ground Truth doc should be generated before debugging
 - If no: flag as OPAQUE — debugging at this boundary will be limited to behavioral observation
 - Ask user: "The bug touches [system] which has no Ground Truth doc. Generate one first? (recommended) or proceed with behavioral debugging?"

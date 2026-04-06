@@ -106,4 +106,4 @@ The `**REF:**` field creates the three-layer provenance chain:
 ```
 Catalogue (compact invariant)  →  Ground Truth doc  →  source file:line
 ```
-If no Ground Truth doc exists for this invariant's domain, create one using `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`.
+If no Ground Truth doc exists for this invariant's domain, create one using `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`.

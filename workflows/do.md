@@ -38,7 +38,7 @@ Read ~/.claude/anvi/cognitive-os/modes/diagnose.md
 Read ~/.claude/anvi/cognitive-os/translation.md
 Read .anvi/hetvabhasa.md (check for known patterns FIRST)
 Read .anvi/dharana.md (which boundaries are in scope?)
-Read artifacts/ref/GROUND_TRUTH_*.md for boundaries being debugged (if they exist)
+Read ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md for boundaries being debugged (if they exist)
 ```
 
 ### PLAN
@@ -79,7 +79,7 @@ Read .anvi/dharana.md
 
 ### GROUND
 ```
-Read artifacts/ref/GROUND_TRUTH_*.md (list existing Ground Truth docs)
+Read ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md (list existing Ground Truth docs)
 Read .anvi/dharana.md (which boundaries need grounding?)
 ```
 If Ground Truth doc exists for the system → read it and answer from citations.

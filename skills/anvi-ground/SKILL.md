@@ -26,7 +26,7 @@ Follow the workflow at `~/.claude/anvi/workflows/ground.md`.
 8 steps:
 1. **Audit** — scan catalogues for ungrounded entries, list external systems
 2. **Identify** — ask user which systems to prioritize, check source availability
-3. **Download** — fetch source code + docs to `artifacts/ref/sources/[system]/`
+3. **Download** — fetch source code + docs to `~/.anvideck/projects/[project]/ref/sources/[system]/`
 4. **Generate** — create Ground Truth docs using `~/.claude/anvi/templates/ground-truth-meta-prompt.md`
 5. **Wire** — add `**REF:**` fields to catalogue entries pointing to Ground Truth docs
 6. **Verify** — test 3 random chains end-to-end, test hook injection

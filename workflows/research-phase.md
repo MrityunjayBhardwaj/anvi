@@ -88,11 +88,11 @@ Agent returns:
 <step name="ground_truth_generation">
 **If the phase interacts with an external system (library, runtime, protocol):**
 
-1. Check if `artifacts/ref/GROUND_TRUTH_{SYSTEM}.md` already exists
+1. Check if `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_{SYSTEM}.md` already exists
 2. If not, and the system is central to the phase:
-   - Locate or download source code into `artifacts/ref/sources/{system}/`
+   - Locate or download source code into `~/.anvideck/projects/[project]/ref/sources/{system}/`
    - Generate a Ground Truth doc using the meta-prompt at `~/.claude/anvi/templates/ground-truth-meta-prompt.md`
-   - Output: `artifacts/ref/GROUND_TRUTH_{SYSTEM}.md`
+   - Output: `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_{SYSTEM}.md`
 3. If the doc already exists: check staleness (has the dependency version changed?)
 
 This ensures that research about external systems produces durable, citable artifacts — not just prose summaries in RESEARCH.md.

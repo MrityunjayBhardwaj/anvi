@@ -31,7 +31,7 @@ if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tool
 3. Present: "Resuming with {N} known error patterns, {N} validated invariants"
 
 4. Check Ground Truth staleness:
-   - List `artifacts/ref/GROUND_TRUTH_*.md` files
+   - List `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md` files
    - For each, compare the version in the doc header against current dependency versions (package.json, lock files)
    - If any dependency version changed since the Ground Truth doc was generated:
      Flag: "Ground Truth doc for {system} may be stale ({dep} updated from {old_ver} to {new_ver})"

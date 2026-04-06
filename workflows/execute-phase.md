@@ -49,7 +49,7 @@ Also load cognitive OS state:
 
 Check Ground Truth coverage for this phase:
 - Read `.anvi/dharana.md` — which external system boundaries does this phase touch?
-- For each boundary: does `artifacts/ref/GROUND_TRUTH_{SYSTEM}.md` exist?
+- For each boundary: does `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_{SYSTEM}.md` exist?
 - If missing: warn "Phase touches {system} boundary without Ground Truth. Consider `/anvi:ground --system {name}` first."
 - This prevents executing changes at external boundaries with ungrounded understanding.
 </step>

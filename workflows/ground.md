@@ -5,12 +5,12 @@
 <step name="audit">
 ## Step 1: Audit Current Grounding State
 
-Scan all catalogue files in `.anvi/` (or `artifacts/.anvi/`):
+Scan all catalogue files in `.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`):
 
 1. Count entries with `**REF:**` field (grounded)
 2. Count entries without `**REF:**` field (ungrounded)
-3. List Ground Truth docs that exist in `artifacts/ref/GROUND_TRUTH_*.md`
-4. List source directories that exist in `artifacts/ref/sources/*/`
+3. List Ground Truth docs that exist in `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md`
+4. List source directories that exist in `~/.anvideck/projects/[project]/ref/sources/*/`
 5. Check dharana for boundary entries — extract external system names
 
 Report:
@@ -66,7 +66,7 @@ GROUNDING PLAN
 
 For each approved system:
 
-1. Create directory: `artifacts/ref/sources/[system_name]/`
+1. Create directory: `~/.anvideck/projects/[project]/ref/sources/[system_name]/`
 2. Download source files (prefer unminified/readable source from GitHub repos)
 3. Download available documentation (README, ARCHITECTURE.md, API docs)
 4. Verify completeness — list files with line counts
@@ -100,7 +100,7 @@ For each downloaded system, launch an agent to generate the Ground Truth doc.
 ```
 1. READ the meta-prompt:
    Primary: ~/.claude/anvi/templates/ground-truth-meta-prompt.md
-   Fallback: artifacts/ref/GROUND_TRUTH_META_PROMPT.md (if copied to project)
+   Fallback: ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md (if copied to project)
 
 2. BUILD the agent prompt with this structure:
    
@@ -114,7 +114,7 @@ For each downloaded system, launch an agent to generate the Ground Truth doc.
    Produce GROUND_TRUTH_[SYSTEM_NAME].md
    
    ## Source Files (READ ALL)
-   [List every file in artifacts/ref/sources/[system]/ with full paths]
+   [List every file in ~/.anvideck/projects/[project]/ref/sources/[system]/ with full paths]
    
    ## Documentation Files
    [List every doc file with full paths]
@@ -124,7 +124,7 @@ For each downloaded system, launch an agent to generate the Ground Truth doc.
     what stages exist between them]
    
    ## Output
-   Write to: artifacts/ref/GROUND_TRUTH_[SYSTEM_NAME].md
+   Write to: ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_[SYSTEM_NAME].md
    
    Remember: every claim must cite file:line. Code wins over docs."
 
@@ -136,13 +136,13 @@ For each downloaded system, launch an agent to generate the Ground Truth doc.
 For each generated doc, verify:
 ```bash
 # Count code citations (should be 50+)
-grep -cE '[a-z_]+\.(js|rb|ts|py):[0-9]+' artifacts/ref/GROUND_TRUTH_*.md
+grep -cE '[a-z_]+\.(js|rb|ts|py):[0-9]+' ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md
 
 # Count stages (should be 3+)
-grep -c '^## STAGE' artifacts/ref/GROUND_TRUTH_*.md
+grep -c '^## STAGE' ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md
 
 # Count NOT FOUND (should be <10% of citations)
-grep -ci 'NOT FOUND' artifacts/ref/GROUND_TRUTH_*.md
+grep -ci 'NOT FOUND' ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md
 ```
 
 **Launch agents in parallel** for multiple systems.
@@ -217,7 +217,7 @@ Add or update section 5 of dharana.md:
 
 | System | Ground Truth Doc | Source Location | Last Verified | Opaque Regions |
 |--------|-----------------|-----------------|---------------|----------------|
-| [name] | GROUND_TRUTH_[NAME].md | artifacts/ref/sources/[name]/ | [date] | [list or "none"] |
+| [name] | GROUND_TRUTH_[NAME].md | ~/.anvideck/projects/[project]/ref/sources/[name]/ | [date] | [list or "none"] |
 | ... | ... | ... | ... | ... |
 
 Ungrounded catalogue entries: [count] (down from [original count])

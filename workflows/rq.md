@@ -43,7 +43,7 @@ Gather current context from 5 sources:
 - Check which boundaries have Ground Truth docs vs not
 
 **4. What do Ground Truth docs reveal?**
-- Read `artifacts/ref/GROUND_TRUTH_*.md` — scan for:
+- Read `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md` — scan for:
   - **OPAQUE REGIONS** — things we can't see inside (WASM, compiled code, external services)
   - **DISCREPANCY LOG** — where docs say one thing and code does another
   - **INIT SEQUENCE** — gaps between "reports ready" and "actually ready"

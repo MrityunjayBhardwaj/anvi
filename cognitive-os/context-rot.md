@@ -23,7 +23,7 @@ Session middle: signal → observation → observation → observation →
 
 3. **Urgency escalation** — as context fills, pressure increases. "We've been at this for an hour" → skip discrimination, try another fix. The longer the session, the stronger the pull to just *do something*.
 
-4. **Ground Truth staleness** — Ground Truth docs (`artifacts/ref/GROUND_TRUTH_*.md`) can rot independently of session context. If a dependency version changed since the doc was generated, the file:line citations may point to moved or changed code. The doc still looks authoritative but its claims no longer match the source. Staleness signals:
+4. **Ground Truth staleness** — Ground Truth docs (`~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md`) can rot independently of session context. If a dependency version changed since the doc was generated, the file:line citations may point to moved or changed code. The doc still looks authoritative but its claims no longer match the source. Staleness signals:
    - The Reference Index in the doc lists files that no longer exist or have been substantially modified in the current dependency version.
    - The dependency version in `package.json` / lockfile differs from the version noted in the doc header.
    - A fix grounded in a Ground Truth citation fails — the citation may be pointing at code that changed.

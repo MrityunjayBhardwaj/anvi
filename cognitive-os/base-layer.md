@@ -81,10 +81,10 @@ Before modifying or removing any code:
 **Plain language:** "Is my claim about this system grounded in source code, or am I inferring?"
 
 Before forming a hypothesis about how an external system behaves:
-1. Does a Ground Truth doc exist for this system? (`artifacts/ref/GROUND_TRUTH_*.md`)
+1. Does a Ground Truth doc exist for this system? (`~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md`)
 2. If yes — read the relevant section. Cite the `file:line` that supports your hypothesis.
-3. If no — is the source code downloaded? (`artifacts/ref/sources/`)
-4. If source exists but no Ground Truth doc — create one using `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`
+3. If no — is the source code downloaded? (`~/.anvideck/projects/[project]/ref/sources/`)
+4. If source exists but no Ground Truth doc — create one using `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`
 5. If no source — mark the boundary as OPAQUE and do NOT infer behavior. State what you observe, not what you assume.
 
 **The cost of one source code read is 10 minutes. The cost of an ungrounded hypothesis is hours of failed experiments.**

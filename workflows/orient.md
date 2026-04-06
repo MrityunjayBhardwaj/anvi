@@ -67,7 +67,7 @@ Check the three-layer grounding chain: Catalogue entry → Ground Truth doc → 
 ```
 Sources (check in order):
 1. .anvi/*.md — scan entries for **REF:** fields
-2. artifacts/ref/GROUND_TRUTH_*.md — list existing Ground Truth docs
+2. ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md — list existing Ground Truth docs
 3. package.json / dependency manifests — check versions against Ground Truth doc headers
 ```
 

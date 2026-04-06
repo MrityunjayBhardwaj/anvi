@@ -40,7 +40,7 @@ User message
   ↓
 ⑦ PreToolUse:Bash — experiment-protocol-guard.js
    Fires when running diagnostic tools (tools/diagnose-*, capture, raw-osc).
-   Checks for artifacts/investigations/exp-*.md with hypothesis + prediction.
+   Checks for ~/.anvideck/projects/[project]/investigations/exp-*.md with hypothesis + prediction.
    "Write the prediction BEFORE running."
 
   ↓

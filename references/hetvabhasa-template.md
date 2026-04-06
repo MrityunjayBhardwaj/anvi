@@ -79,9 +79,9 @@ If you cannot cite a Ground Truth doc, the entry is UNGROUNDED — mark it `**RE
 
 ### Ground Truth Documents
 
-Ground Truth docs are produced using the meta-prompt at `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`. They trace a system's pipeline end-to-end with `file:line` citations for every behavioral claim. To create one:
+Ground Truth docs are produced using the meta-prompt at `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`. They trace a system's pipeline end-to-end with `file:line` citations for every behavioral claim. To create one:
 
-1. Download the reference system's source code to `artifacts/ref/sources/[system_name]/`
+1. Download the reference system's source code to `~/.anvideck/projects/[project]/ref/sources/[system_name]/`
 2. Apply the meta-prompt with the source files as input
-3. Output: `artifacts/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
+3. Output: `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
 4. Update catalogue REF fields to point to the new doc

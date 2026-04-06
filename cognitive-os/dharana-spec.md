@@ -13,22 +13,22 @@ Catalogue entry (compact)           ← dharana.md, hetvabhasa.md, vyapti.md, kr
     ↓ **REF:** GROUND_TRUTH_*.md#section
 Interpretation (how/why/when)       ← Ground Truth docs with file:line citations
     ↓ **REF:** file:line
-Source code (ground truth)          ← artifacts/ref/sources/[system]/
+Source code (ground truth)          ← ~/.anvideck/projects/[project]/ref/sources/[system]/
 ```
 
-**Every catalogue entry must have a `**REF:**` field.** This field points to the Ground Truth document and section that grounds the entry in actual source code. If no Ground Truth doc exists for the relevant system, create one using `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`.
+**Every catalogue entry must have a `**REF:**` field.** This field points to the Ground Truth document and section that grounds the entry in actual source code. If no Ground Truth doc exists for the relevant system, create one using `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`.
 
 ### Ground Truth Documents
 
 Ground Truth documents trace a system's pipeline end-to-end with `file:line` citations for every behavioral claim. They are the interpretation layer between compact catalogue entries and raw source code.
 
 **To create a Ground Truth doc for a reference system:**
-1. Download the system's source code to `artifacts/ref/sources/[system_name]/`
+1. Download the system's source code to `~/.anvideck/projects/[project]/ref/sources/[system_name]/`
 2. Download any available documentation
-3. **Read** the meta-prompt at `~/.claude/anvi/templates/ground-truth-meta-prompt.md` (or `artifacts/ref/GROUND_TRUTH_META_PROMPT.md`)
+3. **Read** the meta-prompt at `~/.claude/anvi/templates/ground-truth-meta-prompt.md` (or `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`)
 4. **Include the full meta-prompt content** in the agent's prompt — don't just reference it by path
 5. Include all source file paths + what to trace (input → output pipeline)
-6. Output: `artifacts/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
+6. Output: `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
 7. Verify: 50+ code citations, 3+ stages, init sequence traced, opaque regions listed
 
 **Automated:** `/anvi:ground` runs this entire flow (audit → download → generate → wire REFs).
@@ -119,7 +119,7 @@ HOW: Consolidate all parameter transformation into a single module
 
 | Trigger | Action |
 |---------|--------|
-| **Project init** (`/anvi:init`) | Create `dharana.md` — scan codebase for system boundaries, read existing catalogues, instantiate global principles. Every entry gets ORIGIN/WHY/HOW/**REF**. **Identify external systems the project depends on. For each: download source to `artifacts/ref/sources/`, create Ground Truth doc using `GROUND_TRUTH_META_PROMPT.md`.** |
+| **Project init** (`/anvi:init`) | Create `dharana.md` — scan codebase for system boundaries, read existing catalogues, instantiate global principles. Every entry gets ORIGIN/WHY/HOW/**REF**. **Identify external systems the project depends on. For each: download source to `~/.anvideck/projects/[project]/ref/sources/`, create Ground Truth doc using `GROUND_TRUTH_META_PROMPT.md`.** |
 | **Session start** (`/anvi:orient`, `/anvi:resume-work`) | Validate `dharana.md` — have catalogues changed since last session? Are boundaries still accurate? Flag stale entries. Re-derive affected sections if catalogues grew. **Check Ground Truth staleness: if dependency version changed, re-trace affected pipeline stages.** |
 | **After any catalogue update** (new hetvabhasa/vyapti/krama) | Re-derive affected dharana sections. Does new error pattern create boundary clustering that wasn't there? Does new invariant span a module not previously flagged? Add entry with provenance pointing to the new catalogue entry. **Every new entry must have a REF to a Ground Truth doc.** |
 | **After fix that took >1 attempt** | Gap check — did dharana's boundary list and observation targets cover this? If not: add new entry. ORIGIN = "this fix required N attempts because [specific blind spot]." **If the blind spot was at an external boundary, check if a Ground Truth doc exists for that system. If not, create one before adding the entry.** |
