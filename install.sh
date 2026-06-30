@@ -15,6 +15,7 @@ set -euo pipefail
 ANVI_DIR="$HOME/.claude/anvi"
 AGENTS_DIR="$HOME/.claude/agents"
 SKILLS_DIR="$HOME/.claude/skills"
+HOOKS_DIR="$HOME/.claude/hooks"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
 
@@ -57,6 +58,10 @@ if [ "$MODE" = "no-dev" ]; then
     done
     for agent_file in "$AGENTS_DIR/"anvi-*.md; do
       [ -L "$agent_file" ] && rm "$agent_file"
+    done
+    # Break hook symlinks (copy install re-copies them below)
+    for hook_file in "$HOOKS_DIR/"*.js; do
+      [ -L "$hook_file" ] && rm "$hook_file"
     done
     echo "  Symlinks removed. Running copy install..."
     MODE="sync"
@@ -111,6 +116,17 @@ if [ "$MODE" = "dev" ]; then
   done
   echo "  ✓ ${AGENT_COUNT} agents symlinked"
 
+  # Symlink hooks (live edits to hook logic)
+  mkdir -p "$HOOKS_DIR"
+  HOOK_COUNT=0
+  for hook_file in "$SCRIPT_DIR/hooks/"*.js; do
+    [ -f "$hook_file" ] || continue
+    ln -sf "$hook_file" "$HOOKS_DIR/$(basename "$hook_file")"
+    HOOK_COUNT=$((HOOK_COUNT + 1))
+  done
+  echo "  ✓ ${HOOK_COUNT} hooks symlinked"
+  node "$SCRIPT_DIR/scripts/register-hooks.cjs"
+
   echo ""
   echo "Dev mode active. Edits to ${SCRIPT_DIR} are immediately live."
   echo "Run ./install.sh (without --dev) to switch back to copy mode."
@@ -150,6 +166,20 @@ chmod +x "$ANVI_DIR/bin/anvi-tools.cjs"
   cp "$SCRIPT_DIR/scripts/"*.sh "$ANVI_DIR/scripts/" 2>/dev/null || true
   chmod +x "$ANVI_DIR/scripts/"*.sh 2>/dev/null || true
 }
+
+# Hooks (enforcement chain — see ENFORCE.md)
+if [ -d "$SCRIPT_DIR/hooks" ]; then
+  mkdir -p "$HOOKS_DIR"
+  HOOK_COUNT=0
+  for hook_file in "$SCRIPT_DIR/hooks/"*.js; do
+    [ -f "$hook_file" ] || continue
+    cp "$hook_file" "$HOOKS_DIR/"
+    HOOK_COUNT=$((HOOK_COUNT + 1))
+  done
+  echo "  ✓ ${HOOK_COUNT} hooks installed to ${HOOKS_DIR}"
+  # Register them in settings.json (idempotent; preserves existing hooks)
+  node "$SCRIPT_DIR/scripts/register-hooks.cjs"
+fi
 
 # Metadata
 cp "$SCRIPT_DIR/VERSION" "$ANVI_DIR/"
