@@ -73,6 +73,29 @@ The catalogue-context-injector uses two matching strategies:
 
 FILES: is preferred — it's deterministic and doesn't rely on boundary descriptions mentioning module names.
 
+## Catalogue & Artifact Path Resolution (single source of truth)
+
+Every hook resolves catalogues, Ground Truth docs, and investigations through the
+**same ordered candidate list** in `hooks/anvi-paths.js`. First existing wins, so a
+project-local location always overrides the centralized one. Two layouts are supported;
+no project has to migrate:
+
+| Kind | Candidate order (first that exists wins) |
+|------|------------------------------------------|
+| `.anvi/` (catalogues) | `cwd/.anvi` → `cwd/artifacts/.anvi` → `~/.anvideck/projects/[name]/.anvi` |
+| `ref/` (Ground Truth docs, sources) | `cwd/ref` → `cwd/artifacts/ref` → `~/.anvideck/projects/[name]/ref` |
+| `investigations/` (experiment protocols) | `cwd/investigations` → `cwd/artifacts/investigations` → `~/.anvideck/projects/[name]/investigations` |
+
+`[name]` is `basename(cwd)`. When workflows/skills say `.anvi/` (or hedge it as
+"`.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`)"), that shorthand means **"the
+`.anvi/` resolved by the order above."** This table is the one authoritative definition —
+the hooks and the docs must agree with it, not with each other ad hoc.
+
+Rationale: before this was unified, the three hooks each checked a different subset of
+locations and silently failed on the layout they didn't handle (e.g. the injector
+no-op'd on projects using `artifacts/.anvi`; session-start reported "no GT docs" on
+centralized projects). See issue #5.
+
 ## What Each Prevents
 
 | # | Failure mode | Prevented by |

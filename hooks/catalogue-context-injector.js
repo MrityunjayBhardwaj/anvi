@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveDir } = require('./anvi-paths.js');
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -33,19 +34,8 @@ process.stdin.on('end', () => {
 
     if (!filePath) process.exit(0);
 
-    // Find .anvi/ directory — check common locations
-    const projectName = path.basename(cwd);
-    let anviDir = null;
-    for (const candidate of [
-      path.join(cwd, '.anvi'),
-      path.join(process.env.HOME || '', '.anvideck', 'projects', projectName, '.anvi'),
-    ]) {
-      if (fs.existsSync(candidate)) {
-        anviDir = candidate;
-        break;
-      }
-    }
-
+    // Find .anvi/ directory — shared resolver spans both layouts
+    const anviDir = resolveDir(cwd, '.anvi');
     if (!anviDir) process.exit(0);
 
     // Read dharana if exists

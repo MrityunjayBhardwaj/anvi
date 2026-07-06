@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveDir } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -23,18 +24,8 @@ process.stdin.on('end', () => {
     const data = JSON.parse(input);
     const cwd = data.cwd || process.cwd();
 
-    // Find .anvi/ directory
-    let anviDir = null;
-    for (const candidate of [
-      path.join(cwd, '.anvi'),
-      path.join(cwd, 'artifacts', '.anvi'),
-    ]) {
-      if (fs.existsSync(candidate)) {
-        anviDir = candidate;
-        break;
-      }
-    }
-
+    // Find .anvi/ directory — shared resolver spans both layouts
+    const anviDir = resolveDir(cwd, '.anvi');
     if (!anviDir) process.exit(0); // Not an anvi project
 
     // Count grounded vs ungrounded entries across all catalogues
@@ -67,10 +58,10 @@ process.stdin.on('end', () => {
     const total = grounded + ungrounded;
     if (total === 0) process.exit(0); // No project-specific entries yet
 
-    // Find Ground Truth docs
-    const refDir = path.join(cwd, 'artifacts', 'ref');
+    // Find Ground Truth docs — shared resolver spans both layouts
+    const refDir = resolveDir(cwd, 'ref');
     let gtDocs = [];
-    if (fs.existsSync(refDir)) {
+    if (refDir) {
       gtDocs = fs.readdirSync(refDir)
         .filter(f => f.startsWith('GROUND_TRUTH_') && f.endsWith('.md') && f !== 'GROUND_TRUTH_META_PROMPT.md')
         .map(f => {

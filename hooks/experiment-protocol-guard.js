@@ -3,7 +3,9 @@
 //
 // Enforces: before running a diagnostic tool (tools/diagnose-*, tools/*test*,
 // tools/*prophet*, tools/capture.ts, tools/raw-osc-*), an experiment protocol
-// file must exist at artifacts/investigations/exp-*.md with:
+// file must exist in the project's investigations/ dir (resolved via
+// anvi-paths.js: cwd/investigations, cwd/artifacts/investigations, or
+// ~/.anvideck/projects/[name]/investigations) as exp-*.md with:
 //   - Hypothesis (written BEFORE the experiment)
 //   - Predicted outcome (written BEFORE the experiment)
 //
@@ -13,6 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveDir } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -43,10 +46,10 @@ process.stdin.on('end', () => {
     const isDiagnostic = diagnosticPatterns.some(p => p.test(command));
     if (!isDiagnostic) process.exit(0);
 
-    // Check for experiment protocol files
-    const investigationsDir = path.join(cwd, 'artifacts', 'investigations');
+    // Check for experiment protocol files — shared resolver spans both layouts
+    const investigationsDir = resolveDir(cwd, 'investigations');
     let protocols = [];
-    if (fs.existsSync(investigationsDir)) {
+    if (investigationsDir) {
       protocols = fs.readdirSync(investigationsDir)
         .filter(f => f.startsWith('exp-') && f.endsWith('.md'))
         .sort()
@@ -79,18 +82,18 @@ process.stdin.on('end', () => {
     if (latestProtocol) {
       message += ` Latest protocol (${latestProtocol}) is missing hypothesis or predicted outcome.`;
     } else {
-      message += ' No experiment protocol found at artifacts/investigations/exp-*.md.';
+      message += ' No experiment protocol found in the project\'s investigations/ dir.';
     }
 
     message += '\n\nBefore running experiments:';
-    message += '\n1. Create artifacts/investigations/exp-NNN.md (use EXPERIMENT_TEMPLATE.md)';
+    message += '\n1. Create investigations/exp-NNN.md (use EXPERIMENT_TEMPLATE.md)';
     message += '\n2. Write the HYPOTHESIS with file:line citation from Ground Truth';
     message += '\n3. Write the PREDICTED OUTCOME before running';
     message += '\n4. THEN run the diagnostic tool';
 
-    // Find Ground Truth docs for context
-    const refDir = path.join(cwd, 'artifacts', 'ref');
-    if (fs.existsSync(refDir)) {
+    // Find Ground Truth docs for context — shared resolver spans both layouts
+    const refDir = resolveDir(cwd, 'ref');
+    if (refDir) {
       const gtDocs = fs.readdirSync(refDir)
         .filter(f => f.startsWith('GROUND_TRUTH_') && f.endsWith('.md'));
       if (gtDocs.length > 0) {
