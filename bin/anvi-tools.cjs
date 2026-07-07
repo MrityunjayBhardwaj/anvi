@@ -3,12 +3,13 @@
 /**
  * Anvi Tools — CLI utility for Anvi workflow operations
  *
- * Delegates to GSD's lib modules for .planning/ operations (compatible format),
- * adds Anvi-specific commands for cognitive OS state management.
+ * Uses the vendored planning lib (bin/lib/, from GSD — see lib/VENDORED.md)
+ * for .planning/ operations, adds Anvi-specific commands for cognitive OS
+ * state management. No GSD installation required.
  *
  * Usage: node anvi-tools.cjs <command> [args] [--raw]
  *
- * All GSD commands are available (state, phase, roadmap, etc.)
+ * All planning commands are available (state, phase, roadmap, etc.)
  * Plus Anvi-specific commands:
  *
  *   tattva-checkpoint <file>          Save compressed cognitive state
@@ -531,7 +532,7 @@ async function main() {
     default:
       console.error(`Unknown command: ${command}`);
       console.error('Anvi commands: tattva-checkpoint, catalogue-append, catalogue-review, cognitive-state');
-      console.error('GSD commands: state, phase, roadmap, commit, verify, init, ...');
+      console.error('Planning commands: state, phase, roadmap, commit, verify, init, ...');
       process.exit(1);
   }
 }

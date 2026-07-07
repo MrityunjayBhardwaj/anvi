@@ -191,7 +191,7 @@ Complete structural map of the cognitive operating system.
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                        CLI (anvi-tools.cjs)                         ║
 ║                                                                      ║
-║  GSD-delegated:  state, phase, roadmap, commit, verify, init, ...  ║
+║  Vendored lib:   state, phase, roadmap, commit, verify, init, ...  ║
 ║  Anvi-native:    tattva-checkpoint, catalogue-append,               ║
 ║                  catalogue-review, cognitive-state                  ║
 ╚══════════════════════════════════════════════════════════════════════╝

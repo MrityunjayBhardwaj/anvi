@@ -41,4 +41,13 @@ The policy is **vendor now, rewrite later** ([#1](https://github.com/MrityunjayB
 | security.cjs | path/field validation, safe JSON |
 | uat.cjs | UAT audit |
 | model-profiles.cjs | model profile table (used by verify/commands) |
-| profile-output.cjs, profile-pipeline.cjs | user-profiling pipeline |
+| profile-output.cjs, profile-pipeline.cjs | user-profiling pipeline — **unreachable from anvi-tools** (no `profile` command is routed); vendored for completeness |
+
+## Known `__dirname` escapes (behavior differs from GSD-installed layout)
+
+`profile-output.cjs:449,642` resolves templates via `__dirname/../../templates/` — in GSD
+that's `get-shit-done/templates/{user-profile,dev-preferences}.md`; here it lands in anvi's
+`templates/`, which doesn't have those files. Harmless today because the profile pipeline is
+unreachable from anvi-tools; if a `profile` command is ever added, rewrite these modules
+natively first. All other modules resolve paths from `cwd` or absolute `homedir()` — identical
+behavior pre/post vendoring.
