@@ -159,10 +159,12 @@ cp -r "$SCRIPT_DIR/templates" "$ANVI_DIR/"
 # GSD compatibility layer (if exists)
 [ -d "$SCRIPT_DIR/gsd-compat" ] && cp -r "$SCRIPT_DIR/gsd-compat" "$ANVI_DIR/"
 
-# CLI tool
+# CLI tool + vendored planning lib (see bin/lib/VENDORED.md)
 mkdir -p "$ANVI_DIR/bin"
 cp "$SCRIPT_DIR/bin/anvi-tools.cjs" "$ANVI_DIR/bin/"
 chmod +x "$ANVI_DIR/bin/anvi-tools.cjs"
+rm -rf "$ANVI_DIR/bin/lib"
+cp -r "$SCRIPT_DIR/bin/lib" "$ANVI_DIR/bin/"
 
 # Scripts
 [ -d "$SCRIPT_DIR/scripts" ] && {
@@ -276,7 +278,7 @@ if [ -d "$HOME/.claude/get-shit-done" ]; then
   echo ""
   echo "  GSD and Anvi can coexist. Both use .planning/ (compatible format)."
   echo "  /gsd: commands still work alongside /anvi: commands."
-  echo "  Anvi's CLI delegates to GSD's lib modules for .planning/ operations."
+  echo "  Anvi is standalone — its CLI uses a vendored planning lib (bin/lib/)."
   echo ""
   echo "  To migrate: replace /gsd: with /anvi: in your workflow."
   echo "  Run /anvi:sync to track GSD upstream changes."

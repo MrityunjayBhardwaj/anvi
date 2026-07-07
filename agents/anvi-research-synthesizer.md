@@ -67,7 +67,6 @@ created: {ISO timestamp}
 ### 5. Commit
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tools.cjs"; fi
 node "$CLI_PATH" commit "docs: synthesize research" --files .planning/research/
 ```
 

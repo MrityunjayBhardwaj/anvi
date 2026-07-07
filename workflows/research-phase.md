@@ -6,13 +6,11 @@ Forked from GSD research-phase.md with dharana boundary scanning.
 
 <paths>
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
-FALLBACK_CLI=~/.claude/get-shit-done/bin/gsd-tools.cjs
 </paths>
 
 <cli_resolution>
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tools.cjs"; fi
 ```
 </cli_resolution>
 

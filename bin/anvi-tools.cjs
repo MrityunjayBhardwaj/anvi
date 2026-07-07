@@ -29,12 +29,13 @@
 const fs = require('fs');
 const path = require('path');
 
-// ─── GSD lib delegation ──────────────────────────────────────────────────────
+// ─── Planning lib (vendored from GSD — see lib/VENDORED.md) ─────────────────
 
-const GSD_BIN = path.join(process.env.HOME, '.claude', 'get-shit-done', 'bin');
-const GSD_LIB = path.join(GSD_BIN, 'lib');
+// Resolved relative to this file so it works in both install modes:
+// copy (~/.claude/anvi/bin/) and dev-symlink (repo bin/).
+const GSD_LIB = path.join(__dirname, 'lib');
 
-// Lazy-load GSD modules (only when needed)
+// Lazy-load lib modules (only when needed)
 function gsd(mod) {
   return require(path.join(GSD_LIB, `${mod}.cjs`));
 }
