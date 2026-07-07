@@ -52,5 +52,43 @@
 
 ## Project-Specific Error Patterns
 
-_(Add entries as discovered. Follow the format: Root cause, Detection signal, The trap.)_
+_(Add entries as discovered. Follow the format below.)_
 _(At every 10th entry: review, prune stale/non-generalizable entries.)_
+
+### Entry Format (MANDATORY fields)
+
+```
+## [ID]: [Name]
+**Root cause:** [What actually causes this]
+**Detection signal:** [How you notice it]
+**The trap:** [The wrong fix that's tempting]. Root fix: [the actual fix]
+**REF:** [Ground Truth doc]#[section] — `[source_file:line]` [what the code shows]
+**FIX:** [commit sha / PR #N / issue #N in the project's repo that resolved it]
+```
+
+The `**REF:**` field is MANDATORY for all project-specific entries. It creates the provenance chain:
+
+```
+Catalogue entry (compact pattern)
+    ↓ REF: GROUND_TRUTH_*.md#stage-N
+Interpretation (how/why/when + code citations)
+    ↓ REF: file:line
+Source code (ground truth)
+```
+
+If you cannot cite a Ground Truth doc, the entry is UNGROUNDED — mark it `**REF:** UNGROUNDED — [reason]` and prioritize grounding it by reading the relevant source code.
+
+The `**FIX:**` field is MANDATORY for entries born from a resolved bug. `REF:` grounds the
+*claim* in source code; `FIX:` grounds the *resolution* in git history — given an entry you
+can find the fixing diff, and given a regression you can find when/why the pattern was
+established. For entries not tied to a fix (observed invariants, pre-mortem patterns), use
+`**FIX:** n/a — [origin]`.
+
+### Ground Truth Documents
+
+Ground Truth docs are produced using the meta-prompt at `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`. They trace a system's pipeline end-to-end with `file:line` citations for every behavioral claim. To create one:
+
+1. Download the reference system's source code to `~/.anvideck/projects/[project]/ref/sources/[system_name]/`
+2. Apply the meta-prompt with the source files as input
+3. Output: `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
+4. Update catalogue REF fields to point to the new doc

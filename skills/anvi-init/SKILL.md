@@ -82,3 +82,18 @@ Check if `.gitignore` exists and whether `.anvi/` is listed:
   (catalogues may contain project-specific reasoning that's valuable to share,
   or may be personal — let the user decide)
 - If no `.gitignore`: mention that `.anvi/` catalogues will be tracked by git
+
+### Step 6: Offer Ground Truth setup (v1.1.0+)
+
+Ask the user:
+```
+This project likely depends on external systems (APIs, libraries, frameworks).
+Ground Truth docs trace their pipelines with file:line citations, so every
+catalogue entry can be backtracked to source code.
+
+Would you like to set up Ground Truth grounding now? [y/n]
+  - If yes: run /anvi:ground (audits dependencies, downloads source, generates docs)
+  - If no: you can run /anvi:ground later when debugging hits an opaque boundary
+```
+
+This step is recommended but not required. Projects work without Ground Truth docs — they just have UNGROUNDED catalogue entries that rely on inference instead of source citations.

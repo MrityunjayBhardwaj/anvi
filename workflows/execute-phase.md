@@ -46,6 +46,12 @@ Also load cognitive OS state:
 - Read `.anvi/hetvabhasa.md` — known error patterns for this project
 - Read `.anvi/vyapti.md` — known invariants
 - Read `.anvi/krama.md` — known lifecycles
+
+Check Ground Truth coverage for this phase:
+- Read `.anvi/dharana.md` — which external system boundaries does this phase touch?
+- For each boundary: does `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_{SYSTEM}.md` exist?
+- If missing: warn "Phase touches {system} boundary without Ground Truth. Consider `/anvi:ground --system {name}` first."
+- This prevents executing changes at external boundaries with ungrounded understanding.
 </step>
 
 <step name="check_interactive_mode">
@@ -145,6 +151,13 @@ After phase verification passes, check all executor results for new discoveries:
    - Repeated error types → potential hetvabhasa entries
 3. Append high-quality entries to `.anvi/` catalogues
 4. Only catalogue patterns from bugs diagnosed in one pass (not multi-attempt)
+5. New hetvabhasa entries include `**FIX:**` — the commit sha / PR from this phase that
+   resolved the bug the pattern came from
+6. **Commit the knowledge (MANDATORY):** if catalogues live in `~/.anvideck`, commit and push:
+   `cd ~/.anvideck && git add -A && git commit -m "📝 catalogues: [entry IDs] — [phase N summary], fixed in [sha/PR]" && git push`
+   (If catalogues are in-repo `.anvi/`, they ride the project's own commits instead.)
+   The Stop-hook backstop auto-commits anything left dirty, but with a generic message —
+   write the rich one here while the context is fresh.
 </step>
 
 <step name="update_roadmap">
@@ -176,6 +189,7 @@ This replaces GSD's "retry or skip" with "diagnose and decide."
 - [ ] Pratyahara protocol followed on failures (not blind retry)
 - [ ] Phase verified by verifier agent
 - [ ] New patterns catalogued in .anvi/ (if discovered)
+- [ ] Ground Truth coverage checked for external boundaries before execution
 - [ ] ROADMAP.md and STATE.md updated
 - [ ] No Sanskrit terms in user-facing output
 </success_criteria>

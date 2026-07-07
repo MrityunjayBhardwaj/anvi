@@ -23,6 +23,12 @@ Session middle: signal → observation → observation → observation →
 
 3. **Urgency escalation** — as context fills, pressure increases. "We've been at this for an hour" → skip discrimination, try another fix. The longer the session, the stronger the pull to just *do something*.
 
+4. **Ground Truth staleness** — Ground Truth docs (`~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md`) can rot independently of session context. If a dependency version changed since the doc was generated, the file:line citations may point to moved or changed code. The doc still looks authoritative but its claims no longer match the source. Staleness signals:
+   - The Reference Index in the doc lists files that no longer exist or have been substantially modified in the current dependency version.
+   - The dependency version in `package.json` / lockfile differs from the version noted in the doc header.
+   - A fix grounded in a Ground Truth citation fails — the citation may be pointing at code that changed.
+   Ground Truth staleness is harder to detect than observation accumulation because the doc is on disk, not in context. It rots between sessions, not within them.
+
 ## Tattva Checkpoint — The Compression Mechanism
 
 ### When to trigger:
@@ -49,6 +55,10 @@ COMPRESS:
 
 4. Active error warnings — which known error patterns apply here?
    (From project's hetvabhasa catalogue)
+
+5. Ground Truth status — are the relevant Ground Truth docs current?
+   (Dependency version matches? File:line citations still valid?
+   If stale, note which pipeline stages need re-tracing.)
 
 DROP:
 - Raw observations (reproducible from code)
@@ -83,6 +93,9 @@ DROP:
 
 ### What Was Working
 [Last known good state — commit hash or description]
+
+### Ground Truth Status
+[Which docs are current / which may be stale / which boundaries are ungrounded]
 ```
 
 ### Do NOT save:

@@ -12,3 +12,6 @@ $ARGUMENTS
 
 ## Process
 Execute the workflow from `~/.claude/anvi/workflows/orient.md`.
+Load dharana spec: `~/.claude/anvi/cognitive-os/dharana-spec.md`
+Load dhyana spec: `~/.claude/anvi/cognitive-os/dhyana-spec.md`
+Load project `dharana.md` from `.anvi/` if it exists — validate against current catalogues, flag stale entries.

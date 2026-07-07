@@ -102,6 +102,8 @@ Check the project's error catalogue (`references/hetvabhasa.md`) and these unive
 
 **For each applicable error:** Is there a test or observation that would detect it if it occurred? If not, add one.
 
+**Ground Truth discrepancy check:** If a Ground Truth doc covers this boundary, check its discrepancy log for known doc-vs-code contradictions. A change that "looks correct" against a stale Ground Truth doc may be wrong against the actual current source.
+
 ---
 
 ## Check 6 — Hyrum: Observable Behavior
@@ -134,11 +136,27 @@ Check against the project's vyāpti catalogue (`references/vyapti.md`):
 - "Pattern methods may return new instances" — does this change handle the return value correctly?
 - "The transpiler transforms arguments" — does this change account for argument reification?
 
+**Ground Truth alignment:** Do the changes respect Ground Truth-documented behavior? For each changed file at a boundary with a Ground Truth doc, cite the relevant pipeline stage. If no Ground Truth doc exists for a boundary touched by this change, note it — the catalogue entries at that boundary are ungrounded claims.
+
 ---
 
 ## Review Output
 
-After completing all 7 checks, the output is one of:
+## Check 8 — Ground Truth Grounding
+
+**Are any changed files at boundaries with ungrounded catalogue entries?**
+
+For each modified file:
+- Does this file sit at a dharana-flagged boundary?
+- Does a Ground Truth doc cover that boundary?
+  - YES: verify the changes are consistent with the documented pipeline stages (cite file:line).
+  - NO: flag the boundary as ungrounded. Catalogue entries (hetvabhasa, vyapti) at this boundary are claims without source citations. The review can still pass, but note the gap.
+
+**This check is fast:** it's a lookup in dharana section 5 (Ground Truth inventory), not a deep investigation. If the inventory doesn't exist yet, skip this check — but note that the project has no Ground Truth layer.
+
+---
+
+After completing all 8 checks, the output is one of:
 
 **Clean:** All checks pass. Proceed with confidence.
 

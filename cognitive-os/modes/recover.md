@@ -66,6 +66,11 @@ List hypotheses that were tried and failed. This prevents re-investigation:
 - [Approach 1]: Failed because [specific reason]
 - [Approach 2]: Failed because [specific reason]
 
+### 4. Is the relevant boundary grounded?
+Check if a Ground Truth doc covers the boundary where failures occurred:
+- **YES, grounded:** Re-read the relevant pipeline stages. The fix may be in the source, not in more experiments.
+- **NO, ungrounded:** The failure may stem from wrong assumptions about how the external system works. The fix is to READ MORE SOURCE (create a Ground Truth doc), not try more experiments.
+
 **Everything else is noise. Drop it.**
 
 ---
@@ -120,6 +125,8 @@ You are now at a clean state with:
 
 Enter diagnose mode. Gather fresh observations from the clean state. Do not import reasoning from the failed attempts — only import the eliminated hypotheses (to avoid retrying them).
 
+**Ground Truth re-entry rule:** If 3+ attempts failed at a boundary and the Ground Truth doc exists, re-read the relevant pipeline stages before forming new hypotheses — the doc may be stale or incomplete. If the Ground Truth doc does NOT exist, that absence is itself a diagnosis: you're guessing at the external system's behavior. Create a Ground Truth doc (trace the source) before attempting another fix.
+
 **The key difference from "just trying again":**
 - You've reverted the mess
 - You've compressed what you know vs what failed
@@ -134,7 +141,7 @@ Enter diagnose mode. Gather fresh observations from the clean state. Do not impo
 No. If you're in recover mode, everything you've done recently is suspect. Fix nothing until you've completed all 5 phases.
 
 ### "I think the approach was right, just the implementation was wrong"
-Maybe. But 3 failed implementations of the same approach is strong evidence the approach is wrong. At minimum, gather fresh observations before recommitting to the same approach.
+Maybe. But 3 failed implementations of the same approach is strong evidence the approach is wrong. At minimum, gather fresh observations before recommitting to the same approach. If all grounded hypotheses from a Ground Truth doc have been exhausted: the doc itself may be stale or incomplete. Re-trace the affected pipeline stages from current source before trying anything else.
 
 ### "Let me explain what happened"
 The user doesn't need a postmortem right now. They need working code. Compress to: "My approach was wrong. I'm reverting to [clean state] and starting fresh with [new framing / user's framing]."

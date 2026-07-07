@@ -21,6 +21,7 @@ Read these files to load the cognitive operating system:
 1. `~/.claude/anvi/cognitive-os/base-layer.md` — passive checks on every action
 2. `~/.claude/anvi/cognitive-os/modes/diagnose.md` — primary lens for debugging
 3. `~/.claude/anvi/cognitive-os/translation.md` — output translation rules
+4. `~/.claude/anvi/cognitive-os/adaptive-observation.md` — lens chaining, depth control, boundary-pair observation, composition verification
 
 ### 2. Load project catalogues (if they exist)
 

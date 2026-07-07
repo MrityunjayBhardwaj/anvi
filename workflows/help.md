@@ -57,6 +57,11 @@
   /anvi:audit           Self-coherence audit
   /anvi:sync            Check GSD upstream changes
 
+## Ground Truth (v1.1.0+)
+  /anvi:ground          Establish three-layer grounding for external systems
+                        (download source → generate Ground Truth docs → wire REFs)
+                        Flags: --audit-only, --system [name], --rewire, --verify
+
 ## Meta
   /anvi:help            This help
   /anvi:settings        Configure workflow toggles

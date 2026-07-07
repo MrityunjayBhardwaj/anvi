@@ -86,4 +86,24 @@
 ## Project-Specific Vyāptis
 
 _(Add entries below as they're validated during this project.)_
-_(Each entry should follow the format above.)_
+_(Each entry must include a `**REF:**` field pointing to a Ground Truth doc.)_
+
+### Entry Format (with mandatory REF)
+
+```
+### [ID]: [Name]
+**Statement:** Wherever [A], necessarily [B].
+**Causal status:** CAUSAL / STRUCTURAL / EMPIRICAL
+**Scope:** [Where this holds]
+**Breaks when:** [Where this doesn't hold]
+**Confirmed by:** [Direct observation — date]
+**Implication:** [What this means for design/debugging]
+**Status:** IMPLEMENTED / NOT YET IMPLEMENTED / ALIGNED / MISALIGNED
+**REF:** [Ground Truth doc]#[section] — `[source_file:line]` [what the code shows]
+```
+
+The `**REF:**` field creates the three-layer provenance chain:
+```
+Catalogue (compact invariant)  →  Ground Truth doc  →  source file:line
+```
+If no Ground Truth doc exists for this invariant's domain, create one using `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`.

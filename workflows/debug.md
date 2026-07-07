@@ -1,11 +1,9 @@
 <purpose>
-Orchestrate debugging with the cognitive OS. Spawns anvi-debugger agent with diagnose lens loaded natively.
+Orchestrate debugging with the cognitive OS + mandatory Ground Truth grounding.
 
-Unlike GSD's diagnose-issues.md (which is a parallel UAT gap orchestrator), this workflow handles both:
-1. Interactive single-bug debugging (user describes an issue)
-2. Parallel UAT gap diagnosis (when called from verify-work)
-
-The cognitive OS is loaded into the agent at spawn time, not bolted on via hooks.
+The key enforcement: NO hypothesis is formed until the relevant Ground Truth doc has been read.
+NO code is written until a file:line citation supports the hypothesis.
+This is not advisory — the workflow structure makes skipping impossible.
 </purpose>
 
 <paths>
@@ -13,12 +11,14 @@ DEBUG_DIR=.planning/debug
 </paths>
 
 <core_principle>
-**The cognitive chain replaces the hypothesis loop.**
+**Ground first. Hypothesize second. Code last.**
 
-GSD debugger: symptom → hypothesis → test → eliminate → repeat
-Anvi debugger: gather → classify → scan boundaries → compress → prove → fix
+The failure mode this prevents: forming a hypothesis from behavioral inference
+("it probably works like..."), running N experiments that all fail, then discovering
+the source code does something completely different. This happened 9 times on one bug.
 
-The difference: GSD explores hypothesis space randomly. Anvi narrows systematically through classification and boundary scanning. Root cause emerges from compression of observations, not from guessing.
+The enforcement: the workflow reads Ground Truth BEFORE spawning the debugger agent.
+The agent receives the relevant Ground Truth sections as input — it can't skip them.
 </core_principle>
 
 <process>
@@ -30,163 +30,251 @@ Read these files to inform orchestrator decisions:
 1. `~/.claude/anvi/cognitive-os/base-layer.md` — passive checks
 2. `~/.claude/anvi/cognitive-os/modes/diagnose.md` — diagnose lens
 3. `~/.claude/anvi/cognitive-os/translation.md` — output translation
-
-These will also be loaded by the agent, but the orchestrator needs them for:
-- Pre-checking catalogues against symptoms
-- Post-resolution catalogue updates
-- Recovery protocol decisions
 </step>
 
 <step name="load_catalogues">
 **Load project catalogues if they exist:**
 
-Check for `.anvi/` in the project root:
+Check for `.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`) in the project:
 - `.anvi/hetvabhasa.md` — known error patterns
 - `.anvi/vyapti.md` — known invariants
 - `.anvi/krama.md` — known lifecycle patterns
+- `.anvi/dharana.md` — boundaries, observation targets, Ground Truth inventory
 
 If hetvabhasa entries exist, extract keywords from each entry's trigger/signal fields.
-These will be matched against the bug symptoms to provide the agent with known-pattern candidates.
+Match against the bug symptoms to provide known-pattern candidates.
+</step>
+
+<step name="identify_boundaries">
+**Identify which system boundaries the bug touches:**
+
+From the bug description + dharana boundary list:
+1. Which files/modules are involved?
+2. Which dharana boundaries do those files touch?
+3. For each boundary: does a Ground Truth doc exist?
+
+```
+BOUNDARY ANALYSIS:
+  Files involved: [list from bug description]
+  Boundaries touched:
+    B2 (AudioInterpreter ↔ SuperSonicBridge) — GROUND_TRUTH_SUPERSONIC.md ✓
+    B5 (Engine.init ↔ AudioWorklet) — GROUND_TRUTH_SUPERSONIC.md ✓
+  Missing Ground Truth: [list any boundaries without docs]
+```
+
+**If a touched boundary has NO Ground Truth doc:**
+- Check if source code exists at `~/.anvideck/projects/[project]/ref/sources/`
+- If yes: flag that Ground Truth doc should be generated before debugging
+- If no: flag as OPAQUE — debugging at this boundary will be limited to behavioral observation
+- Ask user: "The bug touches [system] which has no Ground Truth doc. Generate one first? (recommended) or proceed with behavioral debugging?"
+</step>
+
+<step name="read_ground_truth">
+**MANDATORY: Read the relevant Ground Truth sections BEFORE any hypothesis.**
+
+For each boundary identified in the previous step:
+1. Read the Ground Truth doc's pipeline stage covering that boundary
+2. Read the initialization sequence (if cold-start related)
+3. Read the boundary map entry
+4. Read any discrepancy log entries
+
+Extract and present:
+```
+GROUND TRUTH CONTEXT:
+  System: [name]
+  Relevant stages: [list with one-line summaries]
+  Key code paths:
+    - [function] at [file:line] — [what it does]
+    - [function] at [file:line] — [what it does]
+  Known discrepancies: [doc vs code, if any]
+  Opaque regions: [what we can't see inside]
+```
+
+**This is not optional. This is not a reminder. The debugger agent RECEIVES this context
+as part of its prompt. It cannot form a hypothesis without having read this first.**
 </step>
 
 <step name="pre_check_patterns">
 **Match symptoms against known error patterns:**
 
-If $ARGUMENTS contains error messages, unexpected behavior descriptions, or symptom keywords:
+If $ARGUMENTS contains error messages, unexpected behavior, or symptom keywords:
 
 1. Extract keywords from the bug description
-2. Compare against hetvabhasa catalogue entries (2+ keyword overlap = candidate)
-3. If match found, prepare a `known_pattern_hint` for the agent:
+2. Compare against hetvabhasa entries (2+ keyword overlap = candidate)
+3. For each candidate, include its **REF:** field (Ground Truth citation)
 
 ```
-known_pattern_hint: "Symptoms match hetvabhasa entry [{id}]: {description}. Root cause was: {cause}. Check if the same pattern applies here."
+KNOWN PATTERN CANDIDATES:
+  SP22: Cold-Start WASM AudioWorklet Poison Nodes
+    REF: GROUND_TRUTH_SUPERSONIC.md#initialization-sequence
+    Match confidence: [high/medium] based on [matched keywords]
 ```
 
-This is a hypothesis CANDIDATE, not a diagnosis. The agent must verify.
+This is a candidate, not a diagnosis. The agent must verify against Ground Truth.
 </step>
 
 <step name="determine_mode">
 **Determine debugging mode:**
 
 **Interactive (default):**
-- User describes issue via $ARGUMENTS
-- Agent gathers symptoms, investigates, fixes, verifies
-- goal: find_and_fix
+- User describes issue
+- Agent gathers → classifies → grounds → proves → fixes
 
-**UAT diagnosis (called from verify-work):**
-- Symptoms pre-filled from UAT gaps
-- symptoms_prefilled: true
-- goal: find_root_cause_only
-- Agent diagnoses but does not fix (plan-phase --gaps handles fixes)
+**UAT diagnosis (from verify-work):**
+- Symptoms pre-filled
+- goal: find_root_cause_only (no fix)
 
 **Parse from context:**
-- If prompt contains `symptoms_prefilled: true` → UAT mode
-- If prompt contains `goal: find_root_cause_only` → diagnosis only
-- Otherwise → interactive mode
+- If `symptoms_prefilled: true` → UAT mode
+- If `goal: find_root_cause_only` → diagnosis only
+- Otherwise → interactive
 </step>
 
 <step name="spawn_debugger">
-**Spawn anvi-debugger agent:**
+**Spawn anvi-debugger agent with Ground Truth pre-loaded:**
 
 ```
 Agent(
   prompt = """
+  ## Bug Description
   {$ARGUMENTS}
 
-  {known_pattern_hint if any}
+  ## Ground Truth Context (READ THIS FIRST — do not skip)
+  {ground_truth_context from step read_ground_truth}
+
+  ## Known Pattern Candidates
+  {known_pattern_hint from step pre_check_patterns, or "No known patterns match."}
+
+  ## Grounding Rules (ENFORCED)
+  1. Your hypothesis MUST cite a specific file:line from the Ground Truth context above.
+     Format: "Hypothesis: [claim] — supported by [file:line] which shows [what]"
+  2. If you cannot cite file:line, you are inferring. State: "UNGROUNDED — need to read [what]"
+     and request the orchestrator to read additional Ground Truth sections.
+  3. Maximum 3 experiment rounds. If 3 fail, STOP and report:
+     "3 experiments failed. The Ground Truth context may not cover the relevant code path.
+      Recommend: read additional source code at [specific file/function]."
+  4. Every experiment must have PREDICTED outcome written BEFORE running.
+  5. For audio bugs: observe WAV, not event log. Event log is inference.
+
+  ## Catalogue Context
+  Boundaries: {matched boundaries from dharana}
+  Error patterns: {matched hetvabhasa entries with REFs}
+  Invariants: {relevant vyapti entries with REFs}
+  Lifecycles: {relevant krama entries with REFs}
 
   <mode>
   symptoms_prefilled: {true/false}
   goal: {find_and_fix / find_root_cause_only}
   </mode>
-
-  <files_to_read>
-  - {relevant files from context}
-  </files_to_read>
   """,
   subagent_type = "anvi-debugger",
   description = "Debug: {short description}"
 )
 ```
 
-For parallel UAT gaps, spawn one agent per gap (same as GSD diagnose-issues.md).
+**The agent receives Ground Truth as INPUT, not as a suggestion to go read.**
 </step>
 
 <step name="collect_results">
 **Collect results from agent:**
 
 Agent returns one of:
-- `## ROOT CAUSE FOUND` — diagnosis complete
-- `## DEBUG COMPLETE` — diagnosis + fix + verification complete
-- `## CHECKPOINT REACHED` — needs user input
+- `## ROOT CAUSE FOUND` — with file:line citation from Ground Truth
+- `## DEBUG COMPLETE` — diagnosis + fix + verification
+- `## CHECKPOINT REACHED` — needs user input or additional Ground Truth
 - `## INVESTIGATION INCONCLUSIVE` — couldn't determine root cause
+- `## GROUNDING GAP` — Ground Truth doesn't cover the relevant code path
+
+**On GROUNDING GAP:**
+- Agent identified that the bug is in code NOT covered by existing Ground Truth docs
+- Present to user: "The bug appears to be in [system/area]. No Ground Truth doc covers this.
+  Options: (a) Generate Ground Truth doc for [system] now, (b) proceed with behavioral debugging"
+- If (a): run /anvi:ground --system [name], then re-spawn debugger with new context
+- If (b): proceed but mark any findings as UNGROUNDED in catalogues
 
 **On ROOT CAUSE FOUND or DEBUG COMPLETE:**
-- Check if agent discovered new patterns (from debug session file's Pattern Match section)
+- Verify the root cause cites file:line
+- If no citation: push back — "Root cause must cite file:line. Which Ground Truth section supports this?"
 - Proceed to catalogue_update
 
 **On CHECKPOINT REACHED:**
-- Present checkpoint to user
+- Present to user
 - Get response
-- Spawn continuation agent with debug session file + response
+- Spawn continuation with debug session + response + same Ground Truth context
 
-**On INVESTIGATION INCONCLUSIVE:**
-- Report to user with what was checked and remaining possibilities
-- Do NOT automatically retry — the framing may be wrong
+**On INVESTIGATION INCONCLUSIVE after 3 rounds:**
+- Do NOT retry. The framing is wrong OR the Ground Truth is incomplete.
+- Report what was tried, what was eliminated, where the chain broke
+- Recommend: "Read additional source code at [specific files]" or "Generate Ground Truth for [system]"
 </step>
 
 <step name="catalogue_update">
-**Post-resolution catalogue update:**
+**Post-resolution catalogue update (with mandatory REF):**
 
-Read the debug session file. Check the Pattern Match section.
+Read the debug session. Check for new patterns.
 
 If `new_pattern: yes`:
 
-1. **New hetvabhasa entry:** If the root cause represents a reasoning error pattern
-   - Extract: trigger signal, the error pattern, the insight that resolved it
-   - Append to `.anvi/hetvabhasa.md`
+1. **New hetvabhasa entry:** Must include `**REF:** GROUND_TRUTH_[SYSTEM].md#[section] — [file:line]`
+   and `**FIX:** [commit sha / PR #N that resolved the bug]`
+2. **New vyapti entry:** Must include `**REF:**` — if no Ground Truth supports it, mark `UNGROUNDED`
+3. **New krama entry:** Must include `**REF:**`
 
-2. **New vyapti entry:** If the investigation confirmed a new structural invariant
-   - Extract: the invariant, what confirmed it, scope
-   - Append to `.anvi/vyapti.md`
+**If the root cause was at a boundary not in dharana:** Add new boundary entry with:
+- ORIGIN: this debug session
+- WHY: what class of problems this boundary hides
+- HOW: observation targets
+- **REF:** Ground Truth doc + file:line
 
-3. **New krama entry:** If the bug was timing-related and a lifecycle was documented
-   - Extract: the lifecycle sequence, what runs before/after what
-   - Append to `.anvi/krama.md`
+Only append entries from bugs diagnosed with Ground Truth grounding.
+Entries from ungrounded behavioral debugging are saved to memory, not catalogues.
+Wait for recurrence before promoting to catalogue (dharana promotion criteria).
 
-Only append high-quality entries — patterns from bugs correctly diagnosed in one pass.
-If the agent needed recovery (3+ attempts), the pattern is not yet clean enough to catalogue.
+**Then commit the knowledge (MANDATORY — catalogues that aren't committed don't exist):**
+
+After appending entries, commit `~/.anvideck` and push:
+
+```bash
+cd ~/.anvideck && git add -A && git commit -m "📝 catalogues: [entry IDs] — [one-line symptom], fixed in [PR #N / sha]" && git push
+```
+
+Message format matches the established ledger style (e.g. `📝 catalogues: SP177 + SV84 — #618
+was a parity-tool false-positive, fixed in PR #619`). This makes the .anvideck git log the
+entry ↔ fix ledger. A Stop-hook backstop (`anvideck-checkpoint.js`) auto-commits anything
+left dirty, but the rich message only exists if written here, while the context is fresh.
 </step>
 
 <step name="recovery_protocol">
-**Recovery protocol — if agent reports 3+ failed attempts:**
+**Recovery protocol — 3+ failed attempts:**
 
-This signals the framing is wrong. At orchestrator level:
+This signals the grounding is insufficient, not that we need more guessing.
 
-1. Read the debug session file — check Eliminated section
-2. Count recovery triggers
-3. If 3+: the cognitive chain broke somewhere. Ask:
-   - "Which base-layer check should have caught this?"
-   - Was it a classification error? (wrong problem type)
-   - Was it a boundary scan miss? (didn't check the right boundary)
-   - Was it a compression failure? (multiple problems masquerading as one)
+1. Read the debug session — what was tried and eliminated
+2. Check: were all hypotheses grounded in file:line citations?
+   - If YES (grounded but wrong): Ground Truth may be incomplete or stale.
+     Recommend re-reading source code, checking for version changes.
+   - If NO (some ungrounded): the ungrounded hypotheses wasted rounds.
+     Report which hypotheses lacked citations.
+3. Check: did the Ground Truth doc cover the relevant pipeline stages?
+   - If NO: recommend generating/updating Ground Truth doc
+   - If YES: the bug may be in an opaque region (WASM, compiled code)
 
-4. Report to user honestly:
-   - What was tried and eliminated
-   - Where the cognitive chain broke
-   - Suggested next step (often: step back and re-examine the problem framing)
-
-Do NOT automatically retry with the same approach. Two failures = wrong frame.
+Report honestly:
+- What was tried (with grounding status of each hypothesis)
+- Where the chain broke
+- Whether Ground Truth was sufficient or needs expansion
+- Suggested next step (usually: read more source code, not try more experiments)
 </step>
 
 </process>
 
 <success_criteria>
-- [ ] Cognitive OS loaded before agent spawn
-- [ ] Catalogues checked for known patterns
-- [ ] Agent spawned with diagnose lens native (not bolted on)
-- [ ] Results collected and structured
-- [ ] New patterns appended to catalogues (if high-quality)
-- [ ] Recovery protocol triggered on 3+ failures (not blind retry)
+- [ ] Ground Truth doc read BEFORE any hypothesis formed
+- [ ] Agent received Ground Truth context as prompt input (not advisory)
+- [ ] Every hypothesis cites file:line
+- [ ] Catalogues checked for known patterns (with REF fields)
+- [ ] New catalogue entries include **REF:** to Ground Truth
+- [ ] 3-round limit enforced (no blind retry)
+- [ ] Grounding gaps reported explicitly (not papered over)
 - [ ] No Sanskrit terms in user-facing output
 </success_criteria>

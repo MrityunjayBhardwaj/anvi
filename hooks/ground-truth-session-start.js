@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+// ground-truth-session-start: SessionStart hook
+//
+// On session start, checks Ground Truth grounding status for the current project:
+// 1. Counts grounded vs ungrounded catalogue entries
+// 2. Lists Ground Truth docs with age
+// 3. Flags MISALIGNED / NOT YET IMPLEMENTED invariants
+// 4. Reports any boundaries without Ground Truth docs
+//
+// Injects a brief status summary so every session starts with grounding awareness.
+
+const fs = require('fs');
+const path = require('path');
+const { resolveDir } = require('./anvi-paths.js');
+
+const stdinTimeout = setTimeout(() => process.exit(0), 5000);
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+  clearTimeout(stdinTimeout);
+  try {
+    const data = JSON.parse(input);
+    const cwd = data.cwd || process.cwd();
+
+    // Find .anvi/ directory — shared resolver spans both layouts
+    const anviDir = resolveDir(cwd, '.anvi');
+    if (!anviDir) process.exit(0); // Not an anvi project
+
+    // Count grounded vs ungrounded entries across all catalogues
+    let grounded = 0;
+    let ungrounded = 0;
+    const ungroundedList = [];
+
+    for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md']) {
+      const catPath = path.join(anviDir, cat);
+      if (!fs.existsSync(catPath)) continue;
+      const content = fs.readFileSync(catPath, 'utf8');
+
+      // Split into entries by ## headers with IDs
+      const entries = content.split(/^## ([A-Z]+\d+)/m);
+      for (let i = 1; i < entries.length; i += 2) {
+        const id = entries[i];
+        const body = entries[i + 1] || '';
+        // Skip universal entries (U1, UV1, UK1 etc)
+        if (/^U[A-Z]?\d+$/.test(id)) continue;
+        if (body.includes('**REF:**') && !body.includes('UNGROUNDED')) {
+          grounded++;
+        } else {
+          ungrounded++;
+          const titleMatch = body.match(/^[:\s]*(.+?)$/m);
+          if (titleMatch) ungroundedList.push(`${id}: ${titleMatch[1].trim().substring(0, 50)}`);
+        }
+      }
+    }
+
+    const total = grounded + ungrounded;
+    if (total === 0) process.exit(0); // No project-specific entries yet
+
+    // Find Ground Truth docs — shared resolver spans both layouts
+    const refDir = resolveDir(cwd, 'ref');
+    let gtDocs = [];
+    if (refDir) {
+      gtDocs = fs.readdirSync(refDir)
+        .filter(f => f.startsWith('GROUND_TRUTH_') && f.endsWith('.md') && f !== 'GROUND_TRUTH_META_PROMPT.md')
+        .map(f => {
+          const stat = fs.statSync(path.join(refDir, f));
+          const ageMs = Date.now() - stat.mtimeMs;
+          const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+          return { name: f, ageDays };
+        });
+    }
+
+    // Check for MISALIGNED / NOT YET IMPLEMENTED invariants
+    const vyaptiPath = path.join(anviDir, 'vyapti.md');
+    const gaps = [];
+    if (fs.existsSync(vyaptiPath)) {
+      const vyapti = fs.readFileSync(vyaptiPath, 'utf8');
+      const misaligned = vyapti.match(/## (SV\d+:[^\n]*(?:MISALIGNED|NOT YET IMPLEMENTED))/g);
+      if (misaligned) {
+        for (const m of misaligned) {
+          gaps.push(m.replace(/^## /, ''));
+        }
+      }
+    }
+
+    // Build message
+    const pct = Math.round((grounded / total) * 100);
+    let message = `GROUNDING: ${grounded}/${total} entries grounded (${pct}%)`;
+
+    if (gtDocs.length > 0) {
+      message += ` | GT docs: ${gtDocs.map(d => `${d.name.replace('GROUND_TRUTH_', '').replace('.md', '')}${d.ageDays > 7 ? ' ('+d.ageDays+'d old)' : ''}`).join(', ')}`;
+    } else {
+      message += ' | NO Ground Truth docs — consider /anvi:ground';
+    }
+
+    if (gaps.length > 0) {
+      message += ` | Gaps: ${gaps.join('; ')}`;
+    }
+
+    if (ungrounded > 0 && ungroundedList.length <= 3) {
+      message += ` | Ungrounded: ${ungroundedList.join('; ')}`;
+    } else if (ungrounded > 0) {
+      message += ` | ${ungrounded} ungrounded entries`;
+    }
+
+    const output = {
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: message
+      }
+    };
+    process.stdout.write(JSON.stringify(output));
+  } catch (e) {
+    process.exit(0);
+  }
+});
