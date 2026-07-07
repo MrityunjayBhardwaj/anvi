@@ -151,6 +151,13 @@ After phase verification passes, check all executor results for new discoveries:
    - Repeated error types → potential hetvabhasa entries
 3. Append high-quality entries to `.anvi/` catalogues
 4. Only catalogue patterns from bugs diagnosed in one pass (not multi-attempt)
+5. New hetvabhasa entries include `**FIX:**` — the commit sha / PR from this phase that
+   resolved the bug the pattern came from
+6. **Commit the knowledge (MANDATORY):** if catalogues live in `~/.anvideck`, commit and push:
+   `cd ~/.anvideck && git add -A && git commit -m "📝 catalogues: [entry IDs] — [phase N summary], fixed in [sha/PR]" && git push`
+   (If catalogues are in-repo `.anvi/`, they ride the project's own commits instead.)
+   The Stop-hook backstop auto-commits anything left dirty, but with a generic message —
+   write the rich one here while the context is fresh.
 </step>
 
 <step name="update_roadmap">

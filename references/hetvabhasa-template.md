@@ -63,6 +63,7 @@ _(At every 10th entry: review, prune stale/non-generalizable entries.)_
 **Detection signal:** [How you notice it]
 **The trap:** [The wrong fix that's tempting]. Root fix: [the actual fix]
 **REF:** [Ground Truth doc]#[section] — `[source_file:line]` [what the code shows]
+**FIX:** [commit sha / PR #N / issue #N in the project's repo that resolved it]
 ```
 
 The `**REF:**` field is MANDATORY for all project-specific entries. It creates the provenance chain:
@@ -76,6 +77,12 @@ Source code (ground truth)
 ```
 
 If you cannot cite a Ground Truth doc, the entry is UNGROUNDED — mark it `**REF:** UNGROUNDED — [reason]` and prioritize grounding it by reading the relevant source code.
+
+The `**FIX:**` field is MANDATORY for entries born from a resolved bug. `REF:` grounds the
+*claim* in source code; `FIX:` grounds the *resolution* in git history — given an entry you
+can find the fixing diff, and given a regression you can find when/why the pattern was
+established. For entries not tied to a fix (observed invariants, pre-mortem patterns), use
+`**FIX:** n/a — [origin]`.
 
 ### Ground Truth Documents
 

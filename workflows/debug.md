@@ -216,6 +216,7 @@ Read the debug session. Check for new patterns.
 If `new_pattern: yes`:
 
 1. **New hetvabhasa entry:** Must include `**REF:** GROUND_TRUTH_[SYSTEM].md#[section] — [file:line]`
+   and `**FIX:** [commit sha / PR #N that resolved the bug]`
 2. **New vyapti entry:** Must include `**REF:**` — if no Ground Truth supports it, mark `UNGROUNDED`
 3. **New krama entry:** Must include `**REF:**`
 
@@ -228,6 +229,19 @@ If `new_pattern: yes`:
 Only append entries from bugs diagnosed with Ground Truth grounding.
 Entries from ungrounded behavioral debugging are saved to memory, not catalogues.
 Wait for recurrence before promoting to catalogue (dharana promotion criteria).
+
+**Then commit the knowledge (MANDATORY — catalogues that aren't committed don't exist):**
+
+After appending entries, commit `~/.anvideck` and push:
+
+```bash
+cd ~/.anvideck && git add -A && git commit -m "📝 catalogues: [entry IDs] — [one-line symptom], fixed in [PR #N / sha]" && git push
+```
+
+Message format matches the established ledger style (e.g. `📝 catalogues: SP177 + SV84 — #618
+was a parity-tool false-positive, fixed in PR #619`). This makes the .anvideck git log the
+entry ↔ fix ledger. A Stop-hook backstop (`anvideck-checkpoint.js`) auto-commits anything
+left dirty, but the rich message only exists if written here, while the context is fresh.
 </step>
 
 <step name="recovery_protocol">

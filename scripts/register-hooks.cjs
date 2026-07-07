@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// register-hooks.cjs — idempotently register the 5 Anvi hooks in ~/.claude/settings.json
+// register-hooks.cjs — idempotently register the Anvi hooks in ~/.claude/settings.json
 //
 // Called by install.sh after the hooks are copied to ~/.claude/hooks/.
 // Safe to run repeatedly: it adds each hook only if an entry referencing the
@@ -18,7 +18,7 @@ const HOME = os.homedir();
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 const HOOKS_DIR = path.join(HOME, '.claude', 'hooks');
 
-// The 5 Anvi hooks: [event, matcher|null, file, timeout]
+// The Anvi hooks: [event, matcher|null, file, timeout]
 const REGISTRATIONS = [
   ['SessionStart',     null,         'ground-truth-session-start.js', 5],
   ['UserPromptSubmit', null,         'debug-grounding-gate.js',       5],
@@ -26,7 +26,9 @@ const REGISTRATIONS = [
   ['PreToolUse',       'Read',       'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
   ['PostToolUse',      'Read',       'anvi-route-logger.js',          5],
+  ['Stop',             null,         'anvideck-checkpoint.js',        30], // commit+push may take seconds
 ];
+const HOOK_FILE_COUNT = new Set(REGISTRATIONS.map(r => r[2])).size;
 
 function load() {
   if (!fs.existsSync(SETTINGS)) return {};
@@ -83,7 +85,7 @@ try {
   settings = load();
 } catch (e) {
   console.log(`  ⚠ Could not parse ${SETTINGS} (${e.message}).`);
-  console.log('    Skipping hook registration — register the 5 Anvi hooks manually.');
+  console.log('    Skipping hook registration — register the Anvi hooks manually.');
   process.exit(0);
 }
 
@@ -94,7 +96,7 @@ try {
   }
 } catch (e) {
   console.log(`  ⚠ ${e.message}`);
-  console.log('    Skipping hook registration — register the 5 Anvi hooks manually.');
+  console.log('    Skipping hook registration — register the Anvi hooks manually.');
   process.exit(0);
 }
 
@@ -103,5 +105,5 @@ if (added > 0) {
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + '\n');
   console.log(`  ✓ Registered ${added} new hook entr${added === 1 ? 'y' : 'ies'} in settings.json`);
 } else {
-  console.log('  ✓ All 5 Anvi hooks already registered (no change)');
+  console.log(`  ✓ All ${HOOK_FILE_COUNT} Anvi hooks already registered (no change)`);
 }

@@ -57,6 +57,7 @@ User message
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
+| Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
 
 ## Boundary Matching
 
@@ -111,7 +112,7 @@ centralized projects). See issue #5.
 
 ## Registered In
 
-`~/.claude/settings.json` — hooks section. Four hook events:
+`~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`):
 - `SessionStart`: ground-truth-session-start.js, gsd-check-update.js
 - `UserPromptSubmit`: debug-grounding-gate.js
 - `PreToolUse:Read`: catalogue-context-injector.js
@@ -119,3 +120,22 @@ centralized projects). See issue #5.
 - `PreToolUse:Bash`: experiment-protocol-guard.js
 - `PostToolUse:Bash|Edit|Write|...`: gsd-context-monitor.js
 - `PostToolUse:Read`: anvi-route-logger.js
+- `Stop`: anvideck-checkpoint.js
+
+## Knowledge Durability — Catalogue Commit Chain
+
+Catalogue entries that aren't committed don't exist (observed: 6 of 7 projects'
+knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck`
+(backed by the private `anvi_artifacts` GitHub repo) committed and pushed:
+
+1. **Entry-level linkage** — hetvabhasa entries carry a mandatory `**FIX:**` field
+   (commit sha / PR in the project's repo). `REF:` grounds the claim in source;
+   `FIX:` grounds the resolution in history.
+2. **Workflow commit step** — the catalogue_update steps in `debug.md` and
+   `execute-phase.md` end with an explicit commit+push of `~/.anvideck` using the
+   ledger message format: `📝 catalogues: SP-x + SV-y — <symptom>, fixed in <PR/sha>`.
+   Rich messages, written while the context is fresh.
+3. **Stop-hook backstop** — `anvideck-checkpoint.js` fires when a response finishes:
+   if `~/.anvideck` is dirty it auto-commits (`📓 auto-checkpoint: <project> — <files>
+   (+new entry IDs)`) and pushes best-effort. No-ops when clean. This is the
+   consistency guarantee — layer 2 can be skipped; this can't.
