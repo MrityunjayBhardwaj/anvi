@@ -35,14 +35,29 @@ function load() {
   return JSON.parse(raw); // may throw — caught by caller
 }
 
+// "Write|Edit" and "Edit|Write" are the same matcher — compare order-insensitively
+function normMatcher(m) {
+  if (m === null || m === undefined) return null;
+  return String(m).split('|').map(s => s.trim()).sort().join('|');
+}
+
 function ensureHook(settings, event, matcher, file, timeout) {
   settings.hooks = settings.hooks || {};
+  // Guard: hooks (or this event's list) exists but has the wrong shape.
+  // Assigning named keys onto an array is silently dropped by JSON.stringify —
+  // we'd claim success and register nothing. Refuse instead.
+  if (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+    throw new Error(`settings.json "hooks" is not an object — fix it manually, then re-run`);
+  }
+  if (settings.hooks[event] !== undefined && !Array.isArray(settings.hooks[event])) {
+    throw new Error(`settings.json hooks.${event} is not an array — fix it manually, then re-run`);
+  }
   const list = settings.hooks[event] = settings.hooks[event] || [];
 
-  // Find the group for this matcher (no-matcher groups for Session/UserPrompt events)
-  let group = list.find(g =>
-    matcher === null ? g.matcher === undefined : g.matcher === matcher
-  );
+  // Find the group for this matcher (no-matcher groups for Session/UserPrompt
+  // events). Order-insensitive so an existing "Edit|Write" group is reused
+  // rather than double-registering the hook under a new "Write|Edit" group.
+  let group = list.find(g => normMatcher(g.matcher) === normMatcher(matcher));
   if (!group) {
     group = matcher === null ? { hooks: [] } : { matcher, hooks: [] };
     list.push(group);
@@ -73,8 +88,14 @@ try {
 }
 
 let added = 0;
-for (const [event, matcher, file, timeout] of REGISTRATIONS) {
-  if (ensureHook(settings, event, matcher, file, timeout)) added++;
+try {
+  for (const [event, matcher, file, timeout] of REGISTRATIONS) {
+    if (ensureHook(settings, event, matcher, file, timeout)) added++;
+  }
+} catch (e) {
+  console.log(`  ⚠ ${e.message}`);
+  console.log('    Skipping hook registration — register the 5 Anvi hooks manually.');
+  process.exit(0);
 }
 
 if (added > 0) {

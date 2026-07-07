@@ -59,9 +59,13 @@ if [ "$MODE" = "no-dev" ]; then
     for agent_file in "$AGENTS_DIR/"anvi-*.md; do
       [ -L "$agent_file" ] && rm "$agent_file"
     done
-    # Break hook symlinks (copy install re-copies them below)
+    # Break hook symlinks — only ours (targets inside this repo's hooks/),
+    # never a user's unrelated symlinked hooks
     for hook_file in "$HOOKS_DIR/"*.js; do
-      [ -L "$hook_file" ] && rm "$hook_file"
+      [ -L "$hook_file" ] || continue
+      case "$(readlink "$hook_file")" in
+        "$SCRIPT_DIR/hooks/"*) rm "$hook_file" ;;
+      esac
     done
     echo "  Symlinks removed. Running copy install..."
     MODE="sync"

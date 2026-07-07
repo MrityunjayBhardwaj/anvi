@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveDir } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -40,25 +41,16 @@ process.stdin.on('end', () => {
     const isDebugging = debugKeywords.some(kw => userMessage.includes(kw));
     if (!isDebugging) process.exit(0);
 
-    // Find project catalogues
-    let anviDir = null;
-    for (const candidate of [
-      path.join(cwd, '.anvi'),
-      path.join(cwd, 'artifacts', '.anvi'),
-    ]) {
-      if (fs.existsSync(candidate)) {
-        anviDir = candidate;
-        break;
-      }
-    }
+    // Find project catalogues — shared resolver spans both layouts
+    const anviDir = resolveDir(cwd, '.anvi');
 
-    // Find Ground Truth docs
-    const refDir = path.join(cwd, 'artifacts', 'ref');
+    // Find Ground Truth docs — shared resolver spans both layouts
+    const refDir = resolveDir(cwd, 'ref');
     let gtDocs = [];
-    if (fs.existsSync(refDir)) {
+    if (refDir) {
       gtDocs = fs.readdirSync(refDir)
         .filter(f => f.startsWith('GROUND_TRUTH_') && f.endsWith('.md'))
-        .map(f => `artifacts/ref/${f}`);
+        .map(f => path.join(refDir, f)); // full path — unambiguous in either layout
     }
 
     // Read dharana for boundary context
