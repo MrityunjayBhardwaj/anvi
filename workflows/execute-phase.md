@@ -24,7 +24,6 @@ Cognitive integration happens at the orchestrator level:
 </core_principle>
 
 <cli_resolution>
-
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 ```
