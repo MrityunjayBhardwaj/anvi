@@ -1,172 +1,91 @@
-# Ānvīkṣikī (anvi)
+<div align="center">
 
-A cognitive operating system for software engineering. Self-contained fork of [GSD](https://github.com/get-shit-done) with epistemological discipline infused into every agent.
+# 🧠 Ānvīkṣikī · `anvi`
 
-GSD tells you **what to do** — plan, execute, verify, ship.
-Anvi tells you **how to think** while doing it.
+### A cognitive operating system for software engineering
 
-## What's Different from GSD
+**GSD tells you _what to do_ — plan, execute, verify, ship.**
+**Anvi tells you _how to think_ while doing it.**
 
-| GSD | Anvi |
-|-----|------|
-| Hypothesis loop for debugging | Cognitive chain: gather → classify → scan boundaries → compress → prove |
-| Plans are task lists | Plans include ownership mapping, lifecycle sequencing, pre-mortem analysis |
-| 7 plan-check dimensions | 13 dimensions (7 standard + 6 cognitive: vyapti, krama, hetvabhasa, testability, ownership, UX) |
-| Retry on failure | Diagnose on failure: which cognitive check was missed? |
-| No session memory | Growing catalogues: error patterns, invariants, lifecycles |
+<br>
 
-## System Architecture
+![License](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)
+![Standalone](https://img.shields.io/badge/standalone-no_GSD_needed-8b5cf6?style=for-the-badge)
+![Skills](https://img.shields.io/badge/skills-53-0ea5e9?style=for-the-badge)
+![Agents](https://img.shields.io/badge/agents-17-f97316?style=for-the-badge)
+![Workflows](https://img.shields.io/badge/workflows-48-ec4899?style=for-the-badge)
+![Cognitive OS](https://img.shields.io/badge/🧠-cognitive_OS-14b8a6?style=for-the-badge)
 
-See [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md) for the full structural map.
+</div>
 
-```
-╔═══════════════════════════════════════════╗
-║            BASE LAYER (always on)         ║
-║  7 checks: sequence, witness, completion, ║
-║  existence, observation, completeness,    ║
-║  reactivity                               ║
-╠═══════════════════════════════════════════╣
-║          FOUR LENSES (simultaneous)       ║
-║                                           ║
-║          ┌── RECOVER (parent) ──┐         ║
-║          │   watches all three  │         ║
-║          └──┬──────┬──────┬─────┘         ║
-║        DIAGNOSE  DESIGN  REVIEW           ║
-║        "what IS" "what   "is my           ║
-║                  SHOULD"  reasoning       ║
-║                           sound?"         ║
-╠═══════════════════════════════════════════╣
-║       PROJECT KNOWLEDGE (.anvi/)          ║
-║  hetvabhasa ─ error patterns              ║
-║  vyapti ───── invariants                  ║
-║  krama ────── lifecycles                  ║
-╠═══════════════════════════════════════════╣
-║         17 AGENTS → 41 WORKFLOWS          ║
-║              49 /anvi: SKILLS             ║
-║            anvi-tools.cjs CLI             ║
-╚═══════════════════════════════════════════╝
-```
+---
 
-### Information flow
+> [!TIP]
+> **Anvi is a self-contained fork of [GSD](https://github.com/get-shit-done)** with epistemological discipline infused into every agent. Reasoning becomes _deductive_ — from stated principles to conclusions, confirmed by observation — instead of _empirical_ — probing a black box through failure. No GSD installation required.
 
-```
-User invokes /anvi:debug
-  → Load base layer + diagnose lens + .anvi/ catalogues
-  → Spawn debugger agent
-    → [GATHER] → [CLASSIFY] → [SCAN] → [COMPRESS] → [PROVE] → [SHIP]
-  → Post-resolution: append new patterns to catalogues
-  → Output to user (translated — no Sanskrit)
-```
+## ✨ Why Anvi
 
-### Cognitive feedback loop
+| | GSD | 🧠 Anvi |
+|---|-----|------|
+| **Debugging** | Hypothesis loop | Cognitive chain: gather → classify → scan boundaries → compress → prove |
+| **Plans** | Task lists | Ownership mapping, lifecycle sequencing, pre-mortem analysis |
+| **Plan checks** | 7 dimensions | 13 dimensions (7 standard + 6 cognitive: vyapti, krama, hetvabhasa, testability, ownership, UX) |
+| **On failure** | Retry | Diagnose: _which cognitive check was missed?_ |
+| **Memory** | None | Growing catalogues: error patterns, invariants, lifecycles |
 
-```
-Session 1: Debug bug → discover pattern → catalogue entry H-01
-Session 2: New bug → load catalogues → H-01 matches → skip to root cause
-Session N: 20 patterns, 12 invariants → most bugs diagnosed instantly
+## 🗺️ Architecture
+
+<div align="center">
+
+```mermaid
+flowchart TD
+    BASE["🧭 BASE LAYER — always on<br/>7 silent checks: sequence · witness · completion<br/>existence · observation · completeness · reactivity"]
+    R(["🌀 RECOVER<br/>meta — watches all three"])
+    D1(["🔎 DIAGNOSE<br/>what IS"])
+    D2(["🧩 DESIGN<br/>what SHOULD"])
+    D3(["⚖️ REVIEW<br/>is it sound?"])
+    KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama"]
+    SURF["⚙️ SURFACE<br/>17 agents → 48 workflows · 53 skills · anvi-tools CLI"]
+
+    BASE --> R
+    R --> D1 & D2 & D3
+    D1 & D2 & D3 --> KNOW
+    KNOW --> SURF
+
+    classDef base fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
+    classDef lens fill:#2e1065,stroke:#c084fc,stroke-width:2px,color:#f5f3ff;
+    classDef know fill:#052e2b,stroke:#2dd4bf,stroke-width:2px,color:#ccfbf1;
+    classDef surf fill:#431407,stroke:#fb923c,stroke-width:2px,color:#ffedd5;
+    class BASE base;
+    class R,D1,D2,D3 lens;
+    class KNOW know;
+    class SURF surf;
 ```
 
-## Commands
+</div>
 
-### Getting Started
-| Command | Description |
-|---------|-------------|
-| `/anvi:new-project` | Initialize a new project with deep context gathering |
-| `/anvi:init` | Initialize cognitive OS catalogues for a project |
-| `/anvi:help` | Show all available commands |
+The four lenses **overlap — they don't switch.** `RECOVER` is the parent that watches the other three fire.
 
-### Core Workflow
-| Command | Description |
-|---------|-------------|
-| `/anvi:discuss-phase` | Gather context through adaptive questioning |
-| `/anvi:plan-phase` | Create plans with design lens (ownership, lifecycle, pre-mortem) |
-| `/anvi:execute-phase` | Execute with cognitive gates per task |
-| `/anvi:verify-work` | Verify with review lens |
-| `/anvi:debug` | Cognitive OS-native debugging |
+> [!NOTE]
+> Full structural map in [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md).
 
-### Cognitive Tools
-| Command | Description |
-|---------|-------------|
-| `/anvi:rq` | Surface the right questions for current context |
-| `/anvi:lens` | Map all lenses — active, sister, opposing, parent |
-| `/anvi:assume` | List all hidden assumptions |
-| `/anvi:why` | Trace provenance of a decision |
-| `/anvi:teach` | Extract and persist a lesson to catalogues |
-| `/anvi:contrast` | Compare approaches through all lenses |
-| `/anvi:reframe` | Force a perspective shift when stuck |
+## 🔁 How thinking compounds
 
-### Quick Execution
-| Command | Description |
-|---------|-------------|
-| `/anvi:do` | Route freeform text to the right command |
-| `/anvi:quick` | Small task with guarantees |
-| `/anvi:fast` | Trivial inline edit |
-| `/anvi:autonomous` | Run all remaining phases |
+Every diagnosis feeds the catalogues, so the same class of bug is never re-derived from scratch:
 
-### Navigation
-| Command | Description |
-|---------|-------------|
-| `/anvi:progress` | Status with cognitive metrics |
-| `/anvi:next` | Auto-advance to next step |
-| `/anvi:resume-work` | Resume with cognitive state |
-| `/anvi:pause-work` | Save state with tattva checkpoint |
+```mermaid
+flowchart LR
+    S1["🐛 Session 1<br/>debug → discover pattern"] --> E1["📥 catalogue entry"]
+    E1 --> S2["⚡ Session 2<br/>match → skip to root cause"]
+    S2 --> SN["🚀 Session N<br/>20 patterns, 12 invariants<br/>most bugs diagnosed instantly"]
 
-## Cognitive OS
-
-### Always-on base layer
-7 checks running silently on every action:
-- **Sequence check** — am I assuming execution order?
-- **Witness check** — am I discriminating or reacting?
-- **Completion check** — is this good enough to ship?
-- **Existence check** — do I understand why this code exists?
-- **Observation check** — did I run it, or just read it?
-- **Completeness check** — can I state the full argument? (behavioral changes only)
-- **Reactivity check** — is this fix driven by insight or urgency?
-
-### Four lenses (overlap, don't switch)
-
-```
-              RECOVER (parent/meta)
-              watches all three
-                    │
-       ┌────────────┼────────────┐
-       ▼            ▼            ▼
-   DIAGNOSE ←sister→ DESIGN   REVIEW
-   "What IS?"       "What     "Is my
-                    SHOULD?"   reasoning
-       ↑                       sound?"
-       └── opposing ───────────┘
+    classDef a fill:#0c4a6e,stroke:#38bdf8,color:#e0f2fe;
+    classDef b fill:#3f0f40,stroke:#e879f9,color:#fae8ff;
+    class S1,S2,SN a;
+    class E1 b;
 ```
 
-| Lens | Chain | Core question |
-|------|-------|---------------|
-| **diagnose** | gather → classify → scan boundaries → compress → prove → fix → ship | What IS the problem? |
-| **design** | dharana → vyapti → krama → ownership → hickey → ousterhout → hetvabhasa → chesterton → prototype | Who owns this? What's the lifecycle? |
-| **review** | chesterton → beck → suckless → lokayata → hetvabhasa → hyrum → vyapti | Is my reasoning sound? |
-| **recover** | stop → compress → revert → receive → re-enter | Am I reacting instead of thinking? |
-
-### Growing project knowledge
-Per-project `.anvi/` catalogues:
-- `hetvabhasa.md` — error patterns (only from bugs diagnosed in one pass)
-- `vyapti.md` — validated invariants (confirmed by direct observation)
-- `krama.md` — lifecycle sequences (verified execution order)
-
-### Thinking trace (Ctrl+O)
-Core agents structure their internal reasoning with labeled phases visible in the extended thinking trace:
-
-```
-[GATHER] OBSERVED: 1. setTimeout defers setup — seen via code read
-[CLASSIFY] → B (timing). Signal: async ordering
-[SCAN] Boundary: mount ↔ RenderEngine. Before: schedules setTimeout — OBSERVED
-[COMPRESS] resize fires before async setup creates canvas → no-op
-[PROVE] Running node bug1... → CONFIRMED
-[SHIP] 1 pass. 0 workarounds.
-```
-
-### Translation layer
-All internal reasoning uses Sanskrit terms for precision. All output uses plain English. The user never sees the machinery — just better results.
-
-## Installation
+## 🚀 Installation
 
 ```bash
 git clone https://github.com/MrityunjayBhardwaj/anvi.git
@@ -174,41 +93,166 @@ cd anvi
 ./install.sh
 ```
 
-The installer deploys:
-- Framework to `~/.claude/anvi/` (cognitive OS, workflows, templates, CLI)
-- 17 agents to `~/.claude/agents/`
-- 49+ skills to `~/.claude/skills/`
-- Optionally creates project catalogues (`.anvi/`)
+The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **53 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
 
-### Install modes
+<details>
+<summary><b>⚙️ Install modes</b></summary>
+
+<br>
 
 | Command | What it does |
 |---------|-------------|
-| `./install.sh` | Interactive — prompts before overwriting existing install |
-| `./install.sh --dev` | **Dev mode** — symlinks repo → live. Edits to repo are immediately live. |
+| `./install.sh` | Interactive — prompts before overwriting an existing install |
+| `./install.sh --dev` | **Dev mode** — symlinks repo → live. Edits to the repo are immediately live. |
 | `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
 | `./install.sh --sync` | Silent one-way copy from repo → live (no prompts) |
-| `./install.sh --check` | Show repo version vs installed version, don't change anything |
+| `./install.sh --check` | Show repo version vs installed version, change nothing |
 
-**For contributors:** Use `--dev` during development. The repo IS the live installation — no sync step needed. Use `--no-dev` to switch back to copy mode when done.
+**For contributors:** use `--dev` — the repo _is_ the live installation, no sync step needed.
 
-## GSD Compatibility
+</details>
 
-Anvi is a superset of GSD. All GSD functionality is preserved:
+## 🧩 Commands
+
+The everyday loop:
+
+| Command | Description |
+|---------|-------------|
+| 🌱 `/anvi:new-project` | Initialize a project with deep context gathering |
+| 💬 `/anvi:discuss-phase` | Gather context through adaptive questioning |
+| 🧭 `/anvi:plan-phase` | Plan with the design lens (ownership, lifecycle, pre-mortem) |
+| 🔨 `/anvi:execute-phase` | Execute with cognitive gates per task |
+| 🔬 `/anvi:debug` | Cognitive-OS-native debugging |
+| ✅ `/anvi:verify-work` | Verify with the review lens |
+
+<details>
+<summary><b>📖 Full command reference</b> — cognitive tools, quick execution, navigation</summary>
+
+<br>
+
+**🧠 Cognitive tools**
+
+| Command | Description |
+|---------|-------------|
+| `/anvi:rq` | Surface the right questions for the current context |
+| `/anvi:lens` | Map all lenses — active, sister, opposing, parent |
+| `/anvi:orient` | Where am I? What's known / unknown / assumed? |
+| `/anvi:teach` | Extract and persist a lesson to the catalogues |
+| `/anvi:ground` | Establish three-layer grounding (catalogues → Ground Truth → source) |
+
+**⚡ Quick execution**
+
+| Command | Description |
+|---------|-------------|
+| `/anvi:do` | Route freeform text to the right command |
+| `/anvi:quick` | Small task with guarantees |
+| `/anvi:fast` | Trivial inline edit |
+| `/anvi:autonomous` | Run all remaining phases |
+
+**🧭 Navigation**
+
+| Command | Description |
+|---------|-------------|
+| `/anvi:progress` | Status with cognitive metrics |
+| `/anvi:next` | Auto-advance to the next step |
+| `/anvi:resume-work` | Resume with cognitive state restored |
+| `/anvi:pause-work` | Save state with a tattva checkpoint |
+
+Run `/anvi:help` for the complete list.
+
+</details>
+
+## 🧠 The Cognitive OS
+
+<details open>
+<summary><b>Always-on base layer</b> — 7 checks running silently on every action</summary>
+
+<br>
+
+- 🕐 **Sequence** — am I assuming execution order?
+- 👁️ **Witness** — am I discriminating or reacting?
+- 🎯 **Completion** — is this good enough to ship?
+- 🧱 **Existence** — do I understand why this code exists?
+- 🔬 **Observation** — did I run it, or just read it?
+- 🧾 **Completeness** — can I state the full argument? (behavioral changes only)
+- ⚡ **Reactivity** — is this fix driven by insight or urgency?
+
+</details>
+
+**Four lenses** (they overlap, they don't switch):
+
+| Lens | Chain | Core question |
+|------|-------|---------------|
+| 🔎 **diagnose** | gather → classify → scan → compress → prove → fix → ship | What IS the problem? |
+| 🧩 **design** | dharana → vyapti → krama → ownership → hickey → ousterhout → hetvabhasa → chesterton → prototype | Who owns this? What's the lifecycle? |
+| ⚖️ **review** | chesterton → beck → suckless → lokayata → hetvabhasa → hyrum → vyapti | Is my reasoning sound? |
+| 🌀 **recover** | stop → compress → revert → receive → re-enter | Am I reacting instead of thinking? |
+
+**Growing project knowledge** — per-project `.anvi/` catalogues:
+
+- `hetvabhasa.md` — error patterns (only from bugs diagnosed in one pass)
+- `vyapti.md` — validated invariants (confirmed by direct observation)
+- `krama.md` — lifecycle sequences (verified execution order)
+
+<details>
+<summary><b>🧵 Thinking trace</b> (Ctrl+O) — labeled reasoning phases</summary>
+
+<br>
+
+```
+[GATHER]  OBSERVED: setTimeout defers setup — seen via code read
+[CLASSIFY] → B (timing). Signal: async ordering
+[SCAN]     Boundary: mount ↔ RenderEngine. Before: schedules setTimeout — OBSERVED
+[COMPRESS] resize fires before async setup creates canvas → no-op
+[PROVE]    Running node bug1... → CONFIRMED
+[SHIP]     1 pass. 0 workarounds.
+```
+
+</details>
+
+> [!IMPORTANT]
+> **Translation layer:** all internal reasoning uses Sanskrit terms for precision; all output uses plain English. The user never sees the machinery — just better results.
+
+## 🌍 In the Wild
+
+Projects built with the anvi cognitive OS:
+
+<table>
+<tr>
+<td align="center" width="33%">🎵<br><b>Sonic Pi (Web)</b><br><sub>live-coding music, in the browser</sub></td>
+<td align="center" width="33%">🎼<br><b>Stave</b><br><sub>music notation & practice</sub></td>
+<td align="center" width="33%">🐚<br><b>Basher</b><br><sub>shell workflow automation</sub></td>
+</tr>
+<tr>
+<td align="center">💎<br><b>jewelSaaS</b><br><sub>SaaS platform</sub></td>
+<td align="center">🧩<br><b>rubicsWorld</b><br><sub>3D cube playground</sub></td>
+<td align="center"><sub>your project?<br><a href="https://github.com/MrityunjayBhardwaj/anvi/issues/new">add it →</a></sub></td>
+</tr>
+</table>
+
+## 🤝 GSD Compatibility
+
+Anvi is a **superset of GSD** — all GSD functionality is preserved:
+
 - `.planning/` directory format is identical
-- GSD commands (`/gsd:*`) still work alongside Anvi commands
-- `anvi-tools.cjs` uses a vendored planning lib (`bin/lib/`, from GSD 1.27.0) — no GSD installation needed
+- GSD commands (`/gsd:*`) still work alongside `/anvi:*`
+- `anvi-tools.cjs` uses a **vendored planning lib** (`bin/lib/`, from GSD 1.27.0) — no GSD install needed
 - Migration: replace `/gsd:` with `/anvi:` in your workflow
 
-## When NOT to use this
+## 🛑 When NOT to use this
 
 The cognitive OS adds overhead. Skip it for:
+
 - **Trivial changes** — renames, imports, formatting
-- **Well-understood patterns** — the base layer is sufficient
-- **Time-critical fixes** — ship the workaround, document as debt
+- **Well-understood patterns** — the base layer is enough
+- **Time-critical fixes** — ship the workaround, document the debt
 
-The framework earns its weight on: novel integrations, framework boundaries, architectural decisions, and any problem where the first fix didn't work.
+It earns its weight on **novel integrations, framework boundaries, architectural decisions, and any problem where the first fix didn't work.**
 
-## License
+---
 
-MIT
+<div align="center">
+
+**⚖️ MIT** · Built with 🧠 on top of [GSD](https://github.com/get-shit-done)
+
+</div>
