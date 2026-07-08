@@ -9,10 +9,22 @@
 >
 > This catalogue grows across sessions. Load at session start.
 >
-> **Maintenance:** At every 10th entry, review all entries. Remove any that
-> describe lifecycles of components that no longer exist, or that have been
-> superseded by newer entries for the same component. When a lifecycle
-> changes (e.g., sync becomes async in an update), update the entry.
+> **Maintenance — size-triggered compaction (not every-Nth-entry):**
+> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compaction removes entries describing lifecycles of components that no longer
+> exist, or superseded by newer entries for the same component. When a lifecycle
+> changes (e.g., sync becomes async in an update), update the entry in place.
+> Three rules bind every compaction:
+> - **IDs are never renumbered or reused.** A pruned or merged entry keeps
+>   its ID reserved forever — cross-references (dharana, ref/ docs) resolve by
+>   ID, so renumbering dangles them silently.
+> - **Git history is the only archive.** Never copy pruned entries into a
+>   parallel archive file; the sole preservation is git history at the recorded
+>   sha. Parallel copies diverge; history cannot.
+> - **Every compaction appends to the Compaction Log** (bottom of this file):
+>   date, pre-compaction sha, and each affected ID → disposition
+>   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
+> Commit format: `🗜️ compact: krama N→M — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add lifecycle patterns that
 > were verified by direct observation of execution order (debug logs,
@@ -106,3 +118,14 @@ N. [Your code can safely run here]
 ```
 
 The `**REF:**` field links to the Ground Truth doc that traces this lifecycle end-to-end with `file:line` citations. Every step in the lifecycle should be traceable through: catalogue → Ground Truth → source code.
+
+## Compaction Log
+
+_(Append-only. Never edited, never pruned — this IS the disposition record.
+The full text of any pruned/merged entry lives in git history at the recorded
+pre-state sha, never in a parallel archive file. IDs listed here stay
+reserved forever and are never reused.)_
+
+| Date | Pre-state sha | ID | Disposition |
+|------|---------------|-----|-------------|
+_(none yet)_
