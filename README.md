@@ -212,6 +212,16 @@ Run `/anvi:help` for the complete list.
 > [!IMPORTANT]
 > **Translation layer:** all internal reasoning uses Sanskrit terms for precision; all output uses plain English. The user never sees the machinery — just better results.
 
+## 👁️ Watch it think — AnviDeck
+
+Anvi accumulates state: catalogues grow, invariants multiply, every session leaves a trace. State that accumulates unobserved rots. **[AnviDeck](https://github.com/MrityunjayBhardwaj/AnviDeck)** is the companion observability deck — a zero-config, offline-first dashboard that reads `~/.claude/` and shows the framework operating live, across every project and session.
+
+<div align="center">
+<img src="assets/AnviDeck.jpg" width="100%" alt="AnviDeck — the cognitive framework observability dashboard">
+</div>
+
+**Command Center · Live Trace · System Lens · Cross-Project · Routing · Project Deep Dive** — six views over the framework's cognition. Filesystem + `gh` CLI only; no database, no telemetry.
+
 ## 🌍 In the Wild
 
 Projects built with the anvi cognitive OS:
