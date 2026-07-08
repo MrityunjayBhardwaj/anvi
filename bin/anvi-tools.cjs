@@ -104,6 +104,17 @@ function appendToCatalogue(cwd, name, entry) {
   return filePath;
 }
 
+// Count canonical catalogue entries: `## <ID>:` headers where ID is like H1/V3/K2/SV1.
+// Mirrors hooks/ground-truth-session-start.js so the CLI and the hook agree on the
+// count (H7). Section headers (`## Compaction Log`) lack a digit and don't match;
+// universal template patterns (U1/UV2/UK3) are skipped — they're shared examples,
+// not project-specific entries.
+function countCatalogueEntries(content) {
+  if (!content) return 0;
+  const headers = content.match(/^## ([A-Z]+\d+)/gm) || [];
+  return headers.filter((h) => !/^U[A-Z]?\d+$/.test(h.replace(/^## /, ''))).length;
+}
+
 // ─── Anvi commands ───────────────────────────────────────────────────────────
 
 function cmdTattvaCheckpoint(cwd, outputFile, options, raw) {
@@ -165,26 +176,35 @@ function cmdCatalogueAppend(cwd, catalogue, entryJson, raw) {
     process.exit(1);
   }
 
+  // Entries are written in the canonical `## <ID>:` form with the field set from
+  // references/*-template.md, so the session-start hook and `catalogue-review`
+  // both count them (H7). REF is mandatory for grounding — an appended entry has
+  // no Ground Truth doc, so it defaults to UNGROUNDED for a human to resolve.
   let entryMd;
   if (catalogue === 'hetvabhasa') {
-    entryMd = `### ${entry.id || 'NEW'}: ${entry.title || 'Untitled'}
-**Trigger:** ${entry.trigger || '(unknown)'}
-**Error pattern:** ${entry.pattern || '(unknown)'}
+    entryMd = `## ${entry.id || 'NEW'}: ${entry.title || 'Untitled'}
 **Root cause:** ${entry.root_cause || '(unknown)'}
-**Resolution:** ${entry.resolution || '(unknown)'}
-**Discovered:** ${new Date().toISOString().split('T')[0]}`;
+**Detection signal:** ${entry.detection || entry.pattern || '(unknown)'}
+**The trap:** ${entry.trap || '(unknown)'}
+**REF:** ${entry.ref || 'UNGROUNDED — added via catalogue-append'}
+**FIX:** ${entry.fix || 'n/a'}`;
   } else if (catalogue === 'vyapti') {
-    entryMd = `### ${entry.id || 'NEW'}: ${entry.title || 'Untitled'}
-**Invariant:** ${entry.invariant || '(unknown)'}
-**Confirmed by:** ${entry.confirmed_by || '(unknown)'}
+    entryMd = `## ${entry.id || 'NEW'}: ${entry.title || 'Untitled'}
+**Statement:** ${entry.statement || entry.invariant || '(unknown)'}
+**Causal status:** ${entry.causal_status || 'EMPIRICAL'}
 **Scope:** ${entry.scope || 'project'}
-**Discovered:** ${new Date().toISOString().split('T')[0]}`;
+**Breaks when:** ${entry.breaks_when || '(unknown)'}
+**Confirmed by:** ${entry.confirmed_by || '(unknown)'}
+**Implication:** ${entry.implication || '(unknown)'}
+**Status:** ${entry.status || 'NOT YET IMPLEMENTED'}
+**REF:** ${entry.ref || 'UNGROUNDED — added via catalogue-append'}`;
   } else if (catalogue === 'krama') {
-    entryMd = `### ${entry.id || 'NEW'}: ${entry.title || 'Untitled'}
-**Sequence:** ${entry.sequence || '(unknown)'}
-**Critical ordering:** ${entry.ordering || '(unknown)'}
-**Verified by:** ${entry.verified_by || '(unknown)'}
-**Discovered:** ${new Date().toISOString().split('T')[0]}`;
+    entryMd = `## ${entry.id || 'NEW'}: ${entry.title || 'Untitled'}
+**Lifecycle:**
+${entry.lifecycle || '1. (unknown)'}
+**Common violation:** ${entry.common_violation || entry.ordering || '(unknown)'}
+**Detection:** ${entry.detection || entry.verified_by || '(unknown)'}
+**REF:** ${entry.ref || 'UNGROUNDED — added via catalogue-append'}`;
   }
 
   const filePath = appendToCatalogue(cwd, catalogue, entryMd);
@@ -205,8 +225,7 @@ function cmdCatalogueReview(cwd, raw) {
     if (!content) {
       stats[name] = { exists: false, entries: 0 };
     } else {
-      const entries = (content.match(/^### /gm) || []).length;
-      stats[name] = { exists: true, entries };
+      stats[name] = { exists: true, entries: countCatalogueEntries(content) };
     }
   }
 
@@ -228,7 +247,7 @@ function cmdCognitiveState(cwd, raw) {
   const catalogueStats = {};
   for (const name of ['hetvabhasa', 'vyapti', 'krama']) {
     const content = readCatalogue(cwd, name);
-    catalogueStats[name] = content ? (content.match(/^### /gm) || []).length : 0;
+    catalogueStats[name] = countCatalogueEntries(content);
   }
 
   // Check for active debug sessions
