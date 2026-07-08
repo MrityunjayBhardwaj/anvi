@@ -29,6 +29,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 // ─── Planning lib (vendored from GSD — see lib/VENDORED.md) ─────────────────
 
@@ -47,10 +48,35 @@ function gsdCore() {
 
 // ─── Anvi-specific utilities ─────────────────────────────────────────────────
 
-function findAnviDir(cwd) {
-  const anviDir = path.join(cwd, '.anvi');
-  if (fs.existsSync(anviDir)) return anviDir;
+// Load the shared artifact resolver (hooks/anvi-paths.js) — the SINGLE source of
+// path-resolution logic, so the CLI can never disagree with the hooks on where
+// catalogues live (V1). The resolver itself uses cwd + homedir only (no __dirname),
+// so it is vendoring-safe; only LOCATING it depends on layout:
+//   - dev / repo:   bin/ and hooks/ are siblings   → __dirname/../hooks
+//   - copy install: hooks land in ~/.claude/hooks   (bin is under ~/.claude/anvi/bin)
+// First that loads wins; both resolve to the same authored file.
+function loadAnviPaths() {
+  const candidates = [
+    path.join(__dirname, '..', 'hooks', 'anvi-paths.js'),
+    path.join(os.homedir(), '.claude', 'hooks', 'anvi-paths.js'),
+  ];
+  for (const c of candidates) {
+    try { return require(c); } catch { /* try next layout */ }
+  }
   return null;
+}
+const anviPaths = loadAnviPaths();
+
+function findAnviDir(cwd) {
+  if (anviPaths) return anviPaths.resolveDir(cwd, '.anvi');
+  // Last resort only if the shared resolver can't be located (unexpected layout):
+  // preserve prior cwd-only behavior rather than crash. Warn once — never silent.
+  if (!findAnviDir._warned) {
+    process.stderr.write('anvi-tools: shared path resolver not found; using cwd-only .anvi lookup.\n');
+    findAnviDir._warned = true;
+  }
+  const anviDir = path.join(cwd, '.anvi');
+  return fs.existsSync(anviDir) ? anviDir : null;
 }
 
 function readCatalogue(cwd, name) {
