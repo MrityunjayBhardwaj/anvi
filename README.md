@@ -245,7 +245,6 @@ The cognitive OS adds overhead. Skip it for:
 
 - **Trivial changes** — renames, imports, formatting
 - **Well-understood patterns** — the base layer is enough
-- **Time-critical fixes** — ship the workaround, document the debt
 
 It earns its weight on **novel integrations, framework boundaries, architectural decisions, and any problem where the first fix didn't work.**
 
