@@ -218,13 +218,13 @@ Projects built with the anvi cognitive OS:
 
 <table>
 <tr>
-<td align="center" width="33%">🎵<br><b>Sonic Pi (Web)</b><br><sub>live-coding music, in the browser</sub></td>
-<td align="center" width="33%">🎼<br><b>Stave</b><br><sub>music notation & practice</sub></td>
-<td align="center" width="33%">🐚<br><b>Basher</b><br><sub>shell workflow automation</sub></td>
+<td align="center" width="33%"><img src="assets/SonicWeb.png" width="100%" alt="SonicWeb"><br><b>SonicWeb</b></td>
+<td align="center" width="33%"><img src="assets/stave.png" width="100%" alt="Stave"><br><b>Stave</b></td>
+<td align="center" width="33%"><img src="assets/DyzenAI.jpg" width="100%" alt="DyzenAI"><br><b>DyzenAI</b></td>
 </tr>
 <tr>
-<td align="center">💎<br><b>jewelSaaS</b><br><sub>SaaS platform</sub></td>
-<td align="center">🧩<br><b>rubicsWorld</b><br><sub>3D cube playground</sub></td>
+<td align="center"><img src="assets/FlipFace.jpg" width="100%" alt="FlipFace"><br><b>FlipFace</b></td>
+<td align="center"><img src="assets/MohMayaOS.jpg" width="100%" alt="MohMayaOS"><br><b>MohMayaOS</b></td>
 <td align="center"><sub>your project?<br><a href="https://github.com/MrityunjayBhardwaj/anvi/issues/new">add it →</a></sub></td>
 </tr>
 </table>
