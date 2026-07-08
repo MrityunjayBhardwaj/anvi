@@ -4,13 +4,12 @@
 
 ### A cognitive operating system for software engineering
 
-**GSD tells you _what to do_ — plan, execute, verify, ship.**
-**Anvi tells you _how to think_ while doing it.**
+**Plan · execute · verify · ship — with the discipline of _how to think_ built into every agent.**
 
 <br>
 
 ![License](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)
-![Standalone](https://img.shields.io/badge/standalone-no_GSD_needed-8b5cf6?style=for-the-badge)
+![Standalone](https://img.shields.io/badge/standalone-self--contained-8b5cf6?style=for-the-badge)
 ![Skills](https://img.shields.io/badge/skills-53-0ea5e9?style=for-the-badge)
 ![Agents](https://img.shields.io/badge/agents-17-f97316?style=for-the-badge)
 ![Workflows](https://img.shields.io/badge/workflows-48-ec4899?style=for-the-badge)
@@ -21,17 +20,17 @@
 ---
 
 > [!TIP]
-> **Anvi is a self-contained fork of [GSD](https://github.com/get-shit-done)** with epistemological discipline infused into every agent. Reasoning becomes _deductive_ — from stated principles to conclusions, confirmed by observation — instead of _empirical_ — probing a black box through failure. No GSD installation required.
+> **Catalogues make the black box transparent.** Reasoning becomes _deductive_ — from stated principles to conclusions, confirmed by observation — instead of _empirical_ — probing a black box through failure. Anvi is fully standalone: one `./install.sh` and you're running.
 
-## ✨ Why Anvi
+## ✨ What Anvi does
 
-| | GSD | 🧠 Anvi |
-|---|-----|------|
-| **Debugging** | Hypothesis loop | Cognitive chain: gather → classify → scan boundaries → compress → prove |
-| **Plans** | Task lists | Ownership mapping, lifecycle sequencing, pre-mortem analysis |
-| **Plan checks** | 7 dimensions | 13 dimensions (7 standard + 6 cognitive: vyapti, krama, hetvabhasa, testability, ownership, UX) |
-| **On failure** | Retry | Diagnose: _which cognitive check was missed?_ |
-| **Memory** | None | Growing catalogues: error patterns, invariants, lifecycles |
+| Capability | How Anvi does it |
+|---|------|
+| 🔬 **Debugging** | Cognitive chain: gather → classify → scan boundaries → compress → prove |
+| 🧭 **Plans** | Ownership mapping, lifecycle sequencing, pre-mortem analysis |
+| 📐 **Plan checks** | 13 dimensions — 7 standard + 6 cognitive (vyapti, krama, hetvabhasa, testability, ownership, UX) |
+| 🩺 **On failure** | Diagnose _which cognitive check was missed_ — not a blind retry |
+| 📚 **Memory** | Growing catalogues: error patterns, invariants, lifecycles |
 
 ## 🗺️ Architecture
 
@@ -230,15 +229,6 @@ Projects built with the anvi cognitive OS:
 </tr>
 </table>
 
-## 🤝 GSD Compatibility
-
-Anvi is a **superset of GSD** — all GSD functionality is preserved:
-
-- `.planning/` directory format is identical
-- GSD commands (`/gsd:*`) still work alongside `/anvi:*`
-- `anvi-tools.cjs` uses a **vendored planning lib** (`bin/lib/`, from GSD 1.27.0) — no GSD install needed
-- Migration: replace `/gsd:` with `/anvi:` in your workflow
-
 ## 🛑 When NOT to use this
 
 The cognitive OS adds overhead. Skip it for:
@@ -253,6 +243,8 @@ It earns its weight on **novel integrations, framework boundaries, architectural
 
 <div align="center">
 
-**⚖️ MIT** · Built with 🧠 on top of [GSD](https://github.com/get-shit-done)
+**⚖️ MIT**
+
+<sub>🙏 Anvi is built on top of <a href="https://github.com/get-shit-done"><b>GSD</b></a> — go check it out.</sub>
 
 </div>
