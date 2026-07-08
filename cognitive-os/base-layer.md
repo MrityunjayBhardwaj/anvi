@@ -200,6 +200,13 @@ Internal framework concepts stay internal. Never surface to the user:
 - No mode names ("I'm entering diagnose mode")
 - No protocol references ("the pañcāvayava check requires...")
 - No framework meta-commentary ("applying the Lokāyata gate...")
+- No catalogue entry IDs (`H1`, `V3`, `vyapti:184`, project prefixes like `SP72`)
+  in outward-facing repo content — commit messages, GitHub issue/PR titles and
+  bodies. A catalogue ID is a private index key, not content: it means nothing to
+  an outside reader and leaks the framework. State the FINDING in plain language;
+  the ID→artifact link lives only in the private catalogue's `FIX:` field, pointing
+  private → public, never the reverse. (Enforced as a backstop by
+  `catalogue-id-leak-guard.js`.)
 
 The user sees: clear reasoning, direct questions, honest assessments.
 The user never sees: the machinery producing them.

@@ -47,6 +47,12 @@ User message
 ⑧ PreToolUse:Write|Edit — catalogue-context-injector.js
    Fires when editing code at catalogued boundaries.
    Injects: boundary context, error patterns, invariants, Ground Truth REFs.
+
+  ↓
+⑨ PreToolUse:Bash — catalogue-id-leak-guard.js
+   Fires on `gh issue|pr` and `git commit` (outside ~/.anvideck).
+   Reminds (non-blocking) when the text carries a catalogue index key (`vyapti:184`).
+   "State the finding in plain language; keep the ID in the private FIX: field."
 ```
 
 ## Hook Files
@@ -56,6 +62,7 @@ User message
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
+| Catalogue ID leak guard | PreToolUse:Bash (`gh issue\|pr`, `git commit` outside ~/.anvideck) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
 
@@ -117,7 +124,7 @@ centralized projects). See issue #5.
 - `UserPromptSubmit`: debug-grounding-gate.js
 - `PreToolUse:Read`: catalogue-context-injector.js
 - `PreToolUse:Write|Edit`: catalogue-context-injector.js, gsd-prompt-guard.js
-- `PreToolUse:Bash`: experiment-protocol-guard.js
+- `PreToolUse:Bash`: experiment-protocol-guard.js, catalogue-id-leak-guard.js
 - `PostToolUse:Bash|Edit|Write|...`: gsd-context-monitor.js
 - `PostToolUse:Read`: anvi-route-logger.js
 - `Stop`: anvideck-checkpoint.js
