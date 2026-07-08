@@ -13,6 +13,11 @@ const fs = require('fs');
 const path = require('path');
 const { resolveDir } = require('./anvi-paths.js');
 
+// Size-triggered compaction threshold. When a catalogue passes this many lines,
+// the session-start message flags it so growth doesn't stay silent across
+// sessions. Matches the ~1500-line trigger codified in references/*-template.md.
+const COMPACTION_THRESHOLD = 1500;
+
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -32,11 +37,17 @@ process.stdin.on('end', () => {
     let grounded = 0;
     let ungrounded = 0;
     const ungroundedList = [];
+    const oversized = []; // catalogues past COMPACTION_THRESHOLD lines
 
     for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md']) {
       const catPath = path.join(anviDir, cat);
       if (!fs.existsSync(catPath)) continue;
       const content = fs.readFileSync(catPath, 'utf8');
+
+      const lineCount = content.split('\n').length;
+      if (lineCount > COMPACTION_THRESHOLD) {
+        oversized.push(`${cat.replace('.md', '')} (${lineCount}L)`);
+      }
 
       // Split into entries by ## headers with IDs
       const entries = content.split(/^## ([A-Z]+\d+)/m);
@@ -97,6 +108,10 @@ process.stdin.on('end', () => {
 
     if (gaps.length > 0) {
       message += ` | Gaps: ${gaps.join('; ')}`;
+    }
+
+    if (oversized.length > 0) {
+      message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD}L — see Compaction Log in each catalogue`;
     }
 
     if (ungrounded > 0 && ungroundedList.length <= 3) {

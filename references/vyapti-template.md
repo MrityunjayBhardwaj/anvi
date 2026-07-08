@@ -10,10 +10,22 @@
 >
 > This catalogue grows across sessions. Load at session start.
 >
-> **Maintenance:** At every 10th entry, review all entries. Remove any that
-> are contradicted by newer entries, too specific to one instance (not
-> generalizable), or describe patterns the codebase no longer has.
-> When a vyāpti's scope conditions change, update the entry — don't add a new one.
+> **Maintenance — size-triggered compaction (not every-Nth-entry):**
+> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compaction removes entries contradicted by newer entries, too specific to one
+> instance (not generalizable), or describing patterns the codebase no longer
+> has. When a vyāpti's scope conditions change, update the entry in place —
+> don't add a new one. Three rules bind every compaction:
+> - **IDs are never renumbered or reused (V3).** A pruned or merged entry keeps
+>   its ID reserved forever — cross-references (dharana, ref/ docs) resolve by
+>   ID, so renumbering dangles them silently.
+> - **Git history is the only archive (V2).** Never copy pruned entries into a
+>   parallel archive file; the sole preservation is the `.anvideck` git history
+>   at the recorded sha. Parallel copies diverge; history cannot.
+> - **Every compaction appends to the Compaction Log** (bottom of this file):
+>   date, pre-compaction sha, and each affected ID → disposition
+>   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
+> Commit format: `🗜️ compact: vyapti N→M — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add invariants that were
 > confirmed by direct observation (Lokāyata-verified), not by inference
@@ -107,3 +119,14 @@ The `**REF:**` field creates the three-layer provenance chain:
 Catalogue (compact invariant)  →  Ground Truth doc  →  source file:line
 ```
 If no Ground Truth doc exists for this invariant's domain, create one using `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_META_PROMPT.md`.
+
+## Compaction Log
+
+_(Append-only. Never edited, never pruned — this IS the disposition record.
+The full text of any pruned/merged entry lives in git history at the recorded
+pre-state sha (V2), never in a parallel archive file. IDs listed here stay
+reserved forever and are never reused (V3).)_
+
+| Date | Pre-state sha | ID | Disposition |
+|------|---------------|-----|-------------|
+_(none yet)_

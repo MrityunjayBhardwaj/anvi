@@ -6,10 +6,22 @@
 > (how it seduces you into workarounds). Entries teach you to recognize the
 > ROOT FIX, not the cascade of bad attempts that precede it.
 >
-> **Maintenance:** At every 10th entry, review all entries. Remove any that
-> are too specific to one bug (not generalizable), contradict a newer entry,
-> or describe a pattern the codebase no longer has. Stale entries create
-> false pattern-matching.
+> **Maintenance — size-triggered compaction (not every-Nth-entry):**
+> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compaction removes entries that are too specific to one bug (not
+> generalizable), contradicted by a newer entry, or describe a pattern the
+> codebase no longer has — stale entries create false pattern-matching.
+> Three rules bind every compaction:
+> - **IDs are never renumbered or reused (V3).** A pruned or merged entry keeps
+>   its ID reserved forever — cross-references (dharana, ref/ docs) resolve by
+>   ID, so renumbering dangles them silently.
+> - **Git history is the only archive (V2).** Never copy pruned entries into a
+>   parallel archive file; the sole preservation is the `.anvideck` git history
+>   at the recorded sha. Parallel copies diverge; history cannot.
+> - **Every compaction appends to the Compaction Log** (bottom of this file):
+>   date, pre-compaction sha, and each affected ID → disposition
+>   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
+> Commit format: `🗜️ compact: hetvabhasa N→M — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add entries from high-quality
 > diagnoses — bugs where the root cause was correctly identified in one pass
@@ -53,7 +65,7 @@
 ## Project-Specific Error Patterns
 
 _(Add entries as discovered. Follow the format below.)_
-_(At every 10th entry: review, prune stale/non-generalizable entries.)_
+_(Compact when the catalogue passes ~1500 lines — see the Compaction Log below.)_
 
 ### Entry Format (MANDATORY fields)
 
@@ -92,3 +104,14 @@ Ground Truth docs are produced using the meta-prompt at `~/.anvideck/projects/[p
 2. Apply the meta-prompt with the source files as input
 3. Output: `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
 4. Update catalogue REF fields to point to the new doc
+
+## Compaction Log
+
+_(Append-only. Never edited, never pruned — this IS the disposition record.
+The full text of any pruned/merged entry lives in git history at the recorded
+pre-state sha (V2), never in a parallel archive file. IDs listed here stay
+reserved forever and are never reused (V3).)_
+
+| Date | Pre-state sha | ID | Disposition |
+|------|---------------|-----|-------------|
+_(none yet)_
