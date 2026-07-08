@@ -25,6 +25,7 @@ const REGISTRATIONS = [
   ['PreToolUse',       'Write|Edit', 'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Read',       'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
+  ['PreToolUse',       'Bash',       'catalogue-id-leak-guard.js',    5],
   ['PostToolUse',      'Read',       'anvi-route-logger.js',          5],
   ['Stop',             null,         'anvideck-checkpoint.js',        30], // commit+push may take seconds
 ];

@@ -100,6 +100,13 @@ All internal reasoning uses the Sanskrit terms for precision (high entropy, low 
 - Commit messages, PR descriptions, code comments
 - Planning documents the user will read (CONTEXT.md, SUMMARY.md)
 
+**Catalogue entry IDs are not just Sanskrit — they are private index keys.** `H1`,
+`V3`, `vyapti:184`, project prefixes like `SP72` must never appear in outward-facing
+repo content (commit messages, issue/PR titles & bodies). They are meaningless to an
+outside reader and leak the framework. Translate to the FINDING in plain language; the
+ID→artifact link lives only in the private catalogue's `FIX:` field (private → public,
+never the reverse). Backstopped by `catalogue-id-leak-guard.js`.
+
 ### Profile-adaptive translation:
 If the user profile indicates:
 - **Technical senior engineer** → concise, use engineering jargon, skip obvious explanations
