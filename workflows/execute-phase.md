@@ -10,7 +10,6 @@ Cognitive integration points (per BUILD_v1.md):
 
 <paths>
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
-FALLBACK_CLI=~/.claude/get-shit-done/bin/gsd-tools.cjs
 </paths>
 
 <core_principle>
@@ -25,10 +24,8 @@ Cognitive integration happens at the orchestrator level:
 </core_principle>
 
 <cli_resolution>
-Use anvi-tools.cjs if it exists, otherwise fall back to gsd-tools.cjs (compatible .planning/ format):
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tools.cjs"; fi
 ```
 </cli_resolution>
 

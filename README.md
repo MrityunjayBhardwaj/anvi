@@ -197,7 +197,7 @@ The installer deploys:
 Anvi is a superset of GSD. All GSD functionality is preserved:
 - `.planning/` directory format is identical
 - GSD commands (`/gsd:*`) still work alongside Anvi commands
-- `anvi-tools.cjs` delegates to GSD's lib modules for `.planning/` operations
+- `anvi-tools.cjs` uses a vendored planning lib (`bin/lib/`, from GSD 1.27.0) — no GSD installation needed
 - Migration: replace `/gsd:` with `/anvi:` in your workflow
 
 ## When NOT to use this

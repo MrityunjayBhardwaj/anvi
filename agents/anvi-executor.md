@@ -118,7 +118,6 @@ Load execution context:
 
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tools.cjs"; fi
 INIT=$(node "$CLI_PATH" init execute-phase "${PHASE}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -210,7 +209,6 @@ Same as GSD: stage specific files (NEVER `git add .`), conventional commit forma
 
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-if [ ! -f "$CLI_PATH" ]; then CLI_PATH="$HOME/.claude/get-shit-done/bin/gsd-tools.cjs"; fi
 ```
 
 Use CLI for planning doc commits. Use git directly for code commits.
