@@ -16,12 +16,12 @@
 > instance (not generalizable), or describing patterns the codebase no longer
 > has. When a vyāpti's scope conditions change, update the entry in place —
 > don't add a new one. Three rules bind every compaction:
-> - **IDs are never renumbered or reused (V3).** A pruned or merged entry keeps
+> - **IDs are never renumbered or reused.** A pruned or merged entry keeps
 >   its ID reserved forever — cross-references (dharana, ref/ docs) resolve by
 >   ID, so renumbering dangles them silently.
-> - **Git history is the only archive (V2).** Never copy pruned entries into a
->   parallel archive file; the sole preservation is the `.anvideck` git history
->   at the recorded sha. Parallel copies diverge; history cannot.
+> - **Git history is the only archive.** Never copy pruned entries into a
+>   parallel archive file; the sole preservation is git history at the recorded
+>   sha. Parallel copies diverge; history cannot.
 > - **Every compaction appends to the Compaction Log** (bottom of this file):
 >   date, pre-compaction sha, and each affected ID → disposition
 >   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
@@ -124,8 +124,8 @@ If no Ground Truth doc exists for this invariant's domain, create one using `~/.
 
 _(Append-only. Never edited, never pruned — this IS the disposition record.
 The full text of any pruned/merged entry lives in git history at the recorded
-pre-state sha (V2), never in a parallel archive file. IDs listed here stay
-reserved forever and are never reused (V3).)_
+pre-state sha, never in a parallel archive file. IDs listed here stay
+reserved forever and are never reused.)_
 
 | Date | Pre-state sha | ID | Disposition |
 |------|---------------|-----|-------------|
