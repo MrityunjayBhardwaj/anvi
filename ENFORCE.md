@@ -1,6 +1,6 @@
 # Enforcement Chain — How Grounding Is Actually Enforced
 
-Eight hooks/mechanisms fire at different points. No single point of failure.
+Nine hooks/mechanisms fire at different points. No single point of failure.
 
 ```
 Session starts
