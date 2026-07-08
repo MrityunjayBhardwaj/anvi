@@ -35,7 +35,7 @@
 ## Entry Format
 
 ```
-### [ID]: [System/Component Name]
+## [ID]: [System/Component Name]
 
 **Lifecycle:**
 1. [Step 1] — sync/async — owned by [who]
@@ -106,7 +106,7 @@ _(Each entry must include a `**REF:**` field pointing to a Ground Truth doc.)_
 ### Entry Format (with mandatory REF)
 
 ```
-### [ID]: [System/Component Name]
+## [ID]: [System/Component Name]
 **Lifecycle:**
 1. [Step 1] — sync/async — `file:line`
 2. [Step 2] — sync/async — depends on [1]

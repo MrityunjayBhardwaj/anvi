@@ -36,7 +36,7 @@
 ## Entry Format
 
 ```
-### [ID]: [Name]
+## [ID]: [Name]
 
 **Statement:** Wherever [A], necessarily [B].
 
@@ -103,7 +103,7 @@ _(Each entry must include a `**REF:**` field pointing to a Ground Truth doc.)_
 ### Entry Format (with mandatory REF)
 
 ```
-### [ID]: [Name]
+## [ID]: [Name]
 **Statement:** Wherever [A], necessarily [B].
 **Causal status:** CAUSAL / STRUCTURAL / EMPIRICAL
 **Scope:** [Where this holds]
