@@ -228,13 +228,13 @@ Projects built with the anvi cognitive OS:
 
 <table>
 <tr>
-<td align="center" width="33%"><img src="assets/SonicWeb.png" width="100%" alt="SonicWeb"><br><b>SonicWeb</b></td>
-<td align="center" width="33%"><img src="assets/stave.png" width="100%" alt="Stave"><br><b>Stave</b></td>
-<td align="center" width="33%"><img src="assets/DyzenAI.jpg" width="100%" alt="DyzenAI"><br><b>DyzenAI</b></td>
+<td align="center" width="33%"><img src="assets/DyzenAI.jpg" width="100%" alt="DyzenAI"><br><b>DyzenAI</b><br><sub>Website</sub></td>
+<td align="center" width="33%"><img src="assets/FlipFace.jpg" width="100%" alt="FlipFace"><br><b>FlipFace</b><br><sub>Game</sub></td>
+<td align="center" width="33%"><img src="assets/stave.png" width="100%" alt="Stave"><br><b>Stave</b><br><sub>Music Studio</sub></td>
 </tr>
 <tr>
-<td align="center"><img src="assets/FlipFace.jpg" width="100%" alt="FlipFace"><br><b>FlipFace</b></td>
-<td align="center"><img src="assets/MohMayaOS.jpg" width="100%" alt="MohMayaOS"><br><b>MohMayaOS</b></td>
+<td align="center"><img src="assets/SonicWeb.png" width="100%" alt="SonicWeb"><br><b>SonicWeb</b><br><sub>Music Lang Editor</sub></td>
+<td align="center"><img src="assets/MohMayaOS.jpg" width="100%" alt="MohMayaOS"><br><b>MohMayaOS</b><br><sub>AIOS</sub></td>
 <td align="center"><sub>your project?<br><a href="https://github.com/MrityunjayBhardwaj/anvi/issues/new">add it →</a></sub></td>
 </tr>
 </table>
