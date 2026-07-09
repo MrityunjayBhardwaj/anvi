@@ -75,13 +75,49 @@ The framework loads automatically on next session.
 Or run /anvi now to activate for this session.
 ```
 
-### Step 5: Add .anvi/ to .gitignore check
+### Step 5: Gitignore local catalogue/artifact copies (by design)
 
-Check if `.gitignore` exists and whether `.anvi/` is listed:
-- If `.gitignore` exists but `.anvi/` is not in it: ask user if they want to add it
-  (catalogues may contain project-specific reasoning that's valuable to share,
-  or may be personal — let the user decide)
-- If no `.gitignore`: mention that `.anvi/` catalogues will be tracked by git
+The canonical, git-tracked home for a project's catalogues, Ground Truth docs, and
+downloaded sources is the **centralized** store `~/.anvideck/projects/<name>/`
+(backed by the `anvi_artifacts` repo). The project's own repo must never track a
+parallel copy: parallel copies diverge (split-brain — the resolver serves whichever
+local copy exists *before* the centralized one), and `ref/sources/` is often large
+and may carry its own `.git` (which becomes an empty gitlink if tracked).
+
+So, by design, ensure the project's `.gitignore` excludes the local copies.
+
+**Guard first — skip this entire step if the current directory is `~/.anvideck` or
+any path under it.** That store is where these artifacts *are* the tracked content;
+gitignoring them there would drop the archive.
+
+```bash
+# Guard: never gitignore artifacts inside the centralized store itself
+case "$(pwd)/" in
+  "$HOME/.anvideck/"*) echo "In ~/.anvideck — skipping (this store tracks the artifacts)"; exit 0 ;;
+esac
+```
+
+Otherwise, idempotently add these entries to the project's `.gitignore` (create it
+if absent), appending only lines not already present:
+
+```gitignore
+# Ānvīkṣikī — canonical copies live in ~/.anvideck (anvi_artifacts), not here
+.anvi/
+artifacts/
+ref/sources/
+```
+
+```bash
+touch .gitignore
+grep -qxF '# Ānvīkṣikī — canonical copies live in ~/.anvideck (anvi_artifacts), not here' .gitignore \
+  || printf '\n# Ānvīkṣikī — canonical copies live in ~/.anvideck (anvi_artifacts), not here\n' >> .gitignore
+for entry in '.anvi/' 'artifacts/' 'ref/sources/'; do
+  grep -qxF "$entry" .gitignore || echo "$entry" >> .gitignore
+done
+```
+
+Then verify each entry is present: `grep -qxF '.anvi/' .gitignore` (and likewise for
+the others).
 
 ### Step 6: Offer Ground Truth setup (v1.1.0+)
 
