@@ -8,7 +8,7 @@
 
 <br>
 
-![License](https://img.shields.io/badge/license-AGPL--3.0-22c55e?style=for-the-badge)
+![License](https://img.shields.io/badge/license-GPL--3.0-22c55e?style=for-the-badge)
 ![Standalone](https://img.shields.io/badge/standalone-self--contained-8b5cf6?style=for-the-badge)
 ![Skills](https://img.shields.io/badge/skills-53-0ea5e9?style=for-the-badge)
 ![Agents](https://img.shields.io/badge/agents-17-f97316?style=for-the-badge)
@@ -252,7 +252,7 @@ It earns its weight on **novel integrations, framework boundaries, architectural
 
 <div align="center">
 
-**⚖️ [AGPL-3.0](LICENSE)**
+**⚖️ [GPL-3.0](LICENSE)**
 
 <sub>🙏 Anvi is built on top of <a href="https://github.com/get-shit-done"><b>GSD</b></a> — go check it out.</sub>
 

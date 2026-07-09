@@ -9,6 +9,18 @@ anvi runs standalone, without a GSD installation.
 | GSD version | **1.27.0** |
 | Vendored | 2026-07-07 (byte-identical, verified with `diff -r`) |
 | Consumer | `bin/anvi-tools.cjs` (`GSD_LIB` points here) |
+| License | MIT — see [`LICENSE.GSD`](./LICENSE.GSD) |
+
+## License & attribution
+
+GSD is **MIT-licensed** (© 2025 Lex Christopherson; upstream
+[gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)). These 16
+modules are redistributed verbatim under those terms, and GSD's full MIT notice
+is preserved beside them in [`LICENSE.GSD`](./LICENSE.GSD) — as the MIT license
+requires for substantial portions.
+
+MIT is compatible with anvi's **GPL-3.0** license: the combined work is
+distributed under GPL-3.0, while these vendored modules keep their MIT notice.
 
 ## Do not hand-edit (Chesterton's fence)
 
