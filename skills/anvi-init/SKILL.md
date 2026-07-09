@@ -119,7 +119,34 @@ done
 Then verify each entry is present: `grep -qxF '.anvi/' .gitignore` (and likewise for
 the others).
 
-### Step 6: Offer Ground Truth setup (v1.1.0+)
+### Step 6: Verify knowledge durability
+
+The local `.anvi/` created in Step 2 is a **working copy**: it's what the resolver
+serves as candidate 1, and what the CLAUDE.md `@.anvi/` import loads into context —
+so it must exist locally. But Step 5 gitignores it, so the **project repo does not
+track it**. That is intentional: the tracked archive is the centralized
+`~/.anvideck/projects/<name>/` store, committed to `anvi_artifacts` by the
+`anvideck-checkpoint` hook.
+
+Verify that durability path actually exists — otherwise the catalogues are
+local-only *and* gitignored, i.e. untracked everywhere (silent knowledge loss):
+
+```bash
+NAME="$(basename "$PWD")"
+if [ -d "$HOME/.anvideck/.git" ]; then
+  echo "✓ Centralized store present (~/.anvideck → anvi_artifacts) — durability OK"
+  [ -d "$HOME/.anvideck/projects/$NAME" ] \
+    || echo "  note: ~/.anvideck/projects/$NAME not created yet — it populates on the first centralized write"
+else
+  echo "⚠ ~/.anvideck is not a git repo — local .anvi/ is gitignored, so catalogues are UNTRACKED."
+  echo "  Set up the centralized anvi_artifacts store so the checkpoint hook can preserve them,"
+  echo "  or un-ignore .anvi/ in this repo if you intend to track catalogues with the project."
+fi
+```
+
+Report the result to the user so the durability state is explicit, not silent.
+
+### Step 7: Offer Ground Truth setup (v1.1.0+)
 
 Ask the user:
 ```
