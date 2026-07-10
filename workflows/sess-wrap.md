@@ -19,6 +19,11 @@ them alongside the core steps. Do NOT run the optional hygiene/gap-check pass
 STORE=~/.anvideck                                    # centralized store (git remote: anvi_artifacts)
 CATALOGUES=<store>/projects/<project>/.anvi/{hetvabhasa,vyapti,krama,dharana}.md
 MEMORY=~/.claude/projects/<encoded-project>/memory/  # MEMORY.md index + detail files
+
+A single session often spans MULTIPLE projects (e.g. a framework fix plus a
+downstream project's catalogue). Route each learning to the store of the
+project it belongs to — resolve every catalogue dir independently via the
+shared resolver; never assume one project per session.
 </paths>
 
 <cli_resolution>

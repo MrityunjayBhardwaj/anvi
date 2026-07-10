@@ -44,7 +44,7 @@ flowchart TD
     D2(["🧩 DESIGN<br/>what SHOULD"])
     D3(["⚖️ REVIEW<br/>is it sound?"])
     KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama"]
-    SURF["⚙️ SURFACE<br/>17 agents → 48 workflows · 54 skills · anvi-tools CLI"]
+    SURF["⚙️ SURFACE<br/>17 agents → 49 workflows · 54 skills · anvi-tools CLI"]
 
     BASE --> R
     R --> D1 & D2 & D3
