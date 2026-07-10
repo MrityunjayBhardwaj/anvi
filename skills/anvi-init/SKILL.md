@@ -9,7 +9,7 @@ allowed-tools: [Read, Write, Edit, Bash, Glob, AskUserQuestion]
 
 ## What This Does
 
-1. Creates `.anvi/` directory with project-specific catalogues
+1. Creates the project's catalogues in the centralized `~/.anvideck` store and links the project's `.anvi/` to them
 2. Optionally adds the Anvi directive to the project's `CLAUDE.md`
 
 ## Process
@@ -17,18 +17,54 @@ allowed-tools: [Read, Write, Edit, Bash, Glob, AskUserQuestion]
 ### Step 1: Check if already initialized
 
 ```bash
-ls .anvi/ 2>/dev/null
+ls -ld .anvi 2>/dev/null   # a real directory OR a symlink to ~/.anvideck both count
 ```
 
-If `.anvi/` exists, inform user: "Project already initialized. Catalogues found at .anvi/"
-Offer to reinitialize (overwrites) or skip.
+If `.anvi` exists (a real dir or a symlink to the central store), inform user:
+"Project already initialized." Offer to reinitialize (overwrites) or skip.
 
-### Step 2: Create project catalogues
+### Step 2: Create catalogues centrally + link them
 
-Read the templates from `~/.claude/anvi/references/` and create project-specific copies.
-Replace `[Project Name]` with the current directory name.
+The catalogues live in **one** place — the centralized store
+`~/.anvideck/projects/<name>/.anvi/` (backed by `anvi_artifacts`). The project's own
+`.anvi/` is a **symlink** to that store, so a single physical copy serves both the
+project (via `@.anvi/`, the resolver's candidate 1, and every skill's `.anvi/…` read)
+and the central archive — there is no second copy to diverge (V2, no split-brain).
 
-Create:
+First set up the store and the link:
+
+```bash
+NAME="$(basename "$PWD")"
+STORE="$HOME/.anvideck/projects/$NAME/.anvi"
+
+# Guard: if we're already inside the centralized store, the cwd IS the store —
+# create .anvi/ directly, no symlink (a link to itself would be circular).
+case "$(pwd)/" in
+  "$HOME/.anvideck/"*) STORE="$PWD/.anvi"; INSIDE_STORE=1 ;;
+esac
+
+mkdir -p "$STORE"
+
+if [ -z "$INSIDE_STORE" ]; then
+  # Migrate a pre-existing real local .anvi/ (older Model-A projects) into the store.
+  if [ -e .anvi ] && [ ! -L .anvi ]; then
+    cp -Rn .anvi/. "$STORE"/ 2>/dev/null || true      # contents incl. dotfiles/subdirs, no clobber
+    git rm -r --cached --quiet .anvi 2>/dev/null || true  # untrack it if the repo had committed it
+    rm -rf .anvi
+  fi
+  [ -L .anvi ] && rm .anvi     # replace any stale symlink
+  ln -s "$STORE" .anvi         # project/.anvi -> centralized store
+fi
+```
+
+If the project had previously **committed** its `.anvi/`, the migration stages its
+removal from git (`git rm --cached`); tell the user to commit that deletion to finish
+untracking — the gitignored symlink replaces it.
+
+Then read the templates from `~/.claude/anvi/references/`, replace `[Project Name]`
+with the directory name, and **write them to `.anvi/`** (which now resolves to the
+central store in both cases):
+
 - `.anvi/hetvabhasa.md` — from `~/.claude/anvi/references/hetvabhasa-template.md`
 - `.anvi/vyapti.md` — from `~/.claude/anvi/references/vyapti-template.md`
 - `.anvi/krama.md` — from `~/.claude/anvi/references/krama-template.md`
@@ -65,82 +101,69 @@ only — they'll load the framework manually or via `/anvi` per session.
 ```
 ✓ Ānvīkṣikī initialized for [project name]
 
-Created:
-  .anvi/hetvabhasa.md — error patterns (empty, grows during work)
-  .anvi/vyapti.md     — invariants (empty, grows during work)
-  .anvi/krama.md      — lifecycle patterns (empty, grows during work)
+Created in ~/.anvideck/projects/[name]/.anvi/  (linked as ./.anvi):
+  hetvabhasa.md — error patterns (empty, grows during work)
+  vyapti.md     — invariants (empty, grows during work)
+  krama.md      — lifecycle patterns (empty, grows during work)
   [CLAUDE.md updated with Anvi directive | CLAUDE.md skipped (--no-claude-md)]
 
-The framework loads automatically on next session.
-Or run /anvi now to activate for this session.
+./.anvi is a symlink to the central store, so catalogues load normally (@.anvi/,
+resolver, skills) while staying one copy tracked by anvi_artifacts.
+The framework loads automatically on next session, or run /anvi now.
 ```
 
-### Step 5: Gitignore local catalogue/artifact copies (by design)
+### Step 5: Gitignore the link + local artifact dirs (by design)
 
-The canonical, git-tracked home for a project's catalogues, Ground Truth docs, and
-downloaded sources is the **centralized** store `~/.anvideck/projects/<name>/`
-(backed by the `anvi_artifacts` repo). The project's own repo must never track a
-parallel copy: parallel copies diverge (split-brain — the resolver serves whichever
-local copy exists *before* the centralized one), and `ref/sources/` is often large
-and may carry its own `.git` (which becomes an empty gitlink if tracked).
+The project's `.anvi/` is a **symlink** into the centralized store (Step 2); the
+project repo must not track it — a tracked symlink stores a machine-specific absolute
+target path (leaks, and breaks on any other machine). `artifacts/` and `ref/sources/`
+(if present) are large and belong only in the central store.
 
-So, by design, ensure the project's `.gitignore` excludes the local copies.
-
-**Guard first — skip this entire step if the current directory is `~/.anvideck` or
-any path under it.** That store is where these artifacts *are* the tracked content;
-gitignoring them there would drop the archive.
+**Guard first — skip this entire step inside `~/.anvideck` or any path under it.**
+There these artifacts *are* the tracked content; gitignoring them would drop the archive.
 
 ```bash
-# Guard: never gitignore artifacts inside the centralized store itself
 case "$(pwd)/" in
   "$HOME/.anvideck/"*) echo "In ~/.anvideck — skipping (this store tracks the artifacts)"; exit 0 ;;
 esac
 ```
 
-Otherwise, idempotently add these entries to the project's `.gitignore` (create it
-if absent), appending only lines not already present:
+Idempotently ensure these entries (create `.gitignore` if absent). Note `.anvi` has
+**no trailing slash**: a `dir/` pattern does not match a symlink (git treats the link
+as a file), so `.anvi/` would silently fail to ignore it.
 
 ```gitignore
-# Ānvīkṣikī — canonical copies live in ~/.anvideck (anvi_artifacts), not here
-.anvi/
+# Ānvīkṣikī — catalogues live in ~/.anvideck (anvi_artifacts); .anvi here is a symlink
+.anvi
 artifacts/
 ref/sources/
 ```
 
 ```bash
 touch .gitignore
-grep -qxF '# Ānvīkṣikī — canonical copies live in ~/.anvideck (anvi_artifacts), not here' .gitignore \
-  || printf '\n# Ānvīkṣikī — canonical copies live in ~/.anvideck (anvi_artifacts), not here\n' >> .gitignore
-for entry in '.anvi/' 'artifacts/' 'ref/sources/'; do
+sed -i.bak '/^\.anvi\/$/d' .gitignore && rm -f .gitignore.bak   # drop any legacy '.anvi/' entry
+grep -qxF '# Ānvīkṣikī — catalogues live in ~/.anvideck (anvi_artifacts); .anvi here is a symlink' .gitignore \
+  || printf '\n# Ānvīkṣikī — catalogues live in ~/.anvideck (anvi_artifacts); .anvi here is a symlink\n' >> .gitignore
+for entry in '.anvi' 'artifacts/' 'ref/sources/'; do
   grep -qxF "$entry" .gitignore || echo "$entry" >> .gitignore
 done
 ```
 
-Then verify each entry is present: `grep -qxF '.anvi/' .gitignore` (and likewise for
-the others).
+Verify git actually ignores the link: `git check-ignore .anvi` should print `.anvi`.
 
 ### Step 6: Verify knowledge durability
 
-The local `.anvi/` created in Step 2 is a **working copy**: it's what the resolver
-serves as candidate 1, and what the CLAUDE.md `@.anvi/` import loads into context —
-so it must exist locally. But Step 5 gitignores it, so the **project repo does not
-track it**. That is intentional: the tracked archive is the centralized
-`~/.anvideck/projects/<name>/` store, committed to `anvi_artifacts` by the
-`anvideck-checkpoint` hook.
-
-Verify that durability path actually exists — otherwise the catalogues are
-local-only *and* gitignored, i.e. untracked everywhere (silent knowledge loss):
+The project's `.anvi/` is a symlink into `~/.anvideck/projects/<name>/.anvi/`, so
+catalogue writes land in the central store directly — there is no separate local copy
+to lose. Durability then depends only on that store being a tracked git repo (the
+`anvideck-checkpoint` hook commits it to `anvi_artifacts`). Verify:
 
 ```bash
-NAME="$(basename "$PWD")"
 if [ -d "$HOME/.anvideck/.git" ]; then
-  echo "✓ Centralized store present (~/.anvideck → anvi_artifacts) — durability OK"
-  [ -d "$HOME/.anvideck/projects/$NAME" ] \
-    || echo "  note: ~/.anvideck/projects/$NAME not created yet — it populates on the first centralized write"
+  echo "✓ Centralized store is a git repo (~/.anvideck → anvi_artifacts) — durability OK"
 else
-  echo "⚠ ~/.anvideck is not a git repo — local .anvi/ is gitignored, so catalogues are UNTRACKED."
-  echo "  Set up the centralized anvi_artifacts store so the checkpoint hook can preserve them,"
-  echo "  or un-ignore .anvi/ in this repo if you intend to track catalogues with the project."
+  echo "⚠ ~/.anvideck is not a git repo — catalogues are written but NOT tracked anywhere."
+  echo "  Initialize the anvi_artifacts store (git init + remote) so the checkpoint hook preserves them."
 fi
 ```
 
