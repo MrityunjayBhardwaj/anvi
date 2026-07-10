@@ -48,13 +48,18 @@ mkdir -p "$STORE"
 if [ -z "$INSIDE_STORE" ]; then
   # Migrate a pre-existing real local .anvi/ (older Model-A projects) into the store.
   if [ -e .anvi ] && [ ! -L .anvi ]; then
-    cp -n .anvi/* "$STORE"/ 2>/dev/null || true
+    cp -Rn .anvi/. "$STORE"/ 2>/dev/null || true      # contents incl. dotfiles/subdirs, no clobber
+    git rm -r --cached --quiet .anvi 2>/dev/null || true  # untrack it if the repo had committed it
     rm -rf .anvi
   fi
   [ -L .anvi ] && rm .anvi     # replace any stale symlink
   ln -s "$STORE" .anvi         # project/.anvi -> centralized store
 fi
 ```
+
+If the project had previously **committed** its `.anvi/`, the migration stages its
+removal from git (`git rm --cached`); tell the user to commit that deletion to finish
+untracking — the gitignored symlink replaces it.
 
 Then read the templates from `~/.claude/anvi/references/`, replace `[Project Name]`
 with the directory name, and **write them to `.anvi/`** (which now resolves to the
