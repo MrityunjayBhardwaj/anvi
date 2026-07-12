@@ -22,11 +22,28 @@ function candidates(cwd, kind) {
   ];
 }
 
-// All candidate dirs that actually exist, in resolution order (first = winner).
+// All candidate dirs that actually exist, in resolution order (first = winner),
+// deduped by physical directory. A symlink and its target are two path strings
+// but ONE directory — the local-symlink-to-central layout that /anvi:init creates
+// and the fleet standardizes on. Counting both as separate copies would falsely
+// trip split-brain detection (a symlink is an alias, not a divergent copy);
+// identity is by realpath, not by path string. The first path to reach a given
+// realpath is kept, so local-first ordering is preserved. Two genuinely distinct
+// directories still survive as two entries → real split-brain still detected.
 function existingDirs(cwd, kind) {
-  return candidates(cwd, kind).filter((c) => {
-    try { return fs.existsSync(c); } catch { return false; }
-  });
+  const seen = new Set();
+  const out = [];
+  for (const c of candidates(cwd, kind)) {
+    let exists = false;
+    try { exists = fs.existsSync(c); } catch { exists = false; }
+    if (!exists) continue;
+    let real;
+    try { real = fs.realpathSync(c); } catch { real = c; }
+    if (seen.has(real)) continue; // same physical dir as an earlier candidate (symlink → target)
+    seen.add(real);
+    out.push(c);
+  }
+  return out;
 }
 
 // Split-brain detection. When more than one candidate exists for a kind, the
