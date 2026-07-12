@@ -27,6 +27,11 @@ const REGISTRATIONS = [
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
   ['PreToolUse',       'Bash',       'catalogue-id-leak-guard.js',    5],
   ['PostToolUse',      'Read',       'anvi-route-logger.js',          5],
+  // Provenance Check enforcement — flag results from non-project-scoped surfaces.
+  ['PostToolUse',      'Artifact',           'provenance-guard.js',   5],
+  ['PostToolUse',      'WebFetch|WebSearch', 'provenance-guard.js',   5],
+  ['PostToolUse',      'mcp__.*',            'provenance-guard.js',   5],
+  ['PostToolUse',      'Read|Grep|Glob',     'provenance-guard.js',   5],
   ['Stop',             null,         'anvideck-checkpoint.js',        30], // commit+push may take seconds
 ];
 const HOOK_FILE_COUNT = new Set(REGISTRATIONS.map(r => r[2])).size;
