@@ -96,6 +96,25 @@ Three signals that you're ungrounded:
 
 ---
 
+### Provenance Check
+**Internal concept:** adhikaraṇa (Nyāya — the locus a property truly resides in)
+**Plain language:** "Does this information belong to the project I'm working in — or just to my account / machine?"
+
+Before treating any tool result as authoritative for the current project:
+1. Is the surface I just used **intrinsically scoped to this project**, or is it **account-wide / machine-wide / web-wide**? Artifact galleries (`Artifact(list)`), filesystem reads outside the project dir, web/MCP fetches, and cross-project memory are **not** project-scoped.
+2. If not intrinsically scoped — **name the datum's origin**: which repo / project / account-context produced it? If I can't name it, I don't know it belongs here.
+3. Does that origin **match the project I'm working in**? If it doesn't — or I can't tell — it is **EXTERNAL**: label it external and do NOT treat it as this project's ground truth until confirmed.
+
+**A different gate from the Grounding Check.** Grounding asks *"is this real?"*; Provenance asks *"is this real for THIS project?"* A perfectly grounded source from the wrong project passes Grounding and fails here. Run both. When citing an artifact/file/doc, state its path so the boundary shows — `[in-repo]` vs `[EXTERNAL]`.
+
+**The project envelope** = the repo working dir(s) + `~/.anvideck/projects/[project]/` + `~/.claude/projects/[project-slug]/memory/`. Everything else is EXTERNAL.
+
+**Trigger signals:** an account/machine/web-wide result — a published-artifact gallery listing, a file read outside the current repo, a web/MCP fetch, a memory recall naming an unfamiliar project; any artifact/file/vocabulary that doesn't trace into the current project's directory or reference area.
+
+**Failure example:** In a Basher session, `Artifact(list)` returns artifacts titled "Visor…"; treating them as this project's imports an entire wrong roadmap. Grounding passes (they're real); Provenance fails (they belong to a sibling project). Full spec: `~/.claude/anvi/cognitive-os/provenance-check.md`.
+
+---
+
 ## On Every Fix
 
 ### Observation Check
