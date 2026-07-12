@@ -44,7 +44,7 @@ flowchart TD
     D2(["🧩 DESIGN<br/>what SHOULD"])
     D3(["⚖️ REVIEW<br/>is it sound?"])
     KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama"]
-    SURF["⚙️ SURFACE<br/>17 agents → 48 workflows · 53 skills · anvi-tools CLI"]
+    SURF["⚙️ SURFACE<br/>17 agents → 49 workflows · 54 skills · anvi-tools CLI"]
 
     BASE --> R
     R --> D1 & D2 & D3
@@ -92,7 +92,7 @@ cd anvi
 ./install.sh
 ```
 
-The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **53 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
+The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **54 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
 
 <details>
 <summary><b>⚙️ Install modes</b></summary>
