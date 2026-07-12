@@ -1,6 +1,6 @@
 # Enforcement Chain — How Grounding Is Actually Enforced
 
-Nine hooks/mechanisms fire at different points. No single point of failure.
+Ten hooks/mechanisms fire at different points. No single point of failure.
 
 ```
 Session starts
@@ -53,6 +53,14 @@ User message
    Fires on `gh issue|pr` and `git commit` (outside ~/.anvideck).
    Reminds (non-blocking) when the text carries a catalogue index key (`vyapti:184`).
    "State the finding in plain language; keep the ID in the private FIX: field."
+
+  ↓
+⑩ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
+   Enforces the base-layer Provenance Check. Fires when a tool returns data from a
+   surface that isn't scoped to this project (account-wide artifact gallery, web,
+   any MCP server, or a file read in ANOTHER project's territory). Injects a one-line
+   "EXTERNAL until you confirm origin" reminder. "Grounding asks is-it-real; this asks
+   is-it-real-for-THIS-project." Dedupes once per (surface, target) per session.
 ```
 
 ## Hook Files
@@ -65,6 +73,7 @@ User message
 | Catalogue ID leak guard | PreToolUse:Bash (`gh issue\|pr`, `git commit` outside ~/.anvideck) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
+| Provenance guard | PostToolUse:Artifact\|WebFetch\|WebSearch\|mcp__*\|Read\|Grep\|Glob (non-project-scoped results) | `~/.claude/hooks/provenance-guard.js` |
 
 ## Boundary Matching
 
@@ -127,6 +136,7 @@ centralized projects). See issue #5.
 - `PreToolUse:Bash`: experiment-protocol-guard.js, catalogue-id-leak-guard.js
 - `PostToolUse:Bash|Edit|Write|...`: gsd-context-monitor.js
 - `PostToolUse:Read`: anvi-route-logger.js
+- `PostToolUse:Artifact` / `WebFetch|WebSearch` / `mcp__.*` / `Read|Grep|Glob`: provenance-guard.js
 - `Stop`: anvideck-checkpoint.js
 
 ## Knowledge Durability — Catalogue Commit Chain
