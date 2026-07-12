@@ -2,3 +2,6 @@
 node_modules/
 *.log
 gsd-upstream-snapshot/
+
+# Ānvīkṣikī — catalogues live in ~/.anvideck (anvi_artifacts); .anvi here is a symlink
+.anvi
