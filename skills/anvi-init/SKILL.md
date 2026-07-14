@@ -10,7 +10,8 @@ allowed-tools: [Read, Write, Edit, Bash, Glob, AskUserQuestion]
 ## What This Does
 
 1. Creates the project's catalogues in the centralized `~/.anvideck` store and links the project's `.anvi/` to them
-2. Optionally adds the Anvi directive to the project's `CLAUDE.md`
+2. Grants the project scoped permission to read/write its own centralized envelope (so a fresh session can actually open and append its catalogues)
+3. Optionally adds the Anvi directive to the project's `CLAUDE.md`
 
 ## Process
 
@@ -61,6 +62,22 @@ If the project had previously **committed** its `.anvi/`, the migration stages i
 removal from git (`git rm --cached`); tell the user to commit that deletion to finish
 untracking — the gitignored symlink replaces it.
 
+**Grant the project access to its own centralized envelope.** The symlink's target is
+`~/.anvideck/projects/<name>/`, which lies **outside the session's permitted roots** — so
+without a grant the model cannot read or append its own catalogues in a fresh session
+(the failure is silent: hooks are harness-run so injection keeps working, but every direct
+catalogue read/append no-ops). Write a **scoped** grant to `<repo>/.claude/settings.local.json`
+(gitignored — machine-specific absolute path) — the project's own envelope only, **never blanket
+`~/.anvideck`** (that would collapse the provenance envelope). Relocation and the grant are a
+package. Run the extracted script (idempotent; refuses if the settings file is git-tracked;
+preserves any existing settings):
+
+```bash
+if [ -z "$INSIDE_STORE" ]; then
+  bash "$HOME/.claude/anvi/scripts/grant-catalogue-access.sh" --apply "$PWD"
+fi
+```
+
 Then read the templates from `~/.claude/anvi/references/`, replace `[Project Name]`
 with the directory name, and **write them to `.anvi/`** (which now resolves to the
 central store in both cases):
@@ -105,11 +122,13 @@ Created in ~/.anvideck/projects/[name]/.anvi/  (linked as ./.anvi):
   hetvabhasa.md — error patterns (empty, grows during work)
   vyapti.md     — invariants (empty, grows during work)
   krama.md      — lifecycle patterns (empty, grows during work)
+  Granted read/write to ~/.anvideck/projects/[name] via .claude/settings.local.json
   [CLAUDE.md updated with Anvi directive | CLAUDE.md skipped (--no-claude-md)]
 
 ./.anvi is a symlink to the central store, so catalogues load normally (@.anvi/,
-resolver, skills) while staying one copy tracked by anvi_artifacts.
-The framework loads automatically on next session, or run /anvi now.
+resolver, skills) while staying one copy tracked by anvi_artifacts. The scoped grant
+lets this project (and only this project) read and append its own catalogues in any
+fresh session. The framework loads automatically on next session, or run /anvi now.
 ```
 
 ### Step 5: Gitignore the link + local artifact dirs (by design)
