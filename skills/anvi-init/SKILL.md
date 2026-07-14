@@ -122,7 +122,10 @@ Created in ~/.anvideck/projects/[name]/.anvi/  (linked as ./.anvi):
   hetvabhasa.md — error patterns (empty, grows during work)
   vyapti.md     — invariants (empty, grows during work)
   krama.md      — lifecycle patterns (empty, grows during work)
-  Granted read/write to ~/.anvideck/projects/[name] via .claude/settings.local.json
+  [Granted read/write to ~/.anvideck/projects/[name] via .claude/settings.local.json
+   | ⚠ grant SKIPPED — .claude/settings.local.json is git-tracked; untrack it
+     (add to .gitignore + `git rm --cached`) then re-run, else this project
+     cannot read/append its own catalogues in a fresh session]
   [CLAUDE.md updated with Anvi directive | CLAUDE.md skipped (--no-claude-md)]
 
 ./.anvi is a symlink to the central store, so catalogues load normally (@.anvi/,
