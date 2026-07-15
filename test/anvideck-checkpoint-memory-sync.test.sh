@@ -19,10 +19,21 @@ mkdir -p "$STORE/projects/proj"; git -C "$STORE" init -q
 git -C "$STORE" config user.email t@t; git -C "$STORE" config user.name t
 git -C "$STORE" commit -q --allow-empty -m init
 
+# Memory backup is opt-in — the hook only mirrors when anvi-config.json consents.
+mkdir -p "$CLAUDE"; printf '{"memorySync":true}\n' > "$CLAUDE/anvi-config.json"
+
 drive(){ printf '{"cwd":"%s"}' "$CWD" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" node "$HOOK"; }
 
+echo "TEST 0 — opt-in gate: with memorySync OFF, nothing is mirrored"
+printf '{"memorySync":false}\n' > "$CLAUDE/anvi-config.json"
+mkdir -p "$LIVE"; printf 'idx\n' > "$LIVE/MEMORY.md"
+drive
+ok "$([ -d "$MIRROR" ] && echo made || echo none)" "none" "no mirror when opt-out"
+ok "$(git -C "$STORE" log --oneline | grep -c auto-checkpoint)" "0" "no commit when opt-out"
+printf '{"memorySync":true}\n' > "$CLAUDE/anvi-config.json"   # opt back in for the rest
+
 echo "TEST 1 — live memory mirrors into store + gets committed"
-mkdir -p "$LIVE"; printf 'idx\n' > "$LIVE/MEMORY.md"; printf 'a\n' > "$LIVE/a.md"
+printf 'a\n' > "$LIVE/a.md"
 drive
 ok "$([ -f "$MIRROR/MEMORY.md" ] && echo y)" "y" "MEMORY.md mirrored"
 ok "$([ -f "$MIRROR/a.md" ] && echo y)" "y" "a.md mirrored"

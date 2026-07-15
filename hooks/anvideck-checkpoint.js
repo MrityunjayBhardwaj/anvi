@@ -61,9 +61,21 @@ function countFiles(dir) {
 // harness — not a second source of truth (avoids split-brain, H6/V2).
 // Best-effort and self-contained: any failure is swallowed so the catalogue
 // commit (the durability floor) still runs.
+// Machine-local opt-in for memory backup. Mirroring memory to the remote copies
+// potentially-personal notes off the machine, so it is OFF unless the user
+// explicitly consented (install.sh prompt writes {"memorySync": true}). Default
+// — file absent, unreadable, or key !== true — is NO mirror.
+function memorySyncEnabled() {
+  try {
+    const cfg = path.join(CLAUDE_DIR, 'anvi-config.json');
+    return JSON.parse(fs.readFileSync(cfg, 'utf8')).memorySync === true;
+  } catch { return false; }
+}
+
 function syncMemory(cwd) {
   try {
     if (!cwd) return;
+    if (!memorySyncEnabled()) return;                     // no consent → no mirror (opt-in only)
     const name = path.basename(cwd);
     const envelope = path.join(DIR, 'projects', name);
     if (!fs.existsSync(envelope)) return;                 // not an anvi project — nothing to mirror

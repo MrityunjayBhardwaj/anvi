@@ -269,6 +269,48 @@ fi
 
 echo ""
 
+# ─── Optional: Memory backup (opt-in) ───────────────────────────────────────
+# Machine-global consent for mirroring auto-memory to the remote. OFF unless the
+# user explicitly says yes — memory can hold personal notes, so pushing it off
+# the machine is a choice, not a default. Interactive mode only; --sync/--dev
+# preserve whatever the user already chose.
+
+if [ "$MODE" = "interactive" ]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " Optional: Back up your project memory"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "  Claude keeps per-project 'memory' notes in ~/.claude/projects/<project>/."
+  echo "  That folder has no backup — a disk loss loses all of it."
+  echo ""
+  echo "  If you enable this, the checkpoint hook will mirror each project's memory"
+  echo "  into your centralized store (~/.anvideck) at session end, so it's committed"
+  echo "  and pushed to your anvi_artifacts repo — the same place your catalogues go."
+  echo ""
+  echo "  Consider what this means: your memory notes leave this machine and land in"
+  echo "  that git remote. Only enable it if that's where you want them. It's one"
+  echo "  direction (live → backup); the backup is never read back. You can change"
+  echo "  this any time by editing ~/.claude/anvi-config.json (\"memorySync\": true|false)."
+  echo ""
+  CURRENT_MEMSYNC=$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.env.HOME+"/.claude/anvi-config.json","utf8")).memorySync===true))}catch{process.stdout.write("false")}' 2>/dev/null || echo false)
+  echo -n "  Back up project memory to your anvi_artifacts remote? [y/N] (currently: ${CURRENT_MEMSYNC}) "
+  read -r REPLY
+  if [[ "$REPLY" =~ ^[Yy]$ ]]; then MEMSYNC=true; else MEMSYNC=false; fi
+  CFG="$HOME/.claude/anvi-config.json" MEMSYNC="$MEMSYNC" node -e '
+    const fs=require("fs"), f=process.env.CFG;
+    let o={}; try{const r=fs.readFileSync(f,"utf8").trim(); if(r) o=JSON.parse(r);}catch{}
+    if(typeof o!=="object"||o===null||Array.isArray(o)) o={};
+    o.memorySync = process.env.MEMSYNC==="true";
+    fs.writeFileSync(f, JSON.stringify(o,null,2)+"\n");
+  '
+  if [ "$MEMSYNC" = true ]; then
+    echo "  ✓ Memory backup ON — each project mirrors to ~/.anvideck as its next session ends."
+  else
+    echo "  Memory backup OFF. Enable later in ~/.claude/anvi-config.json."
+  fi
+  echo ""
+fi
+
 # ─── Optional: GSD coexistence ──────────────────────────────────────────────
 
 if [ -d "$HOME/.claude/get-shit-done" ]; then
