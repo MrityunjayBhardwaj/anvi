@@ -28,6 +28,9 @@ const path = require('path');
 const os = require('os');
 
 const DIR = process.env.ANVIDECK_DIR || path.join(os.homedir(), '.anvideck');
+// ~/.claude override, for tests only (mirrors ANVIDECK_DIR). Default = real home.
+const CLAUDE_DIR = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
+const MIRROR_README = 'MIRROR-README.md'; // marker kept in the store mirror; rsync excludes it
 
 function git(args, timeoutMs) {
   return execSync(`git ${args}`, {
@@ -36,17 +39,74 @@ function git(args, timeoutMs) {
   });
 }
 
-// Consume stdin per hook protocol, then act on end (hooks receive JSON we don't need).
-const stdinTimeout = setTimeout(run, 5000);
-process.stdin.resume();
-process.stdin.on('data', () => {});
-process.stdin.on('end', () => { clearTimeout(stdinTimeout); run(); });
+// Canonical memory-namespace encoding — Claude Code names ~/.claude/projects/<slug>
+// by replacing every non-alphanumeric char in the cwd with '-'. Mirrors
+// provenance-guard.js encodeCwd(); keep the two in sync (single scheme, V1).
+function encodeCwd(cwd) { return cwd.replace(/[^a-zA-Z0-9]/g, '-'); }
+
+function countFiles(dir) {
+  let n = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) n += countFiles(path.join(dir, e.name));
+    else if (e.isFile()) n++;
+  }
+  return n;
+}
+
+// Copy-sync: mirror the CURRENT project's live memory into the store so the
+// existing commit+push below carries it to anvi_artifacts. Memory must STAY a
+// real dir at its canonical ~/.claude location (H10 — the harness gates that
+// namespace as sensitive; a symlink into the store is blocked for read/write).
+// So this is a ONE-WAY backup mirror (live → store), never read back by the
+// harness — not a second source of truth (avoids split-brain, H6/V2).
+// Best-effort and self-contained: any failure is swallowed so the catalogue
+// commit (the durability floor) still runs.
+function syncMemory(cwd) {
+  try {
+    if (!cwd) return;
+    const name = path.basename(cwd);
+    const envelope = path.join(DIR, 'projects', name);
+    if (!fs.existsSync(envelope)) return;                 // not an anvi project — nothing to mirror
+    const live = path.join(CLAUDE_DIR, 'projects', encodeCwd(cwd), 'memory');
+    if (!fs.existsSync(live) || !fs.statSync(live).isDirectory()) return;
+    if (countFiles(live) === 0) return;                   // NEVER mirror empty → don't --delete-wipe the backup
+    const store = path.join(envelope, 'memory');
+    fs.mkdirSync(store, { recursive: true });
+    // Write the marker once (excluded from --delete so it persists and never churns).
+    const markerPath = path.join(store, MIRROR_README);
+    if (!fs.existsSync(markerPath)) {
+      fs.writeFileSync(markerPath,
+        `# Memory backup mirror — do not edit\n\n` +
+        `One-way backup of the live memory at\n` +
+        `\`~/.claude/projects/${encodeCwd(cwd)}/memory/\`, written by the\n` +
+        `anvideck-checkpoint Stop hook at session end.\n\n` +
+        `- The harness never reads memory from here — it reads/writes the live copy above (H10).\n` +
+        `- Files here are OVERWRITTEN (rsync --delete) every session. Edits made here are lost.\n` +
+        `- To restore after data loss: copy this directory back to the live path, then reopen the project.\n`);
+    }
+    execSync(
+      `rsync -a --delete --exclude=${JSON.stringify(MIRROR_README)} ` +
+      `${JSON.stringify(live + '/')} ${JSON.stringify(store + '/')}`,
+      { timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch { /* best-effort — never block the catalogue commit */ }
+}
+
+// Consume stdin per hook protocol; the Stop payload carries `cwd`, used for the
+// memory copy-sync. Act on end (or on timeout with no cwd — preserves prior behavior).
+let input = '';
+const stdinTimeout = setTimeout(() => run(''), 5000);
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { input += chunk; });
+process.stdin.on('end', () => { clearTimeout(stdinTimeout); run(input); });
 
 let ran = false;
-function run() {
+function run(rawInput) {
   if (ran) return; ran = true;
   try {
+    let cwd = '';
+    try { cwd = (JSON.parse(rawInput || '{}').cwd) || ''; } catch { /* no/!JSON payload */ }
     if (!fs.existsSync(path.join(DIR, '.git'))) process.exit(0);
+    syncMemory(cwd); // mirror live memory into the store BEFORE the dirty check
     // Don't interfere with an in-progress git operation
     for (const marker of ['MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD']) {
       if (fs.existsSync(path.join(DIR, '.git', marker))) process.exit(0);
@@ -64,8 +124,10 @@ function run() {
       return m ? m[1] : '(root)';
     }))];
 
-    // New catalogue entry IDs added in this diff (## SP178:, ### B4:, ## SV85: ...)
-    const added = git('diff --cached --unified=0');
+    // New catalogue entry IDs added in this diff (## SP178:, ### B4:, ## SV85: ...).
+    // Scope to .anvi/ catalogue files only — memory files (now mirrored here) may
+    // quote a catalogue ID in prose, which must not inject a false (+ID) summary.
+    const added = git("diff --cached --unified=0 -- ':(glob)projects/*/.anvi/*.md'");
     const ids = [...new Set(
       (added.match(/^\+#{2,3} ((?:SP|SV|SK|H|V|K|B)\d+)/gm) || [])
         .map(l => l.replace(/^\+#{2,3} /, ''))
