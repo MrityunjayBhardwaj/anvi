@@ -64,13 +64,20 @@ untracking — the gitignored symlink replaces it.
 
 **Grant the project access to its own centralized envelope.** The symlink's target is
 `~/.anvideck/projects/<name>/`, which lies **outside the session's permitted roots** — so
-without a grant the model cannot read or append its own catalogues in a fresh session
-(the failure is silent: hooks are harness-run so injection keeps working, but every direct
-catalogue read/append no-ops). Write a **scoped** grant to `<repo>/.claude/settings.local.json`
-(gitignored — machine-specific absolute path) — the project's own envelope only, **never blanket
-`~/.anvideck`** (that would collapse the provenance envelope). Relocation and the grant are a
-package. Run the extracted script (idempotent; refuses if the settings file is git-tracked;
-preserves any existing settings):
+without a grant the model cannot read or append its own catalogues in a fresh session (the
+failure is silent: hooks are harness-run so injection keeps working, but every direct
+catalogue read/append no-ops). This is framework infrastructure, not a preference — apply
+it automatically; **don't prompt for it** (accept/reject prompts are reserved for the
+CLAUDE.md and memory edits below, which change user-facing content). Just **state what
+you're doing** and run it. The grant is a **scoped** entry in
+`<repo>/.claude/settings.local.json` (gitignored — machine-specific absolute path) — the
+project's own envelope only, **never blanket `~/.anvideck`** (that would collapse the
+provenance envelope). Relocation and the grant are a package.
+
+Tell the user, in one line, that you're granting this project scoped read/write to its own
+catalogue store (`~/.anvideck/projects/<name>`) so a fresh session can append catalogues —
+scoped to this project only, gitignored, reversible. Then run the extracted script
+(idempotent; refuses if the settings file is git-tracked; preserves any existing settings):
 
 ```bash
 if [ -z "$INSIDE_STORE" ]; then
