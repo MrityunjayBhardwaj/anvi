@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries } = loadFromCandidates('currency.js');
 const { resolveDir } = loadFromCandidates('anvi-paths.js');
 
 // --- args -------------------------------------------------------------------
@@ -39,31 +39,19 @@ if (!anviDir) { console.error(`no .anvi catalogues for ${cwd}`); process.exit(2)
 const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const fileExists = (rel) => fs.existsSync(path.join(cwd, rel));
 
-// --- parse entries ----------------------------------------------------------
-// An entry = a "## ID:" / "### ID:" heading + body until the next heading.
-// Field lines may be bold (**REF:**) or plain (REF:).
-function field(body, name) {
-  // Anchor to line start + require the UPPERCASE field marker, so prose like
-  // "Root fix: …" or "The real fix: …" never masquerades as the **FIX:** field.
-  const m = body.match(new RegExp(`^\\s*(?:\\*\\*)?${name}:(?:\\*\\*)?\\s*(.+)`, 'm'));
-  return m ? m[1].trim() : undefined;
-}
-function parseEntries(md) {
-  const entries = [];
-  const re = /^#{2,3}\s+([A-Z]{1,3}\d+)\b[:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
-  let m;
-  while ((m = re.exec(md)) !== null) {
-    const body = m[2];
-    entries.push({
-      id: m[1],
-      title: body.split('\n')[0].trim().slice(0, 70),
-      refField: field(body, 'REF'),
-      fixField: field(body, 'FIX'),
-      validatedField: field(body, 'VALIDATED'),
-    });
-  }
-  return entries;
-}
+// storeGit runs in the repo that holds the CATALOGUES — a different repo from the
+// project whenever .anvi is the symlink-to-central layout. Ladder rung 4 asks it
+// when an entry's own text last changed. Resolve through realpath: the symlink's
+// path is in the project, the git dir it belongs to is not.
+let storeRoot = null, cataloguePrefix = '';
+try {
+  const realAnvi = fs.realpathSync(anviDir);
+  storeRoot = execSync('git rev-parse --show-toplevel', { cwd: realAnvi, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  cataloguePrefix = path.relative(storeRoot, realAnvi);
+} catch { storeRoot = null; } // catalogues not in a repo → rung 4 unavailable, ladder still works
+const storeGit = storeRoot
+  ? (a) => execSync(`git ${a}`, { cwd: storeRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  : null;
 
 const SYMBOL = { GREEN: '🟢', YELLOW: '🟡', RED: '🔴', GRAY: '⚪' };
 const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0 };
@@ -77,7 +65,10 @@ for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md']) {
   if (entries.length === 0) continue;
   const lines = [];
   for (const e of entries) {
-    const v = computeCurrency(e, { git, fileExists });
+    const v = computeCurrency(e, {
+      git, fileExists, storeGit,
+      cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
+    });
     counts[v.status]++;
     if (staleOnly && v.status === 'GREEN') continue;
     const drift = v.files.filter(f => f.changedCommits > 0).map(f => `${f.file}(+${f.changedCommits})`).join(', ');
@@ -88,6 +79,9 @@ for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md']) {
                : v.status === 'YELLOW' ? `drifted: ${drift}`
                : v.reason;
     if (v.status !== 'RED' && gone) detail += ` (unresolved: ${gone})`;
+    // A time-anchored verdict is provisional — say so on the line, so a yellow from
+    // rung 4 never reads as confidently as one from an explicit VALIDATED.
+    if (v.anchor.provisional && v.status !== 'GRAY') detail += ` (provisional — last edited ~${v.anchor.ts})`;
     const anchor = v.anchor.sha ? `${v.anchor.source}@${v.anchor.sha.slice(0, 7)}` : v.anchor.source;
     lines.push(`  ${SYMBOL[v.status]} ${e.id.padEnd(6)} [${anchor}]  ${detail}`);
     shown++;

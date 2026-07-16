@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Unit test for hooks/currency.js — mocked git + fileExists, no real repo.
 'use strict';
-const { computeCurrency, extractRefFiles } = require('../hooks/currency.js');
+const {
+  computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
+} = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
 const eq = (a, b, msg) => ok(a === b, `${msg} (got ${JSON.stringify(a)})`);
@@ -83,6 +85,171 @@ eq(v.status, 'GRAY', 'anchor sha missing from history → GRAY not GREEN');
 v = computeCurrency({ validatedField: 'abc1234', refField: 'hetvabhasa H6' },
   { git: makeGit({}), fileExists: exists([]) });
 eq(v.status, 'GRAY', 'cross-ref-only REF → GRAY');
+
+// --- parseEntries -----------------------------------------------------------
+// The parser feeds BOTH the report and the injector, and the time rung depends on
+// its line ranges being right — an off-by-one there silently anchors to the wrong
+// commit, which looks like a working verdict.
+console.log('parseEntries');
+const MD = [
+  '# Catalogue',            // 1
+  '',                       // 2
+  '## H1: First pattern',   // 3
+  'Root cause: x',          // 4
+  '**REF:** a.js:12',       // 5
+  '**FIX:** #40',           // 6
+  '',                       // 7
+  '## H2: Second pattern',  // 8
+  '**REF:** b.js',          // 9
+  '**VALIDATED:** abc1234 2026-07-01', // 10
+  'Root fix: prose that must not be read as the FIX field', // 11
+].join('\n');
+const parsed = parseEntries(MD);
+eq(parsed.length, 2, 'finds both entries');
+eq(parsed[0].id, 'H1', 'id');
+eq(parsed[0].refField, 'a.js:12', 'REF field');
+eq(parsed[0].fixField, '#40', 'FIX field');
+eq(parsed[0].lineStart, 3, 'lineStart = heading line');
+eq(parsed[0].lineEnd, 7, 'lineEnd = last line before next entry');
+eq(parsed[1].lineStart, 8, 'second entry lineStart');
+eq(parsed[1].validatedField, 'abc1234 2026-07-01', 'VALIDATED field');
+eq(parsed[1].fixField, undefined, 'prose "Root fix:" is not the FIX field');
+
+// --- the anchor ladder ------------------------------------------------------
+// git mock with sha reachability + a store history for the time rung.
+function ladderGit({ live = [], logMap = {}, revList = null } = {}) {
+  return (args) => {
+    const ce = args.match(/^cat-file -e ([0-9a-f]+)\^\{commit\}$/);
+    if (ce) { if (!live.includes(ce[1])) throw new Error('bad object'); return ''; }
+    const rl = args.match(/^rev-list -1 --before=/);
+    if (rl) { if (!revList) throw new Error('no rev'); return revList + '\n'; }
+    const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
+    if (m) { const k = `${m[1]}:${m[2]}`; if (!(k in logMap)) throw new Error('unknown sha'); return logMap[k]; }
+    const pr = args.match(/--grep="\(#(\d+)\)"/);
+    if (pr) return pr[1] === '40' ? 'squash40\n' : '';
+    return '';
+  };
+}
+const storeGitOK = (ts) => (args) => {
+  if (/^log -1 --format=%cI -L \d+,\d+:/.test(args)) return `${ts}\ncommit blah\n@@ -1 +1 @@\n`;
+  throw new Error('unexpected');
+};
+
+console.log('anchor ladder');
+// NB: fixture shas must be REAL hex — a fake like "live123" never matches the sha
+// regex, so the ladder would fall through for the wrong reason and the test would
+// pass while proving nothing.
+const DEAD = 'deadbee1';   // hex, but not in the mock's `live` list
+const LIVE = 'facade1';    // hex, reachable
+
+// rung 2 guard: a FIX sha that is NOT reachable (squash-dropped or foreign repo)
+// must not anchor — it falls through to the PR rung.
+v = computeCurrency({ fixField: `fixed in ${DEAD} (PR #40)`, refField: 'a.js' }, {
+  git: ladderGit({ live: ['squash40'], logMap: { 'squash40:a.js': 'h1\n' } }),
+  fileExists: exists(['a.js']),
+});
+eq(v.anchor.source, 'FIX-#40', 'unreachable FIX sha falls through to PR rung');
+eq(v.status, 'YELLOW', 'and still yields a real verdict');
+
+// a reachable FIX sha is used directly (rung 2 wins over rung 3)
+v = computeCurrency({ fixField: `${LIVE} (PR #40)`, refField: 'a.js' }, {
+  git: ladderGit({ live: [LIVE], logMap: { [`${LIVE}:a.js`]: '' } }),
+  fileExists: exists(['a.js']),
+});
+eq(v.anchor.source, 'FIX-sha', 'reachable FIX sha wins over PR rung');
+eq(v.status, 'GREEN', 'no drift → GREEN');
+
+// an unreachable VALIDATED sha falls through to a live FIX sha
+v = computeCurrency({ validatedField: `${DEAD} 2026-01-01`, fixField: LIVE, refField: 'a.js' }, {
+  git: ladderGit({ live: [LIVE], logMap: { [`${LIVE}:a.js`]: 'h1\n' } }),
+  fileExists: exists(['a.js']),
+});
+eq(v.anchor.source, 'FIX-sha', 'dead VALIDATED falls through to live FIX');
+
+// rung 4: nothing anchors, but the store knows when the entry last changed
+v = computeCurrency({ fixField: 'n/a — design decision', refField: 'a.js', lineStart: 3, lineEnd: 7 }, {
+  git: ladderGit({ revList: 'timesha1', logMap: { 'timesha1:a.js': 'h1\n' } }),
+  fileExists: exists(['a.js']),
+  storeGit: storeGitOK('2026-07-08T10:00:00+05:30'),
+  cataloguePath: '.anvi/hetvabhasa.md',
+});
+eq(v.status, 'YELLOW', 'time rung produces a verdict where A gave GRAY');
+eq(v.anchor.source, 'TIME', 'anchor source = TIME');
+ok(v.anchor.provisional === true, 'time-anchored verdict is marked provisional');
+eq(v.anchor.ts, '2026-07-08', 'carries the last-edited date');
+
+// rung 4 needs a line range — without one it must not guess
+v = computeCurrency({ fixField: 'n/a', refField: 'a.js' }, {
+  git: ladderGit({ revList: 'timesha1' }), fileExists: exists(['a.js']),
+  storeGit: storeGitOK('2026-07-08T10:00:00Z'), cataloguePath: '.anvi/hetvabhasa.md',
+});
+eq(v.status, 'GRAY', 'no line range → no time anchor → GRAY');
+
+// store not a repo → ladder degrades to GRAY, never throws
+v = computeCurrency({ fixField: 'n/a', refField: 'a.js', lineStart: 3, lineEnd: 7 }, {
+  git: ladderGit({}), fileExists: exists(['a.js']),
+  storeGit: () => { throw new Error('not a git repo'); }, cataloguePath: '.anvi/hetvabhasa.md',
+});
+eq(v.status, 'GRAY', 'store git failure → GRAY, no throw');
+
+// --- class sensitivity + nudges ---------------------------------------------
+console.log('sensitivity + nudges');
+eq(sensitivityFor('dharana.md'), 'high', 'dharana = high sensitivity');
+eq(sensitivityFor('dhyana'), 'high', 'dhyana = high sensitivity');
+eq(sensitivityFor('hetvabhasa.md'), 'low', 'hetvabhasa = low sensitivity');
+eq(sensitivityFor('vyapti.md'), 'low', 'vyapti = low sensitivity');
+eq(sensitivityFor('krama.md'), 'low', 'krama = low sensitivity');
+
+const green = { status: 'GREEN', anchor: { sha: 'x' }, files: [] };
+ok(nudgeFor(green, { catalogue: 'dharana.md', id: 'B1' }) === null, 'GREEN → no nudge (injector stays quiet)');
+
+const yellow = { status: 'YELLOW', anchor: { sha: 'x' }, files: [{ file: 'a.js', changedCommits: 2 }] };
+const hi = nudgeFor(yellow, { catalogue: 'dharana.md', id: 'B1' });
+ok(/RE-MAP/.test(hi), 'dharana YELLOW → loud re-map nudge');
+ok(hi.includes('a.js +2'), 'names the drifted file + commit count');
+const lo = nudgeFor(yellow, { catalogue: 'hetvabhasa.md', id: 'H1' });
+ok(/[Rr]e-point/.test(lo) && !/RE-MAP/.test(lo), 'hetvabhasa YELLOW → quiet re-point nudge');
+
+const provisional = { status: 'YELLOW', anchor: { sha: 'x', provisional: true, ts: '2026-07-08' }, files: [{ file: 'a.js', changedCommits: 1 }] };
+ok(nudgeFor(provisional, { catalogue: 'vyapti.md', id: 'V1' }).includes('provisional'),
+  'time-anchored nudge says provisional (never reads as confident)');
+
+const gray = { status: 'GRAY', anchor: { sha: null }, files: [], reason: 'no computable REF file' };
+ok(/VALIDATED/.test(nudgeFor(gray, { catalogue: 'krama.md', id: 'K1' })), 'GRAY → stamp-VALIDATED call to action');
+
+const red = { status: 'RED', anchor: { sha: 'x' }, files: [{ file: 'a.js', exists: false }] };
+ok(/dangles/.test(nudgeFor(red, { catalogue: 'vyapti.md', id: 'V9' })), 'RED → dangling entry nudge');
+
+// No nudge may ever claim the hook fixed anything — the hook flags, the agent updates.
+for (const [name, n] of [['high', hi], ['low', lo], ['gray', nudgeFor(gray, {})], ['red', nudgeFor(red, {})]]) {
+  ok(!/\b(auto-?updated|I (?:updated|stamped)|has been (?:updated|stamped))\b/i.test(n),
+    `${name} nudge asks for action, never claims to have taken it`);
+}
+
+// --- capNudges --------------------------------------------------------------
+// A boundary can surface a dozen entries and most of them have drifted, so the
+// cap is what keeps the annotation from burying the checks it annotates. Order
+// matters more than the cap: whatever gets cut must be the least urgent thing.
+console.log('capNudges');
+const N = {
+  red:  'V9: 🔴 every file this entry points at is gone — it dangles.',
+  high: 'B1: 🟡 drifted (x.md +1). RE-MAP before trusting the checks above.',
+  low1: 'H1: 🟡 REF drifted since its anchor (a.js +2). Re-point the REF.',
+  low2: 'H2: 🟡 REF drifted since its anchor (b.js +2). Re-point the REF.',
+  gray: 'K4: ⚪ no currency anchor (no REF) — freshness unknown.',
+};
+eq(capNudges([N.low1, N.red]).length, 2, 'under the cap → nothing dropped');
+eq(capNudges([N.gray, N.low1, N.high, N.red])[0], N.red, 'dangling ranks first — it cannot be reasoned from at all');
+eq(capNudges([N.gray, N.low1, N.high, N.red])[1], N.high, 'silent-failure re-map outranks pointer-rot');
+eq(capNudges([N.gray, N.low1, N.high])[2], N.gray, 'unanchored ranks last — a call to action, not a live hazard');
+
+const many = [N.red, N.high, N.low1, N.low2, N.gray, N.gray, N.low1];
+const capped = capNudges(many, 3);
+eq(capped.length, 4, 'over the cap → cap + one tail line');
+eq(capped[0], N.red, 'cap keeps the most urgent, not the first-arrived');
+ok(!capped.slice(0, 3).includes(N.gray), 'cap drops the least urgent first');
+ok(/and 4 more/.test(capped[3]), 'tail counts exactly what was dropped');
+ok(/currency-report/.test(capped[3]), 'tail points at the exhaustive surface — silence about the remainder would read as "that was all"');
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
