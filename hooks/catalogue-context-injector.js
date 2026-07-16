@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { projectRootFor, resolveDirForFile } = require('./anvi-paths.js');
+const { resolveDir } = require('./anvi-paths.js');
 const { computeCurrency, parseEntries, nudgeFor, capNudges } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
@@ -39,27 +39,23 @@ const { computeCurrency, parseEntries, nudgeFor, capNudges } = require('./curren
 const CURRENCY_BUDGET_MS = 1500;
 const GIT_TIMEOUT_MS = 3000;
 
-function cacheFile(projectRoot, head) {
-  const slug = path.basename(projectRoot).replace(/[^\w.-]/g, '_');
+function cacheFile(cwd, head) {
+  const slug = path.basename(cwd).replace(/[^\w.-]/g, '_');
   return path.join(os.tmpdir(), `anvi-currency-${slug}-${head.slice(0, 7)}.json`);
 }
 
-// projectRoot = the repo that OWNS the edited file, never the session cwd. Drift is
-// "did THIS project's code move under THIS project's entry", so every git question
-// and every REF-file check below has to be asked of that repo. Ask the wrong repo
-// and it answers confidently about files it has never contained.
-function currencyNudges(projectRoot, anviDir, wanted) {
+function currencyNudges(cwd, anviDir, wanted) {
   if (!wanted.length) return [];
   const run = (dir) => (a) => execSync(`git ${a}`, {
     cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS,
   });
-  const git = run(projectRoot);
+  const git = run(cwd);
 
   let head;
   try { head = git('rev-parse HEAD').trim(); } catch { return []; } // not a repo → no drift to compute
   if (!head) return [];
 
-  const cachePath = cacheFile(projectRoot, head);
+  const cachePath = cacheFile(cwd, head);
   let cache = {};
   try { cache = JSON.parse(fs.readFileSync(cachePath, 'utf8')); } catch { cache = {}; }
 
@@ -104,7 +100,7 @@ function currencyNudges(projectRoot, anviDir, wanted) {
       try {
         const verdict = computeCurrency(e, {
           git,
-          fileExists: (rel) => fs.existsSync(path.join(projectRoot, rel)),
+          fileExists: (rel) => fs.existsSync(path.join(cwd, rel)),
           storeGit,
           cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
         });
@@ -118,7 +114,7 @@ function currencyNudges(projectRoot, anviDir, wanted) {
   try {
     fs.writeFileSync(cachePath, JSON.stringify(cache));
     // Drop this project's caches for superseded HEADs — they can never be read again.
-    const slug = path.basename(projectRoot).replace(/[^\w.-]/g, "_");
+    const slug = path.basename(cwd).replace(/[^\w.-]/g, '_');
     for (const f of fs.readdirSync(os.tmpdir())) {
       if (f.startsWith(`anvi-currency-${slug}-`) && f !== path.basename(cachePath)) {
         try { fs.unlinkSync(path.join(os.tmpdir(), f)); } catch { /* best effort */ }
@@ -139,30 +135,14 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    const cwd = data.cwd || process.cwd();
     const toolInput = data.tool_input || {};
     const filePath = toolInput.file_path || '';
 
     if (!filePath) process.exit(0);
 
-    // Whose knowledge governs this file? The project that OWNS the file — never the
-    // session's cwd. They coincide most of the time, which is why the difference
-    // hides: a session sitting in project A that edits a file in project B would
-    // resolve A's catalogues and inject A's boundaries over B's file. Every path
-    // below (relPath, the REF-file existence checks, the git that computes drift)
-    // must be anchored to the owning project, or the whole injection describes the
-    // wrong repo while looking authoritative. No owner → no knowledge → say nothing.
-    const projectRoot = projectRootFor(filePath);
-    if (!projectRoot) process.exit(0);
-
-    // Canonicalize the file the same way the root was canonicalized. projectRootFor
-    // resolves through realpath, so on macOS a /tmp/… path yields a /private/tmp/…
-    // root; relativizing the raw path against it produces a ../../.. escape hatch
-    // that silently breaks FILES: matching and every path derived from it. Both
-    // sides of a path comparison must live in the same world.
-    let realFile = path.resolve(filePath);
-    try { realFile = fs.realpathSync(realFile); } catch { /* new/unsaved file — keep the literal path */ }
-
-    const anviDir = resolveDirForFile(filePath, '.anvi');
+    // Find .anvi/ directory — shared resolver spans both layouts
+    const anviDir = resolveDir(cwd, '.anvi');
     if (!anviDir) process.exit(0);
 
     // Read dharana if exists
@@ -172,8 +152,8 @@ process.stdin.on('end', () => {
     const dharana = fs.readFileSync(dharanaPath, 'utf8');
 
     // Extract the filename/module being edited
-    const relPath = path.relative(projectRoot, realFile);
-    const fileName = path.basename(realFile, path.extname(realFile));
+    const relPath = path.relative(cwd, filePath);
+    const fileName = path.basename(filePath, path.extname(filePath));
 
     // Match against dharana boundaries — split by ### B headers, then match
     // This is more robust than a single regex for multi-line content
@@ -368,7 +348,7 @@ process.stdin.on('end', () => {
       }
       for (const vid of new Set(vyaptiIds)) wanted.push({ catalogue: 'vyapti.md', id: vid });
 
-      const nudges = currencyNudges(projectRoot, anviDir, wanted);
+      const nudges = currencyNudges(cwd, anviDir, wanted);
       if (nudges.length) {
         message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
           + capNudges(nudges).join('\n  ');
