@@ -75,4 +75,44 @@ function resolveDir(cwd, kind) {
   return existing.length ? existing[0] : null;
 }
 
-module.exports = { candidates, resolveDir, existingDirs, warnIfSplitBrain };
+// The project that OWNS a file — its nearest ancestor that is a project root.
+//
+// Knowledge is owned by a PROJECT, and a file's project is where the FILE lives,
+// not where the session happens to be sitting. Those coincide most of the time,
+// which is exactly why the difference goes unnoticed: a session in project A that
+// edits a file in project B resolves A's catalogues and injects A's boundaries as
+// though they governed B's file. That is authoritative-looking, specific, and
+// wrong — knowledge from the wrong project, which is worse than none.
+//
+// A root is a dir holding `.git` (file or dir, so worktrees/submodules count) or a
+// `.anvi`. Resolved through realpath first, so an edit to a symlinked path lands on
+// the project that really owns the file rather than the tree it was linked into.
+// Returns null when the file belongs to no project — the honest answer, and the
+// caller's cue to stay silent.
+function projectRootFor(filePath) {
+  if (!filePath) return null;
+  let dir = path.dirname(path.resolve(filePath));
+  try { dir = fs.realpathSync(dir); } catch { /* unsaved/new file — walk the literal path */ }
+  const fsRoot = path.parse(dir).root;
+  for (;;) {
+    try {
+      if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, '.anvi'))) return dir;
+    } catch { /* unreadable dir → keep walking up */ }
+    if (dir === fsRoot) return null;
+    dir = path.dirname(dir);
+  }
+}
+
+// resolveDir for the project that owns `filePath`, rather than for the session cwd.
+// Consumers that act ON A FILE must resolve through this, not resolveDir(cwd) — one
+// answer to "whose knowledge governs this file", so the injector and the currency
+// computer can never disagree about it.
+function resolveDirForFile(filePath, kind) {
+  const root = projectRootFor(filePath);
+  if (!root) return null;
+  return resolveDir(root, kind);
+}
+
+module.exports = {
+  candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, resolveDirForFile,
+};
