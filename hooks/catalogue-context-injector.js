@@ -78,11 +78,20 @@ function currencyNudges(cwd, anviDir, wanted) {
   for (const [cat, ids] of Object.entries(byCat)) {
     const p = path.join(anviDir, cat);
     if (!fs.existsSync(p)) continue;
-    let entries;
-    try { entries = parseEntries(fs.readFileSync(p, 'utf8')); } catch { continue; }
+    let entries, mtime;
+    try {
+      entries = parseEntries(fs.readFileSync(p, 'utf8'));
+      mtime = fs.statSync(p).mtimeMs;
+    } catch { continue; }
     for (const e of entries) {
       if (!ids.includes(e.id)) continue;
-      const key = `${cat}:${e.id}`;
+      // A verdict is a function of the ENTRY's text and the project's HEAD — so both
+      // belong in the key. HEAD alone is not enough: stamping VALIDATED changes the
+      // catalogue, not the code, and a HEAD-only key would keep serving the stale
+      // nudge afterwards. That would make the very action the nudge asks for look
+      // like a no-op, and teach that stamping is pointless — killing the update loop
+      // this gate depends on. The catalogue's mtime closes that.
+      const key = `${cat}:${e.id}:${mtime}`;
       if (key in cache) { if (cache[key]) out.push(cache[key]); continue; }
       // Budget guard: an uncached entry past the budget is skipped, not half-computed.
       // Silence beats a slow hook — the report covers what the hook skips.
