@@ -23,17 +23,82 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, lintEntry } = loadFromCandidates('currency.js');
 const { resolveDir } = loadFromCandidates('anvi-paths.js');
 
 // --- args -------------------------------------------------------------------
 const args = process.argv.slice(2);
 const staleOnly = args.includes('--stale');
+const lintOnly = args.includes('--lint');
 const target = args.filter(a => !a.startsWith('--'))[0] || process.cwd();
 const cwd = path.resolve(target);
 
 const anviDir = resolveDir(cwd, '.anvi');
 if (!anviDir) { console.error(`no .anvi catalogues for ${cwd}`); process.exit(2); }
+
+const CATALOGUES = ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md'];
+
+// --- lint mode --------------------------------------------------------------
+// A different question from the report's: not "what drifted?" but "which entries
+// can't be checked at all, and which pointers promise more than they can keep?"
+// That is a pure function of the catalogue text — no git, no repo, no HEAD — so it
+// runs anywhere, including over a checkout whose project repo isn't present.
+//
+// The output is a WORKLIST, not errors. Nothing here is a failure; every line is an
+// entry whose grounding is incomplete, which is the gate's own note that "an
+// unanchored entry is also a grounding-completeness gap", made enumerable.
+if (lintOnly) {
+  console.log(`Currency lint — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
+  const counts = { high: 0, low: 0 };
+  const byCode = {};
+  let total = 0;
+
+  for (const cat of CATALOGUES) {
+    const p = path.join(anviDir, cat);
+    if (!fs.existsSync(p)) continue;
+    const entries = parseEntries(fs.readFileSync(p, 'utf8'));
+
+    // Group by finding, not by entry. On a real corpus a single code can hit
+    // hundreds of entries, and printing the same sentence 341 times is a wall, not
+    // a worklist — the reader stops at the third line and learns nothing. The
+    // explanation belongs to the CODE (say it once); the entries are the payload
+    // (list them compactly). High-severity findings are few by construction, so
+    // they keep their own line and their pointer.
+    const groups = {};
+    for (const e of entries) {
+      total++;
+      for (const f of lintEntry(e, { catalogue: cat })) {
+        counts[f.severity]++;
+        byCode[f.code] = (byCode[f.code] || 0) + 1;
+        const g = (groups[f.code] = groups[f.code] || { severity: f.severity, detail: f.detail, ids: [], refs: [] });
+        if (f.severity === 'high') g.severity = 'high';
+        g.ids.push(e.id);
+        if (f.refs) g.refs.push(`${e.id} → ${f.refs.join(', ')}`);
+      }
+    }
+
+    const codes = Object.keys(groups);
+    if (!codes.length) continue;
+    console.log(cat);
+    for (const code of codes) {
+      const g = groups[code];
+      console.log(`  ${g.severity === 'high' ? '⚠' : '·'} ${code} (${g.ids.length})  ${g.detail}`);
+      // When a finding carries pointers, those lines already name their entries —
+      // printing the ID list too would say everything twice. Otherwise the IDs ARE
+      // the payload.
+      if (g.refs.length) for (const r of g.refs) console.log(`      ${r}`);
+      else console.log(`      ${g.ids.join(', ')}`);
+    }
+    console.log('');
+  }
+
+  const codeSummary = Object.entries(byCode).map(([c, n]) => `${c}: ${n}`).join('  ');
+  console.log(`── ${total} entries scanned  ⚠ ${counts.high} high  · ${counts.low} low${codeSummary ? `\n   ${codeSummary}` : ''}`);
+  // Exit 0 regardless. This is a worklist to act on, not a gate to fail: a lint that
+  // breaks a build teaches people to stop running it, and every finding here needs a
+  // human judgement (re-point the REF? or is the pattern itself too concrete?).
+  process.exit(0);
+}
 
 // git runs in the PROJECT repo (REF files + FIX shas are project-repo history).
 const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -58,7 +123,7 @@ const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0 };
 let shown = 0;
 
 console.log(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
-for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md']) {
+for (const cat of CATALOGUES) {
   const p = path.join(anviDir, cat);
   if (!fs.existsSync(p)) continue;
   const entries = parseEntries(fs.readFileSync(p, 'utf8'));

@@ -251,6 +251,28 @@ drifted," never "true"); every verdict is a re-verify prompt.
   exists to kill. Once you've re-confirmed an entry, stamp it yourself.
 - **Batch report:** `node ~/.claude/anvi/scripts/currency-report.js [project-dir]`
   (`--stale` hides GREEN).
+- **Lint:** `… currency-report.js [project-dir] --lint` — a different question from the
+  report's. Not *"what drifted?"* but *"which entries can't be checked at all, and
+  which pointers promise more than they can keep?"* That is a pure function of the
+  catalogue text — no git, no repo, no HEAD — so it runs over any checkout, including
+  one whose project repo isn't present. Three findings:
+  - `no-computable-ref` — the REF names no file in the repo (cross-ref/section only,
+    or absent). The entry is **permanently gray**: no verdict is possible no matter
+    how much the code moves. This is the grounding gap made enumerable — currency
+    doubles as a grounding-completeness detector.
+  - `no-validated` — checkable, but unstamped, so freshness falls to a weaker rung.
+    **High severity on `dharana`/`dhyana`**, which rot silently and most deserve an
+    explicit stamp; low elsewhere.
+  - `line-anchored-ref` — the REF pins `:NN`. The line moves on the next edit above
+    it and nothing can tell you it moved; `extractRefFiles` strips the number before
+    resolving, so it is invisible to every verdict. Deliberately does **not** inherit
+    the computer's extension whitelist: a pinned line is fragile in any language, and
+    this finding never resolves the file (see #57).
+
+  Output is **grouped by finding, not by entry** — one corpus had a single code on 341
+  entries, and the same sentence 341 times is a wall, not a worklist. Exit is always 0:
+  this is a worklist to act on, not a gate to fail. A lint that breaks a build teaches
+  people to stop running it, and every finding here needs a human judgement.
 - **Tests:** `node test/currency.test.js` (mocked units — the ladder, sensitivity,
   nudges, the cap) and `node test/injector-currency.test.js` (spawns the hook on the
   real catalogues). The second exists because the first cannot see the first's own

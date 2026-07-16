@@ -114,6 +114,101 @@ function extractFileSpecs(filesField) {
   return out;
 }
 
+// --- lint: the entry's FORM, not the code's state ---------------------------
+// computeCurrency asks "has the code moved under this entry?" and needs git and a
+// project repo to answer. The lint asks a different question — "can this entry be
+// checked at all, and does its pointer promise more than it can keep?" — which is a
+// pure function of the catalogue text. No git, no repo, no HEAD. That is why it
+// lives beside the computer but takes none of its inputs: it is cheap enough to run
+// over every catalogue in the fleet at once.
+//
+// Findings are worklist items, never errors. Each names an entry whose GROUNDING is
+// incomplete — the gate's own design note that "an unanchored entry is also a
+// grounding-completeness gap," made enumerable.
+const LINT = {
+  LINE_ANCHORED_REF: 'line-anchored-ref',
+  NO_VALIDATED: 'no-validated',
+  NO_COMPUTABLE_REF: 'no-computable-ref',
+};
+
+// A REF token of the form `path/to/file.ext:540`, with an optional `-560` range.
+//
+// SOME extension is required, and that is what makes this correct rather than
+// nearly-correct: `vyapti:184` is also "colon followed by digits", but it is a
+// catalogue index key, not a line anchor — flagging it would report the corpus's
+// most precise cross-refs as fragile.
+//
+// But NOT the FILE_EXT whitelist the computer uses. Deliberately: a pinned line is
+// fragile in any language, and this finding never resolves the file, so it has no
+// reason to care whether the extension is one currency can diff. The whitelist is a
+// closed list built from the languages in front of whoever wrote it — the fleet
+// already carries `.rb` and `.sql` refs it does not know (#57) — and inheriting it
+// here would make the lint under-report on exactly the projects that need it most,
+// while looking clean. The two questions differ, so the two rules differ.
+const LINE_ANCHOR_RE = /(\S+\.[A-Za-z0-9]{1,6}):(\d+(?:-\d+)?)\b/g;
+
+function lineAnchoredRefs(refField) {
+  if (!refField) return [];
+  const out = [];
+  for (const m of String(refField).matchAll(LINE_ANCHOR_RE)) {
+    if (m[1].includes('://')) continue; // a URL's port is not a line number
+    // REF fields wrap paths in backticks/quotes/parens. Strip them the way
+    // extractRefFiles does, or the worklist prints `src/a.ts:12 with an unbalanced
+    // quote — a path the reader cannot copy, from a lint whose whole product is a
+    // pointer you act on.
+    const file = m[1].replace(/^[`'"([]+/, '');
+    if (!file) continue;
+    const tok = `${file}:${m[2]}`;
+    if (!out.includes(tok)) out.push(tok);
+  }
+  return out;
+}
+
+// Lint one entry. `catalogue` grades severity, reusing the same structure-vs-pattern
+// split the nudges use: dharana/dhyana ARE the code map, so an unanchored one is a
+// live hazard (its drift is what silently misfires the injector); elsewhere a
+// missing anchor is hygiene. Returns [{ code, severity, detail }].
+function lintEntry(entry, { catalogue } = {}) {
+  const findings = [];
+  const high = sensitivityFor(catalogue) === 'high';
+
+  const anchored = lineAnchoredRefs(entry.refField);
+  if (anchored.length) {
+    findings.push({
+      // `detail` explains the CODE and must read the same for every entry that has
+      // it — callers group by code and print it once. The entry-specific part is
+      // `refs`. Interpolating the pointers into the sentence made a grouped report
+      // quote one entry's ref as though it spoke for all nineteen.
+      code: LINT.LINE_ANCHORED_REF, severity: 'low', refs: anchored,
+      detail: 'REF pins a line number — the line moves on the next edit above it, and nothing here can tell you it moved. Point at a symbol or a section instead.',
+    });
+  }
+
+  // A REF with no computable file can never receive a verdict — permanently gray,
+  // no matter how much code changes. Reported before the missing-anchor finding
+  // because stamping VALIDATED on it would buy nothing: there is nothing to diff.
+  // Check the same union computeCurrency resolves — a boundary carrying only FILES:
+  // is perfectly checkable, so judging it on REF: alone would report the entries the
+  // gate can verify best as ungrounded.
+  if (extractRefFiles(entry.refField).length === 0 && extractFileSpecs(entry.filesField).length === 0) {
+    findings.push({
+      code: LINT.NO_COMPUTABLE_REF, severity: high ? 'high' : 'low',
+      detail: entry.refField
+        ? 'REF names no file in this repo (cross-ref or section only) — currency can never compute a verdict for this entry. Add a file REF to make it checkable.'
+        : 'no REF at all — the entry is ungrounded and permanently unverifiable.',
+    });
+  } else if (!entry.validatedField) {
+    findings.push({
+      code: LINT.NO_VALIDATED, severity: high ? 'high' : 'low',
+      detail: high
+        ? 'no VALIDATED stamp on a boundary entry — its freshness falls to a weaker rung (a creation-time FIX, or the provisional "when the text was last edited"). Boundary maps rot silently and are the entries that most deserve an explicit stamp.'
+        : 'no VALIDATED stamp — freshness falls back to the FIX sha or the provisional time rung. Stamp it the next time you confirm this entry.',
+    });
+  }
+
+  return findings;
+}
+
 // Parse a catalogue file into entries. An entry = a "## ID:" / "### ID:" heading
 // plus its body, up to the next such heading. Field lines may be bold (**REF:**)
 // or plain (REF:). Line numbers are 1-based over the CURRENT file — which is what
@@ -385,4 +480,5 @@ module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists,
+  lintEntry, lineAnchoredRefs, LINT,
 };

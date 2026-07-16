@@ -3,7 +3,7 @@
 'use strict';
 const {
   computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
-  extractFileSpecs, specExists,
+  extractFileSpecs, specExists, lintEntry, lineAnchoredRefs, LINT,
 } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -325,6 +325,65 @@ ok(specExists('bin/lib/*.cjs', exists([]), lsGit({ 'bin/lib/*.cjs': 'bin/lib/cor
 ok(!specExists('bin/nope/*.cjs', exists([]), lsGit({})), 'glob matching nothing → genuinely gone');
 ok(!specExists('x/*.js', exists([]), () => { throw new Error('not a repo'); }),
    'git unavailable → not exists, never throws');
+
+// --- lineAnchoredRefs -------------------------------------------------------
+// The whole finding hinges on telling a line anchor from things that merely look
+// like one. The corpus is full of both.
+console.log('lineAnchoredRefs');
+const la = (s) => lineAnchoredRefs(s).join(',');
+eq(la('bin/lib/verify.cjs:540'), 'bin/lib/verify.cjs:540', 'file:line');
+eq(la('bin/lib/verify.cjs:540-560'), 'bin/lib/verify.cjs:540-560', 'file:line-range');
+eq(la('src/a.ts:12 and core.rb:334'), 'src/a.ts:12,core.rb:334', 'multiple, including an extension currency cannot resolve');
+eq(la('vyapti:184 gap, sibling of SP72'), '', 'a catalogue index key is NOT a line anchor — no extension');
+eq(la('hetvabhasa H6; vyapti V2'), '', 'cross-refs are not line anchors');
+eq(la('see https://example.com:8080/x'), '', 'a URL port is not a line number');
+eq(la('ENFORCE.md §Registered In'), '', 'a section anchor is not a line anchor');
+eq(la('hooks/currency.js'), '', 'a clean file REF is not flagged');
+eq(la('a.ts:12; a.ts:12'), 'a.ts:12', 'deduped — one worklist item per pointer');
+eq(la(undefined), '', 'no REF field');
+
+// --- lintEntry --------------------------------------------------------------
+// The lint judges the entry's FORM. It takes no git, no repo, no HEAD — so these
+// cases pass no opts at all, which is the point.
+console.log('lintEntry');
+const codesOf = (e, cat) => lintEntry(e, { catalogue: cat }).map(f => f.code).sort().join(',');
+const sevOf = (e, cat) => lintEntry(e, { catalogue: cat }).map(f => f.severity).join(',');
+
+eq(codesOf({ refField: 'src/a.ts', validatedField: 'abc1234 2026-01-01' }, 'hetvabhasa.md'),
+   '', 'a stamped entry with a clean file REF is clean');
+eq(codesOf({ refField: 'src/a.ts' }, 'hetvabhasa.md'),
+   LINT.NO_VALIDATED, 'checkable but unstamped → no-validated');
+eq(codesOf({ refField: 'src/a.ts:540', validatedField: 'abc1234' }, 'hetvabhasa.md'),
+   LINT.LINE_ANCHORED_REF, 'stamped but line-pinned → line-anchored-ref');
+eq(codesOf({ refField: 'hetvabhasa H6', validatedField: 'abc1234' }, 'hetvabhasa.md'),
+   LINT.NO_COMPUTABLE_REF, 'cross-ref-only REF → can never get a verdict');
+eq(codesOf({}, 'hetvabhasa.md'), LINT.NO_COMPUTABLE_REF, 'no REF at all → ungrounded');
+
+// An entry with no computable REF must NOT also be told to stamp VALIDATED: there
+// is nothing to diff, so the stamp would buy a green nobody could have earned.
+eq(codesOf({ refField: 'hetvabhasa H6' }, 'hetvabhasa.md'), LINT.NO_COMPUTABLE_REF,
+   'unresolvable REF reports only the grounding gap, not a stamp it cannot honour');
+
+// The FILES-carrying boundary is checkable via FILES alone — judging it on REF
+// alone would call the entries the gate verifies BEST ungrounded.
+eq(codesOf({ filesField: 'src/engine.js', validatedField: 'abc1234' }, 'dharana.md'),
+   '', 'FILES: alone is checkable — no grounding gap');
+eq(codesOf({ filesField: 'src/engine.js' }, 'dharana.md'), LINT.NO_VALIDATED,
+   'FILES: alone, unstamped → no-validated');
+
+// Severity follows the same structure-vs-pattern split the nudges use.
+eq(sevOf({ refField: 'src/a.ts' }, 'dharana.md'), 'high', 'an unstamped boundary map is high severity');
+eq(sevOf({ refField: 'src/a.ts' }, 'hetvabhasa.md'), 'low', 'an unstamped pattern entry is low');
+eq(sevOf({ refField: 'src/a.ts:9', validatedField: 'x1234567' }, 'dharana.md'), 'low',
+   'a line anchor is low even on a boundary — fragile pointer, not a rotting map');
+
+// Multiple findings coexist.
+eq(codesOf({ refField: 'src/a.ts:540' }, 'hetvabhasa.md'),
+   [LINT.LINE_ANCHORED_REF, LINT.NO_VALIDATED].sort().join(','),
+   'line-pinned AND unstamped → both');
+
+ok(lintEntry({ refField: 'src/a.ts:540' }, {})[0].refs.join(',') === 'src/a.ts:540',
+   'the finding names the offending pointer, so the worklist is actionable');
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
