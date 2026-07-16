@@ -14,12 +14,26 @@
 //   GREEN  no REF file changed since the anchor
 //   GRAY   no resolvable anchor (no VALIDATED, no sha-resolvable FIX) — needs backfill
 //
-// Anchor resolution (policy: auto-default to FIX so currency works with zero
-// backfill; an explicit VALIDATED wins when present):
-//   1. VALIDATED: <sha> ...      → that sha
-//   2. FIX: ... <7+ hex sha> ... → that sha
+// Anchor resolution is a DEGRADATION LADDER, strongest → weakest, and the rung
+// that resolves grades the verdict's confidence. (Policy: auto-default down the
+// ladder so currency works with zero backfill; an explicit VALIDATED wins.)
+//   1. VALIDATED: <sha> ...      → that sha. Explicit claim: "confirmed against this state."
+//   2. FIX: ... <7+ hex sha> ... → that sha, ONLY IF STILL REACHABLE. A sha dropped
+//                                  by a squash/rebase, or belonging to another repo
+//                                  (a store or sibling-repo sha), is not an anchor
+//                                  here — verify, then fall through rather than
+//                                  hand back a verdict computed against nothing.
 //   3. FIX: ... #N ...           → the squash-merge commit whose subject ends "(#N)"
-//   4. otherwise                 → GRAY
+//   4. time-based (universal)    → the store's last commit touching THIS entry's
+//                                  text → the project's HEAD as of that timestamp.
+//                                  Every entry has a history, so this rung always
+//                                  applies — but a store commit may be a bulk
+//                                  compaction rather than a real re-validation, so
+//                                  its verdicts are marked `provisional` and must
+//                                  never read as confident.
+//   5. otherwise                 → GRAY. Not a dead end: GRAY is the call to action
+//                                  ("stamp VALIDATED"), and an unanchored entry is
+//                                  also a grounding-completeness gap.
 //
 // Shared by the catalogue injector (hook) and the CLI report — kept __dirname-free
 // and side-effect-free (git is injected), so only its LOCATION varies (V7).
@@ -58,22 +72,88 @@ function extractRefFiles(refField) {
   return out;
 }
 
-// Pull the currency anchor (a commit sha) from an entry's fields.
-// `git` is (args:string) => string (stdout), run in the project repo. Returns
-// { sha, source } or { sha: null, source: 'none' }.
-function resolveAnchor({ validatedField, fixField, git }) {
+// Parse a catalogue file into entries. An entry = a "## ID:" / "### ID:" heading
+// plus its body, up to the next such heading. Field lines may be bold (**REF:**)
+// or plain (REF:). Line numbers are 1-based over the CURRENT file — which is what
+// `git log -L` wants (it walks history backwards from the working state).
+//
+// One parser, used by both the report and the injector: they read the same corpus,
+// so two parsers would be two chances to disagree about what an entry IS.
+const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+)\b[:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
+
+function field(body, name) {
+  // Anchor to line start + require the UPPERCASE field marker, so prose like
+  // "Root fix: …" or "The real fix: …" never masquerades as the **FIX:** field.
+  const m = body.match(new RegExp(`^\\s*(?:\\*\\*)?${name}:(?:\\*\\*)?\\s*(.+)`, 'm'));
+  return m ? m[1].trim() : undefined;
+}
+
+function parseEntries(md) {
+  const entries = [];
+  const re = new RegExp(ENTRY_RE.source, 'gm'); // fresh lastIndex per call
+  let m;
+  while ((m = re.exec(md)) !== null) {
+    const body = m[2];
+    const lineStart = md.slice(0, m.index).split('\n').length;
+    entries.push({
+      id: m[1],
+      title: body.split('\n')[0].trim().slice(0, 70),
+      refField: field(body, 'REF'),
+      fixField: field(body, 'FIX'),
+      validatedField: field(body, 'VALIDATED'),
+      lineStart,
+      lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
+    });
+  }
+  return entries;
+}
+
+// Is this sha an actual commit in the repo `git` runs in? A FIX: sha can be dead
+// (squash/rebase dropped it) or foreign (an anvi_artifacts / sibling-repo sha).
+// Trusting one unverified yields a verdict computed against a commit that isn't
+// there — so verify before anchoring, and fall down the ladder when it fails.
+function isReachable(git, sha) {
+  try { git(`cat-file -e ${sha}^{commit}`); return true; } catch { return false; }
+}
+
+// Ladder rung 4 — the universal fallback. Ask the STORE repo when this entry's own
+// text last changed, then take the PROJECT repo's HEAD as of that moment. Weak by
+// construction (a store commit may be a bulk compaction, not a re-validation), so
+// callers mark the result provisional. Returns { sha, source, provisional, ts } or
+// null when the store history can't answer.
+function resolveTimeAnchor({ git, storeGit, cataloguePath, lineStart, lineEnd }) {
+  if (!storeGit || !cataloguePath || !lineStart || !lineEnd) return null;
+  let ts;
+  try {
+    const out = storeGit(`log -1 --format=%cI -L ${lineStart},${lineEnd}:${JSON.stringify(cataloguePath)}`);
+    ts = (out.split('\n')[0] || '').trim();
+  } catch { return null; }
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(ts)) return null;
+  try {
+    const sha = git(`rev-list -1 --before=${JSON.stringify(ts)} HEAD`).trim();
+    if (sha) return { sha, source: 'TIME', provisional: true, ts: ts.slice(0, 10) };
+  } catch { /* fall through to GRAY */ }
+  return null;
+}
+
+// Pull the currency anchor (a commit sha) from an entry's fields, walking the
+// ladder documented at the top of this file. `git` is (args:string) => string
+// (stdout), run in the project repo. Returns { sha, source, provisional? } or
+// { sha: null, source: 'none' }.
+function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
   const shaRe = /\b([0-9a-f]{7,40})\b/;
 
-  if (validatedField) {
-    const m = validatedField.match(shaRe);
-    if (m) return { sha: m[1], source: 'VALIDATED' };
+  // Rung 1 + 2: an explicit VALIDATED beats a FIX, but both are shas that may be
+  // dead or foreign — the same guard applies to each.
+  for (const [f, source] of [[validatedField, 'VALIDATED'], [fixField, 'FIX-sha']]) {
+    if (!f) continue;
+    const m = f.match(shaRe);
+    if (m && isReachable(git, m[1])) return { sha: m[1], source };
   }
   if (fixField) {
-    const m = fixField.match(shaRe);
-    if (m) return { sha: m[1], source: 'FIX-sha' };
-    // PR/issue number → squash-merge commit whose subject ends "(#N)". The field
-    // often lists an issue AND its PR ("#37 (PR #38)"); only the PR's number is on
-    // the squash subject, so try each #N and take the first that actually resolves.
+    // Rung 3: PR/issue number → squash-merge commit whose subject ends "(#N)". The
+    // field often lists an issue AND its PR ("#37 (PR #38)"); only the PR's number
+    // is on the squash subject, so try each #N and take the first that resolves.
     for (const pm of fixField.matchAll(/#(\d+)/g)) {
       try {
         const sha = git(`log --grep="(#${pm[1]})" --fixed-strings --format=%H -1`).trim();
@@ -81,28 +161,129 @@ function resolveAnchor({ validatedField, fixField, git }) {
       } catch { /* try next */ }
     }
   }
+  // Rung 4: time-based, provisional.
+  if (typeof timeAnchor === 'function') {
+    try {
+      const t = timeAnchor();
+      if (t && t.sha) return t;
+    } catch { /* fall through to GRAY */ }
+  }
   return { sha: null, source: 'none' };
 }
 
+// --- class sensitivity ------------------------------------------------------
+// Same computation, class-aware PRESENTATION. What drift MEANS depends on how much
+// of an entry is code-structure vs. location-independent pattern:
+//   dharana/dhyana — the entry IS the code map; it rots the instant the code's
+//     shape moves, and its failure is silent (a stale boundary map makes the
+//     injector fire the wrong checks, or none, during work). Loud: "re-map."
+//   hetvabhasa/vyapti/krama — a durable pattern wearing a thin REF skin; a
+//     well-formed entry survives refactors, so drift is usually pointer-rot.
+//     Quiet: "re-point." But FREQUENT drift here is a quality smell — the entry
+//     was written as an instance, not a pattern.
+const HIGH_SENSITIVITY = ['dharana', 'dhyana'];
+
+function sensitivityFor(catalogue) {
+  const base = String(catalogue || '').replace(/\.md$/, '').toLowerCase();
+  return HIGH_SENSITIVITY.includes(base) ? 'high' : 'low';
+}
+
+// The point-of-use nudge for a verdict. Returns null for GREEN — a fresh entry has
+// nothing to say, and the injector must not get noisier for free.
+//
+// Every nudge asks a HUMAN/agent to act. The hook flags; it never rewrites a body
+// and never bumps VALIDATED itself: drift detection is mechanical, but
+// re-validation is a reasoning act, and auto-stamping would manufacture a green
+// nobody earned — the exact false confidence this gate exists to kill.
+function nudgeFor(verdict, { catalogue, id } = {}) {
+  if (!verdict || verdict.status === 'GREEN') return null;
+  const high = sensitivityFor(catalogue) === 'high';
+  const tag = id ? `${id}: ` : '';
+  const drift = verdict.files.filter(f => f.changedCommits > 0)
+    .map(f => `${f.file} +${f.changedCommits}`).join(', ');
+  const prov = verdict.anchor && verdict.anchor.provisional;
+
+  if (verdict.status === 'RED') {
+    return `${tag}🔴 every file this entry points at is gone — it dangles. Re-point it at the code that replaced them, or retire it.`;
+  }
+  if (verdict.status === 'GRAY') {
+    return `${tag}⚪ no currency anchor (${verdict.reason}) — freshness unknown. Stamp \`VALIDATED: <sha> <date>\` when you next confirm this entry.`;
+  }
+  // YELLOW
+  const since = prov
+    ? `since the entry was last edited (~${verdict.anchor.ts}) — provisional: that's when the text changed, not a confirmed validation`
+    : `since its anchor`;
+  return high
+    ? `${tag}🟡 the code this boundary maps has drifted ${since} (${drift}). RE-MAP before trusting the checks above: a stale boundary map fires the wrong checks silently. Stamp \`VALIDATED\` once re-confirmed.`
+    : `${tag}🟡 REF drifted ${since} (${drift}). Re-point the REF and confirm the pattern still holds — the pattern usually outlives the pointer. Stamp \`VALIDATED\` once re-confirmed.`;
+}
+
+// --- bounding the point-of-use surface --------------------------------------
+// A boundary can surface a dozen entries (the injector's vyapti match is a text
+// match — broad by design), and drift is the common case, not the exception. Emit
+// every verdict and the nudges outweigh the checks they annotate; a hook that
+// prints a wall on every edit stops being read, which costs more than the drift.
+//
+// So: rank by what a reader must not miss, keep the top few, and say plainly that
+// the rest exist. The report is the exhaustive surface — this one is the alarm.
+//   🔴 dangling      the entry points at nothing; it cannot be reasoned from.
+//   🟡 re-map        high-sensitivity drift (dharana/dhyana) — fails SILENTLY.
+//   🟡 re-point      low-sensitivity drift — the pattern usually outlives the REF.
+//   ⚪ unanchored    a call to action, not a live hazard. Lowest at point of use.
+// Ranking lives HERE, next to nudgeFor, because it reads the markers nudgeFor
+// writes: split them across modules and a changed marker degrades ordering to a
+// silent no-op — the exact failure class this file exists to catch (V7).
+const NUDGE_CAP = 5;
+
+function rankNudge(n) {
+  if (n.includes('🔴')) return 0;
+  if (n.includes('RE-MAP')) return 1;
+  if (n.includes('🟡')) return 2;
+  return 3;
+}
+
+function capNudges(nudges, cap = NUDGE_CAP) {
+  if (nudges.length <= cap) return [...nudges].sort((a, b) => rankNudge(a) - rankNudge(b));
+  const sorted = [...nudges].sort((a, b) => rankNudge(a) - rankNudge(b));
+  const kept = sorted.slice(0, cap);
+  kept.push(`…and ${nudges.length - cap} more drifted/unanchored entries at this boundary — \`node scripts/currency-report.js --stale\` for the full picture.`);
+  return kept;
+}
+
 // Compute a currency verdict for one entry.
-//   entry: { validatedField?, fixField?, refField?, id? }
-//   opts:  { git, fileExists }  — git(args)=>stdout run in project repo;
-//                                 fileExists(relPath)=>bool for REF files.
+//   entry: { validatedField?, fixField?, refField?, id?, lineStart?, lineEnd? }
+//   opts:  { git, fileExists, storeGit?, cataloguePath? }
+//     git(args)=>stdout          run in the PROJECT repo (REF files live there)
+//     fileExists(relPath)=>bool  for REF files
+//     storeGit(args)=>stdout     run in the CATALOGUE STORE repo — optional; with
+//     cataloguePath              it (+ the entry's line range) enables ladder
+//                                rung 4, the time-based fallback.
 // Returns { status, anchor, files:[{file,exists,changedCommits}], reason }.
 function computeCurrency(entry, opts) {
-  const { git, fileExists } = opts;
+  const { git, fileExists, storeGit, cataloguePath } = opts;
   const refFiles = extractRefFiles(entry.refField);
+
+  // No computable REF → nothing to diff against, so don't spend git calls walking
+  // the ladder for an anchor we can't use.
+  if (refFiles.length === 0) {
+    return {
+      status: 'GRAY', anchor: { sha: null, source: 'none' }, files: [],
+      reason: 'no computable REF file (cross-ref/section only)',
+    };
+  }
+
   const anchor = resolveAnchor({
     validatedField: entry.validatedField,
     fixField: entry.fixField,
     git,
+    timeAnchor: () => resolveTimeAnchor({
+      git, storeGit, cataloguePath,
+      lineStart: entry.lineStart, lineEnd: entry.lineEnd,
+    }),
   });
 
-  if (refFiles.length === 0) {
-    return { status: 'GRAY', anchor, files: [], reason: 'no computable REF file (cross-ref/section only)' };
-  }
   if (!anchor.sha) {
-    return { status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })), reason: 'no VALIDATED and no sha-resolvable FIX' };
+    return { status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })), reason: 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)' };
   }
 
   const files = [];
@@ -137,4 +318,7 @@ function computeCurrency(entry, opts) {
   return { status: 'GREEN', anchor, files, reason: 'no REF drift since anchor' };
 }
 
-module.exports = { computeCurrency, extractRefFiles, resolveAnchor, FILE_EXT };
+module.exports = {
+  computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
+  parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
+};

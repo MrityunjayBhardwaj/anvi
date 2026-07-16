@@ -16,7 +16,105 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { execSync } = require('child_process');
 const { resolveDir } = require('./anvi-paths.js');
+const { computeCurrency, parseEntries, nudgeFor } = require('./currency.js');
+
+// --- Currency at point of use ----------------------------------------------
+// The checks above are only worth obeying if the entry that produced them is still
+// real. Currency answers that (hooks/currency.js): has the code an entry points at
+// drifted since the entry was last validated? Injecting the verdict HERE — beside
+// the checks, at the moment of the edit — is the difference between knowing an
+// entry is stale and finding out after reasoning from it.
+//
+// Three constraints, because this runs on every Write/Edit at a boundary:
+//   1. Never block. Any failure returns [] — the injector's exit-0 contract is
+//      absolute, and a freshness annotation is never worth losing the checks over.
+//   2. Never auto-fix. This FLAGS; the reasoning agent updates. No body rewrite,
+//      no auto-bumped VALIDATED (a green nobody earned is the failure this gate
+//      exists to prevent).
+//   3. Stay fast. Verdicts cache by (project, HEAD sha) — drift can only change
+//      when HEAD moves — and a wall-clock budget bounds the cold path.
+const CURRENCY_BUDGET_MS = 1500;
+const GIT_TIMEOUT_MS = 3000;
+
+function cacheFile(cwd, head) {
+  const slug = path.basename(cwd).replace(/[^\w.-]/g, '_');
+  return path.join(os.tmpdir(), `anvi-currency-${slug}-${head.slice(0, 7)}.json`);
+}
+
+function currencyNudges(cwd, anviDir, wanted) {
+  if (!wanted.length) return [];
+  const run = (dir) => (a) => execSync(`git ${a}`, {
+    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS,
+  });
+  const git = run(cwd);
+
+  let head;
+  try { head = git('rev-parse HEAD').trim(); } catch { return []; } // not a repo → no drift to compute
+  if (!head) return [];
+
+  const cachePath = cacheFile(cwd, head);
+  let cache = {};
+  try { cache = JSON.parse(fs.readFileSync(cachePath, 'utf8')); } catch { cache = {}; }
+
+  // The catalogues usually live in a different repo than the project (the
+  // symlink-to-central layout), and the symlink's path is not the git dir it
+  // belongs to — resolve through realpath before asking git anything.
+  let storeGit = null, cataloguePrefix = '', storeRoot = null;
+  try {
+    const realAnvi = fs.realpathSync(anviDir);
+    storeRoot = run(realAnvi)('rev-parse --show-toplevel').trim();
+    cataloguePrefix = path.relative(storeRoot, realAnvi);
+    storeGit = run(storeRoot);
+  } catch { storeGit = null; } // no store repo → ladder rung 4 unavailable, rungs 1-3 still work
+
+  const started = Date.now();
+  const out = [];
+  const byCat = {};
+  for (const w of wanted) (byCat[w.catalogue] = byCat[w.catalogue] || []).push(w.id);
+
+  for (const [cat, ids] of Object.entries(byCat)) {
+    const p = path.join(anviDir, cat);
+    if (!fs.existsSync(p)) continue;
+    let entries;
+    try { entries = parseEntries(fs.readFileSync(p, 'utf8')); } catch { continue; }
+    for (const e of entries) {
+      if (!ids.includes(e.id)) continue;
+      const key = `${cat}:${e.id}`;
+      if (key in cache) { if (cache[key]) out.push(cache[key]); continue; }
+      // Budget guard: an uncached entry past the budget is skipped, not half-computed.
+      // Silence beats a slow hook — the report covers what the hook skips.
+      if (Date.now() - started > CURRENCY_BUDGET_MS) break;
+      let nudge = null;
+      try {
+        const verdict = computeCurrency(e, {
+          git,
+          fileExists: (rel) => fs.existsSync(path.join(cwd, rel)),
+          storeGit,
+          cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
+        });
+        nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
+      } catch { nudge = null; }
+      cache[key] = nudge; // cache GREEN's null too — a fresh entry shouldn't be recomputed
+      if (nudge) out.push(nudge);
+    }
+  }
+
+  try {
+    fs.writeFileSync(cachePath, JSON.stringify(cache));
+    // Drop this project's caches for superseded HEADs — they can never be read again.
+    const slug = path.basename(cwd).replace(/[^\w.-]/g, '_');
+    for (const f of fs.readdirSync(os.tmpdir())) {
+      if (f.startsWith(`anvi-currency-${slug}-`) && f !== path.basename(cachePath)) {
+        try { fs.unlinkSync(path.join(os.tmpdir(), f)); } catch { /* best effort */ }
+      }
+    }
+  } catch { /* cache is an optimization; failing to persist it costs speed, not correctness */ }
+
+  return out;
+}
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -129,6 +227,12 @@ process.stdin.on('end', () => {
 
     // Also check vyapti for misaligned invariants at this boundary
     let invariantWarnings = '';
+    // IDs of the vyapti entries actually surfaced below — currency must cover every
+    // entry the injection asks you to reason from, and these are selected by text
+    // match rather than by an ID scrape, so they have to be captured here at the
+    // point of selection. Deriving them a second way would be a second matching
+    // rule, free to drift out of step with the one that built the message (V1).
+    const vyaptiIds = [];
     const vyaptiPath = path.join(anviDir, 'vyapti.md');
     if (fs.existsSync(vyaptiPath)) {
       const vyapti = fs.readFileSync(vyaptiPath, 'utf8');
@@ -147,6 +251,8 @@ process.stdin.on('end', () => {
       if (relevant.length > 0) {
         const summaries = relevant.map(e => {
           const firstLine = e.split('\n')[0].trim();
+          const idm = firstLine.match(/^([A-Z]{1,3}\d+)\b/);
+          if (idm) vyaptiIds.push(idm[1]);
           const hasGap = e.includes('NOT YET IMPLEMENTED') ? ' [NOT YET IMPLEMENTED]' : '';
           return firstLine + hasGap;
         });
@@ -215,6 +321,30 @@ process.stdin.on('end', () => {
         if (ref) message += '\nMisaligned invariant source: ' + ref[1].trim();
       }
     }
+
+    // Currency: are the entries that produced the checks above still real?
+    // Wrapped whole — a freshness annotation must never cost the checks themselves.
+    try {
+      const wanted = [];
+      // Cover every entry the message above surfaces — a boundary whose freshness is
+      // annotated beside two of three catalogues teaches that silence means fresh,
+      // which is exactly the false confidence this gate exists to kill.
+      // Boundary sections split on "B\d+|Boundary"; only the numbered ones are entries.
+      for (const m of matches) {
+        if (/^[A-Z]{1,3}\d+$/.test(m.id)) wanted.push({ catalogue: 'dharana.md', id: m.id });
+      }
+      for (const m of matches) {
+        const ids = m.content.match(/SP\d+|H\d+|P\d+/g) || [];
+        for (const pid of new Set(ids)) wanted.push({ catalogue: 'hetvabhasa.md', id: pid });
+      }
+      for (const vid of new Set(vyaptiIds)) wanted.push({ catalogue: 'vyapti.md', id: vid });
+
+      const nudges = currencyNudges(cwd, anviDir, wanted);
+      if (nudges.length) {
+        message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
+          + capNudges(nudges).join('\n  ');
+      }
+    } catch (_) { /* never blocks */ }
 
     // Check for FATALITY signal
     if (matches.some(m => m.content.includes('FATALITY'))) {

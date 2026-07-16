@@ -173,13 +173,38 @@ drifts underneath it. Currency detects **drift since the entry was last
 validated** — it is *not* a correctness claim (GREEN = "not known to have
 drifted," never "true"); every verdict is a re-verify prompt.
 
-- **Anchor:** an optional `VALIDATED: <sha> <date>` field (the commit where the
-  entry's body was last confirmed against code). Absent → falls back to the `FIX:`
-  sha, or a PR/issue `#N` resolved to its squash-merge commit. So currency works
-  with **zero backfill** and sharpens as entries gain `VALIDATED`.
 - **Verdicts** (`hooks/currency.js`, run in the project repo): 🔴 RED all REF
   files gone (dangling), 🟡 YELLOW a REF file changed since the anchor (drifted),
   🟢 GREEN no drift, ⚪ GRAY no resolvable anchor / non-file REF.
+- **Anchor = a degradation ladder**, strongest → weakest; the rung that resolves
+  grades the verdict's confidence. Currency needs **zero backfill** and sharpens
+  as entries gain `VALIDATED`:
+  1. `VALIDATED: <sha> <date>` — the explicit claim "confirmed against this state."
+  2. the `FIX:` sha — **only if still reachable** (`git cat-file -e`). A sha dropped
+     by a squash or belonging to another repo anchors nothing; verify, then fall
+     through rather than diff against a commit that isn't there.
+  3. a `FIX:` PR/issue `#N` → its squash-merge commit.
+  4. **time-based** (universal): the store's last commit touching *that entry's
+     text* → the project's HEAD as of that timestamp. Every entry has a history, so
+     this rung always applies — but a store commit may be a bulk compaction rather
+     than a real re-validation, so its verdicts are marked **provisional** and must
+     never read as confident.
+  5. ⚪ GRAY otherwise — a call to action ("stamp `VALIDATED`"), not a dead end. An
+     unanchored entry is also a grounding-completeness gap.
+- **Point of use** (`hooks/catalogue-context-injector.js`): each injected boundary
+  carries its own freshness verdict, so you learn an entry is stale *beside* the
+  checks it produced — not after reasoning from it. Presentation is **class-aware**:
+  `dharana`/`dhyana` are the code map itself and rot the moment the code's shape
+  moves — and rot *silently* (a stale map fires the wrong checks during work) — so
+  drift there is loud ("re-map"). `hetvabhasa`/`vyapti`/`krama` are patterns wearing
+  a thin REF skin, so drift is usually pointer-rot and the nudge is quiet
+  ("re-point, confirm the pattern still holds"). Frequent drift on those is itself a
+  smell: the entry was written as an instance, not a pattern. Best-effort — verdicts
+  cache per HEAD sha, a budget bounds the cold path, and any failure drops the
+  annotation while the checks still inject (the hook never blocks).
+- **The hook flags; the agent updates.** Detection is mechanical, re-validation is a
+  reasoning act. Nothing here rewrites an entry body or auto-bumps `VALIDATED` on
+  bare drift — an auto-stamped green is exactly the false confidence this gate
+  exists to kill. Once you've re-confirmed an entry, stamp it yourself.
 - **Batch report:** `node ~/.claude/anvi/scripts/currency-report.js [project-dir]`
-  (`--stale` hides GREEN). Point-of-use injection into the boundary injector is a
-  planned follow-up (issue #43, increment B).
+  (`--stale` hides GREEN).
