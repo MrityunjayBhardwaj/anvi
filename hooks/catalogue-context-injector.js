@@ -34,8 +34,8 @@ const { computeCurrency, parseEntries, nudgeFor, capNudges } = require('./curren
 //   2. Never auto-fix. This FLAGS; the reasoning agent updates. No body rewrite,
 //      no auto-bumped VALIDATED (a green nobody earned is the failure this gate
 //      exists to prevent).
-//   3. Stay fast. Verdicts cache by (project, HEAD sha) — drift can only change
-//      when HEAD moves — and a wall-clock budget bounds the cold path.
+//   3. Stay fast. Verdicts cache by (project HEAD, entry text) — the two things a
+//      verdict is a function of — and a wall-clock budget bounds the cold path.
 const CURRENCY_BUDGET_MS = 1500;
 const GIT_TIMEOUT_MS = 3000;
 
