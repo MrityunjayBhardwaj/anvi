@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { resolveDir } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
