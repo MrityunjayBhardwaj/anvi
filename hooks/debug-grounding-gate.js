@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// debug-grounding-gate: PrePromptSubmit hook (user_prompt_submit_hook)
+// debug-grounding-gate: UserPromptSubmit hook
 //
 // Detects debugging-shaped user messages and injects Ground Truth context
 // BEFORE Claude starts thinking about the problem. This is the earliest
@@ -28,7 +28,13 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(input);
     const cwd = data.cwd || process.cwd();
-    const userMessage = (data.user_message || data.message || '').toLowerCase();
+    // `prompt` is the field the harness actually sends on UserPromptSubmit. This
+    // read used to name only `user_message`/`message` — fields no payload carries —
+    // so the scan below ran on an empty string and this gate never fired once.
+    // Nothing reported it: a hook whose only job is to inject a reminder dies
+    // looking exactly like a hook with nothing to say. The older names are kept as
+    // a fallback because they cost nothing and cover an older harness.
+    const userMessage = (data.prompt || data.user_message || data.message || '').toLowerCase();
 
     // Debugging keyword detection
     const debugKeywords = [
@@ -89,8 +95,13 @@ process.stdin.on('end', () => {
       const vyaptiPath = path.join(anviDir, 'vyapti.md');
       if (fs.existsSync(vyaptiPath)) {
         const vyapti = fs.readFileSync(vyaptiPath, 'utf8');
-        const misaligned = vyapti.match(/## (SV\d+):[^\n]*MISALIGNED/g) ||
-                           vyapti.match(/## (SV\d+):[^\n]*NOT YET IMPLEMENTED/g);
+        // Entry IDs are per-project: some use a plain `V1`, others a prefix like
+        // `SV1`. Hardcoding one project's prefix made this scan a silent no-op
+        // everywhere else — the same "written against one project's shape and
+        // assumed universal" mistake as the payload field above, and just as
+        // invisible. Match any prefix, and gather both flags in one pass so a
+        // MISALIGNED entry can't hide an unimplemented one.
+        const misaligned = vyapti.match(/^##\s+[A-Z]{1,3}\d+:[^\n]*(?:MISALIGNED|NOT YET IMPLEMENTED)/gm);
         if (misaligned && misaligned.length > 0) {
           boundaryContext += '\n\nMisaligned/unimplemented invariants: ' +
             misaligned.map(m => m.replace(/^## /, '')).join('; ');
