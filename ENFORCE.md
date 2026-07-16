@@ -156,3 +156,11 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
    if `~/.anvideck` is dirty it auto-commits (`📓 auto-checkpoint: <project> — <files>
    (+new entry IDs)`) and pushes best-effort. No-ops when clean. This is the
    consistency guarantee — layer 2 can be skipped; this can't.
+4. **Memory backup (opt-in)** — the same Stop hook also mirrors the current
+   project's auto-memory (`~/.claude/projects/<slug>/memory/`) into the store at
+   `~/.anvideck/projects/<name>/memory/` so it rides the commit+push above. Memory
+   must stay a real dir where the harness reads it (a symlink into the store is
+   blocked as a sensitive path), so this is a one-way backup mirror, never read
+   back. **Off unless the user consents:** the mirror runs only when
+   `~/.claude/anvi-config.json` has `"memorySync": true` — written by the
+   `install.sh` "Back up your project memory?" prompt. Absent/false → no mirror.
