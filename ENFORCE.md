@@ -125,6 +125,42 @@ centralized projects). See issue #5.
 | 6 | Writing code without knowing boundary context | ⑧ — catalogue injector fires on Write/Edit |
 | 7 | Retrying failed approach endlessly | ④ — 3-round limit, then "read more source" |
 | 8 | Adding ungrounded catalogue entries | ④ — post-resolution update requires REF field |
+| 9 | A hook silently dying and nobody noticing | `test/hook-liveness.test.js` — every hook must prove it still speaks |
+
+## Liveness — a quiet hook and a dead hook look identical
+
+Every hook wraps its body in a blanket catch and always exits 0. That is correct and
+non-negotiable: a hook must never block a tool call, and an optional annotation must
+never cost the user the thing it annotates. But **the guard fails open** — it cannot
+distinguish *"nothing to say"* from *"threw on every call"*. A typo'd import, a
+renamed export, a changed payload field: all collapse into silence, and silence is
+also what healthy output looks like. The hooks that inject **reminders** are the worst
+case — nobody misses advice that never arrives.
+
+This is not theoretical. Three hooks were found dead or half-dead this way, each
+invisible to a green unit suite: a call to an unimported function (the currency
+verdict vanished while checks still injected), a cache key missing a dimension (a
+nudge outlived the action it asked for), and a gate reading a payload field the
+harness never sends (**it had never fired once**).
+
+**The rule: keep the catch-all, but make success observable somewhere.** A feature
+allowed to be silent in production must be loud in a test, or it has no witness.
+
+- `node test/hook-liveness.test.js` — spawns each hook the way the harness does,
+  against a fixture project it builds, and requires what the hook is *supposed* to
+  inject to actually arrive. It also asserts the earned silences (a non-debugging
+  prompt, an in-envelope read, a satisfied protocol), so a hook that fired on
+  everything could not pass by firing on everything.
+- **Feed the documented payload, not the one the hook expects.** A test written
+  against the hook's own assumed shape proves only that it can parse itself — that
+  is precisely how the dead gate passed review.
+- **Coverage is derived from the registration table**, so a hook added to the chain
+  without a witness fails the suite rather than being silently uncovered.
+- **Verify from the shipped artifact** (`git archive HEAD | tar -x` and run *that*).
+  The working tree hides staged/unstaged splits, and such a split is how a dead hook
+  reached a commit once already.
+- **Falsify, don't assert.** Break the thing each case guards and confirm it goes
+  red. An integration test that has never failed is a claim, not a witness.
 
 ## Registered In
 
