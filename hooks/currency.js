@@ -72,6 +72,48 @@ function extractRefFiles(refField) {
   return out;
 }
 
+// Extract path specs from a FILES: field.
+//
+// FILES: and REF: are different grammars and must not share a parser. REF: is prose
+// that happens to contain a path; FILES: is a comma-separated list of paths — the
+// code a boundary MAPS, and what the injector matches on. Reading a boundary's
+// freshness from REF: alone measures the doc that grounds it while the code it
+// describes stays invisible: rewrite every mapped file, touch nothing else, and the
+// entry reads green — inverted exactly where the map's silent rot matters most.
+//
+// Shapes taken from the live fleet corpus, not imagined (all of these are real):
+//   plain list      hooks/a.js, scripts/b.cjs
+//   glob            bin/lib/*.cjs, public/*.glb
+//   directory       public/audio/, packages/app/src/assetLibrary   (no extension!)
+//   symbol note     src/bus.ts (loadBuffer normaliser)
+//   note w/ slashes src/main.tsx (route gates: /, /optimize/, /bake/)
+//   absolute probes /tmp/probe-orbit.mjs + /tmp/probe-render.mjs
+//   prose/TO BUILD  release runbook (none yet — TO BUILD)
+//   template line   [comma-separated list of source files at this boundary — …]
+//
+// So: strip parenthetical notes FIRST (they carry slashes and would otherwise mint
+// junk specs), then split the list, then keep tokens that look like repo paths.
+// Deliberately NOT the FILE_EXT whitelist used for REF:. FILES: is declared to be a
+// file list, so a path is anything with a separator or an extension — otherwise real
+// entries (.glb, .patch, extension-less directories) get silently dropped, which is
+// the same half-read field this fixes.
+function extractFileSpecs(filesField) {
+  if (!filesField) return [];
+  const out = [];
+  const noNotes = String(filesField).replace(/\([^)]*\)/g, ' ');
+  for (const chunk of expandBraces(noNotes).split(/[,;]+/)) {
+    for (let tok of chunk.trim().split(/\s+/)) {
+      tok = tok.replace(/^[`'"[(]+|[`'")\],.:+]+$/g, '');
+      if (!tok) continue;
+      if (tok.startsWith('/') || tok.startsWith('~')) continue; // outside the repo
+      if (/[<>]/.test(tok)) continue;                           // <placeholder>
+      if (!tok.includes('/') && !FILE_EXT.test(tok)) continue;  // prose, not a path
+      if (!out.includes(tok)) out.push(tok);
+    }
+  }
+  return out;
+}
+
 // Parse a catalogue file into entries. An entry = a "## ID:" / "### ID:" heading
 // plus its body, up to the next such heading. Field lines may be bold (**REF:**)
 // or plain (REF:). Line numbers are 1-based over the CURRENT file — which is what
@@ -101,6 +143,7 @@ function parseEntries(md) {
       refField: field(body, 'REF'),
       fixField: field(body, 'FIX'),
       validatedField: field(body, 'VALIDATED'),
+      filesField: field(body, 'FILES'),
       lineStart,
       lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
     });
@@ -250,6 +293,17 @@ function capNudges(nudges, cap = NUDGE_CAP) {
   return kept;
 }
 
+// Does a spec point at anything? A spec can be a literal file, a directory, or a
+// glob (`bin/lib/*.cjs`). fs answers the first two; only git can answer a glob — so
+// a glob that fs can't stat would otherwise read as a dangling pointer and drag a
+// perfectly live entry toward RED. Ask fs first (cheap, and authoritative for a
+// literal path), and spend a git call only on the specs that need one.
+function specExists(f, fileExists, git) {
+  if (fileExists(f)) return true;
+  if (!/[*?[\]]/.test(f)) return false; // literal path that isn't there — fs is the last word
+  try { return git(`ls-files -- ${JSON.stringify(f)}`).trim().length > 0; } catch { return false; }
+}
+
 // Compute a currency verdict for one entry.
 //   entry: { validatedField?, fixField?, refField?, id?, lineStart?, lineEnd? }
 //   opts:  { git, fileExists, storeGit?, cataloguePath? }
@@ -261,14 +315,23 @@ function capNudges(nudges, cap = NUDGE_CAP) {
 // Returns { status, anchor, files:[{file,exists,changedCommits}], reason }.
 function computeCurrency(entry, opts) {
   const { git, fileExists, storeGit, cataloguePath } = opts;
-  const refFiles = extractRefFiles(entry.refField);
 
-  // No computable REF → nothing to diff against, so don't spend git calls walking
+  // The UNION of what the entry maps and what grounds it. A boundary genuinely
+  // depends on both: FILES: is the code it describes, REF: the doc it was written
+  // from, and either moving is a reason to re-read it. Union, not swap — most
+  // projects carry REF: only, where REF: IS the code pointer and today's behaviour
+  // is already right; adding FILES: takes nothing away from them.
+  const refFiles = extractRefFiles(entry.refField);
+  for (const spec of extractFileSpecs(entry.filesField)) {
+    if (!refFiles.includes(spec)) refFiles.push(spec);
+  }
+
+  // Nothing computable → nothing to diff against, so don't spend git calls walking
   // the ladder for an anchor we can't use.
   if (refFiles.length === 0) {
     return {
       status: 'GRAY', anchor: { sha: null, source: 'none' }, files: [],
-      reason: 'no computable REF file (cross-ref/section only)',
+      reason: 'no computable FILES/REF path (cross-ref/section only)',
     };
   }
 
@@ -289,7 +352,7 @@ function computeCurrency(entry, opts) {
   const files = [];
   let anyDrift = false;
   for (const f of refFiles) {
-    if (!fileExists(f)) { files.push({ file: f, exists: false }); continue; }
+    if (!specExists(f, fileExists, git)) { files.push({ file: f, exists: false }); continue; }
     let changed = 0;
     try {
       const log = git(`log ${anchor.sha}..HEAD --format=%h -- ${JSON.stringify(f)}`).trim();
@@ -321,4 +384,5 @@ function computeCurrency(entry, opts) {
 module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
+  extractFileSpecs, specExists,
 };

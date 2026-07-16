@@ -3,6 +3,7 @@
 'use strict';
 const {
   computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
+  extractFileSpecs, specExists,
 } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -250,6 +251,80 @@ eq(capped[0], N.red, 'cap keeps the most urgent, not the first-arrived');
 ok(!capped.slice(0, 3).includes(N.gray), 'cap drops the least urgent first');
 ok(/and 4 more/.test(capped[3]), 'tail counts exactly what was dropped');
 ok(/currency-report/.test(capped[3]), 'tail points at the exhaustive surface — silence about the remainder would read as "that was all"');
+
+// --- FILES: — the code a boundary MAPS ---------------------------------------
+// Every fixture below is a REAL line lifted from the live fleet catalogues, not an
+// invented shape. Inventing them is what let the last parser pass 23 cases and still
+// be wrong four ways on the first real corpus it met.
+console.log('extractFileSpecs (fixtures from the live corpus)');
+const spec = (s) => extractFileSpecs(s);
+
+eq(spec('hooks/anvi-paths.js, scripts/register-hooks.cjs').join('|'),
+   'hooks/anvi-paths.js|scripts/register-hooks.cjs', 'plain comma list');
+eq(spec('bin/anvi-tools.cjs, bin/lib/*.cjs').join('|'),
+   'bin/anvi-tools.cjs|bin/lib/*.cjs', 'glob survives — REF:’s parser drops it as non-literal');
+eq(spec('public/audio/, public/*.glb').join('|'), 'public/audio/|public/*.glb',
+   'directory + a glob whose extension is outside the code whitelist');
+eq(spec('packages/app/src/assetLibrary, packages/editor/src/seed.ts').join('|'),
+   'packages/app/src/assetLibrary|packages/editor/src/seed.ts',
+   'extension-less directory is kept (has a separator)');
+eq(spec('src/world/audio/bus.ts (loadBuffer normaliser)').join('|'), 'src/world/audio/bus.ts',
+   'parenthetical symbol note dropped, file kept');
+eq(spec('src/main.tsx (route gates: /, /optimize/, /bake/, /fluid/)').join('|'), 'src/main.tsx',
+   'note containing slashes mints no junk specs — the reason notes are stripped FIRST');
+eq(spec('src/engine/Program.ts (step tags), src/engine/App.ts (UI footer — TO BUILD).').join('|'),
+   'src/engine/Program.ts|src/engine/App.ts', 'trailing period + TO BUILD note');
+eq(spec('package.json, CHANGELOG.md, release runbook (none yet — TO BUILD)').join('|'),
+   'package.json|CHANGELOG.md', 'prose entry with no path is not a file');
+eq(spec('/tmp/probe-orbit.mjs + /tmp/probe-render.mjs (Playwright A/B harnesses)').length, 0,
+   'absolute probe paths excluded — outside the repo, not computable here');
+eq(spec('[comma-separated list of source files at this boundary — used by hook]').length, 0,
+   'the template placeholder line yields nothing');
+eq(spec('patches/realism-effects+1.1.2.patch, package.json').join('|'),
+   'patches/realism-effects+1.1.2.patch|package.json', '+ inside a filename is not a separator');
+eq(spec(undefined).length, 0, 'no FILES: field');
+
+// --- the union ---------------------------------------------------------------
+console.log('FILES: ∪ REF:');
+// The gap this closes: a boundary maps code via FILES: and is grounded by a doc via
+// REF:. Measuring only REF: means rewriting every mapped file reads GREEN.
+v = computeCurrency(
+  { validatedField: 'abc1234', refField: 'ENFORCE.md (chain + resolution table)', filesField: 'a.js, b.js' },
+  { git: makeGit({ 'abc1234:ENFORCE.md': '', 'abc1234:a.js': 'h1\n', 'abc1234:b.js': '' }),
+    fileExists: exists(['ENFORCE.md', 'a.js', 'b.js']) });
+eq(v.status, 'YELLOW', 'mapped code drifted while the doc stood still → YELLOW (was GREEN)');
+eq(v.files.map(f => f.file).join('|'), 'ENFORCE.md|a.js|b.js', 'verdict covers the union, doc first');
+
+v = computeCurrency(
+  { validatedField: 'abc1234', refField: 'ENFORCE.md', filesField: 'a.js' },
+  { git: makeGit({ 'abc1234:ENFORCE.md': 'h1\n', 'abc1234:a.js': '' }),
+    fileExists: exists(['ENFORCE.md', 'a.js']) });
+eq(v.status, 'YELLOW', 'doc drifted while code stood still → still YELLOW (union, not swap)');
+
+// REF:-only entries — 8 of 12 fleet projects — must be untouched by this.
+v = computeCurrency({ validatedField: 'abc1234', refField: 'b.js' },
+  { git: makeGit({ 'abc1234:b.js': '' }), fileExists: exists(['b.js']) });
+eq(v.status, 'GREEN', 'REF:-only entry unchanged — the change is additive');
+
+// FILES:-only, no REF: — a boundary that never named a grounding doc is still checkable.
+v = computeCurrency({ validatedField: 'abc1234', filesField: 'a.js' },
+  { git: makeGit({ 'abc1234:a.js': 'h1\n' }), fileExists: exists(['a.js']) });
+eq(v.status, 'YELLOW', 'FILES:-only entry is computable (was GRAY — nothing to diff)');
+
+// --- specExists: only git can answer a glob ----------------------------------
+console.log('specExists');
+const lsGit = (matches) => (args) => {
+  const m = args.match(/^ls-files -- "(.+)"$/);
+  if (m) return matches[m[1]] || '';
+  return '';
+};
+ok(specExists('a.js', exists(['a.js']), lsGit({})), 'literal file present → fs answers, no git call');
+ok(!specExists('gone.js', exists([]), lsGit({})), 'literal file absent → fs is the last word');
+ok(specExists('bin/lib/*.cjs', exists([]), lsGit({ 'bin/lib/*.cjs': 'bin/lib/core.cjs\n' })),
+   'glob fs cannot stat → git resolves it (else a live glob reads as dangling)');
+ok(!specExists('bin/nope/*.cjs', exists([]), lsGit({})), 'glob matching nothing → genuinely gone');
+ok(!specExists('x/*.js', exists([]), () => { throw new Error('not a repo'); }),
+   'git unavailable → not exists, never throws');
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
