@@ -166,10 +166,11 @@ chmod +x "$ANVI_DIR/bin/anvi-tools.cjs"
 rm -rf "$ANVI_DIR/bin/lib"
 cp -r "$SCRIPT_DIR/bin/lib" "$ANVI_DIR/bin/"
 
-# Scripts
+# Scripts (.sh helpers + .js tools like currency-report.js)
 [ -d "$SCRIPT_DIR/scripts" ] && {
   mkdir -p "$ANVI_DIR/scripts"
   cp "$SCRIPT_DIR/scripts/"*.sh "$ANVI_DIR/scripts/" 2>/dev/null || true
+  cp "$SCRIPT_DIR/scripts/"*.js "$ANVI_DIR/scripts/" 2>/dev/null || true
   chmod +x "$ANVI_DIR/scripts/"*.sh 2>/dev/null || true
 }
 

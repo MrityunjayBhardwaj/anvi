@@ -164,3 +164,22 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
    back. **Off unless the user consents:** the mirror runs only when
    `~/.claude/anvi-config.json` has `"memorySync": true` — written by the
    `install.sh` "Back up your project memory?" prompt. Absent/false → no mirror.
+
+### Currency — is a catalogue entry STILL real?
+
+The third gate, alongside Grounding ("is it real?") and Provenance ("is it real
+HERE?"). A catalogue entry is a frozen inference; the code its `REF:` points at
+drifts underneath it. Currency detects **drift since the entry was last
+validated** — it is *not* a correctness claim (GREEN = "not known to have
+drifted," never "true"); every verdict is a re-verify prompt.
+
+- **Anchor:** an optional `VALIDATED: <sha> <date>` field (the commit where the
+  entry's body was last confirmed against code). Absent → falls back to the `FIX:`
+  sha, or a PR/issue `#N` resolved to its squash-merge commit. So currency works
+  with **zero backfill** and sharpens as entries gain `VALIDATED`.
+- **Verdicts** (`hooks/currency.js`, run in the project repo): 🔴 RED all REF
+  files gone (dangling), 🟡 YELLOW a REF file changed since the anchor (drifted),
+  🟢 GREEN no drift, ⚪ GRAY no resolvable anchor / non-file REF.
+- **Batch report:** `node ~/.claude/anvi/scripts/currency-report.js [project-dir]`
+  (`--stale` hides GREEN). Point-of-use injection into the boundary injector is a
+  planned follow-up (issue #43, increment B).
