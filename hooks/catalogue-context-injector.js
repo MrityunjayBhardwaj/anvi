@@ -240,7 +240,7 @@ process.stdin.on('end', () => {
     // entry the injection asks you to reason from, and these are selected by text
     // match rather than by an ID scrape, so they have to be captured here at the
     // point of selection. Deriving them a second way would be a second matching
-    // rule, free to drift out of step with the one that built the message (V1).
+    // rule, free to drift out of step with the one that built the message.
     const vyaptiIds = [];
     const vyaptiPath = path.join(anviDir, 'vyapti.md');
     if (fs.existsSync(vyaptiPath)) {

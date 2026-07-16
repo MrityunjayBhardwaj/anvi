@@ -232,7 +232,7 @@ function nudgeFor(verdict, { catalogue, id } = {}) {
 //   ⚪ unanchored    a call to action, not a live hazard. Lowest at point of use.
 // Ranking lives HERE, next to nudgeFor, because it reads the markers nudgeFor
 // writes: split them across modules and a changed marker degrades ordering to a
-// silent no-op — the exact failure class this file exists to catch (V7).
+// silent no-op — the exact failure class this file exists to catch.
 const NUDGE_CAP = 5;
 
 function rankNudge(n) {
