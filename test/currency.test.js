@@ -2,7 +2,7 @@
 // Unit test for hooks/currency.js — mocked git + fileExists, no real repo.
 'use strict';
 const {
-  computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor,
+  computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
 } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -225,6 +225,31 @@ for (const [name, n] of [['high', hi], ['low', lo], ['gray', nudgeFor(gray, {})]
   ok(!/\b(auto-?updated|I (?:updated|stamped)|has been (?:updated|stamped))\b/i.test(n),
     `${name} nudge asks for action, never claims to have taken it`);
 }
+
+// --- capNudges --------------------------------------------------------------
+// A boundary can surface a dozen entries and most of them have drifted, so the
+// cap is what keeps the annotation from burying the checks it annotates. Order
+// matters more than the cap: whatever gets cut must be the least urgent thing.
+console.log('capNudges');
+const N = {
+  red:  'V9: 🔴 every file this entry points at is gone — it dangles.',
+  high: 'B1: 🟡 drifted (x.md +1). RE-MAP before trusting the checks above.',
+  low1: 'H1: 🟡 REF drifted since its anchor (a.js +2). Re-point the REF.',
+  low2: 'H2: 🟡 REF drifted since its anchor (b.js +2). Re-point the REF.',
+  gray: 'K4: ⚪ no currency anchor (no REF) — freshness unknown.',
+};
+eq(capNudges([N.low1, N.red]).length, 2, 'under the cap → nothing dropped');
+eq(capNudges([N.gray, N.low1, N.high, N.red])[0], N.red, 'dangling ranks first — it cannot be reasoned from at all');
+eq(capNudges([N.gray, N.low1, N.high, N.red])[1], N.high, 'silent-failure re-map outranks pointer-rot');
+eq(capNudges([N.gray, N.low1, N.high])[2], N.gray, 'unanchored ranks last — a call to action, not a live hazard');
+
+const many = [N.red, N.high, N.low1, N.low2, N.gray, N.gray, N.low1];
+const capped = capNudges(many, 3);
+eq(capped.length, 4, 'over the cap → cap + one tail line');
+eq(capped[0], N.red, 'cap keeps the most urgent, not the first-arrived');
+ok(!capped.slice(0, 3).includes(N.gray), 'cap drops the least urgent first');
+ok(/and 4 more/.test(capped[3]), 'tail counts exactly what was dropped');
+ok(/currency-report/.test(capped[3]), 'tail points at the exhaustive surface — silence about the remainder would read as "that was all"');
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
