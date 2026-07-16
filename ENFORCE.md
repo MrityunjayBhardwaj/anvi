@@ -202,9 +202,22 @@ drifted," never "true"); every verdict is a re-verify prompt.
   smell: the entry was written as an instance, not a pattern. Best-effort — verdicts
   cache per HEAD sha, a budget bounds the cold path, and any failure drops the
   annotation while the checks still inject (the hook never blocks).
+  Every catalogue the injection surfaces gets annotated — dharana, hetvabhasa **and**
+  vyapti. Annotating only some teaches that silence means fresh, which is the false
+  confidence this gate exists to kill. Because a boundary can surface a dozen entries
+  and drift is the common case, the nudges are ranked (dangling → silent-failure
+  re-map → pointer-rot → unanchored) and capped, with a tail line naming how many
+  were held back and pointing at the report. The cap protects the checks: a hook that
+  prints a wall on every edit stops being read, which costs more than the drift does.
 - **The hook flags; the agent updates.** Detection is mechanical, re-validation is a
   reasoning act. Nothing here rewrites an entry body or auto-bumps `VALIDATED` on
   bare drift — an auto-stamped green is exactly the false confidence this gate
   exists to kill. Once you've re-confirmed an entry, stamp it yourself.
 - **Batch report:** `node ~/.claude/anvi/scripts/currency-report.js [project-dir]`
   (`--stale` hides GREEN).
+- **Tests:** `node test/currency.test.js` (mocked units — the ladder, sensitivity,
+  nudges, the cap) and `node test/injector-currency.test.js` (spawns the hook on the
+  real catalogues). The second exists because the first cannot see the first's own
+  blind spot: the injector's never-block guard **fails open**, so a broken wiring —
+  a missing import, a renamed export — deletes currency entirely while every unit
+  stays green and the hook still exits 0. Only running the hook proves it is live.
