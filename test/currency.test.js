@@ -4,6 +4,7 @@
 const {
   computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
   extractFileSpecs, specExists, lintEntry, lineAnchoredRefs, LINT,
+  classifySpec, extensionsFrom, FILE_EXT,
 } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -27,8 +28,20 @@ eq(extractRefFiles('').length, 0, 'empty');
 
 // --- mocked repo ---
 // history: file "a.js" changed in 2 commits after anchor A; "b.js" unchanged; "gone.js" absent.
-function makeGit(logMap) {
+//
+// `everKnown` = paths this repo has history for. It decides "you deleted it"
+// (dangling, RED) from "it was never yours" (vendored/external, GRAY) — so a fixture
+// that omits it is asserting the file was never in the repo, which for a
+// deleted-file case is not what it means. Default: a missing file is one this repo
+// once had, which is what the pre-existing RED cases intend.
+function makeGit(logMap, everKnown = null) {
   return (args) => {
+    const hist = args.match(/^log --oneline -1 --all -- "(.+)"$/);
+    if (hist) {
+      const f = hist[1];
+      if (everKnown === null) return 'abc1234 once here\n';        // default: repo knew it
+      return everKnown.includes(f) ? 'abc1234 once here\n' : '';   // '' → never ours → external
+    }
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
     if (m) { const key = `${m[1]}:${m[2]}`; if (!(key in logMap)) throw new Error('unknown sha'); return logMap[key]; }
     const pr = args.match(/--grep="\(#(\d+)\)"/);
@@ -384,6 +397,93 @@ eq(codesOf({ refField: 'src/a.ts:540' }, 'hetvabhasa.md'),
 
 ok(lintEntry({ refField: 'src/a.ts:540' }, {})[0].refs.join(',') === 'src/a.ts:540',
    'the finding names the offending pointer, so the worklist is actionable');
+
+// --- "not on disk" is three conditions, not one ------------------------------
+// Collapsing them manufactures false dangling verdicts. Each of these is a real
+// shape from the fleet, and each was found by RUNNING the report on a live project
+// rather than by imagining what a REF looks like.
+console.log('classifySpec — deleted vs external vs bare-name');
+const clsGit = ({ tracked = [], history = [] } = {}) => (args) => {
+  const ls = args.match(/^ls-files -- "(.+?)"(?: "(.+?)")?$/);
+  if (ls) {
+    const pats = [ls[1], ls[2]].filter(Boolean);
+    return tracked.filter(t => pats.some(p => {
+      if (p.startsWith('*/')) return t.endsWith(p.slice(1)) || t === p.slice(2);
+      if (p.includes('*')) return new RegExp('^' + p.replace(/\*/g, '[^/]*') + '$').test(t);
+      return t === p;
+    })).join('\n');
+  }
+  const hist = args.match(/^log --oneline -1 --all -- "(.+)"$/);
+  if (hist) return history.includes(hist[1]) ? 'abc1234 x\n' : '';
+  return '';
+};
+
+let c = classifySpec('src/a.js', exists(['src/a.js']), clsGit());
+eq(c.kind, 'present', 'on disk → present');
+
+c = classifySpec('src/gone.js', exists([]), clsGit({ history: ['src/gone.js'] }));
+eq(c.kind, 'deleted', 'absent + this repo HAS history → really deleted (a true dangling ref)');
+
+c = classifySpec('ref/sources/desktop-sp/sound.rb', exists([]), clsGit({}));
+eq(c.kind, 'external', 'absent + NO history ever → never this repo’s file (vendored source)');
+
+// The bare-basename case. Found by observation: the live report showed 35 entries
+// RED for "gone: SoundLayer.ts" while src/engine/SoundLayer.ts was sitting right
+// there. The REF is shorthand, not a broken pointer.
+c = classifySpec('SoundLayer.ts', exists([]), clsGit({ tracked: ['src/engine/SoundLayer.ts'] }));
+eq(c.kind, 'present', 'bare basename that resolves to exactly one tracked file → present');
+eq(c.path, 'src/engine/SoundLayer.ts', 'and it reports the path GIT knows');
+
+c = classifySpec('config.ts', exists([]), clsGit({ tracked: ['a/config.ts', 'b/config.ts'] }));
+eq(c.kind, 'ambiguous', 'bare name matching several files → ambiguous, never a guess');
+
+c = classifySpec('nowhere.ts', exists([]), clsGit({}));
+eq(c.kind, 'external', 'bare name matching nothing, no history → external');
+
+// The consequence that matters: a resolved bare name must be DIFFED at its real
+// path. Diffing the bare token reports zero drift forever — a permanent silent GREEN
+// on a file that changes every week.
+v = computeCurrency({ validatedField: 'abc1234', refField: 'SoundLayer.ts' }, {
+  fileExt: /\.(ts|js)$/i,
+  fileExists: exists([]),
+  git: (args) => {
+    const ls = args.match(/^ls-files --/);
+    if (ls) return 'src/engine/SoundLayer.ts';
+    const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
+    if (m) return m[2] === 'src/engine/SoundLayer.ts' ? 'h1\nh2\n' : ''; // only the REAL path has drift
+    return '';
+  },
+});
+eq(v.status, 'YELLOW', 'bare-name entry drifts at its resolved path (was RED "gone")');
+eq(v.files[0].changedCommits, 2, 'drift counted against the resolved path, not the shorthand');
+
+// An entry whose refs are ALL external is not dangling — the gate simply cannot
+// speak to it. Calling that RED blames the entry for the gate's blind spot.
+v = computeCurrency({ validatedField: 'abc1234', refField: 'ref/sources/desktop-sp/sound.rb' }, {
+  fileExt: /\.(rb|ts)$/i, fileExists: exists([]), git: clsGit({}),
+});
+eq(v.status, 'GRAY', 'all-external refs → GRAY, never RED');
+ok(/outside this repo/.test(v.reason), 'and the reason names the real cause (vendored source)');
+
+// Regression: a genuinely deleted file must STILL be RED. The whole risk of the
+// third state is that it becomes a blanket excuse.
+v = computeCurrency({ validatedField: 'abc1234', refField: 'src/gone.js' }, {
+  fileExt: /\.(js)$/i, fileExists: exists([]), git: clsGit({ history: ['src/gone.js'] }),
+});
+eq(v.status, 'RED', 'a file this repo deleted is still RED — external is not a blanket excuse');
+
+// --- extensionsFrom: derived from the repo, not compiled in ------------------
+console.log('extensionsFrom');
+const lsGitExt = (files) => (args) => (args === 'ls-files' ? files.join('\n') : '');
+let ext = extensionsFrom(lsGitExt(['a/b.rb', 'c.sql', 'd.ts']));
+ok(ext.test('lib/core.rb'), 'a repo tracking .rb makes .rb a file extension (the whole gap)');
+ok(ext.test('q.sql'), 'and .sql');
+ok(!ext.test('use_bpm 0.5'), 'a decimal is still not a file');
+ok(!ext.test('scheduler.tick'), 'a method call is still not a file — prose stays out');
+ext = extensionsFrom(() => { throw new Error('not a repo'); });
+eq(ext.source, FILE_EXT.source, 'git unavailable → falls back to the compiled default');
+ext = extensionsFrom(lsGitExt([]));
+eq(ext.source, FILE_EXT.source, 'empty repo → compiled default, never an empty matcher');
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
