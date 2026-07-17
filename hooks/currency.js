@@ -44,7 +44,41 @@
 // file, file:line, file + "(symbol)", "File.md §Section", or a catalogue
 // cross-ref ("hetvabhasa H6"). We keep only tokens that look like real repo
 // files and drop line numbers / section anchors / symbol notes / cross-refs.
+// The default discriminator. REF: is PROSE, so this list's job is to tell a path
+// from a word — it cannot simply accept "anything with a dot". Measured across the
+// live fleet, the tokens carrying an unlisted extension are overwhelmingly not
+// files: decimals (`0.5`, `1.571`), method calls (`.tick`, `.draw`, `.sleep`),
+// property reads (`.args`, `.bpm`), even `.com`. Widening this naively admits all of
+// it as "files" and the gate starts reporting on prose.
+//
+// But a CLOSED list written against the languages in front of its author silently
+// zeroes out coverage for every project in a language nobody listed — Ruby, Java,
+// Swift, Kotlin, Vue. The entry reads "no computable REF" when the truth is the gate
+// cannot read the pointer. That is a property of this list, presented as a property
+// of the entry.
+//
+// So the list is only a DEFAULT. `extensionsFrom(git)` derives the real set from
+// what a repo actually tracks, which adapts to any language without admitting prose:
+// no repo tracks a file called `x.tick`.
 const FILE_EXT = /\.(js|cjs|mjs|ts|tsx|jsx|md|sh|json|py|rs|go|css|html)$/i;
+
+// Every extension this repo actually tracks, as a matcher — self-adapting, and it
+// keeps prose out for free (nobody commits `foo.sleep`). Falls back to the compiled
+// default when git can't answer, so a non-repo caller behaves exactly as before.
+function extensionsFrom(git) {
+  try {
+    const files = git('ls-files').split('\n');
+    const exts = new Set();
+    for (const f of files) {
+      const m = f.match(/\.([A-Za-z0-9]{1,8})$/);
+      if (m) exts.add(m[1].toLowerCase());
+    }
+    if (!exts.size) return FILE_EXT;
+    return new RegExp(`\\.(${[...exts].map(e => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`, 'i');
+  } catch {
+    return FILE_EXT;
+  }
+}
 
 // Expand shell-style brace lists so "references/{a,b,c}-t.md" becomes three files.
 function expandBraces(s) {
@@ -52,7 +86,7 @@ function expandBraces(s) {
     (_, pre, inner, post) => inner.split(',').map(x => pre + x.trim() + post).join(' '));
 }
 
-function extractRefFiles(refField) {
+function extractRefFiles(refField, fileExt = FILE_EXT) {
   if (!refField) return [];
   const out = [];
   // Split on whitespace AND ;,  so file tokens separate cleanly from symbol notes
@@ -64,7 +98,7 @@ function extractRefFiles(refField) {
     // Strip wrapping backticks/quotes/parens/trailing punctuation.
     tok = tok.replace(/^[`'"([]+|[`'")\].,]+$/g, '');
     if (!tok) continue;
-    if (!FILE_EXT.test(tok)) continue;                        // must look like a repo file
+    if (!fileExt.test(tok)) continue;                         // must look like a repo file
     if (tok.startsWith('/') || tok.startsWith('~')) continue; // outside the project repo — not computable here
     if (/[<>*]/.test(tok)) continue;                          // placeholder <repo>/… or glob *.sh — not a literal path
     if (!out.includes(tok)) out.push(tok);
@@ -393,10 +427,59 @@ function capNudges(nudges, cap = NUDGE_CAP) {
 // a glob that fs can't stat would otherwise read as a dangling pointer and drag a
 // perfectly live entry toward RED. Ask fs first (cheap, and authoritative for a
 // literal path), and spend a git call only on the specs that need one.
+// Classify a spec: 'present' | 'deleted' | 'external'.
+//
+// "Not on disk" is not one condition, and collapsing it to one manufactures false
+// dangling verdicts. Git can tell the two apart exactly:
+//   present   fs finds it, or (for a glob, which fs cannot stat) git matches it
+//   deleted   gone from disk, but THIS repo has history for the path → really removed
+//   external  gone, and this repo has NO history for it, ever → it was never this
+//             repo's file. Vendored/reference source, or a sibling repo's path. Not
+//             a dangling pointer — a pointer at something this git cannot speak to.
+//
+// The third state is the whole point. The fleet's Ruby REFs (88 of them) name
+// vendored upstream source under the reference area: not in the project dir, never
+// tracked by the project's git. Teaching the extractor to recognise `.rb` without
+// this would turn an honest gray into RED "all REF files gone" — worse than the gap
+// it fixes. Verified by hand against that project before writing this.
+function classifySpec(f, fileExists, git) {
+  if (fileExists(f)) return { kind: 'present', path: f };
+  const isGlob = /[*?[\]]/.test(f);
+  if (isGlob) {
+    // fs cannot stat a glob; only git can answer. A live glob misread as missing
+    // would drag a perfectly current entry toward RED.
+    try { if (git(`ls-files -- ${JSON.stringify(f)}`).trim()) return { kind: 'present', path: f }; } catch { /* fall through */ }
+  }
+
+  // A bare basename ("SoundLayer.ts") is how a lot of REFs are actually written, and
+  // it is not a broken pointer — it is shorthand for a file that really is here.
+  // Resolve it against what the repo tracks before judging it: skipping this step
+  // calls the project's own file "gone" (or, worse, "vendored"), which is a wrong
+  // answer dressed as a confident one. Only accept an UNAMBIGUOUS match — two files
+  // named config.ts mean the shorthand doesn't identify one, and guessing would
+  // diff the wrong file while looking right.
+  if (!f.includes('/') && !isGlob) {
+    try {
+      const hits = git(`ls-files -- ${JSON.stringify('*/' + f)} ${JSON.stringify(f)}`)
+        .split('\n').map(x => x.trim()).filter(Boolean);
+      if (hits.length === 1) return { kind: 'present', path: hits[0], resolvedFrom: f };
+      if (hits.length > 1) return { kind: 'ambiguous', path: f, candidates: hits.length };
+    } catch { /* fall through */ }
+  }
+
+  // Has this repo EVER carried this path? One log call, and it is the discriminator
+  // between "you deleted it" and "it was never yours".
+  try {
+    const seen = git(`log --oneline -1 --all -- ${JSON.stringify(f)}`).trim();
+    return seen ? { kind: 'deleted', path: f } : { kind: 'external', path: f };
+  } catch {
+    return { kind: 'external', path: f }; // no history → cannot claim it was ever here
+  }
+}
+
+// Back-compat shim: existence as a boolean, for callers that only need "is it here".
 function specExists(f, fileExists, git) {
-  if (fileExists(f)) return true;
-  if (!/[*?[\]]/.test(f)) return false; // literal path that isn't there — fs is the last word
-  try { return git(`ls-files -- ${JSON.stringify(f)}`).trim().length > 0; } catch { return false; }
+  return classifySpec(f, fileExists, git).kind === 'present';
 }
 
 // Compute a currency verdict for one entry.
@@ -416,7 +499,11 @@ function computeCurrency(entry, opts) {
   // from, and either moving is a reason to re-read it. Union, not swap — most
   // projects carry REF: only, where REF: IS the code pointer and today's behaviour
   // is already right; adding FILES: takes nothing away from them.
-  const refFiles = extractRefFiles(entry.refField);
+  // Ask the repo what it tracks rather than trusting a compiled-in list, so a
+  // project in any language gets coverage. opts.fileExt lets a caller (the report)
+  // derive it once and reuse it across every entry instead of per-entry.
+  const fileExt = opts.fileExt || extensionsFrom(git);
+  const refFiles = extractRefFiles(entry.refField, fileExt);
   for (const spec of extractFileSpecs(entry.filesField)) {
     if (!refFiles.includes(spec)) refFiles.push(spec);
   }
@@ -447,10 +534,27 @@ function computeCurrency(entry, opts) {
   const files = [];
   let anyDrift = false;
   for (const f of refFiles) {
-    if (!specExists(f, fileExists, git)) { files.push({ file: f, exists: false }); continue; }
+    const c = classifySpec(f, fileExists, git);
+    if (c.kind !== 'present') {
+      // 'deleted'   this repo had it and lost it → a real dangling pointer.
+      // 'external'  never this repo's file (vendored source, sibling repo) → the gate
+      //             cannot speak to it; saying "dangling" would blame the entry for
+      //             our blind spot.
+      // 'ambiguous' the shorthand matches several tracked files → we don't know WHICH,
+      //             so we cannot diff it. Not the entry's rot either.
+      files.push({
+        file: f, exists: false,
+        external: c.kind === 'external', ambiguous: c.kind === 'ambiguous',
+      });
+      continue;
+    }
+    // Diff the path git actually knows — a bare "SoundLayer.ts" resolves to
+    // "src/engine/SoundLayer.ts", and `git log -- SoundLayer.ts` would report zero
+    // drift forever: a silent, permanent GREEN on a file that moves every week.
+    const target = c.path;
     let changed = 0;
     try {
-      const log = git(`log ${anchor.sha}..HEAD --format=%h -- ${JSON.stringify(f)}`).trim();
+      const log = git(`log ${anchor.sha}..HEAD --format=%h -- ${JSON.stringify(target)}`).trim();
       changed = log ? log.split('\n').filter(Boolean).length : 0;
     } catch {
       // Anchor sha not in history (e.g. squash dropped it) → can't compute drift for this file.
@@ -466,6 +570,21 @@ function computeCurrency(entry, opts) {
   // among present ones is usually a cross-repo ref or a prose mention, not a dead
   // pointer, so it must not override drift/fresh on the files that do resolve.
   if (present.length === 0) {
+    // Nothing resolves — but WHY decides whether this is the entry's fault or ours.
+    // If no ref was ever this repo's file, the entry is not dangling: its grounding
+    // lives somewhere this git cannot diff (vendored upstream, a sibling repo). Say
+    // that, and say it as GRAY — "we cannot judge" — never RED, "you point at
+    // nothing". Calling the gate's own blind spot the entry's rot is the false
+    // confidence this whole gate exists to prevent, pointed the other way.
+    if (files.every(f => f.external || f.ambiguous)) {
+      const amb = files.some(f => f.ambiguous);
+      return {
+        status: 'GRAY', anchor, files,
+        reason: amb
+          ? 'REF names are ambiguous in this repo (several files match) — not diffable here'
+          : 'REF points outside this repo (vendored/reference source) — not diffable here',
+      };
+    }
     return { status: 'RED', anchor, files, reason: 'all REF files no longer exist' };
   }
   if (anyDrift) return { status: 'YELLOW', anchor, files, reason: 'REF file(s) changed since anchor' };
@@ -479,6 +598,6 @@ function computeCurrency(entry, opts) {
 module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
-  extractFileSpecs, specExists,
+  extractFileSpecs, specExists, classifySpec, extensionsFrom,
   lintEntry, lineAnchoredRefs, LINT,
 };

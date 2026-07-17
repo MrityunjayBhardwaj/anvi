@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, lintEntry } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, lintEntry, extensionsFrom } = loadFromCandidates('currency.js');
 const { resolveDir } = loadFromCandidates('anvi-paths.js');
 
 // --- args -------------------------------------------------------------------
@@ -103,6 +103,11 @@ if (lintOnly) {
 // git runs in the PROJECT repo (REF files + FIX shas are project-repo history).
 const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const fileExists = (rel) => fs.existsSync(path.join(cwd, rel));
+// What counts as a "file" in a REF: is derived from what THIS repo tracks, not from
+// a list compiled into shared code — a project in an unlisted language would
+// otherwise get zero coverage while the report cheerfully printed "gray". Derived
+// once here and reused for every entry.
+const fileExt = extensionsFrom(git);
 
 // storeGit runs in the repo that holds the CATALOGUES — a different repo from the
 // project whenever .anvi is the symlink-to-central layout. Ladder rung 4 asks it
@@ -131,7 +136,7 @@ for (const cat of CATALOGUES) {
   const lines = [];
   for (const e of entries) {
     const v = computeCurrency(e, {
-      git, fileExists, storeGit,
+      git, fileExists, storeGit, fileExt,
       cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
     });
     counts[v.status]++;
