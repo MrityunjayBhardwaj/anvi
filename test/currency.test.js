@@ -525,6 +525,16 @@ v = computeCurrency({ validatedField: 'abc1234', refField: 'ref/sources/desktop-
 });
 eq(v.status, 'GRAY', 'without a store resolver the same entry falls back to GRAY — proves the resolver is what distinguishes it');
 
+// A reference-grounded entry needs NO anchor — its grounding doesn't drift with this
+// repo's commits, so it is 🔵 even with no VALIDATED / FIX / time anchor at all. This
+// is the #57 bug one level down: requiring an anchor first would send an
+// unanchored-but-grounded entry to GRAY, reading identical to an ungrounded one.
+v = computeCurrency({ refField: 'ref/sources/desktop-sp/sound.rb' }, {
+  fileExt: /\.(rb|ts)$/i, fileExists: exists([]), git: clsGit({}),
+  refResolver: refResolverStub({ 'ref/sources/desktop-sp/sound.rb': { path: 'sources/desktop-sp/sound.rb', area: 'ref/sources' } }),
+});
+eq(v.status, 'REFERENCE', 'a reference entry with NO anchor is still 🔵 — grounding does not depend on an anchor');
+
 // Mixed entry: one project file present + one store ref. The project file decides the
 // verdict (drift/fresh); the store ref must NOT drag it to RED or read as "unresolved".
 v = computeCurrency({ validatedField: 'abc1234', refField: 'src/a.ts ref/sources/x.rb' }, {

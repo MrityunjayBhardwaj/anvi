@@ -615,6 +615,32 @@ function computeCurrency(entry, opts) {
     };
   }
 
+  // Classify every ref FIRST — where each file lives is independent of any anchor,
+  // and it decides whether an anchor is even needed. A purely reference-grounded
+  // entry (all refs in the store) does not drift with this repo's commits, so it is
+  // 🔵 whether or not it carries a VALIDATED/FIX/time anchor. Requiring an anchor
+  // before this check would send an unanchored-but-grounded entry to GRAY — the #57
+  // "well-grounded reads like ungrounded" bug, one level down. Present files still
+  // need an anchor (that is what drift is measured against); the anchor block below
+  // fires only when there is something to diff.
+  const kinds = refFiles.map(f => ({ f, c: classifySpec(f, fileExists, git, refResolver) }));
+  const hasPresent = kinds.some(k => k.c.kind === 'present');
+  const allNonProject = kinds.every(k => k.c.kind === 'reference' || k.c.kind === 'external' || k.c.kind === 'ambiguous');
+  if (!hasPresent && allNonProject && kinds.some(k => k.c.kind === 'reference')) {
+    // Grounded entirely in the store — no anchor required, no drift to compute.
+    const files = kinds.map(({ f, c }) => ({
+      file: f, exists: false,
+      reference: c.kind === 'reference', referencePath: c.path, area: c.area,
+      external: c.kind === 'external', ambiguous: c.kind === 'ambiguous',
+    }));
+    const areas = [...new Set(files.filter(x => x.reference && x.area).map(x => x.area))];
+    const where = areas.length ? areas.join(', ') : 'reference area';
+    return {
+      status: 'REFERENCE', anchor: { sha: null, source: 'none' }, files,
+      reason: `grounded in the store's ${where}; freshness is an upstream-version question, not a drift this repo can compute`,
+    };
+  }
+
   const anchor = resolveAnchor({
     validatedField: entry.validatedField,
     fixField: entry.fixField,
@@ -631,8 +657,7 @@ function computeCurrency(entry, opts) {
 
   const files = [];
   let anyDrift = false;
-  for (const f of refFiles) {
-    const c = classifySpec(f, fileExists, git, refResolver);
+  for (const { f, c } of kinds) {
     if (c.kind !== 'present') {
       // 'deleted'   this repo had it and lost it → a real dangling pointer.
       // 'reference' grounded in the store (vendored upstream, GT doc, investigation)
@@ -671,31 +696,22 @@ function computeCurrency(entry, opts) {
   // among present ones is usually a cross-repo ref or a prose mention, not a dead
   // pointer, so it must not override drift/fresh on the files that do resolve.
   if (present.length === 0) {
-    // Nothing resolves in the project — but WHY decides whether this is the entry's
-    // fault or ours, and the three not-here kinds are three different facts:
+    // A purely store-grounded entry already returned REFERENCE above, before the
+    // anchor was even resolved — so if we reach here with no present files, the entry
+    // is NOT purely reference. The remaining cases:
     //
-    //   reference  the grounding resolves into the STORE (vendored upstream source, a
-    //              Ground Truth doc, an investigation). The entry is GROUNDED, just
-    //              not in a place this repo's git can diff — its freshness is a version
-    //              question against upstream, which this gate does not model. This is
-    //              #57's whole point: a well-grounded entry must not read the same as
-    //              an ungrounded one. Give it its own status, not the GRAY bin.
+    //   deleted    a file this repo had and lost → a genuine dangling pointer. If it
+    //              is mixed with store refs, the deletion still wins: RED, because the
+    //              entry points at something that is really gone. Reference does not
+    //              launder a dead pointer.
     //   external   never this repo's file AND not in the store → a sibling-repo path
     //              or prose. Honestly "we cannot judge" → GRAY.
     //   ambiguous  a shorthand matching several tracked files → we don't know which.
     //
     // RED — "you point at nothing" — is reserved for a genuinely DELETED file, never
-    // for the gate's own blind spot. Calling our limitation the entry's rot is the
-    // false confidence this whole gate exists to prevent, pointed the other way.
+    // for the gate's own blind spot. So RED only when nothing here was ever ours to
+    // begin with; if every not-here ref is reference/external/ambiguous, it is GRAY.
     if (files.every(f => f.reference || f.external || f.ambiguous)) {
-      if (files.some(f => f.reference)) {
-        const areas = [...new Set(files.filter(f => f.reference && f.area).map(f => f.area))];
-        const where = areas.length ? areas.join(', ') : 'reference area';
-        return {
-          status: 'REFERENCE', anchor, files,
-          reason: `grounded in the store's ${where}; freshness is an upstream-version question, not a drift this repo can compute`,
-        };
-      }
       const amb = files.some(f => f.ambiguous);
       return {
         status: 'GRAY', anchor, files,
