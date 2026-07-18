@@ -62,22 +62,26 @@
 // no repo tracks a file called `x.tick`.
 const FILE_EXT = /\.(js|cjs|mjs|ts|tsx|jsx|md|sh|json|py|rs|go|css|html)$/i;
 
-// Every extension this repo actually tracks, as a matcher — self-adapting, and it
-// keeps prose out for free (nobody commits `foo.sleep`). Falls back to the compiled
-// default when git can't answer, so a non-repo caller behaves exactly as before.
-function extensionsFrom(git) {
+// Every extension actually present in the corpus, as a matcher — self-adapting, and
+// it keeps prose out for free (nobody commits `foo.sleep`). Falls back to the compiled
+// default when git can't answer AND no extra files are supplied.
+//
+// `extraFiles` unions in filenames from OUTSIDE the project's git — specifically the
+// store's reference area (vendored source, GT docs, investigations). Without this a
+// project that vendors a language it doesn't otherwise use (a JS app citing Ruby
+// upstream, and tracking no .rb itself) would fail to recognise `.rb` as a file, drop
+// the ref before it is ever classified, and never reach the reference verdict — the
+// exact #57 gap, one layer earlier. The reference source IS the evidence that its
+// extension is a real file extension here, so it belongs in the derivation.
+function extensionsFrom(git, extraFiles = []) {
+  const exts = new Set();
+  const add = (name) => { const m = String(name).match(/\.([A-Za-z0-9]{1,8})$/); if (m) exts.add(m[1].toLowerCase()); };
   try {
-    const files = git('ls-files').split('\n');
-    const exts = new Set();
-    for (const f of files) {
-      const m = f.match(/\.([A-Za-z0-9]{1,8})$/);
-      if (m) exts.add(m[1].toLowerCase());
-    }
-    if (!exts.size) return FILE_EXT;
-    return new RegExp(`\\.(${[...exts].map(e => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`, 'i');
-  } catch {
-    return FILE_EXT;
-  }
+    for (const f of git('ls-files').split('\n')) add(f);
+  } catch { /* not a repo — extraFiles may still carry a set */ }
+  for (const f of extraFiles) add(f);
+  if (!exts.size) return FILE_EXT;
+  return new RegExp(`\\.(${[...exts].map(e => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`, 'i');
 }
 
 // Expand shell-style brace lists so "references/{a,b,c}-t.md" becomes three files.
@@ -378,6 +382,14 @@ function nudgeFor(verdict, { catalogue, id } = {}) {
   if (verdict.status === 'RED') {
     return `${tag}🔴 every file this entry points at is gone — it dangles. Re-point it at the code that replaced them, or retire it.`;
   }
+  if (verdict.status === 'REFERENCE') {
+    // Not a defect and not a call to re-point — the entry is grounded in vendored/
+    // reference source this repo can't diff. The ONLY live question is whether the
+    // upstream we traced has moved, which no field here records. Say that, quietly.
+    const areas = [...new Set(verdict.files.filter(f => f.reference && f.area).map(f => f.area))];
+    const where = areas.length ? areas.join(', ') : 'the reference area';
+    return `${tag}🔵 grounded in ${where} (vendored/reference source) — drift isn't a question this repo's git can answer; re-check only if the upstream version was refreshed.`;
+  }
   if (verdict.status === 'GRAY') {
     return `${tag}⚪ no currency anchor (${verdict.reason}) — freshness unknown. Stamp \`VALIDATED: <sha> <date>\` when you next confirm this entry.`;
   }
@@ -427,22 +439,32 @@ function capNudges(nudges, cap = NUDGE_CAP) {
 // a glob that fs can't stat would otherwise read as a dangling pointer and drag a
 // perfectly live entry toward RED. Ask fs first (cheap, and authoritative for a
 // literal path), and spend a git call only on the specs that need one.
-// Classify a spec: 'present' | 'deleted' | 'external'.
+// Classify a spec: 'present' | 'deleted' | 'reference' | 'external' | 'ambiguous'.
 //
 // "Not on disk" is not one condition, and collapsing it to one manufactures false
-// dangling verdicts. Git can tell the two apart exactly:
-//   present   fs finds it, or (for a glob, which fs cannot stat) git matches it
-//   deleted   gone from disk, but THIS repo has history for the path → really removed
-//   external  gone, and this repo has NO history for it, ever → it was never this
-//             repo's file. Vendored/reference source, or a sibling repo's path. Not
-//             a dangling pointer — a pointer at something this git cannot speak to.
+// verdicts. Resolve by LOCATION, in order, and let where the file actually lives —
+// not git history as a proxy for it — decide the kind:
+//   present    the project's own file: on disk, or a glob/bare-name/partial-path
+//              that resolves UNAMBIGUOUSLY to one tracked file. Diffable here.
+//   reference  not the project's file, but found in the STORE's reference area
+//              (vendored upstream source, Ground Truth docs, investigations). Its
+//              freshness is a VERSION question against upstream, not a drift question
+//              this repo's git can answer — so it is grounded, not dangling.
+//   deleted    gone from disk, but THIS repo has history for the path → really removed.
+//   external   gone, no store match, and this repo has NO history for it, ever → it
+//              was never anything this gate can speak to. A sibling repo's path, prose.
+//   ambiguous  a shorthand that matches several tracked files → we don't know WHICH.
 //
-// The third state is the whole point. The fleet's Ruby REFs (88 of them) name
-// vendored upstream source under the reference area: not in the project dir, never
-// tracked by the project's git. Teaching the extractor to recognise `.rb` without
-// this would turn an honest gray into RED "all REF files gone" — worse than the gap
-// it fixes. Verified by hand against that project before writing this.
-function classifySpec(f, fileExists, git) {
+// The 'reference' kind is #57's fix. The fleet's Ruby REFs name vendored upstream
+// source under the store's `ref/sources/`; other refs name store Ground Truth docs
+// and investigations. History alone cannot see them (they were never in the project
+// repo) and would call them 'external' — indistinguishable from a sibling-repo path
+// or prose, which is what made the best-grounded project look ungrounded. Resolving
+// against the store where they actually live is what separates "grounded elsewhere"
+// from "points at nothing". `refResolver(spec) => { path, area } | null` is injected
+// by the caller (which owns the store layout), so this stays filesystem-agnostic —
+// the same shape as fileExists/git. Absent (a non-store caller) → behaves as before.
+function classifySpec(f, fileExists, git, refResolver) {
   if (fileExists(f)) return { kind: 'present', path: f };
   const isGlob = /[*?[\]]/.test(f);
   if (isGlob) {
@@ -451,20 +473,35 @@ function classifySpec(f, fileExists, git) {
     try { if (git(`ls-files -- ${JSON.stringify(f)}`).trim()) return { kind: 'present', path: f }; } catch { /* fall through */ }
   }
 
-  // A bare basename ("SoundLayer.ts") is how a lot of REFs are actually written, and
-  // it is not a broken pointer — it is shorthand for a file that really is here.
-  // Resolve it against what the repo tracks before judging it: skipping this step
-  // calls the project's own file "gone" (or, worse, "vendored"), which is a wrong
-  // answer dressed as a confident one. Only accept an UNAMBIGUOUS match — two files
-  // named config.ts mean the shorthand doesn't identify one, and guessing would
-  // diff the wrong file while looking right.
-  if (!f.includes('/') && !isGlob) {
+  // A shorthand — a bare basename ("SoundLayer.ts") or a partial path
+  // ("interpreters/AudioInterpreter.ts") — is how a lot of REFs are actually written,
+  // and it is not a broken pointer: it is the project's own file named the short way.
+  // Resolve it against what the repo tracks before judging it; skipping this step
+  // calls the project's own file "gone" (or, worse, "vendored"), a wrong answer
+  // dressed as a confident one. A bare name matches on the basename (`*/f`); a partial
+  // path must match as a whole trailing segment (`*/f`), never as a substring, so
+  // `engine/App.ts` doesn't sweep in `reengine/App.ts`. Only an UNAMBIGUOUS match
+  // counts — two files fitting the shorthand mean it doesn't identify one, and
+  // guessing would diff the wrong file while looking right.
+  if (!isGlob && !f.startsWith('/')) {
     try {
-      const hits = git(`ls-files -- ${JSON.stringify('*/' + f)} ${JSON.stringify(f)}`)
+      const pathspecs = f.includes('/')
+        ? [JSON.stringify('*/' + f)]                 // partial path: trailing segment only
+        : [JSON.stringify('*/' + f), JSON.stringify(f)]; // bare name: basename or repo-root file
+      const hits = git(`ls-files -- ${pathspecs.join(' ')}`)
         .split('\n').map(x => x.trim()).filter(Boolean);
       if (hits.length === 1) return { kind: 'present', path: hits[0], resolvedFrom: f };
       if (hits.length > 1) return { kind: 'ambiguous', path: f, candidates: hits.length };
     } catch { /* fall through */ }
+  }
+
+  // Not the project's file. Before asking history "was it ever ours?", ask WHERE it
+  // lives: a hit in the store's reference area is grounding this gate can't diff but
+  // must not call dangling. Location first, because it is the honest classifier;
+  // history is only the tiebreaker between "you deleted it" and "never yours".
+  if (refResolver) {
+    let hit; try { hit = refResolver(f); } catch { hit = null; }
+    if (hit) return { kind: 'reference', path: hit.path, area: hit.area };
   }
 
   // Has this repo EVER carried this path? One log call, and it is the discriminator
@@ -482,6 +519,67 @@ function specExists(f, fileExists, git) {
   return classifySpec(f, fileExists, git).kind === 'present';
 }
 
+// Build the refResolver classifySpec expects: (spec) => { path, area } | null, where
+// a hit means the spec resolves into the STORE's reference material. ONE
+// implementation, so the report and the injector can never disagree about what counts
+// as reference-grounded (V1: shared resolution; V7: shared module across both trees).
+//
+// `areas` is [{ area, dir, sub?, strip }] — the label to report, the store directory
+// to index, an optional required sub-path within it (`ref/sources/` only, so a bare
+// GT-doc name isn't mistaken for vendored source), and the prefix to strip off a spec
+// before matching within that area (REF specs carry mixed prefixes: `ref/…`,
+// `artifacts/investigations/…`, or bare). `readdir(dir) => Dirent[]` is injected so
+// this file stays free of fs — the caller owns the filesystem, exactly as it owns git
+// and fileExists. Each area is indexed ONCE at build time; the returned closure only
+// matches against the in-memory listing.
+//
+// Matching is exact-relative-path or an UNAMBIGUOUS trailing-segment (`*/want`), never
+// a substring — the same discipline the project resolver uses, so a bare `core.rb`
+// naming two different vendored files stays unresolved rather than silently picking
+// one and diffing (well, reporting) the wrong thing.
+function makeRefResolver(areas, { readdir } = {}) {
+  if (!readdir || !Array.isArray(areas)) return null;
+  const indexed = areas.map(a => ({ ...a, rel: indexDir(a.dir, readdir) })).filter(a => a.rel.length);
+  if (!indexed.length) return null;
+  const refResolver = function refResolver(spec) {
+    for (const a of indexed) {
+      const want = a.strip ? spec.replace(a.strip, '') : spec;
+      let hits = a.rel.filter(r => r === want);
+      if (!hits.length) hits = a.rel.filter(r => r.endsWith('/' + want));
+      if (hits.length !== 1) continue;                    // 0 = not here; >1 = ambiguous
+      if (a.sub && !hits[0].startsWith(a.sub)) continue;  // ref/sources must be under sources/
+      return { path: hits[0], area: a.area };
+    }
+    return null;
+  };
+  // Expose the indexed filenames so a caller can union their extensions into
+  // extensionsFrom — a vendored language the project doesn't track must still be
+  // recognised as a file, or its refs are dropped before classification (see the
+  // extensionsFrom note). Flat list, deduped; cheap because indexing already happened.
+  refResolver.files = [...new Set(indexed.flatMap(a => a.rel))];
+  return refResolver;
+}
+
+// Recursively list files under `dir` as paths relative to it, via injected readdir.
+// Returns [] for a missing/unreadable dir (readdir throws) so a project with no
+// reference area simply contributes no matches.
+function indexDir(dir, readdir) {
+  const rel = [];
+  if (!dir) return rel;
+  const stack = [{ abs: dir, pre: '' }];
+  while (stack.length) {
+    const { abs, pre } = stack.pop();
+    let ents; try { ents = readdir(abs); } catch { continue; }
+    for (const e of ents) {
+      if (e.name === '.git') continue;
+      const childPre = pre ? pre + '/' + e.name : e.name;
+      if (e.isDirectory()) stack.push({ abs: abs + '/' + e.name, pre: childPre });
+      else rel.push(childPre);
+    }
+  }
+  return rel;
+}
+
 // Compute a currency verdict for one entry.
 //   entry: { validatedField?, fixField?, refField?, id?, lineStart?, lineEnd? }
 //   opts:  { git, fileExists, storeGit?, cataloguePath? }
@@ -492,7 +590,7 @@ function specExists(f, fileExists, git) {
 //                                rung 4, the time-based fallback.
 // Returns { status, anchor, files:[{file,exists,changedCommits}], reason }.
 function computeCurrency(entry, opts) {
-  const { git, fileExists, storeGit, cataloguePath } = opts;
+  const { git, fileExists, storeGit, cataloguePath, refResolver } = opts;
 
   // The UNION of what the entry maps and what grounds it. A boundary genuinely
   // depends on both: FILES: is the code it describes, REF: the doc it was written
@@ -517,6 +615,32 @@ function computeCurrency(entry, opts) {
     };
   }
 
+  // Classify every ref FIRST — where each file lives is independent of any anchor,
+  // and it decides whether an anchor is even needed. A purely reference-grounded
+  // entry (all refs in the store) does not drift with this repo's commits, so it is
+  // 🔵 whether or not it carries a VALIDATED/FIX/time anchor. Requiring an anchor
+  // before this check would send an unanchored-but-grounded entry to GRAY — the #57
+  // "well-grounded reads like ungrounded" bug, one level down. Present files still
+  // need an anchor (that is what drift is measured against); the anchor block below
+  // fires only when there is something to diff.
+  const kinds = refFiles.map(f => ({ f, c: classifySpec(f, fileExists, git, refResolver) }));
+  const hasPresent = kinds.some(k => k.c.kind === 'present');
+  const allNonProject = kinds.every(k => k.c.kind === 'reference' || k.c.kind === 'external' || k.c.kind === 'ambiguous');
+  if (!hasPresent && allNonProject && kinds.some(k => k.c.kind === 'reference')) {
+    // Grounded entirely in the store — no anchor required, no drift to compute.
+    const files = kinds.map(({ f, c }) => ({
+      file: f, exists: false,
+      reference: c.kind === 'reference', referencePath: c.path, area: c.area,
+      external: c.kind === 'external', ambiguous: c.kind === 'ambiguous',
+    }));
+    const areas = [...new Set(files.filter(x => x.reference && x.area).map(x => x.area))];
+    const where = areas.length ? areas.join(', ') : 'reference area';
+    return {
+      status: 'REFERENCE', anchor: { sha: null, source: 'none' }, files,
+      reason: `grounded in the store's ${where}; freshness is an upstream-version question, not a drift this repo can compute`,
+    };
+  }
+
   const anchor = resolveAnchor({
     validatedField: entry.validatedField,
     fixField: entry.fixField,
@@ -533,17 +657,19 @@ function computeCurrency(entry, opts) {
 
   const files = [];
   let anyDrift = false;
-  for (const f of refFiles) {
-    const c = classifySpec(f, fileExists, git);
+  for (const { f, c } of kinds) {
     if (c.kind !== 'present') {
       // 'deleted'   this repo had it and lost it → a real dangling pointer.
-      // 'external'  never this repo's file (vendored source, sibling repo) → the gate
-      //             cannot speak to it; saying "dangling" would blame the entry for
-      //             our blind spot.
+      // 'reference' grounded in the store (vendored upstream, GT doc, investigation)
+      //             → not dangling; its freshness is a version question, not drift.
+      // 'external'  never this repo's file, no store match either (sibling repo,
+      //             prose) → the gate cannot speak to it; saying "dangling" would
+      //             blame the entry for our blind spot.
       // 'ambiguous' the shorthand matches several tracked files → we don't know WHICH,
       //             so we cannot diff it. Not the entry's rot either.
       files.push({
         file: f, exists: false,
+        reference: c.kind === 'reference', referencePath: c.path, area: c.area,
         external: c.kind === 'external', ambiguous: c.kind === 'ambiguous',
       });
       continue;
@@ -570,19 +696,28 @@ function computeCurrency(entry, opts) {
   // among present ones is usually a cross-repo ref or a prose mention, not a dead
   // pointer, so it must not override drift/fresh on the files that do resolve.
   if (present.length === 0) {
-    // Nothing resolves — but WHY decides whether this is the entry's fault or ours.
-    // If no ref was ever this repo's file, the entry is not dangling: its grounding
-    // lives somewhere this git cannot diff (vendored upstream, a sibling repo). Say
-    // that, and say it as GRAY — "we cannot judge" — never RED, "you point at
-    // nothing". Calling the gate's own blind spot the entry's rot is the false
-    // confidence this whole gate exists to prevent, pointed the other way.
-    if (files.every(f => f.external || f.ambiguous)) {
+    // A purely store-grounded entry already returned REFERENCE above, before the
+    // anchor was even resolved — so if we reach here with no present files, the entry
+    // is NOT purely reference. The remaining cases:
+    //
+    //   deleted    a file this repo had and lost → a genuine dangling pointer. If it
+    //              is mixed with store refs, the deletion still wins: RED, because the
+    //              entry points at something that is really gone. Reference does not
+    //              launder a dead pointer.
+    //   external   never this repo's file AND not in the store → a sibling-repo path
+    //              or prose. Honestly "we cannot judge" → GRAY.
+    //   ambiguous  a shorthand matching several tracked files → we don't know which.
+    //
+    // RED — "you point at nothing" — is reserved for a genuinely DELETED file, never
+    // for the gate's own blind spot. So RED only when nothing here was ever ours to
+    // begin with; if every not-here ref is reference/external/ambiguous, it is GRAY.
+    if (files.every(f => f.reference || f.external || f.ambiguous)) {
       const amb = files.some(f => f.ambiguous);
       return {
         status: 'GRAY', anchor, files,
         reason: amb
           ? 'REF names are ambiguous in this repo (several files match) — not diffable here'
-          : 'REF points outside this repo (vendored/reference source) — not diffable here',
+          : 'REF points outside this repo (sibling repo or prose) — not diffable here',
       };
     }
     return { status: 'RED', anchor, files, reason: 'all REF files no longer exist' };
@@ -599,5 +734,6 @@ module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom,
+  makeRefResolver, indexDir,
   lintEntry, lineAnchoredRefs, LINT,
 };
