@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, resolveDirForFile } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -48,12 +48,28 @@ function cacheFile(projectRoot, head) {
 // "did THIS project's code move under THIS project's entry", so every git question
 // and every REF-file check below has to be asked of that repo. Ask the wrong repo
 // and it answers confidently about files it has never contained.
-function currencyNudges(projectRoot, anviDir, wanted) {
+function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
   if (!wanted.length) return [];
   const run = (dir) => (a) => execSync(`git ${a}`, {
     cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS,
   });
   const git = run(projectRoot);
+
+  // Does a REF resolve into the STORE's reference material (vendored source, GT docs,
+  // investigations)? Built from the SAME shared logic and the SAME resolver the CLI
+  // uses (V1/V7), so the point-of-use nudge and the batch report agree on what counts
+  // as reference-grounded. refDir/invDir are resolved by the caller via the shared
+  // resolver, anchored to the file's OWNING project.
+  const refResolver = makeRefResolver([
+    { area: 'ref/sources', dir: refDir, sub: 'sources/', strip: /^ref\// },
+    { area: 'ref', dir: refDir, strip: /^ref\// },
+    { area: 'investigations', dir: invDir, strip: /^(artifacts\/)?investigations\// },
+  ], { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+
+  // Recognise a REF as a file from what the project tracks PLUS the store's reference
+  // files — else a vendored language the project doesn't use (a JS app citing Ruby) is
+  // dropped before it can be classified. Derived once, shared across every entry.
+  const fileExt = extensionsFrom(git, refResolver ? refResolver.files : []);
 
   let head;
   try { head = git('rev-parse HEAD').trim(); } catch { return []; } // not a repo → no drift to compute
@@ -105,7 +121,7 @@ function currencyNudges(projectRoot, anviDir, wanted) {
         const verdict = computeCurrency(e, {
           git,
           fileExists: (rel) => fs.existsSync(path.join(projectRoot, rel)),
-          storeGit,
+          storeGit, refResolver, fileExt,
           cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
         });
         nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
@@ -368,7 +384,12 @@ process.stdin.on('end', () => {
       }
       for (const vid of new Set(vyaptiIds)) wanted.push({ catalogue: 'vyapti.md', id: vid });
 
-      const nudges = currencyNudges(projectRoot, anviDir, wanted);
+      // Store reference areas resolved via the SAME shared resolver as .anvi, anchored
+      // to the file's owning project (V1) — so a REF into vendored source / GT docs /
+      // investigations gets the 🔵 reference-grounded verdict instead of a false gray.
+      const refDir = resolveDirForFile(filePath, 'ref');
+      const invDir = resolveDirForFile(filePath, 'investigations');
+      const nudges = currencyNudges(projectRoot, anviDir, wanted, refDir, invDir);
       if (nudges.length) {
         message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
           + capNudges(nudges).join('\n  ');

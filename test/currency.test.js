@@ -4,7 +4,7 @@
 const {
   computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
   extractFileSpecs, specExists, lintEntry, lineAnchoredRefs, LINT,
-  classifySpec, extensionsFrom, FILE_EXT,
+  classifySpec, extensionsFrom, FILE_EXT, makeRefResolver,
 } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -471,6 +471,141 @@ v = computeCurrency({ validatedField: 'abc1234', refField: 'src/gone.js' }, {
   fileExt: /\.(js)$/i, fileExists: exists([]), git: clsGit({ history: ['src/gone.js'] }),
 });
 eq(v.status, 'RED', 'a file this repo deleted is still RED — external is not a blanket excuse');
+
+// --- #60: partial-path resolution -------------------------------------------
+// A partial path ("interpreters/AudioInterpreter.ts") is shorthand for the project's
+// own file, exactly like a bare name — but the old code bailed on the first slash and
+// mislabelled it. It must resolve to the one tracked file, unambiguously.
+console.log('classifySpec — partial-path resolution (#60)');
+c = classifySpec('interpreters/AudioInterpreter.ts', exists([]),
+  clsGit({ tracked: ['src/engine/interpreters/AudioInterpreter.ts'] }));
+eq(c.kind, 'present', 'partial path resolving to one tracked file → present (was mislabelled external)');
+eq(c.path, 'src/engine/interpreters/AudioInterpreter.ts', 'reports the full path git knows');
+
+c = classifySpec('emit/layer.ts', exists([]),
+  clsGit({ tracked: ['a/emit/layer.ts', 'b/emit/layer.ts'] }));
+eq(c.kind, 'ambiguous', 'partial path matching several files → ambiguous, never a guess');
+
+// A trailing SEGMENT match, not a substring: engine/App.ts must not sweep in
+// reengine/App.ts. The `*/` pathspec anchors to a path separator.
+c = classifySpec('engine/App.ts', exists([]),
+  clsGit({ tracked: ['src/reengine/App.ts'] }));
+eq(c.kind, 'external', 'partial path matches only as a substring (reengine) → NOT a match');
+
+// --- #57: reference-grounded classification ---------------------------------
+// A ref that resolves nowhere in the project but IS found in the store's reference
+// area is grounded, not dangling. refResolver is the injected store lookup.
+console.log('classifySpec — reference-grounded (#57)');
+const refResolverStub = (map) => (spec) => map[spec] || null;
+c = classifySpec('synthinfo.rb', exists([]), clsGit({}),
+  refResolverStub({ 'synthinfo.rb': { path: 'sources/desktop-sp/synthinfo.rb', area: 'ref/sources' } }));
+eq(c.kind, 'reference', 'ref found in the store → reference, not external');
+eq(c.area, 'ref/sources', 'and it carries the area it resolved in');
+
+// Location beats history: even for a path this repo once had, a store hit wins,
+// because "grounded elsewhere" is the honest answer. (Here history is empty anyway;
+// the ordering is asserted by the resolver being consulted before the log call.)
+c = classifySpec('nowhere.rb', exists([]), clsGit({}), refResolverStub({}));
+eq(c.kind, 'external', 'refResolver returns null + no history → still external (no false reference)');
+
+// --- #57: REFERENCE verdict at the entry level ------------------------------
+console.log('computeCurrency — REFERENCE status (#57)');
+v = computeCurrency({ validatedField: 'abc1234', refField: 'ref/sources/desktop-sp/sound.rb' }, {
+  fileExt: /\.(rb|ts)$/i, fileExists: exists([]), git: clsGit({}),
+  refResolver: refResolverStub({ 'ref/sources/desktop-sp/sound.rb': { path: 'sources/desktop-sp/sound.rb', area: 'ref/sources' } }),
+});
+eq(v.status, 'REFERENCE', 'all-reference entry → its own REFERENCE status, not GRAY');
+ok(/store's ref\/sources/.test(v.reason), 'reason names the store area');
+ok(/upstream-version question/.test(v.reason), 'reason states freshness is a version question, not drift');
+
+// A well-grounded entry must NOT read the same as an ungrounded one — the whole #57
+// complaint. Without the resolver, the identical entry is only GRAY.
+v = computeCurrency({ validatedField: 'abc1234', refField: 'ref/sources/desktop-sp/sound.rb' }, {
+  fileExt: /\.(rb|ts)$/i, fileExists: exists([]), git: clsGit({}),
+});
+eq(v.status, 'GRAY', 'without a store resolver the same entry falls back to GRAY — proves the resolver is what distinguishes it');
+
+// Mixed entry: one project file present + one store ref. The project file decides the
+// verdict (drift/fresh); the store ref must NOT drag it to RED or read as "unresolved".
+v = computeCurrency({ validatedField: 'abc1234', refField: 'src/a.ts ref/sources/x.rb' }, {
+  fileExt: /\.(rb|ts)$/i, fileExists: exists(['src/a.ts']),
+  git: (args) => {
+    if (/^ls-files/.test(args)) return '';
+    const m = args.match(/log \S+\.\.HEAD .*-- "(.+)"$/);
+    if (m) return m[1] === 'src/a.ts' ? 'h1\n' : '';
+    return '';
+  },
+  refResolver: refResolverStub({ 'ref/sources/x.rb': { path: 'sources/x.rb', area: 'ref/sources' } }),
+});
+eq(v.status, 'YELLOW', 'mixed entry: the present project file drives the verdict');
+ok(v.files.some(f => f.reference), 'and the store ref is marked reference (not counted as unresolved/gone)');
+
+// deleted still wins over reference when BOTH would apply? No — a deleted project file
+// among reference refs is a genuine dangling pointer and must not be masked. But a
+// pure-reference entry with no deleted file is REFERENCE. Assert the deleted case:
+v = computeCurrency({ validatedField: 'abc1234', refField: 'src/gone.ts ref/sources/x.rb' }, {
+  fileExt: /\.(rb|ts)$/i, fileExists: exists([]),
+  git: clsGit({ history: ['src/gone.ts'] }),
+  refResolver: refResolverStub({ 'ref/sources/x.rb': { path: 'sources/x.rb', area: 'ref/sources' } }),
+});
+eq(v.status, 'RED', 'a deleted project file among reference refs is still RED — reference is not a blanket excuse');
+
+// --- #57: nudgeFor on a REFERENCE verdict -----------------------------------
+console.log('nudgeFor — REFERENCE');
+const refVerdict = {
+  status: 'REFERENCE',
+  files: [{ file: 'sound.rb', reference: true, area: 'ref/sources' }],
+  anchor: { sha: 'abc1234', source: 'VALIDATED' },
+};
+const rn = nudgeFor(refVerdict, { catalogue: 'hetvabhasa.md', id: 'SP62' });
+ok(rn && rn.includes('🔵'), 'REFERENCE nudge uses the 🔵 marker');
+ok(rn.includes('ref/sources'), 'names the area');
+ok(!/re-point|dangles/i.test(rn), 'and does NOT tell the reader to re-point or call it dangling');
+
+// --- #57: makeRefResolver — the shared store lookup -------------------------
+console.log('makeRefResolver');
+// Injected readdir returns Dirent-likes. Model a tiny store: ref/sources/desktop-sp/
+// sound.rb + ref/GROUND_TRUTH_X.md + investigations/exp-1.md.
+const dirent = (name, isDir) => ({ name, isDirectory: () => isDir });
+const fakeReaddir = (tree) => (dir) => {
+  if (!(dir in tree)) throw new Error('ENOENT ' + dir);
+  return tree[dir];
+};
+const REF = '/store/ref', INV = '/store/investigations';
+const tree = {
+  [REF]: [dirent('sources', true), dirent('GROUND_TRUTH_X.md', false)],
+  [`${REF}/sources`]: [dirent('desktop-sp', true)],
+  [`${REF}/sources/desktop-sp`]: [dirent('sound.rb', false), dirent('core.rb', false)],
+  [INV]: [dirent('exp-1.md', false)],
+};
+const rr = makeRefResolver([
+  { area: 'ref/sources', dir: REF, sub: 'sources/', strip: /^ref\// },
+  { area: 'ref', dir: REF, strip: /^ref\// },
+  { area: 'investigations', dir: INV, strip: /^(artifacts\/)?investigations\// },
+], { readdir: fakeReaddir(tree) });
+
+eq(rr('core.rb').area, 'ref/sources', 'bare vendored name resolves to ref/sources');
+eq(rr('core.rb').path, 'sources/desktop-sp/core.rb', 'and reports the store-relative path');
+eq(rr('ref/GROUND_TRUTH_X.md').area, 'ref', 'a GT doc under ref/ (not sources/) → area ref, not ref/sources');
+eq(rr('GROUND_TRUTH_X.md').area, 'ref', 'GT doc resolves without the ref/ prefix too');
+eq(rr('artifacts/investigations/exp-1.md').area, 'investigations', 'investigation with its long prefix stripped');
+eq(rr('nothere.rb'), null, 'a name in no area → null (falls through to external)');
+// The sub-path guard: sound.rb IS under sources/, so ref/sources wins; but the same
+// name must not be claimed by the bare-ref area if it is not directly under ref/.
+eq(rr('sound.rb').area, 'ref/sources', 'sound.rb lives under sources/ → ref/sources, not the ref fallthrough');
+// Ambiguity: two files with the same basename in the store → unresolved, never a guess.
+const tree2 = {
+  [REF]: [dirent('sources', true)],
+  [`${REF}/sources`]: [dirent('a', true), dirent('b', true)],
+  [`${REF}/sources/a`]: [dirent('dup.rb', false)],
+  [`${REF}/sources/b`]: [dirent('dup.rb', false)],
+};
+const rr2 = makeRefResolver([{ area: 'ref/sources', dir: REF, sub: 'sources/', strip: /^ref\// }],
+  { readdir: fakeReaddir(tree2) });
+eq(rr2('dup.rb'), null, 'a bare name matching two store files → null (ambiguous, never a guess)');
+// No areas / no readdir → null resolver, callers treat store as absent.
+eq(makeRefResolver([], { readdir: fakeReaddir({}) }), null, 'no areas → null resolver');
+eq(makeRefResolver([{ area: 'ref', dir: REF, strip: /^ref\// }], {}), null, 'no readdir → null resolver');
 
 // --- extensionsFrom: derived from the repo, not compiled in ------------------
 console.log('extensionsFrom');

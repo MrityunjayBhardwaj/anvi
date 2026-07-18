@@ -50,7 +50,14 @@ const commit = (dir, msg) => {
 // anchored at a sha, and the question is what happened to its REF files SINCE.
 // The test therefore controls both halves — where each entry is anchored, and what
 // moved afterwards — which is what makes the expected verdict knowable.
-const P = path.join(tmp, 'project');
+//
+// The project dir carries a UNIQUE basename (the tmpdir's random suffix), for one
+// reason: the store's reference area is resolved as ~/.anvideck/projects/<basename>/ref
+// — the real out-of-cwd layout — and a unique name guarantees the fixture's store
+// namespace can't collide with a real project's. It is created and removed by this
+// test (see STORE below), never touching a live project's store.
+const projName = 'anvi-cur-fixture-' + path.basename(tmp);
+const P = path.join(tmp, projName);
 fs.mkdirSync(path.join(P, '.anvi'), { recursive: true });
 fs.mkdirSync(path.join(P, 'src'), { recursive: true });
 
@@ -109,14 +116,35 @@ fs.writeFileSync(path.join(P, '.anvi', 'hetvabhasa.md'), [
 // vyapti is matched by TEXT, not by an ID scrape — which is exactly how it was
 // missed when the wiring was first written. The body must therefore mention the
 // edited file's name for the injector to surface it at all.
+//
+// V2 is the #57 reference-grounded case: its REF names vendored source that lives in
+// the store's ref/sources area, NOT the project repo. It must get the 🔵 verdict, not
+// a false RED/GRAY — proving the injector's store lookup is live end-to-end. Its body
+// mentions drifted.js so the text matcher surfaces it when that file is edited.
 fs.writeFileSync(path.join(P, '.anvi', 'vyapti.md'), [
   '# Vyapti',
   '## V1: VYAPTI-MARKER — every drifted.js write goes through the resolver',
   '**REF:** src/drifted.js',
   `**VALIDATED:** ${ANCHOR} 2026-01-01`,
   '',
+  '## V2: REFERENCE-MARKER — drifted.js parity grounded in vendored upstream',
+  '**REF:** `ref/sources/vendored.rb`',
+  `**VALIDATED:** ${ANCHOR} 2026-01-01`,
+  '',
 ].join('\n'));
+
 commit(P, 'add catalogues');
+
+// The store's reference area — in the REAL layout it lives OUTSIDE the project repo,
+// at ~/.anvideck/projects/<name>/ref, resolved via the shared resolver's third
+// candidate. That out-of-cwd location is load-bearing: if it sat inside cwd, the
+// injector's fileExists(projectRoot, ...) would find the vendored file on disk and
+// classify it 'present' (a project file), never reaching the reference branch — the
+// exact fixture trap that made an earlier version of this test pass GREEN instead of
+// 🔵. So the fixture builds the store where production puts it, and removes it after.
+const STORE = path.join(os.homedir(), '.anvideck', 'projects', projName);
+fs.mkdirSync(path.join(STORE, 'ref', 'sources'), { recursive: true });
+fs.writeFileSync(path.join(STORE, 'ref', 'sources', 'vendored.rb'), '# upstream source\n');
 
 function inject(cwd, filePath) {
   const r = spawnSync('node', [HOOK], {
@@ -142,6 +170,12 @@ ok(/B1:/.test(r.currency), 'the dharana boundary carries a verdict');
 ok(/H1:/.test(r.currency), 'a surfaced trap carries a verdict');
 ok(/V1:/.test(r.currency), 'a surfaced invariant carries a verdict too — the coverage gap that hid once already');
 
+// #57 end-to-end: the reference-grounded entry reaches the output as 🔵, resolved
+// against the store area — not a false RED "gone" or a GRAY that reads ungrounded.
+ok(/V2:/.test(r.currency), 'the reference-grounded invariant carries a verdict');
+ok(/V2:[^\n]*🔵/.test(r.currency), 'and it is 🔵 reference-grounded — the store lookup is live in the hook, not just the CLI');
+ok(!/V2:[^\n]*🔴/.test(r.currency), 'the vendored ref is NOT called dangling — the false-RED wave #57 warns of does not fire');
+
 // The verdicts are pinned, not whatever the live corpus happens to say.
 ok(/🟡/.test(r.currency), 'the drifted entry reads yellow');
 ok(/drifted\.js/.test(r.currency), 'the nudge names the file that actually moved');
@@ -166,5 +200,6 @@ ok(bare.exit === 0 && /DHYANA/.test(bare.ctx), 'outside a git repo the checks st
 ok(!/Currency/.test(bare.ctx), 'and currency degrades to silence rather than erroring');
 
 fs.rmSync(tmp, { recursive: true, force: true });
+fs.rmSync(STORE, { recursive: true, force: true }); // remove the out-of-cwd store fixture
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, lintEntry, extensionsFrom } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, lintEntry, extensionsFrom, makeRefResolver } = loadFromCandidates('currency.js');
 const { resolveDir } = loadFromCandidates('anvi-paths.js');
 
 // --- args -------------------------------------------------------------------
@@ -103,11 +103,6 @@ if (lintOnly) {
 // git runs in the PROJECT repo (REF files + FIX shas are project-repo history).
 const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const fileExists = (rel) => fs.existsSync(path.join(cwd, rel));
-// What counts as a "file" in a REF: is derived from what THIS repo tracks, not from
-// a list compiled into shared code — a project in an unlisted language would
-// otherwise get zero coverage while the report cheerfully printed "gray". Derived
-// once here and reused for every entry.
-const fileExt = extensionsFrom(git);
 
 // storeGit runs in the repo that holds the CATALOGUES — a different repo from the
 // project whenever .anvi is the symlink-to-central layout. Ladder rung 4 asks it
@@ -123,8 +118,27 @@ const storeGit = storeRoot
   ? (a) => execSync(`git ${a}`, { cwd: storeRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   : null;
 
-const SYMBOL = { GREEN: '🟢', YELLOW: '🟡', RED: '🔴', GRAY: '⚪' };
-const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0 };
+// refResolver — does a REF spec resolve into the STORE's reference material? This is
+// #57's fix: a REF like `synthinfo.rb`, `ref/GROUND_TRUTH_X.md`, or
+// `artifacts/investigations/exp-004.md` names vendored upstream source, a Ground
+// Truth doc, or an investigation — grounding that lives in the store, never in the
+// project repo. The matching logic is shared (makeRefResolver in currency.js) so the
+// report and the injector classify identically; here we just name the store areas via
+// the SAME resolver every artifact-kind lookup uses (V1), and inject readdir.
+const refResolver = makeRefResolver([
+  { area: 'ref/sources', dir: resolveDir(cwd, 'ref'), sub: 'sources/', strip: /^ref\// },
+  { area: 'ref', dir: resolveDir(cwd, 'ref'), strip: /^ref\// },
+  { area: 'investigations', dir: resolveDir(cwd, 'investigations'), strip: /^(artifacts\/)?investigations\// },
+], { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+
+// What counts as a "file" in a REF: is derived from what THIS repo tracks — plus the
+// store's reference files, so a vendored language the project doesn't otherwise use
+// (a JS app citing Ruby upstream) still has its refs recognised rather than dropped
+// before they can be classified. Derived once, reused for every entry.
+const fileExt = extensionsFrom(git, refResolver ? refResolver.files : []);
+
+const SYMBOL = { GREEN: '🟢', YELLOW: '🟡', RED: '🔴', GRAY: '⚪', REFERENCE: '🔵' };
+const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0, REFERENCE: 0 };
 let shown = 0;
 
 console.log(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
@@ -136,13 +150,17 @@ for (const cat of CATALOGUES) {
   const lines = [];
   for (const e of entries) {
     const v = computeCurrency(e, {
-      git, fileExists, storeGit, fileExt,
+      git, fileExists, storeGit, fileExt, refResolver,
       cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
     });
     counts[v.status]++;
-    if (staleOnly && v.status === 'GREEN') continue;
+    // REFERENCE is a settled state, not a worklist item — it drifts only on an
+    // upstream refresh this repo can't see, so --stale hides it alongside GREEN.
+    if (staleOnly && (v.status === 'GREEN' || v.status === 'REFERENCE')) continue;
     const drift = v.files.filter(f => f.changedCommits > 0).map(f => `${f.file}(+${f.changedCommits})`).join(', ');
-    const gone = v.files.filter(f => f.exists === false).map(f => f.file).join(', ');
+    // A store-grounded ref resolved fine — it is not "unresolved". Only a file that
+    // matched nowhere (external/prose) belongs in the unresolved note.
+    const gone = v.files.filter(f => f.exists === false && !f.reference).map(f => f.file).join(', ');
     // Detail follows the verdict — only RED leads with "gone"; on GREEN/YELLOW a
     // missing file is a cross-repo/prose ref, shown quietly as "unresolved".
     let detail = v.status === 'RED' ? `gone: ${gone}`
@@ -159,6 +177,9 @@ for (const cat of CATALOGUES) {
   if (lines.length) { console.log(`${cat}`); console.log(lines.join('\n')); console.log(''); }
 }
 
-const total = counts.GREEN + counts.YELLOW + counts.RED + counts.GRAY;
-console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ${SYMBOL.RED} ${counts.RED} dangling  ${SYMBOL.GRAY} ${counts.GRAY} unknown`);
+const total = counts.GREEN + counts.YELLOW + counts.RED + counts.GRAY + counts.REFERENCE;
+// REFERENCE gets its own tally — it is the whole point of #57. Folding it back into
+// "unknown" would restore the exact confusion this fixes: a well-grounded project
+// (many 🔵) reading identical to an ungrounded one (many ⚪).
+console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ${SYMBOL.RED} ${counts.RED} dangling  ${SYMBOL.REFERENCE} ${counts.REFERENCE} reference-grounded  ${SYMBOL.GRAY} ${counts.GRAY} unknown`);
 if (staleOnly && shown === 0) console.log('(no stale entries — all fresh)');
