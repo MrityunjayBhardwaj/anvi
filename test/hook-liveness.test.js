@@ -61,6 +61,13 @@ fs.writeFileSync(path.join(P, '.anvi', 'hetvabhasa.md'), [
   '**REF:** src/engine.js',
   '**FIX:** n/a',
   '',
+  // H21 is a REAL fixture entry with a flaggable shape (num ≥ 10), so the leak-guard
+  // can cross-reference a bare `H21` against it. H1 stays collision-prone (single
+  // digit) and must NOT trip — the two together witness both sides of the filter.
+  '## H21: LIVENESS-LEAK-MARKER — a bare high-numbered ID that names a real entry',
+  '**REF:** src/engine.js',
+  '**FIX:** n/a',
+  '',
 ].join('\n'));
 fs.writeFileSync(path.join(P, '.anvi', 'vyapti.md'), [
   '# Vyapti',
@@ -224,6 +231,41 @@ r = fire('catalogue-id-leak-guard.js', {
   tool_input: { command: 'git commit -m "fix the parameter name on both sides"' },
 });
 ok(r.ctx === '', 'silent on a clean publish');
+
+// #45 — bare ID that names a REAL entry (H21 exists in the fixture) is caught. This
+// is the leak class the command-string `name:NNN` form never saw.
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'gh pr create --title "fix" --body "grounded per the H21 finding"' },
+});
+ok(/H21/.test(r.ctx), 'ALIVE: a bare ID that IS a real entry is flagged (#45 core gap)');
+
+// #45 — the collision filter: a bare ID that collides with English/tech (H1, single
+// digit) must stay silent EVEN THOUGH H1 is a real fixture entry, or "H2 heading" /
+// "V8 engine" would nag the guard into being ignored.
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'gh pr create --title "fix" --body "cleaned up the H1 heading and V1 rollout"' },
+});
+ok(r.ctx === '', 'silent on collision-prone low IDs (H1/V1) even though they are real entries — precision over nagging');
+
+// #45 — a bare ID that is NOT a real entry stays silent regardless of shape: cross-
+// reference means "H99" (no entry) never trips, so an unrelated token is safe.
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'gh pr create --title "fix" --body "resolves ticket H99 from the tracker"' },
+});
+ok(r.ctx === '', 'silent on a flaggable-shape token that is NOT a real entry (H99) — cross-reference, not guessing');
+
+// #45 — the body-file gap: a PR body authored via --body-file (heredoc/editor/file)
+// was never seen by the command-string scan. The hook now reads the referenced file.
+const leakBody = path.join(P, 'pr-body.md');
+fs.writeFileSync(leakBody, 'This change is grounded per H21 in the catalogue.\n');
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: `gh pr create --title "fix" --body-file ${leakBody}` },
+});
+ok(/H21/.test(r.ctx), 'ALIVE: a leak in a --body-file body is caught (the #417 blind spot)');
 
 // --- 7. degradation ---------------------------------------------------------
 // Malformed stdin and a non-project cwd: every hook must fall to SILENCE, never to
