@@ -31,6 +31,14 @@ const DIR = process.env.ANVIDECK_DIR || path.join(os.homedir(), '.anvideck');
 // ~/.claude override, for tests only (mirrors ANVIDECK_DIR). Default = real home.
 const CLAUDE_DIR = process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
 const MIRROR_README = 'MIRROR-README.md'; // marker kept in the store mirror; rsync excludes it
+// Quiet period after a commit: if the store's last commit landed within this
+// many seconds, assume an author just committed deliberately (the agent's own
+// `git add` + `git commit` this turn) and DEFER — don't `add -A` over their
+// staged/pending work under our terse message. Deferral is loss-free: the dirty
+// state persists and the NEXT Stop commits it once the window has passed (#65).
+// Sized to cover a slow commit+push, small enough that a legit backup lands one
+// Stop later at most. ANVIDECK_QUIET_SECONDS overrides (used by tests).
+const QUIET_SECONDS = Number(process.env.ANVIDECK_QUIET_SECONDS) || 90;
 
 function git(args, timeoutMs) {
   return execSync(`git ${args}`, {
@@ -126,6 +134,19 @@ function run(rawInput) {
 
     const dirty = git('status --porcelain').trim();
     if (!dirty) process.exit(0); // clean — workflow layer already committed
+
+    // Quiet-period guard (#65): if a commit just landed, an author is likely
+    // mid-commit (staged files, or a commit whose sibling edits aren't staged
+    // yet). Racing them with `add -A` buries a deliberate rich message under our
+    // terse one — and it's already pushed, so unreclaimable. Defer instead: the
+    // dirty tree is untouched and the next Stop commits it once quiet. Loss-free.
+    // Guarded so a git failure here never blocks the commit path below.
+    try {
+      const lastCommitAt = Number(git('log -1 --format=%ct').trim());
+      if (lastCommitAt && (Date.now() / 1000 - lastCommitAt) < QUIET_SECONDS) {
+        process.exit(0); // recent commit → defer to next Stop
+      }
+    } catch { /* no commits yet / not a repo state we can read — fall through and commit */ }
 
     git('add -A');
 
