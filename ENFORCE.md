@@ -191,7 +191,12 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
 3. **Stop-hook backstop** — `anvideck-checkpoint.js` fires when a response finishes:
    if `~/.anvideck` is dirty it auto-commits (`📓 auto-checkpoint: <project> — <files>
    (+new entry IDs)`) and pushes best-effort. No-ops when clean. This is the
-   consistency guarantee — layer 2 can be skipped; this can't.
+   consistency guarantee — layer 2 can be skipped; this can't. **Quiet-period
+   guard:** if the store's last commit is younger than 90s
+   (`ANVIDECK_QUIET_SECONDS`), it defers this Stop — an author likely just
+   committed deliberately, and `add -A` would bury a rich message under the terse
+   one. The defer is loss-free: the dirty state persists and the next Stop commits
+   it once quiet. So layer 2's explicit rich commit is never clobbered by layer 3.
 4. **Memory backup (opt-in)** — the same Stop hook also mirrors the current
    project's auto-memory (`~/.claude/projects/<slug>/memory/`) into the store at
    `~/.anvideck/projects/<name>/memory/` so it rides the commit+push above. Memory
