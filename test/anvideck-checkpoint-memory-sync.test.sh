@@ -22,7 +22,11 @@ git -C "$STORE" commit -q --allow-empty -m init
 # Memory backup is opt-in — the hook only mirrors when anvi-config.json consents.
 mkdir -p "$CLAUDE"; printf '{"memorySync":true}\n' > "$CLAUDE/anvi-config.json"
 
-drive(){ printf '{"cwd":"%s"}' "$CWD" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" node "$HOOK"; }
+# ANVIDECK_QUIET_SECONDS=-1 disables the #65 quiet-period guard (age is always
+# >= 0, never < -1), so this test exercises the MIRROR + commit path without the
+# race guard deferring on the throwaway store's freshly-made commits. The guard
+# itself is covered by anvideck-checkpoint-quiet-period.test.sh.
+drive(){ printf '{"cwd":"%s"}' "$CWD" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; }
 
 echo "TEST 0 — opt-in gate: with memorySync OFF, nothing is mirrored"
 printf '{"memorySync":false}\n' > "$CLAUDE/anvi-config.json"
@@ -59,13 +63,13 @@ ok "$([ -f "$MIRROR/MEMORY.md" ] && echo y)" "y" "backup preserved (sync skipped
 echo "TEST 5 — non-anvi project (no store envelope): sync skips, no crash"
 CWD2="$T/other"; mkdir -p "$CWD2"; SLUG2=$(enc "$CWD2")
 mkdir -p "$CLAUDE/projects/$SLUG2/memory"; printf 'x\n' > "$CLAUDE/projects/$SLUG2/memory/MEMORY.md"
-printf '{"cwd":"%s"}' "$CWD2" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" node "$HOOK"; rc=$?
+printf '{"cwd":"%s"}' "$CWD2" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
 ok "$rc" "0" "exits 0 for non-anvi project"
 ok "$([ -d "$STORE/projects/other" ] && echo made || echo none)" "none" "no store dir created for non-anvi project"
 
 echo "TEST 6 — no cwd in payload: prior behavior preserved (commit dirty, no crash)"
 echo dirty > "$STORE/projects/proj/scratch.txt"
-printf '{}' | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" node "$HOOK"; rc=$?
+printf '{}' | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
 ok "$rc" "0" "exits 0 with empty payload"
 ok "$(git -C "$STORE" status --porcelain | wc -l | tr -d ' ')" "0" "dirty tree still committed without cwd"
 
