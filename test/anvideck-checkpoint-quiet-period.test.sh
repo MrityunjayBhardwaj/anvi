@@ -7,7 +7,9 @@
 # Run:  bash test/anvideck-checkpoint-quiet-period.test.sh
 #
 # HOOK env var overrides the hook path (used to run the SHIPPED tree via
-# `git archive HEAD` — the working tree hides staged/unstaged splits, H12).
+# `git archive HEAD` — the working tree can hide a staged/unstaged split where a
+# call and its import live in different commits, so only the shipped tree proves
+# what a user actually gets).
 set -u
 HOOK="${HOOK:-$(cd "$(dirname "$0")/.." && pwd)/hooks/anvideck-checkpoint.js}"
 T=$(mktemp -d)
