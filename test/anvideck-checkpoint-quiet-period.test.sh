@@ -88,6 +88,20 @@ echo "x" > "$STORE/projects/proj/z.md"
 printf '{}' | ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=90 node "$HOOK"; rc=$?
 ok "$rc" "0" "exit 0 when deferring"
 
+echo "TEST 6 — future-dated commit (negative age) must PROCEED, not defer forever (#67)"
+# First clear any pending drift from TEST 5 so the tree state is known.
+git -C "$STORE" add -A; commit_aged 60 "settle TEST 5 drift"
+# Re-date HEAD one hour into the FUTURE → age is negative → a naive `age < window`
+# check would defer indefinitely, stalling the durability backstop. The bounded
+# guard (age >= 0) must instead proceed and commit.
+FUT="$(node -e "console.log(new Date(Date.now()+3600000).toISOString())")"
+GIT_COMMITTER_DATE="$FUT" git -C "$STORE" commit -q --amend --no-edit --date="$FUT"
+echo "future-skew drift" > "$STORE/projects/proj/skew.md"
+BASE=$(autocount)
+drive 90
+ok "$(autocount)" "$((BASE+1))" "committed despite a future-dated HEAD (no infinite defer)"
+ok "$(dirtycount)" "0" "drift backed up — durability floor holds under clock skew"
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]

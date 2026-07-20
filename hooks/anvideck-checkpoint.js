@@ -143,7 +143,13 @@ function run(rawInput) {
     // Guarded so a git failure here never blocks the commit path below.
     try {
       const lastCommitAt = Number(git('log -1 --format=%ct').trim());
-      if (lastCommitAt && (Date.now() / 1000 - lastCommitAt) < QUIET_SECONDS) {
+      const age = Date.now() / 1000 - lastCommitAt; // seconds since last commit
+      // Defer only for a genuinely recent commit: age in [0, QUIET_SECONDS).
+      // A NEGATIVE age means a future-dated commit (clock skew) — not "a commit
+      // just landed"; deferring on it would stall the durability backstop
+      // indefinitely. The safe direction for a backstop is to proceed and
+      // commit, never to silently stop backing up (#67).
+      if (lastCommitAt && age >= 0 && age < QUIET_SECONDS) {
         process.exit(0); // recent commit → defer to next Stop
       }
     } catch { /* no commits yet / not a repo state we can read — fall through and commit */ }
