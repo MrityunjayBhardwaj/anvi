@@ -97,10 +97,13 @@ function extractRefFiles(refField, fileExt = FILE_EXT) {
   // ("existingDirs()"), section anchors ("§Registered"), and prose — all of which
   // lack a file extension and get filtered below.
   for (let tok of expandBraces(refField).split(/[\s;,]+/)) {
+    // Strip wrapping backticks/quotes/parens/trailing punctuation FIRST — a token
+    // written `path.ts:1082-1092` ends in a backtick, which blocks the :line anchor
+    // below ($ can't reach past the wrapper). Unwrap, THEN strip :line, or the ref
+    // keeps its :NN suffix, fails the extension test, and is silently dropped (#69).
+    tok = tok.replace(/^[`'"([]+|[`'")\].,]+$/g, '');
     // Strip a trailing :line or :line-range (fragile anchors we tolerate).
     tok = tok.replace(/:\d+(-\d+)?$/, '');
-    // Strip wrapping backticks/quotes/parens/trailing punctuation.
-    tok = tok.replace(/^[`'"([]+|[`'")\].,]+$/g, '');
     if (!tok) continue;
     if (!fileExt.test(tok)) continue;                         // must look like a repo file
     if (tok.startsWith('/') || tok.startsWith('~')) continue; // outside the project repo — not computable here

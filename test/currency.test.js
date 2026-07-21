@@ -25,6 +25,14 @@ eq(extractRefFiles('~/.anvideck git history').length, 0, 'home/abs path excluded
 eq(extractRefFiles('references/*-template.md').length, 0, 'glob token excluded');
 eq(extractRefFiles('<repo>/.claude/settings.local.json').length, 0, 'placeholder <repo> excluded');
 eq(extractRefFiles('').length, 0, 'empty');
+// #69 — a backtick-wrapped path with a trailing :line must not be dropped. The
+// wrapping backtick blocks the :line anchor unless wrappers are stripped first;
+// this is the single most common ref style in the catalogues.
+eq(extractRefFiles('`bin/lib/verify.cjs:540`').join(','), 'bin/lib/verify.cjs', 'wrapped + :line (single)');
+eq(extractRefFiles('`src/engine/SuperSonicBridge.ts:1082-1092`').join(','), 'src/engine/SuperSonicBridge.ts', 'wrapped + :line-range');
+eq(extractRefFiles('`ref/sources/supersonic/scsynth_options.js:57`').join(','), 'ref/sources/supersonic/scsynth_options.js', 'wrapped vendored ref + :line');
+eq(extractRefFiles('`a.ts:1-4`; `b.md:9`').join(','), 'a.ts,b.md', 'two wrapped + :line refs');
+eq(extractRefFiles('`only.ts:5`.').join(','), 'only.ts', 'wrapped + :line + trailing prose period');
 
 // --- mocked repo ---
 // history: file "a.js" changed in 2 commits after anchor A; "b.js" unchanged; "gone.js" absent.
