@@ -626,6 +626,7 @@ function vendorManifestRel(p) {
 // and pull it into --stale; a multi-source breakdown isn't needed for the verdict.
 function readVendorFor(files, readVendor) {
   if (typeof readVendor !== 'function') return undefined;
+  let fallback;                                               // a valid-but-null-version manifest, kept only if nothing better appears
   for (const x of files) {
     // A vendored ref may arrive EITHER as a 'reference' hit (referencePath =
     // "sources/<name>/…") OR as a 'present' project file whose spec is
@@ -637,9 +638,14 @@ function readVendorFor(files, readVendor) {
     let text; try { text = readVendor(rel); } catch { text = null; }
     if (!text) continue;
     const m = parseVendorManifest(text);
-    if (m) return m;                                           // first valid manifest wins
+    if (!m) continue;
+    // When an entry cites several vendored sources, prefer the one that actually
+    // carries a version — surfacing `v4.6.0` is more useful than "un-captured". A
+    // null-version manifest is a valid fallback, used only if no versioned one is cited.
+    if (m.version) return m;
+    if (!fallback) fallback = m;
   }
-  return undefined;
+  return fallback;                                            // undefined if no valid manifest at all
 }
 
 function makeRefResolver(areas, { readdir } = {}) {

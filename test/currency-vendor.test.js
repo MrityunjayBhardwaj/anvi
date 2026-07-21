@@ -65,6 +65,17 @@ ok(readVendorFor([{ file: 'ref/sources/other/x.rb' }], reader) === undefined, 'v
 ok(readVendorFor([{ file: 'ref/sources/desktop-sp/x.rb' }], null) === undefined, 'no reader injected → undefined (non-store caller)');
 ok(readVendorFor([{ file: 'ref/sources/desktop-sp/x.rb' }], () => { throw new Error('boom'); }) === undefined,
    'reader that throws → undefined (never crashes)');
+// Multi-vendor: an entry citing a null-version source AND a versioned one prefers the
+// versioned — surfacing a real version beats "un-captured".
+const multiStore = {
+  'sources/nullv/VENDOR.json': JSON.stringify({ version: null, versionSource: 'NOT FOUND IN CODE' }),
+  'sources/desktop-sp/VENDOR.json': good,
+};
+const multiReader = (rel) => (rel in multiStore ? multiStore[rel] : null);
+eq(readVendorFor([{ file: 'ref/sources/nullv/a.rb' }, { file: 'ref/sources/desktop-sp/b.rb' }], multiReader).version, '4.6.0',
+   'versioned manifest preferred over a null-version one, regardless of citation order');
+ok(readVendorFor([{ file: 'ref/sources/nullv/a.rb' }], multiReader).version === null,
+   'a lone null-version manifest is still surfaced (honest fallback)');
 
 // --- computeCurrency: vendor rides EVERY verdict color ----------------------
 // Mock a repo where the project file is present + drifted (→ YELLOW) or clean (→ GREEN),
