@@ -128,7 +128,7 @@ fs.writeFileSync(path.join(P, '.anvi', 'vyapti.md'), [
   `**VALIDATED:** ${ANCHOR} 2026-01-01`,
   '',
   '## V2: REFERENCE-MARKER — drifted.js parity grounded in vendored upstream',
-  '**REF:** `ref/sources/vendored.rb`',
+  '**REF:** `ref/sources/upstream-lib/core.rb`',
   `**VALIDATED:** ${ANCHOR} 2026-01-01`,
   '',
 ].join('\n'));
@@ -143,8 +143,13 @@ commit(P, 'add catalogues');
 // exact fixture trap that made an earlier version of this test pass GREEN instead of
 // 🔵. So the fixture builds the store where production puts it, and removes it after.
 const STORE = path.join(os.homedir(), '.anvideck', 'projects', projName);
-fs.mkdirSync(path.join(STORE, 'ref', 'sources'), { recursive: true });
-fs.writeFileSync(path.join(STORE, 'ref', 'sources', 'vendored.rb'), '# upstream source\n');
+// A named vendored source (sources/<name>/file), matching production's layout, so
+// #61's manifest can sit beside its source root. V2 REFs core.rb here.
+fs.mkdirSync(path.join(STORE, 'ref', 'sources', 'upstream-lib'), { recursive: true });
+fs.writeFileSync(path.join(STORE, 'ref', 'sources', 'upstream-lib', 'core.rb'), '# upstream source\n');
+// #61: the source opts into version-aware freshness with a colocated VENDOR.json.
+fs.writeFileSync(path.join(STORE, 'ref', 'sources', 'upstream-lib', 'VENDOR.json'),
+  JSON.stringify({ source: 'upstream-lib', version: '2.1.0', versionSource: 'core.rb:1 (test fixture)', fetchDate: '2026-01-01' }));
 
 function inject(cwd, filePath) {
   const r = spawnSync('node', [HOOK], {
@@ -175,6 +180,10 @@ ok(/V1:/.test(r.currency), 'a surfaced invariant carries a verdict too — the c
 ok(/V2:/.test(r.currency), 'the reference-grounded invariant carries a verdict');
 ok(/V2:[^\n]*🔵/.test(r.currency), 'and it is 🔵 reference-grounded — the store lookup is live in the hook, not just the CLI');
 ok(!/V2:[^\n]*🔴/.test(r.currency), 'the vendored ref is NOT called dangling — the false-RED wave #57 warns of does not fire');
+// #61 end-to-end: the vendored source opted in with a VENDOR.json, so the 🔵 line
+// must state the traced version — proving the readVendor closure is wired live in
+// the HOOK (not just computeCurrency), the H12 wiring-vs-unit distinction.
+ok(/V2:[^\n]*v2\.1\.0/.test(r.currency), 'the 🔵 verdict states the vendored version — the manifest read is live in the injector');
 
 // The verdicts are pinned, not whatever the live corpus happens to say.
 ok(/🟡/.test(r.currency), 'the drifted entry reads yellow');
