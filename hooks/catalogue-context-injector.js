@@ -66,6 +66,14 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
     { area: 'investigations', dir: invDir, strip: /^(artifacts\/)?investigations\// },
   ], { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
 
+  // readVendor — the fs half of the vendored-source freshness read (#61): read a
+  // VENDOR.json manifest's text from the store, given its path relative to refDir. The
+  // parse/validate is in currency.js (fs-agnostic). Null when no ref dir or unreadable
+  // → absent manifest → plain 🔵 at point of use, exactly as before (no regression).
+  const readVendor = refDir
+    ? (rel) => { try { return fs.readFileSync(path.join(refDir, rel), 'utf8'); } catch { return null; } }
+    : null;
+
   // Recognise a REF as a file from what the project tracks PLUS the store's reference
   // files — else a vendored language the project doesn't use (a JS app citing Ruby) is
   // dropped before it can be classified. Derived once, shared across every entry.
@@ -121,7 +129,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
         const verdict = computeCurrency(e, {
           git,
           fileExists: (rel) => fs.existsSync(path.join(projectRoot, rel)),
-          storeGit, refResolver, fileExt,
+          storeGit, refResolver, fileExt, readVendor,
           cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
         });
         nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
