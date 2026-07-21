@@ -131,6 +131,16 @@ const refResolver = makeRefResolver([
   { area: 'investigations', dir: resolveDir(cwd, 'investigations'), strip: /^(artifacts\/)?investigations\// },
 ], { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
 
+// readVendor — read a VENDOR.json manifest's TEXT from the store, given its path
+// relative to the `ref` dir (e.g. "sources/desktop-sp/VENDOR.json"). This is the fs
+// half of the vendored-source freshness read (#61); the parse/validate lives in
+// currency.js (fs-agnostic, V1/V7). Returns null if there is no ref dir or the file
+// is unreadable → the core treats it as an absent manifest (plain 🔵, no regression).
+const refDir = resolveDir(cwd, 'ref');
+const readVendor = refDir
+  ? (rel) => { try { return fs.readFileSync(path.join(refDir, rel), 'utf8'); } catch { return null; } }
+  : null;
+
 // What counts as a "file" in a REF: is derived from what THIS repo tracks — plus the
 // store's reference files, so a vendored language the project doesn't otherwise use
 // (a JS app citing Ruby upstream) still has its refs recognised rather than dropped
@@ -150,13 +160,20 @@ for (const cat of CATALOGUES) {
   const lines = [];
   for (const e of entries) {
     const v = computeCurrency(e, {
-      git, fileExists, storeGit, fileExt, refResolver,
+      git, fileExists, storeGit, fileExt, refResolver, readVendor,
       cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
     });
     counts[v.status]++;
-    // REFERENCE is a settled state, not a worklist item — it drifts only on an
-    // upstream refresh this repo can't see, so --stale hides it alongside GREEN.
-    if (staleOnly && (v.status === 'GREEN' || v.status === 'REFERENCE')) continue;
+    // --stale is the deliberate "what should I re-verify?" worklist. It normally
+    // hides GREEN (nothing to do) and REFERENCE (settled — drifts only on an upstream
+    // refresh this repo can't see). EXCEPTION (#61, option A): a source that OPTED IN
+    // with a VENDOR.json is asking to be re-verified — you recorded its version
+    // precisely so "is our copy still upstream?" becomes a periodic manual check. So
+    // an opted-in vendor (v.vendor present) JOINS the worklist WHATEVER its color,
+    // including a GREEN mixed entry (code fresh, but the vendored upstream may have
+    // moved). A plain reference/green entry with no manifest stays hidden.
+    const hiddenByDefault = v.status === 'GREEN' || v.status === 'REFERENCE';
+    if (staleOnly && hiddenByDefault && !v.vendor) continue;
     const drift = v.files.filter(f => f.changedCommits > 0).map(f => `${f.file}(+${f.changedCommits})`).join(', ');
     // A store-grounded ref resolved fine — it is not "unresolved". Only a file that
     // matched nowhere (external/prose) belongs in the unresolved note.
@@ -166,6 +183,16 @@ for (const cat of CATALOGUES) {
     let detail = v.status === 'RED' ? `gone: ${gone}`
                : v.status === 'YELLOW' ? `drifted: ${drift}`
                : v.reason;
+    // An opted-in vendor (#61) surfaces its recorded version. For a PURE reference
+    // entry the version IS the whole story → replace the generic reason. For a MIXED
+    // entry (GREEN/YELLOW/RED — code + a vendored anchor) the drift/gone detail still
+    // matters → append the vendor note so both show on one --stale line.
+    if (v.vendor) {
+      const ver = v.vendor.version ? `v${v.vendor.version}` : 'version un-captured';
+      const fetched = v.vendor.fetchDate ? `, fetched ${v.vendor.fetchDate}` : '';
+      const vnote = `vendored ${ver}${fetched} — re-verify upstream`;
+      detail = v.status === 'REFERENCE' ? vnote : `${detail} · ${vnote}`;
+    }
     if (v.status !== 'RED' && gone) detail += ` (unresolved: ${gone})`;
     // A time-anchored verdict is provisional — say so on the line, so a yellow from
     // rung 4 never reads as confidently as one from an explicit VALIDATED.

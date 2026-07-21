@@ -372,15 +372,28 @@ function sensitivityFor(catalogue) {
 // re-validation is a reasoning act, and auto-stamping would manufacture a green
 // nobody earned — the exact false confidence this gate exists to kill.
 function nudgeFor(verdict, { catalogue, id } = {}) {
+  // GREEN stays silent at point of use — a fresh entry has nothing to say, even one
+  // that also cites a vendored source. Its re-verify prompt lives in the --stale
+  // worklist (the deliberate "what should I re-check?" surface), NOT in an edit-time
+  // nudge that would print on every touch near a vendored entry (#61, option A).
   if (!verdict || verdict.status === 'GREEN') return null;
   const high = sensitivityFor(catalogue) === 'high';
   const tag = id ? `${id}: ` : '';
   const drift = verdict.files.filter(f => f.changedCommits > 0)
     .map(f => `${f.file} +${f.changedCommits}`).join(', ');
   const prov = verdict.anchor && verdict.anchor.provisional;
+  // A vendored-source clause appended to a drift/dangle nudge (#61, MIXED entry): the
+  // entry is already worth a nudge for its own reason, so ride the version re-verify
+  // prompt along rather than emit a second line. Empty when no opted-in vendor.
+  const v = verdict.vendor;
+  const vendorTail = v
+    ? (v.version
+        ? ` · also traced against \`v${v.version}\` — re-verify upstream.`
+        : ` · also cites a vendored source with no captured version — re-trace to record one.`)
+    : '';
 
   if (verdict.status === 'RED') {
-    return `${tag}🔴 every file this entry points at is gone — it dangles. Re-point it at the code that replaced them, or retire it.`;
+    return `${tag}🔴 every file this entry points at is gone — it dangles. Re-point it at the code that replaced them, or retire it.${vendorTail}`;
   }
   if (verdict.status === 'REFERENCE') {
     // Not a defect and not a call to re-point — the entry is grounded in vendored/
@@ -388,18 +401,32 @@ function nudgeFor(verdict, { catalogue, id } = {}) {
     // upstream we traced has moved, which no field here records. Say that, quietly.
     const areas = [...new Set(verdict.files.filter(f => f.reference && f.area).map(f => f.area))];
     const where = areas.length ? areas.join(', ') : 'the reference area';
+    // If the vendored source opted in with a VENDOR.json (#61), the version IS
+    // recorded — turn "drift isn't a question we can answer" into a dated re-verify
+    // prompt. No network call, no auto-drift: the manifest makes the version
+    // comparable, the human re-checks. A null version stays honest ("version not
+    // captured") — an invented version is the false-green this gate exists to kill.
+    if (verdict.vendor) {
+      const v = verdict.vendor;
+      const ver = v.version ? `\`v${v.version}\`` : 'an un-captured version';
+      const src = v.versionSource ? ` (${v.versionSource})` : '';
+      const fetched = v.fetchDate ? `, fetched ${v.fetchDate}` : '';
+      return v.version
+        ? `${tag}🔵 traced against ${ver}${src}${fetched} — re-verify the upstream version manually; this repo's git can't detect upstream drift.`
+        : `${tag}🔵 grounded in vendored source but ${ver} was captured${src} — no version comparison possible; re-trace upstream to record one.`;
+    }
     return `${tag}🔵 grounded in ${where} (vendored/reference source) — drift isn't a question this repo's git can answer; re-check only if the upstream version was refreshed.`;
   }
   if (verdict.status === 'GRAY') {
-    return `${tag}⚪ no currency anchor (${verdict.reason}) — freshness unknown. Stamp \`VALIDATED: <sha> <date>\` when you next confirm this entry.`;
+    return `${tag}⚪ no currency anchor (${verdict.reason}) — freshness unknown. Stamp \`VALIDATED: <sha> <date>\` when you next confirm this entry.${vendorTail}`;
   }
   // YELLOW
   const since = prov
     ? `since the entry was last edited (~${verdict.anchor.ts}) — provisional: that's when the text changed, not a confirmed validation`
     : `since its anchor`;
   return high
-    ? `${tag}🟡 the code this boundary maps has drifted ${since} (${drift}). RE-MAP before trusting the checks above: a stale boundary map fires the wrong checks silently. Stamp \`VALIDATED\` once re-confirmed.`
-    : `${tag}🟡 REF drifted ${since} (${drift}). Re-point the REF and confirm the pattern still holds — the pattern usually outlives the pointer. Stamp \`VALIDATED\` once re-confirmed.`;
+    ? `${tag}🟡 the code this boundary maps has drifted ${since} (${drift}). RE-MAP before trusting the checks above: a stale boundary map fires the wrong checks silently. Stamp \`VALIDATED\` once re-confirmed.${vendorTail}`
+    : `${tag}🟡 REF drifted ${since} (${drift}). Re-point the REF and confirm the pattern still holds — the pattern usually outlives the pointer. Stamp \`VALIDATED\` once re-confirmed.${vendorTail}`;
 }
 
 // --- bounding the point-of-use surface --------------------------------------
@@ -537,6 +564,84 @@ function specExists(f, fileExists, git) {
 // a substring — the same discipline the project resolver uses, so a bare `core.rb`
 // naming two different vendored files stays unresolved rather than silently picking
 // one and diffing (well, reporting) the wrong thing.
+// Parse a VENDOR.json manifest STRICTLY — the reader half of the vendored-source
+// freshness feature (#61). A manifest OPTS a vendored source into a version-aware
+// 🔵 verdict; its mere presence is the opt-in, so a broken one must read as ABSENT
+// (plain 🔵, no regression), never crash, never be dressed up as an honest null.
+//
+// Takes the raw file TEXT (fs stays in the caller, V1/V7) → returns a normalized
+// manifest or null. The contract, hardened against adversarial inputs:
+//   parse → is-PLAIN-object → has(version, versionSource) → surface; else null.
+// Why each guard:
+//   - unparseable JSON → null.
+//   - array/scalar: `typeof [] === 'object'` is the trap — a permissive typeof lets
+//     `[1,2,3]` through as a fake object. Require `m.constructor === Object`.
+//   - missing `version` OR `versionSource` → null, NOT a "null-version" verdict.
+//     The honesty distinction the gate is built on: a DELIBERATE
+//     {version:null, versionSource:"NOT FOUND IN CODE"} means a human confirmed it
+//     is unknowable and IS surfaced (null version, honest); an empty {} or one that
+//     merely OMITS versionSource is a BROKEN manifest and must read as absent. Two
+//     meanings, two verdicts. `version` may be null (first-class); `versionSource`
+//     must be a non-empty string (the citation that keeps version from being trusted
+//     blindly) — an empty/missing citation is broken, not honest.
+function parseVendorManifest(text) {
+  let m;
+  try { m = JSON.parse(text); } catch { return null; }
+  if (!m || m.constructor !== Object) return null;             // reject array/scalar/null
+  if (!('version' in m) || !('versionSource' in m)) return null;
+  if (typeof m.versionSource !== 'string' || !m.versionSource.trim()) return null;
+  if (m.version !== null && typeof m.version !== 'string') return null; // null OK, else must be string
+  return {
+    version: m.version,                                        // string | null (honest unknown)
+    versionSource: m.versionSource,
+    fetchDate: typeof m.fetchDate === 'string' ? m.fetchDate : null,
+    url: typeof m.url === 'string' ? m.url : null,
+  };
+}
+
+// Given a path that points at a vendored-source file, return the manifest path
+// relative to the ref dir ("sources/<name>/VENDOR.json"), or null if it isn't shaped
+// like one. Accepts BOTH spellings the corpus actually uses:
+//   - a reference-resolver hit path: "sources/<name>/file"      (strip already applied)
+//   - a raw REF spec:                "ref/sources/<name>/file"   (present-classified)
+// A vendored ref written as "ref/sources/desktop-sp/sound.rb" resolves as a PRESENT
+// project file (it physically exists under the project via the store symlink), never
+// the 'reference' kind — so keying the manifest lookup on classification alone misses
+// every mixed entry. Keying on the PATH SHAPE catches both. The source ROOT is the two
+// segments after the optional "ref/" prefix; the manifest is colocated there.
+function vendorManifestRel(p) {
+  if (typeof p !== 'string') return null;
+  let parts = p.split('/');
+  if (parts[0] === 'ref') parts = parts.slice(1);     // tolerate the raw "ref/…" spelling
+  if (parts.length < 3 || parts[0] !== 'sources') return null;
+  return `${parts[0]}/${parts[1]}/VENDOR.json`;
+}
+
+// Given a verdict's reference files and an injected `readVendor(relPath)=>text|null`,
+// find the FIRST vendored source (area 'ref/sources') that carries a valid VENDOR.json
+// and return its parsed manifest, or undefined. `readVendor` reads the manifest text
+// from the store (the caller owns fs); undefined when no reader is injected (a
+// non-store caller) so behaviour is unchanged. First-wins: an entry citing several
+// vendored sources reports the first opted-in one — enough to mark it version-tracked
+// and pull it into --stale; a multi-source breakdown isn't needed for the verdict.
+function readVendorFor(files, readVendor) {
+  if (typeof readVendor !== 'function') return undefined;
+  for (const x of files) {
+    // A vendored ref may arrive EITHER as a 'reference' hit (referencePath =
+    // "sources/<name>/…") OR as a 'present' project file whose spec is
+    // "ref/sources/<name>/…" (it physically exists via the store symlink). Try the
+    // resolved reference path first, then the raw spec — both map to the same source
+    // root via vendorManifestRel, which tolerates the "ref/" prefix.
+    const rel = vendorManifestRel(x.referencePath) || vendorManifestRel(x.file);
+    if (!rel) continue;
+    let text; try { text = readVendor(rel); } catch { text = null; }
+    if (!text) continue;
+    const m = parseVendorManifest(text);
+    if (m) return m;                                           // first valid manifest wins
+  }
+  return undefined;
+}
+
 function makeRefResolver(areas, { readdir } = {}) {
   if (!readdir || !Array.isArray(areas)) return null;
   const indexed = areas.map(a => ({ ...a, rel: indexDir(a.dir, readdir) })).filter(a => a.rel.length);
@@ -590,7 +695,7 @@ function indexDir(dir, readdir) {
 //                                rung 4, the time-based fallback.
 // Returns { status, anchor, files:[{file,exists,changedCommits}], reason }.
 function computeCurrency(entry, opts) {
-  const { git, fileExists, storeGit, cataloguePath, refResolver } = opts;
+  const { git, fileExists, storeGit, cataloguePath, refResolver, readVendor } = opts;
 
   // The UNION of what the entry maps and what grounds it. A boundary genuinely
   // depends on both: FILES: is the code it describes, REF: the doc it was written
@@ -626,6 +731,22 @@ function computeCurrency(entry, opts) {
   const kinds = refFiles.map(f => ({ f, c: classifySpec(f, fileExists, git, refResolver) }));
   const hasPresent = kinds.some(k => k.c.kind === 'present');
   const allNonProject = kinds.every(k => k.c.kind === 'reference' || k.c.kind === 'external' || k.c.kind === 'ambiguous');
+
+  // Vendored-source freshness (#61): read the manifest ONCE, up front, from the
+  // classified refs — a vendored file arrives either as a 'reference' hit
+  // (referencePath = sources/<name>/…) or a 'present' project file whose spec is
+  // ref/sources/<name>/… (physically present via the store symlink). readVendorFor
+  // keys on the PATH SHAPE, so it catches both. Computed here (before any return) so
+  // EVERY terminal verdict — pure-🔵, no-anchor ⚪, drift 🟢/🟡/🔴 — can carry it. SCOPE:
+  // physically-vendored SNAPSHOTS under ref/sources only, never live node_modules
+  // deps / DBs / deployments (no store snapshot → nothing to resolve → a version there
+  // would be invented, the false-green this gate kills). Absent manifest → undefined →
+  // every verdict is byte-identical to before (no regression).
+  const vendor = readVendorFor(
+    kinds.map(({ f, c }) => ({ file: f, referencePath: c.path, area: c.area, reference: c.kind === 'reference' })),
+    readVendor);
+  const withVendor = (v) => (vendor ? { ...v, vendor } : v);
+
   if (!hasPresent && allNonProject && kinds.some(k => k.c.kind === 'reference')) {
     // Grounded entirely in the store — no anchor required, no drift to compute.
     const files = kinds.map(({ f, c }) => ({
@@ -635,10 +756,10 @@ function computeCurrency(entry, opts) {
     }));
     const areas = [...new Set(files.filter(x => x.reference && x.area).map(x => x.area))];
     const where = areas.length ? areas.join(', ') : 'reference area';
-    return {
+    return withVendor({
       status: 'REFERENCE', anchor: { sha: null, source: 'none' }, files,
       reason: `grounded in the store's ${where}; freshness is an upstream-version question, not a drift this repo can compute`,
-    };
+    });
   }
 
   const anchor = resolveAnchor({
@@ -652,7 +773,9 @@ function computeCurrency(entry, opts) {
   });
 
   if (!anchor.sha) {
-    return { status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })), reason: 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)' };
+    // No anchor to diff against — but if the entry cites an opted-in vendor, its
+    // version re-verify prompt still rides along (the vendor was read up front).
+    return withVendor({ status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })), reason: 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)' });
   }
 
   const files = [];
@@ -691,6 +814,9 @@ function computeCurrency(entry, opts) {
     if (changed > 0) anyDrift = true;
   }
 
+  // `vendor` / `withVendor` were computed up front (before the anchor block), so both
+  // the pure-🔵 and no-anchor ⚪ returns above and the drift terminals below all carry
+  // an opted-in vendor's version note. Nothing to recompute here.
   const present = files.filter(f => f.exists !== false);
   // RED only when EVERY ref file is gone — a dangling entry. A single missing file
   // among present ones is usually a cross-repo ref or a prose mention, not a dead
@@ -713,21 +839,21 @@ function computeCurrency(entry, opts) {
     // begin with; if every not-here ref is reference/external/ambiguous, it is GRAY.
     if (files.every(f => f.reference || f.external || f.ambiguous)) {
       const amb = files.some(f => f.ambiguous);
-      return {
+      return withVendor({
         status: 'GRAY', anchor, files,
         reason: amb
           ? 'REF names are ambiguous in this repo (several files match) — not diffable here'
           : 'REF points outside this repo (sibling repo or prose) — not diffable here',
-      };
+      });
     }
-    return { status: 'RED', anchor, files, reason: 'all REF files no longer exist' };
+    return withVendor({ status: 'RED', anchor, files, reason: 'all REF files no longer exist' });
   }
-  if (anyDrift) return { status: 'YELLOW', anchor, files, reason: 'REF file(s) changed since anchor' };
+  if (anyDrift) return withVendor({ status: 'YELLOW', anchor, files, reason: 'REF file(s) changed since anchor' });
   // If every present file was uncomputable (changedCommits null), we don't actually know.
   if (present.every(f => f.changedCommits === null)) {
-    return { status: 'GRAY', anchor, files, reason: 'anchor sha not in current history (squash?) — drift uncomputable' };
+    return withVendor({ status: 'GRAY', anchor, files, reason: 'anchor sha not in current history (squash?) — drift uncomputable' });
   }
-  return { status: 'GREEN', anchor, files, reason: 'no REF drift since anchor' };
+  return withVendor({ status: 'GREEN', anchor, files, reason: 'no REF drift since anchor' });
 }
 
 module.exports = {
@@ -735,5 +861,6 @@ module.exports = {
   parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom,
   makeRefResolver, indexDir,
+  parseVendorManifest, vendorManifestRel, readVendorFor,
   lintEntry, lineAnchoredRefs, LINT,
 };
