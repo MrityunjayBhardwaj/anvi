@@ -10,9 +10,9 @@
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-22c55e?style=for-the-badge)
 ![Standalone](https://img.shields.io/badge/standalone-self--contained-8b5cf6?style=for-the-badge)
-![Skills](https://img.shields.io/badge/skills-53-0ea5e9?style=for-the-badge)
+![Skills](https://img.shields.io/badge/skills-55-0ea5e9?style=for-the-badge)
 ![Agents](https://img.shields.io/badge/agents-17-f97316?style=for-the-badge)
-![Workflows](https://img.shields.io/badge/workflows-48-ec4899?style=for-the-badge)
+![Workflows](https://img.shields.io/badge/workflows-50-ec4899?style=for-the-badge)
 ![Cognitive OS](https://img.shields.io/badge/🧠-cognitive_OS-14b8a6?style=for-the-badge)
 
 </div>
@@ -44,7 +44,7 @@ flowchart TD
     D2(["🧩 DESIGN<br/>what SHOULD"])
     D3(["⚖️ REVIEW<br/>is it sound?"])
     KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama"]
-    SURF["⚙️ SURFACE<br/>17 agents → 49 workflows · 54 skills · anvi-tools CLI"]
+    SURF["⚙️ SURFACE<br/>17 agents → 50 workflows · 55 skills · anvi-tools CLI"]
 
     BASE --> R
     R --> D1 & D2 & D3
@@ -92,7 +92,7 @@ cd anvi
 ./install.sh
 ```
 
-The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **54 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
+The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **55 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
 
 <details>
 <summary><b>⚙️ Install modes</b></summary>
