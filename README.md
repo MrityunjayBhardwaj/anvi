@@ -105,6 +105,7 @@ The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.c
 | `./install.sh --dev` | **Dev mode** — symlinks repo → live. Edits to the repo are immediately live. |
 | `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
 | `./install.sh --sync` | Silent one-way copy from repo → live (no prompts) |
+| `./install.sh --migrate [dir ...]` | One-pass upgrade of an existing clone — framework sync + retired-hook prune + per-project catalogue migration for each `dir`. Idempotent. Usually driven by `/anvi:update`. |
 | `./install.sh --check` | Show repo version vs installed version, change nothing |
 
 **For contributors:** use `--dev` — the repo _is_ the live installation, no sync step needed.

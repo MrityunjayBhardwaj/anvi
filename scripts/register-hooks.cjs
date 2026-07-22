@@ -149,7 +149,9 @@ function pruneRegistrations(settings, removed = REMOVED) {
 // removed still gets cleaned. Only names in `removed` are ever deleted.
 function pruneOrphanFiles(removed = REMOVED, hooksDir = HOOKS_DIR) {
   const deleted = [];
+  const live = new Set(REGISTRATIONS.map(r => r[2]));
   for (const file of removed) {
+    if (live.has(file)) continue; // never delete a still-shipped hook's file
     const p = path.join(hooksDir, file);
     // lstat, not exists: a dangling dev symlink must still be removable.
     let present = false;

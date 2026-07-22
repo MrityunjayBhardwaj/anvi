@@ -108,6 +108,17 @@ console.log('pruneOrphanFiles — deletes only listed names, keeps the rest');
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+console.log('pruneOrphanFiles — a still-registered hook file is NEVER deleted');
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-hooks-'));
+  fs.writeFileSync(path.join(tmp, 'catalogue-context-injector.js'), '// LIVE hook\n');
+  // Maintainer error: a live hook name in the removed-list must not delete its file.
+  const deleted = pruneOrphanFiles(['catalogue-context-injector.js'], tmp);
+  eq(deleted.length, 0, 'nothing deleted — the name is still in REGISTRATIONS');
+  ok(fs.existsSync(path.join(tmp, 'catalogue-context-injector.js')), 'live hook file survives');
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 // --- integration: spawn the SHIPPED script against a temp HOME ---
 // Proves the real bytes with the real (empty) REMOVED are a pure no-op: a
 // foreign hook and the live anvi hooks all survive `--prune`.
