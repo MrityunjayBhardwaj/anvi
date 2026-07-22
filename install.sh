@@ -8,6 +8,11 @@ set -euo pipefail
 # Usage:
 #   ./install.sh              Interactive install (prompts before overwrite)
 #   ./install.sh --sync       Silent sync from repo → live (no prompts)
+#   ./install.sh --migrate [project-dir ...]
+#                             One-pass upgrade of an existing clone: framework sync
+#                             + stale-hook prune + per-project catalogue migration
+#                             (link-catalogues --apply + grant) for each project-dir.
+#                             Idempotent; no prompts (the /anvi:update skill asks).
 #   ./install.sh --dev        Symlink instead of copy (live edits = repo edits)
 #   ./install.sh --no-dev     Break symlink, copy files (back to standalone mode)
 #   ./install.sh --check      Show version diff only, don't install
@@ -20,14 +25,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
 
 MODE="interactive"
+PROJECTS=()   # positional args = project dirs to migrate (--migrate only)
 for arg in "$@"; do
   case "$arg" in
-    --sync)   MODE="sync" ;;
-    --dev)    MODE="dev" ;;
-    --no-dev) MODE="no-dev" ;;
-    --check)  MODE="check" ;;
+    --sync)    MODE="sync" ;;
+    --migrate) MODE="migrate" ;;
+    --dev)     MODE="dev" ;;
+    --no-dev)  MODE="no-dev" ;;
+    --check)   MODE="check" ;;
+    -*)        echo "unknown flag: $arg" >&2; exit 2 ;;
+    *)         PROJECTS+=("$arg") ;;
   esac
 done
+
+# --migrate prunes retired hooks; every other mode stays additive-only.
+PRUNE_FLAG=""
+[ "$MODE" = "migrate" ] && PRUNE_FLAG="--prune"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " Ānvīkṣikī v${VERSION} — Installer"
@@ -184,8 +197,9 @@ if [ -d "$SCRIPT_DIR/hooks" ]; then
     HOOK_COUNT=$((HOOK_COUNT + 1))
   done
   echo "  ✓ ${HOOK_COUNT} hooks installed to ${HOOKS_DIR}"
-  # Register them in settings.json (idempotent; preserves existing hooks)
-  node "$SCRIPT_DIR/scripts/register-hooks.cjs"
+  # Register them in settings.json (idempotent; preserves existing hooks).
+  # --migrate also prunes registrations + orphan files for retired anvi hooks.
+  node "$SCRIPT_DIR/scripts/register-hooks.cjs" $PRUNE_FLAG
 fi
 
 # Metadata
@@ -243,29 +257,68 @@ echo "  /anvi:debug             Debug with cognitive OS"
 echo "  /anvi:init              Initialize project catalogues"
 echo ""
 
+# ─── Migrate: per-project structural migration ──────────────────────────────
+# --migrate is a one-pass upgrade. The framework + prune are done above; now
+# apply catalogue-centralization + the permission grant to each selected project.
+# Both helper scripts auto-detect state and are idempotent, so this is safe to
+# re-run (a fully-migrated project reports "nothing to do"). No prompts here —
+# the /anvi:update skill collects the project list and answers the questions.
+
+if [ "$MODE" = "migrate" ]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " Per-project catalogue migration"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  if [ "${#PROJECTS[@]}" -eq 0 ]; then
+    echo "  No project dirs given — framework + hooks are current; nothing per-project to migrate."
+    echo "  (Pass project dirs to migrate their catalogues: ./install.sh --migrate <dir> ...)"
+  else
+    LINK_SH="$SCRIPT_DIR/scripts/link-catalogues.sh"
+    GRANT_SH="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
+    for proj in "${PROJECTS[@]}"; do
+      echo "▶ $proj"
+      if [ ! -d "$proj" ]; then
+        echo "  ✗ not a directory — skipping"
+        echo ""
+        continue
+      fi
+      # link-catalogues / grant exit non-zero on a REFUSAL (split-brain, tracked
+      # settings). Surface it, keep going to the next project — don't abort the run.
+      bash "$LINK_SH"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
+      bash "$GRANT_SH" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
+      echo ""
+    done
+  fi
+  echo "Done."
+  exit 0
+fi
+
 # ─── Optional: Project catalogues ───────────────────────────────────────────
+# Interactive install only — a silent --sync must not prompt for this.
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Optional: Initialize project catalogues"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo -n "Create .anvi/ catalogues in current directory? [y/N] "
-read -r REPLY
-if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-  PROJ_DIR=".anvi"
-  mkdir -p "$PROJ_DIR"
-  PROJ_NAME=$(basename "$(pwd)")
+if [ "$MODE" = "interactive" ]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " Optional: Initialize project catalogues"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo -n "Create .anvi/ catalogues in current directory? [y/N] "
+  read -r REPLY
+  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    PROJ_DIR=".anvi"
+    mkdir -p "$PROJ_DIR"
+    PROJ_NAME=$(basename "$(pwd)")
 
-  for template in hetvabhasa-template.md vyapti-template.md krama-template.md; do
-    target="${template%-template.md}.md"
-    if [ -f "$ANVI_DIR/references/$template" ]; then
-      sed "s/\[Project Name\]/${PROJ_NAME}/g" "$ANVI_DIR/references/$template" > "$PROJ_DIR/$target"
-    fi
-  done
+    for template in hetvabhasa-template.md vyapti-template.md krama-template.md; do
+      target="${template%-template.md}.md"
+      if [ -f "$ANVI_DIR/references/$template" ]; then
+        sed "s/\[Project Name\]/${PROJ_NAME}/g" "$ANVI_DIR/references/$template" > "$PROJ_DIR/$target"
+      fi
+    done
 
-  echo "  ✓ Project catalogues created in ${PROJ_DIR}/"
-else
-  echo "  Skipped. Run /anvi:init in any project to create them."
+    echo "  ✓ Project catalogues created in ${PROJ_DIR}/"
+  else
+    echo "  Skipped. Run /anvi:init in any project to create them."
+  fi
 fi
 
 echo ""
