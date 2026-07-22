@@ -106,13 +106,20 @@ ensure_gitignore() {
   # the link as a file), so `.anvi/` would silently fail to ignore it.
   if [ "$APPLY" = 1 ]; then
     touch "$gi"
+    local changed=0
     # drop any legacy '.anvi/' entry
     if grep -qxF '.anvi/' "$gi" 2>/dev/null; then
-      sed -i.bak '/^\.anvi\/$/d' "$gi" && rm -f "$gi.bak"
+      sed -i.bak '/^\.anvi\/$/d' "$gi" && rm -f "$gi.bak"; changed=1
     fi
-    grep -qxF "$comment" "$gi" 2>/dev/null || printf '\n%s\n' "$comment" >> "$gi"
-    grep -qxF '.anvi' "$gi" 2>/dev/null || echo '.anvi' >> "$gi"
-    echo "  ✓  $PREFIX .gitignore ensures '.anvi'"
+    grep -qxF "$comment" "$gi" 2>/dev/null || { printf '\n%s\n' "$comment" >> "$gi"; changed=1; }
+    grep -qxF '.anvi' "$gi" 2>/dev/null || { echo '.anvi' >> "$gi"; changed=1; }
+    # Report honestly whether the tree was touched, so idempotence is observable
+    # from the output alone (a no-op run must not look like a write).
+    if [ "$changed" = 1 ]; then
+      echo "  ✓  $PREFIX added '.anvi' to .gitignore"
+    else
+      echo "  ✓  .gitignore already ignores '.anvi'"
+    fi
   else
     if grep -qxF '.anvi' "$TARGET/.gitignore" 2>/dev/null; then
       echo "  ·  .gitignore already ignores '.anvi'"
