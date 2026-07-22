@@ -6,6 +6,9 @@
 // same hook file isn't already present, and it never touches other hooks
 // (GSD hooks, user hooks) in the same event/matcher group.
 //
+// With --prune (used by `install.sh --migrate`) it ALSO removes registrations
+// and orphan files for anvi hooks that are no longer shipped — see REMOVED.
+//
 // If settings.json is missing it is created. If it can't be parsed (e.g. the
 // user hand-edited it into invalid JSON), registration is skipped with a
 // notice rather than risking data loss.
@@ -17,6 +20,8 @@ const os = require('os');
 const HOME = os.homedir();
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 const HOOKS_DIR = path.join(HOME, '.claude', 'hooks');
+
+const PRUNE = process.argv.slice(2).includes('--prune');
 
 // The Anvi hooks: [event, matcher|null, file, timeout]
 const REGISTRATIONS = [
@@ -35,6 +40,17 @@ const REGISTRATIONS = [
   ['Stop',             null,         'anvideck-checkpoint.js',        30], // commit+push may take seconds
 ];
 const HOOK_FILE_COUNT = new Set(REGISTRATIONS.map(r => r[2])).size;
+
+// Retired anvi hooks — filenames anvi shipped in a PAST version and no longer
+// ships. `--prune` strips their settings registrations and deletes their orphan
+// files. This is the ONLY list that authorizes removal: pruning keys on it, NOT
+// on "absent from REGISTRATIONS," so a user's or GSD's hooks (and anvi's own
+// unregistered shared modules like anvi-paths.js / currency.js, which are
+// imported, never invoked as hooks) are never touched. When you retire a hook,
+// delete it from REGISTRATIONS above and add its filename here.
+const REMOVED = [
+  // e.g. 'old-anvi-hook.js',
+];
 
 function load() {
   if (!fs.existsSync(SETTINGS)) return {};
@@ -86,30 +102,100 @@ function ensureHook(settings, event, matcher, file, timeout) {
   return true;
 }
 
-let settings;
-try {
-  settings = load();
-} catch (e) {
-  console.log(`  ⚠ Could not parse ${SETTINGS} (${e.message}).`);
-  console.log('    Skipping hook registration — register the Anvi hooks manually.');
-  process.exit(0);
+// Does this registered hook command reference the given hook filename? The
+// leading separator anchors the match to a path segment so a REMOVED
+// 'route-logger.js' can't strip the live '.../anvi-route-logger.js'.
+function commandRefsFile(command, file) {
+  if (typeof command !== 'string') return false;
+  return command.includes(path.sep + file) || command.includes('/' + file);
 }
 
-let added = 0;
-try {
-  for (const [event, matcher, file, timeout] of REGISTRATIONS) {
-    if (ensureHook(settings, event, matcher, file, timeout)) added++;
+// Remove registrations for retired hooks. `removed` is the ONLY authorization to
+// delete anything (defaults to REMOVED); every other hook object in a shared
+// group is kept. Empty groups and empty event lists are cleaned up so a second
+// run is a no-op. Pure on `settings` — no filesystem, unit-testable directly.
+function pruneRegistrations(settings, removed = REMOVED) {
+  const removedFiles = new Set();
+  if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+    return removedFiles; // nothing (or malformed) — leave it to the shape guards
   }
-} catch (e) {
-  console.log(`  ⚠ ${e.message}`);
-  console.log('    Skipping hook registration — register the Anvi hooks manually.');
-  process.exit(0);
+  for (const event of Object.keys(settings.hooks)) {
+    const list = settings.hooks[event];
+    if (!Array.isArray(list)) continue;
+    for (const group of list) {
+      if (!group || !Array.isArray(group.hooks)) continue;
+      group.hooks = group.hooks.filter(h => {
+        const hit = removed.some(f => commandRefsFile(h && h.command, f));
+        if (hit) removed.forEach(f => { if (commandRefsFile(h.command, f)) removedFiles.add(f); });
+        return !hit; // drop the ones that reference a removed file
+      });
+    }
+    // Drop groups left with no hooks, then the event list if it's now empty.
+    settings.hooks[event] = list.filter(g => g && Array.isArray(g.hooks) && g.hooks.length > 0);
+    if (settings.hooks[event].length === 0) delete settings.hooks[event];
+  }
+  return removedFiles;
 }
 
-if (added > 0) {
-  fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
-  fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + '\n');
-  console.log(`  ✓ Registered ${added} new hook entr${added === 1 ? 'y' : 'ies'} in settings.json`);
-} else {
-  console.log(`  ✓ All ${HOOK_FILE_COUNT} Anvi hooks already registered (no change)`);
+// Delete orphan hook files for retired names (copy-mode installs never rm a
+// dropped hook; dev-mode leaves a dangling symlink). Independent of whether a
+// registration existed, so a file left behind after its registration was
+// removed still gets cleaned. Only names in `removed` are ever deleted.
+function pruneOrphanFiles(removed = REMOVED, hooksDir = HOOKS_DIR) {
+  const deleted = [];
+  for (const file of removed) {
+    const p = path.join(hooksDir, file);
+    // lstat, not exists: a dangling dev symlink must still be removable.
+    let present = false;
+    try { fs.lstatSync(p); present = true; } catch { present = false; }
+    if (!present) continue;
+    try { fs.unlinkSync(p); deleted.push(file); }
+    catch (e) { console.log(`  ⚠ could not delete orphan hook ${file}: ${e.message}`); }
+  }
+  return deleted;
 }
+
+function main() {
+  let settings;
+  try {
+    settings = load();
+  } catch (e) {
+    console.log(`  ⚠ Could not parse ${SETTINGS} (${e.message}).`);
+    console.log('    Skipping hook registration — register the Anvi hooks manually.');
+    process.exit(0);
+  }
+
+  let added = 0;
+  let prunedRegs = new Set();
+  try {
+    for (const [event, matcher, file, timeout] of REGISTRATIONS) {
+      if (ensureHook(settings, event, matcher, file, timeout)) added++;
+    }
+    if (PRUNE) prunedRegs = pruneRegistrations(settings);
+  } catch (e) {
+    console.log(`  ⚠ ${e.message}`);
+    console.log('    Skipping hook registration — register the Anvi hooks manually.');
+    process.exit(0);
+  }
+
+  if (added > 0 || prunedRegs.size > 0) {
+    fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
+    fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + '\n');
+    if (added > 0) console.log(`  ✓ Registered ${added} new hook entr${added === 1 ? 'y' : 'ies'} in settings.json`);
+    if (prunedRegs.size > 0) console.log(`  ✓ Pruned ${prunedRegs.size} retired hook registration(s): ${[...prunedRegs].join(', ')}`);
+  } else {
+    console.log(`  ✓ All ${HOOK_FILE_COUNT} Anvi hooks already registered (no change)`);
+  }
+
+  if (PRUNE) {
+    const deleted = pruneOrphanFiles();
+    if (deleted.length > 0) console.log(`  ✓ Deleted ${deleted.length} orphan hook file(s): ${deleted.join(', ')}`);
+  }
+}
+
+if (require.main === module) main();
+
+module.exports = {
+  REGISTRATIONS, REMOVED, ensureHook, normMatcher, commandRefsFile,
+  pruneRegistrations, pruneOrphanFiles,
+};
