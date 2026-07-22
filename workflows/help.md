@@ -11,11 +11,19 @@
   /anvi:new-project     Initialize a new project
   /anvi:new-milestone   Start a new milestone
   /anvi:init            Initialize cognitive OS for project
+  /anvi:map-codebase    Analyze a codebase with parallel mapper agents
+
+## Orientation
+  /anvi:orient          Where am I — known/unknown/assumed, go deep or wide
+  /anvi:rq              Surface the right questions to ask right now
+  /anvi:lens            Map the lenses that apply to the current problem
 
 ## Planning
   /anvi:discuss-phase   Gather context before planning
   /anvi:plan-phase      Create detailed phase plans
   /anvi:research-phase  Deep research for a phase
+  /anvi:list-phase-assumptions  Surface assumptions before planning
+  /anvi:plan-milestone-gaps     Create phases to close milestone-audit gaps
 
 ## Execution
   /anvi:execute-phase   Execute phase plans
@@ -23,12 +31,20 @@
   /anvi:quick           Small task with guarantees
   /anvi:fast            Trivial inline edit
   /anvi:autonomous      Run all phases autonomously
+  /anvi:explore         Explore a friction point — something that should exist
 
 ## Verification
   /anvi:verify-work     UAT verification
+  /anvi:verify-phase    Verify a phase achieved its goal
+  /anvi:validate-phase  Fill Nyquist validation gaps for a phase
   /anvi:add-tests       Generate tests for a phase
   /anvi:audit-uat       Cross-phase UAT audit
   /anvi:audit-milestone Milestone completion audit
+  /anvi:review          Peer review of plans or implementation
+
+## UI
+  /anvi:ui-phase        Generate a UI design contract (UI-SPEC.md)
+  /anvi:ui-review       6-pillar visual audit of implemented UI
 
 ## Debugging
   /anvi:debug           Cognitive OS-native debugging
@@ -43,6 +59,8 @@
   /anvi:insert-phase    Insert urgent phase
   /anvi:remove-phase    Remove future phase
   /anvi:complete-milestone  Archive and tag milestone
+  /anvi:cleanup         Archive accumulated phase directories
+  /anvi:pr-branch       Create a clean PR branch (filters .planning/)
   /anvi:pause-work      Save state for later
 
 ## Notes & Ideas
@@ -69,10 +87,11 @@
 
 ## Meta
   /anvi:help            This help
-  /anvi:settings        Configure workflow toggles
+  /anvi:settings        Configure workflow toggles + session retention
   /anvi:stats           Project statistics
   /anvi:health          Planning directory health
   /anvi:session-report  Session summary
+  /anvi:sess-wrap       Wrap up a session — harvest learnings, print kickoff
   /anvi:ship            Create PR and prepare for merge
 ```
 </step>
