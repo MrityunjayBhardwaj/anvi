@@ -119,15 +119,21 @@ function pruneRegistrations(settings, removed = REMOVED) {
   if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
     return removedFiles; // nothing (or malformed) — leave it to the shape guards
   }
+  // REGISTRATIONS is authoritative: never prune a filename that is still shipped
+  // (guards against a maintainer listing a live hook in REMOVED — that would add-
+  // then-prune it on every run, breaking idempotence). A currently-registered
+  // name is always kept, whatever REMOVED says.
+  const live = new Set(REGISTRATIONS.map(r => r[2]));
+  const eligible = removed.filter(f => !live.has(f));
   for (const event of Object.keys(settings.hooks)) {
     const list = settings.hooks[event];
     if (!Array.isArray(list)) continue;
     for (const group of list) {
       if (!group || !Array.isArray(group.hooks)) continue;
       group.hooks = group.hooks.filter(h => {
-        const hit = removed.some(f => commandRefsFile(h && h.command, f));
-        if (hit) removed.forEach(f => { if (commandRefsFile(h.command, f)) removedFiles.add(f); });
-        return !hit; // drop the ones that reference a removed file
+        const hit = eligible.some(f => commandRefsFile(h && h.command, f));
+        if (hit) eligible.forEach(f => { if (commandRefsFile(h.command, f)) removedFiles.add(f); });
+        return !hit; // drop the ones that reference a removed (and not-still-live) file
       });
     }
     // Drop groups left with no hooks, then the event list if it's now empty.

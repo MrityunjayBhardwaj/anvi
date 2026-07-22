@@ -62,6 +62,17 @@ console.log('pruneRegistrations — empty removed-list touches NOTHING (conserva
   eq(cmds(s, 'PreToolUse').length, 2, 'shared group intact');
 }
 
+console.log('pruneRegistrations — a still-registered name is NEVER pruned (REGISTRATIONS wins)');
+{
+  // Maintainer error: a LIVE hook mistakenly listed in the removed-list. It must
+  // survive (else it would be added-then-pruned every run — non-idempotent).
+  const s = build();
+  const removed = pruneRegistrations(s, ['catalogue-context-injector.js']);
+  eq(removed.size, 0, 'nothing pruned — the name is still in REGISTRATIONS');
+  ok(cmds(s, 'PreToolUse').some(c => c.includes('catalogue-context-injector.js')),
+     'the live hook survives despite being on the removed-list');
+}
+
 console.log('commandRefsFile — leading-separator anchor prevents substring false-hits');
 {
   ok(!commandRefsFile(cmd('anvi-route-logger.js'), 'route-logger.js'),
