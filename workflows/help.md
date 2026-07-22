@@ -74,6 +74,8 @@
   /anvi:session         Session-only activation
   /anvi:audit           Self-coherence audit
   /anvi:sync            Check GSD upstream changes
+  /anvi:update          Update this clone to the latest anvi (framework + hooks
+                        + per-project catalogue migration, idempotent)
 
 ## Ground Truth (v1.1.0+)
   /anvi:ground          Establish three-layer grounding for external systems

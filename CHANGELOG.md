@@ -3,6 +3,83 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [2.0.0] — 2026-07-23
+
+Major release. Since 1.1.0 the framework grew a **centralized knowledge store**:
+catalogues, Ground Truth docs, and memory now live under `~/.anvideck` (backed by
+a private git remote) and are reached from each project through a symlinked `.anvi`.
+This is a **structural, non-backward-compatible change** — an install from 1.1.0 or
+earlier keeps its catalogues in a local `.anvi/` directory and must be migrated to
+become current. The new `/anvi:update` command (and `install.sh --migrate`) performs
+that migration; the version bump to 2.0.0 signals that the migration is required, not
+optional.
+
+### Migration notes — upgrading an existing 1.1.0 (or earlier) clone
+
+Run **`/anvi:update`** (or `./install.sh --migrate`). It is idempotent and
+state-driven — it reconciles what is *installed* against what the repo ships, so it
+does the right thing whether or not you had already `git pull`ed, and a second run is
+a clean no-op. It performs:
+
+1. **Framework sync** — copies the current cognitive OS, workflows, hooks, CLI,
+   agents, and skills into `~/.claude/` and re-registers hooks idempotently.
+2. **Stale-hook pruning** — removes hook files and settings registrations for anvi
+   hooks that are no longer shipped (keyed on an explicit known-removed list, so a
+   user's or GSD's hooks are never touched).
+3. **Per-project structural migration**, for the projects you select:
+   - **Catalogue centralization** — moves a project's local `.anvi/` into
+     `~/.anvideck/projects/<name>/.anvi` and replaces it with a symlink, so there is
+     one physical copy reached locally (no split-brain). A project with both a local
+     and a central copy is *refused*, not merged — resolve those by hand.
+   - **Scoped permission grant** — adds `~/.anvideck/projects/<name>` to the
+     project's `.claude/settings.local.json` `additionalDirectories`, so a fresh
+     (non-elevated) session can actually read and append its own centralized
+     catalogues. Scoped to the one project, never blanket.
+4. **Optional memory backup** — the checkpoint hook can mirror each project's memory
+   into the store at session end. **Opt-in** (`~/.claude/anvi-config.json`
+   `"memorySync": true`); off unless you enable it, since memory leaves the machine.
+
+Your data is preserved untouched throughout: store catalogues, per-project memory,
+existing permission grants, and your own `settings.json` hooks.
+
+### Added
+- **`/anvi:update`** — one command that takes an existing clone from any version to
+  fully current: framework + hook registrations + every selected project's catalogue
+  structure. Idempotent, state-driven, and interactive only where a human decision is
+  genuinely needed (`skills/anvi-update/`, `workflows/update.md`).
+- **`install.sh --migrate`** — one-pass upgrade: framework `--sync` + stale-hook
+  prune + per-project `link-catalogues.sh --apply` + `grant-catalogue-access.sh` over
+  selected projects.
+- **Stale-hook pruning** in `scripts/register-hooks.cjs` (`--prune`) — removes
+  registrations and orphan files for retired anvi hooks, conservatively.
+- **Centralized store + symlink model** — catalogues live in `~/.anvideck`, reached
+  via a symlinked `.anvi`; `/anvi:init` and `scripts/link-catalogues.sh` create the
+  layout; the resolver warns on split-brain (multiple physical copies of a kind).
+- **Scoped permission grant** (`scripts/grant-catalogue-access.sh`) — a fresh session
+  can read/write its own centralized envelope without a blanket grant.
+- **Provenance Check** — base-layer gate + `provenance-guard.js` hook flagging results
+  from surfaces not scoped to the current project.
+- **Currency gate** — `hooks/currency.js` + `scripts/currency-report.js` +
+  `/anvi:currency`: detects when a catalogue entry has drifted from the code its REF
+  points at, with a re-validation ritual. Folds in vendored-source version freshness
+  via optional `VENDOR.json` manifests.
+- **Memory durability** — the checkpoint hook mirrors project memory into the store
+  (opt-in); catalogues auto-commit and push to the `anvi_artifacts` remote on Stop.
+- **Catalogue-ID leak guard** (`catalogue-id-leak-guard.js`) — keeps private catalogue
+  IDs out of outward-facing repo content (commits, issues, PRs).
+- **Hook liveness harness** (`test/hook-liveness.test.js`) — spawns each hook the way
+  the harness does and requires its output to arrive, so a silently-dead hook fails.
+- **New skills/workflows**: `/anvi:sess-wrap`, `/anvi:currency`, and session-retention
+  control in `/anvi:settings`.
+- **Standalone operation** — the CLI's planning lib is vendored (`bin/lib/`); anvi no
+  longer depends on a GSD install.
+
+### Changed
+- `/anvi:help` now lists all commands (was a partial listing).
+- Catalogues use the canonical entry-count header format; a size-triggered compaction
+  protocol keeps them lean with stable IDs and git-only archival.
+- Licensing: anvi is GPL-3.0; the vendored GSD planning lib preserves its MIT notice.
+
 ## [1.1.0] — 2026-04-02
 
 ### Added
