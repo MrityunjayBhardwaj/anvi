@@ -62,6 +62,11 @@
                         (download source → generate Ground Truth docs → wire REFs)
                         Flags: --audit-only, --system [name], --rewire, --verify
 
+## Currency
+  /anvi:currency        Check catalogue freshness — which entries have drifted
+                        from the code they point at — and re-validate them
+                        Flags: --stale (worklist only), --lint (grounding gaps)
+
 ## Meta
   /anvi:help            This help
   /anvi:settings        Configure workflow toggles
