@@ -42,6 +42,36 @@ done
 PRUNE_FLAG=""
 [ "$MODE" = "migrate" ] && PRUNE_FLAG="--prune"
 
+# Per-project structural migration (used by --migrate). Applies catalogue-
+# centralization + the permission grant to each selected project. Both helpers
+# auto-detect state and are idempotent; a refusal (split-brain, tracked settings)
+# is surfaced and skipped, not fatal. No prompts — the /anvi:update skill asks.
+migrate_projects() {
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " Per-project catalogue migration"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  if [ "${#PROJECTS[@]}" -eq 0 ]; then
+    echo "  No project dirs given — framework + hooks are current; nothing per-project to migrate."
+    echo "  (Pass project dirs to migrate their catalogues: ./install.sh --migrate <dir> ...)"
+    return 0
+  fi
+  local link_sh="$SCRIPT_DIR/scripts/link-catalogues.sh"
+  local grant_sh="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
+  local proj
+  for proj in "${PROJECTS[@]}"; do
+    echo "▶ $proj"
+    if [ ! -d "$proj" ]; then
+      echo "  ✗ not a directory — skipping"
+      echo ""
+      continue
+    fi
+    bash "$link_sh"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
+    bash "$grant_sh" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
+    echo ""
+  done
+}
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " Ānvīkṣikī v${VERSION} — Installer"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -86,6 +116,19 @@ if [ "$MODE" = "no-dev" ]; then
     echo "  Not in dev mode (no symlink found). Nothing to do."
     exit 0
   fi
+fi
+
+# --migrate on a dev-mode install: the framework + hooks are already live via
+# symlinks, so the copy path would just hit "cp: identical (not copied)" and,
+# under `set -e`, abort before reaching the prune + per-project migration. Skip
+# the copy entirely; register (with prune) and migrate the projects directly.
+if [ "$MODE" = "migrate" ] && [ -L "$ANVI_DIR" ] && [ "$(readlink "$ANVI_DIR")" = "$SCRIPT_DIR" ]; then
+  echo "Dev-mode install detected — framework is already live via symlink; skipping copy."
+  node "$SCRIPT_DIR/scripts/register-hooks.cjs" --prune
+  echo ""
+  migrate_projects
+  echo "Done."
+  exit 0
 fi
 
 # Check if already installed
@@ -265,30 +308,7 @@ echo ""
 # the /anvi:update skill collects the project list and answers the questions.
 
 if [ "$MODE" = "migrate" ]; then
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo " Per-project catalogue migration"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  if [ "${#PROJECTS[@]}" -eq 0 ]; then
-    echo "  No project dirs given — framework + hooks are current; nothing per-project to migrate."
-    echo "  (Pass project dirs to migrate their catalogues: ./install.sh --migrate <dir> ...)"
-  else
-    LINK_SH="$SCRIPT_DIR/scripts/link-catalogues.sh"
-    GRANT_SH="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
-    for proj in "${PROJECTS[@]}"; do
-      echo "▶ $proj"
-      if [ ! -d "$proj" ]; then
-        echo "  ✗ not a directory — skipping"
-        echo ""
-        continue
-      fi
-      # link-catalogues / grant exit non-zero on a REFUSAL (split-brain, tracked
-      # settings). Surface it, keep going to the next project — don't abort the run.
-      bash "$LINK_SH"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
-      bash "$GRANT_SH" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
-      echo ""
-    done
-  fi
+  migrate_projects
   echo "Done."
   exit 0
 fi
