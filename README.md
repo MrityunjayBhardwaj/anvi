@@ -106,6 +106,8 @@ The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.c
 | `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
 | `./install.sh --sync` | Silent one-way copy from repo → live (no prompts) |
 | `./install.sh --migrate [dir ...]` | One-pass upgrade of an existing clone — framework sync + retired-hook prune + per-project catalogue migration for each `dir`. Idempotent. Usually driven by `/anvi:update`. |
+| `./install.sh --version-list` | List all releases (version + date + summary), marking installed and latest |
+| `./install.sh --version <v> [--migrate]` | Install/upgrade to a specific version. Upgrade-only (refuses to go below installed). Older tagged releases come from `git archive`; your clone is never checked out. |
 | `./install.sh --check` | Show repo version vs installed version, change nothing |
 
 **For contributors:** use `--dev` — the repo _is_ the live installation, no sync step needed.

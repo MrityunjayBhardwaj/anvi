@@ -20,6 +20,14 @@ result (currency + hook-liveness + `--check` + a second-run no-op).
 $ARGUMENTS — optional. Examples:
 - a project dir (or several) → migrate exactly those projects' catalogues.
 - `--check` / "just tell me what's stale" → detect + report the delta, do NOT apply.
+- `--version-list` / "what versions are there" → print the release catalogue
+  (version + date + short description, installed + latest marked); do NOT install.
+- `--version <v>` / "update to 2.0.0" → install/upgrade to a SPECIFIC release.
+  UPGRADE-ONLY: install.sh refuses to go below the installed version. The latest
+  is this clone's tree; an older tagged release is taken from `git archive <tag>`
+  into a temp dir (the clone is never checked out). A version present in the
+  CHANGELOG but without a git tag (and not the latest) is not installable — the
+  command says so and lists what is.
 - absent → detect the delta, then ask which projects to migrate.
 </inputs>
 
@@ -58,6 +66,22 @@ versions MATCH, per-project migration may still be pending — say so.
 If `$ARGUMENTS` asked for `--check`/report-only: stop here with the delta report.
 </step>
 
+<step name="2b_version">
+Handle version selection, if `$ARGUMENTS` asked for it:
+- `--version-list` (or "what versions exist") → run `bash "$REPO/install.sh"
+  --version-list` and show the catalogue (version + date + summary, installed +
+  latest marked). This is informational — stop here unless they also ask to install.
+- `--version <v>` → this pins the install target. Pass it straight through to
+  `install.sh` in step 4 (`--version <v> --migrate …`). install.sh enforces the
+  UPGRADE-ONLY rule (it refuses to go below the installed version) and materializes
+  an older tagged release from `git archive` without touching the clone — do NOT
+  re-implement the guard here; let install.sh own it and report its refusal.
+  Note: `--version` runs THAT release's own installer, so a target older than the
+  one that introduced `--migrate`/the store model can't honor those flags — the
+  realistic targets are the latest and future tagged releases.
+Absent → target is the latest (this clone's tree), the default flow below.
+</step>
+
 <step name="3_pull">
 Bring the working tree to latest, if there is anything to pull:
 
@@ -91,9 +115,10 @@ question already answered by `$ARGUMENTS` or existing config.
 </step>
 
 <step name="4_apply">
-Run the one-pass migrate for the selected projects:
+Run the one-pass migrate for the selected projects (thread `--version <v>`
+through if step 2b set a target — omit it to take the latest):
 
-  bash "$REPO/install.sh" --migrate <project-dir> [<project-dir> ...]
+  bash "$REPO/install.sh" [--version <v>] --migrate <project-dir> [<project-dir> ...]
 
 It syncs the framework, prunes retired hooks, and for each project applies
 catalogue-centralization + the scoped permission grant. It is idempotent — a
