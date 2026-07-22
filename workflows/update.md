@@ -142,7 +142,7 @@ remind the user the store commits + pushes on session end (the checkpoint hook).
   register-hooks' explicit REMOVED list; a user's or GSD's hooks are never touched.
   Do not hand-edit settings to remove hooks; let `--migrate` do it.
 - Never auto-resolve a SPLIT_BRAIN or TRACKED_SETTINGS refusal — surface it and let
-  the user reconcile. A wrong merge loses catalogue knowledge (V2/V5).
+  the user reconcile. A wrong merge silently loses catalogue knowledge.
 - memorySync is opt-in and off by default — never enable it without explicit
   consent; respect an existing choice without re-asking.
 - anvi is PUBLIC: no catalogue IDs in any outward-facing content (commits, PRs,

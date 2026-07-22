@@ -98,8 +98,12 @@ function fire(hook, payload) {
 // covered by nothing while this suite still printed green — the same fail-open
 // shape one level up.
 console.log('coverage');
-const reg = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'register-hooks.cjs'), 'utf8');
-const registered = [...reg.matchAll(/'([a-z0-9-]+\.(?:js|cjs))'/g)].map(m => m[1]);
+// Derive coverage from the ACTUAL registration manifest, not a regex over the
+// file text: the file also contains a REMOVED list (retired hooks) and example
+// filenames in comments, none of which are live hooks needing a witness.
+// Requiring the module is side-effect-free (its main() is require.main-guarded).
+const { REGISTRATIONS } = require('../scripts/register-hooks.cjs');
+const registered = REGISTRATIONS.map(r => r[2]);
 const COVERED = new Set([
   'catalogue-context-injector.js', // injector-currency + injector-ownership
   'provenance-guard.js',
