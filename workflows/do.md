@@ -123,6 +123,7 @@ Additional routing refinements (first match within type):
 | "complex task", "refactor", "big change" | `/anvi:add-phase` |
 | "all phases", "autonomous", "run everything" | `/anvi:autonomous` |
 | "tests", "add tests", "test coverage" | `/anvi:add-tests` |
+| "catalogue drift", "what's stale", "re-validate entries", "is this entry still real" | `/anvi:currency` |
 </step>
 
 <step name="display">
