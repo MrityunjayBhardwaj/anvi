@@ -65,7 +65,9 @@ State the verdicts honestly. Drift is NOT wrongness:
                — never a proof the entry is true.
 - 🟡 YELLOW    a REF file changed since the anchor. The code MOVED; the entry's
                pattern usually outlives its pointer. A re-verify prompt, not a bug.
-- 🔴 RED       every REF file is gone — a dangling pointer. Re-point or retire.
+- 🔴 RED       every REF file is gone. A prompt to RE-READ the entry (step 4),
+               not on its own a verdict it is dead — re-point, retire, or (if a
+               later change inverted its premise) supersede.
 - 🔵 REFERENCE grounded in vendored/store source this repo's git can't diff;
                freshness is an upstream-VERSION question (a VENDOR.json manifest),
                not drift. Not a defect.
@@ -96,6 +98,26 @@ the load-bearing step, and skipping it is how a false green gets stamped:
 If the pattern NO LONGER holds, do not stamp — re-point the REF, rewrite the
 body to the current reality, or retire the entry. Drift that turns out to be a
 genuine break is a real find, not a stamping chore.
+
+A vanished or moved REF file is a PROMPT TO RE-READ the entry, never on its own
+the verdict that the entry is dead. The same missing-file signal has two
+opposite causes, and only reading the entry's CONCLUSION tells them apart:
+- CONFIRMED — the entry's remedy SHIPPED, so the dead path is a historical
+  citation inside a still-true invariant (often the entry already records its
+  own retirement inline, e.g. "Status: IMPLEMENTED"). Leave it — the catalogue
+  is working, and many entries self-update this way.
+- INVERTED — a later change reversed the entry's premise, so its conclusion is
+  dead. SUPERSEDE it: add a dated note grounded in the commit/file that inverted
+  it, KEEP the historical body (it records why the entry existed — Chesterton),
+  and do NOT stamp VALIDATED. A superseded entry is fixed, not still-true.
+Falsely superseding a live entry is worse than missing one: a SUPERSEDED banner
+retires guidance, and nobody re-checks a retired entry. So verify each
+missing-file hit against the source INDEPENDENTLY of the probe that surfaced it
+— a sloppy file-existence sweep manufactures phantom "gone" hits (an ordered
+regex alternation once matched `.tsx` as `.ts`, faking ~80). And the true
+supersessions cluster in FATALITY / ORGANIZATIONAL-HEALTH / focus entries: they
+rot silently because nothing re-reads them once their fix lands — a frozen
+diagnosis then reads as today's assessment. The re-read is the whole point.
 </step>
 
 <step name="5_stamp">
@@ -156,6 +178,8 @@ Probes stayed in a scratch dir — verify nothing stray landed under `.anvi/`.
 - [ ] Freshness report run and read per-entry (not just the summary)
 - [ ] A coherent, re-confirmable batch chosen; entries left for later named explicitly
 - [ ] Each stamped entry re-confirmed against current code AND observed (tests run)
+- [ ] Any vanished/moved REF adjudicated confirmed-vs-inverted before acting; a
+      superseded entry annotated (dated note, historical body kept), not stamped
 - [ ] VALIDATED stamped at the trunk sha (post-merge), leading the field, with a
       concrete re-confirmation note
 - [ ] Flip verified per-entry (not by summary counts); no untouched entry changed
