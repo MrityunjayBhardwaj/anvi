@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, lintEntry, extensionsFrom, makeRefResolver } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver } = loadFromCandidates('currency.js');
 const { resolveDir } = loadFromCandidates('anvi-paths.js');
 
 // --- args -------------------------------------------------------------------
@@ -198,7 +198,12 @@ for (const cat of CATALOGUES) {
     // rung 4 never reads as confidently as one from an explicit VALIDATED.
     if (v.anchor.provisional && v.status !== 'GRAY') detail += ` (provisional — last edited ~${v.anchor.ts})`;
     const anchor = v.anchor.sha ? `${v.anchor.source}@${v.anchor.sha.slice(0, 7)}` : v.anchor.source;
-    lines.push(`  ${SYMBOL[v.status]} ${e.id.padEnd(6)} [${anchor}]  ${detail}`);
+    // The entry's role, shown on every row so a per-id before/after join keys on
+    // (id, kind) and never pairs a `## SV12` invariant against a dharana `### SV12`
+    // alignment cross-ref of the same id (#79 — the double-count that once got
+    // misread as duplicate ids). The id is legitimately shared; kind disambiguates.
+    const kind = entryKind(cat, e);
+    lines.push(`  ${SYMBOL[v.status]} ${e.id.padEnd(6)} ${kind.padEnd(10)} [${anchor}]  ${detail}`);
     shown++;
   }
   if (lines.length) { console.log(`${cat}`); console.log(lines.join('\n')); console.log(''); }

@@ -275,6 +275,12 @@ function parseEntries(md) {
     const lineStart = md.slice(0, m.index).split('\n').length;
     entries.push({
       id: m[1],
+      // Heading depth: 2 for a `## ID:` primary entry, 3 for a `### ID:` one. The
+      // regex anchors on `^#{2,3}`, so m[0] always opens with the markers. A dharana
+      // `### SV12` alignment cross-ref and a vyapti `## SV12` invariant share an id
+      // but not a level — the discriminator entryKind() uses so a per-id join never
+      // pairs them (#79).
+      level: (m[0].match(/^#{2,3}/) || ['##'])[0].length,
       title: body.split('\n')[0].trim().slice(0, 70),
       refField: field(body, 'REF'),
       fixField: field(body, 'FIX'),
@@ -365,6 +371,24 @@ const HIGH_SENSITIVITY = ['dharana', 'dhyana'];
 function sensitivityFor(catalogue) {
   const base = String(catalogue || '').replace(/\.md$/, '').toLowerCase();
   return HIGH_SENSITIVITY.includes(base) ? 'high' : 'low';
+}
+
+// The ROLE of an entry within its catalogue — used to key a per-id join (before/after
+// verdict diffs) so an invariant and a dharana alignment entry that reuse the same id
+// never pair against each other (#79). A dharana `### <ID>` (h3) is a CROSS-REFERENCE,
+// not a primary definition: an invariant-span alignment note (`### SV12 — ALIGNED`) or
+// a boundary (`### B1:`), pointing at the `## <ID>` (h2) invariant/pattern of that id
+// elsewhere. So (kind, id) separates `## SV12` [invariant] from `### SV12` [alignment].
+// Derived from (catalogue, heading level, id shape) only — a pure function of ONE entry,
+// no cross-catalogue lookup. Not renumbering (V3): the id is legitimately shared; kind
+// is what disambiguates the two rows.
+const CATALOGUE_ROLE = { vyapti: 'invariant', hetvabhasa: 'error', krama: 'lifecycle', dharana: 'focus' };
+function entryKind(catalogue, entry) {
+  const base = String(catalogue || '').replace(/\.md$/, '').toLowerCase();
+  if (base === 'dharana' && entry && entry.level === 3) {
+    return /^B\d+$/.test(entry.id || '') ? 'boundary' : 'alignment';
+  }
+  return CATALOGUE_ROLE[base] || base || 'entry';
 }
 
 // The point-of-use nudge for a verdict. Returns null for GREEN — a fresh entry has
@@ -867,7 +891,7 @@ function computeCurrency(entry, opts) {
 
 module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
-  parseEntries, sensitivityFor, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
+  parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom,
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
