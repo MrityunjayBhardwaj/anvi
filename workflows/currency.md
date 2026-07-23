@@ -119,6 +119,15 @@ Re-run the report and verify the flip PER-ENTRY, not by summary counts (a count
 can move the right way for the wrong reason). Confirm exactly the scoped entries
 flipped to 🟢 `VALIDATED@<trunk-sha>` and NOTHING ELSE changed. If an entry you
 did not touch changed verdict, stop and find out why before persisting.
+
+When you pair before/after rows by id, key the join on **(id, kind)** — the second
+column the report prints (`invariant` / `error` / `lifecycle` / `focus` /
+`alignment` / `boundary`). A dharana `### <ID>` alignment or boundary cross-ref
+legitimately REUSES a vyapti `## <ID>` invariant's id (deliberate span-tracking,
+not a duplicate), so the report shows two rows for that id with different kinds. A
+join on id alone pairs the invariant's "before" against the alignment's "after" and
+manufactures a spurious flip — read once as "duplicate ids" (#79). Key on (id,
+kind) and the two rows stay in separate buckets.
 </step>
 
 <step name="7_persist">

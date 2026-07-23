@@ -2,7 +2,7 @@
 // Unit test for hooks/currency.js — mocked git + fileExists, no real repo.
 'use strict';
 const {
-  computeCurrency, extractRefFiles, parseEntries, sensitivityFor, nudgeFor, capNudges,
+  computeCurrency, extractRefFiles, parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges,
   extractFileSpecs, specExists, lintEntry, lineAnchoredRefs, LINT,
   classifySpec, extensionsFrom, FILE_EXT, makeRefResolver,
 } = require('../hooks/currency.js');
@@ -136,6 +136,43 @@ eq(parsed[0].lineEnd, 7, 'lineEnd = last line before next entry');
 eq(parsed[1].lineStart, 8, 'second entry lineStart');
 eq(parsed[1].validatedField, 'abc1234 2026-07-01', 'VALIDATED field');
 eq(parsed[1].fixField, undefined, 'prose "Root fix:" is not the FIX field');
+eq(parsed[0].level, 2, 'h2 entry → level 2');
+
+// --- entryKind + the per-id join (#79) --------------------------------------
+// A dharana `### <ID>` alignment/boundary cross-ref reuses a vyapti `## <ID>` id.
+// The parser must keep them distinguishable (level + kind) so a per-id before/after
+// join keys on (id, kind) and never pairs the invariant against its alignment row —
+// the double-count that once got misread as duplicate ids. This is NOT renumbering
+// (V3): the shared id is legitimate; kind is what disambiguates.
+console.log('entryKind (#79 double-count)');
+const DHARANA_MD = [
+  '## ACTIVE INVARIANT SPANS',              // section header, no id → not an entry
+  '### SV12: BPM Scales Time — ALIGNED',    // h3 alignment cross-ref (colon form)
+  'Aligns with the vyapti invariant of the same id.',
+  '### V3 — "Arithmetic is compile-time"',  // h3 alignment (em-dash form, no colon)
+  'cross-ref',
+  '### B1: Transpiler ↔ Engine',            // h3 boundary
+  'boundary note',
+].join('\n');
+const dh = parseEntries(DHARANA_MD);
+eq(dh.length, 3, 'parses 3 h3 entries (section header is not an entry)');
+eq(dh[0].id, 'SV12', 'h3 id captured');
+eq(dh[0].level, 3, 'h3 entry → level 3');
+eq(dh[1].id, 'V3', 'em-dash `### V3 —` form parsed');
+eq(dh[1].level, 3, 'em-dash h3 → level 3');
+// kind maps: catalogue role for primaries, cross-ref role for dharana h3.
+eq(entryKind('vyapti.md', { id: 'SV12', level: 2 }), 'invariant', 'vyapti ## → invariant');
+eq(entryKind('hetvabhasa.md', { id: 'H1', level: 2 }), 'error', 'hetvabhasa ## → error');
+eq(entryKind('krama.md', { id: 'K2', level: 2 }), 'lifecycle', 'krama ## → lifecycle');
+eq(entryKind('dharana.md', dh[0]), 'alignment', 'dharana ### <invariant id> → alignment');
+eq(entryKind('dharana.md', dh[1]), 'alignment', 'dharana ### V3 (em-dash) → alignment');
+eq(entryKind('dharana.md', dh[2]), 'boundary', 'dharana ### B1 → boundary');
+// THE per-id-diff assertion: the invariant and its dharana alignment share an id but
+// get different join keys, so a join keyed on (id, kind) yields TWO distinct buckets,
+// never one collided pair.
+const invKey  = ['SV12', entryKind('vyapti.md',  { id: 'SV12', level: 2 })].join(' ');
+const alignKey = ['SV12', entryKind('dharana.md', dh[0])].join(' ');
+ok(invKey !== alignKey, 'invariant and alignment of the same id → distinct (id,kind) keys — no cross-pairing');
 
 // --- the anchor ladder ------------------------------------------------------
 // git mock with sha reachability + a store history for the time rung.
