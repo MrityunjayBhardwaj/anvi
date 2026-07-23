@@ -120,22 +120,37 @@ migrate_projects() {
   if [ "${#PROJECTS[@]}" -eq 0 ]; then
     echo "  No project dirs given — framework + hooks are current; nothing per-project to migrate."
     echo "  (Pass project dirs to migrate their catalogues: ./install.sh --migrate <dir> ...)"
-    return 0
-  fi
-  local link_sh="$SCRIPT_DIR/scripts/link-catalogues.sh"
-  local grant_sh="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
-  local proj
-  for proj in "${PROJECTS[@]}"; do
-    echo "▶ $proj"
-    if [ ! -d "$proj" ]; then
-      echo "  ✗ not a directory — skipping"
-      echo ""
-      continue
-    fi
-    bash "$link_sh"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
-    bash "$grant_sh" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
     echo ""
-  done
+  else
+    local link_sh="$SCRIPT_DIR/scripts/link-catalogues.sh"
+    local grant_sh="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
+    local proj
+    for proj in "${PROJECTS[@]}"; do
+      echo "▶ $proj"
+      if [ ! -d "$proj" ]; then
+        echo "  ✗ not a directory — skipping"
+        echo ""
+        continue
+      fi
+      bash "$link_sh"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
+      bash "$grant_sh" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
+      echo ""
+    done
+  fi
+
+  # Report store durability (DETECT only — never creates a remote here; that's
+  # outward-facing and belongs to the interactive /anvi:update flow). A migrated
+  # project's catalogues are worthless if the store they live in is backed up
+  # nowhere (V5), so surface the state even though we don't fix it.
+  local durable_sh="$SCRIPT_DIR/scripts/ensure-store-durable.sh"
+  if [ -f "$durable_sh" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo " Store durability"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    bash "$durable_sh" "$HOME/.anvideck" || true
+    echo ""
+  fi
 }
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

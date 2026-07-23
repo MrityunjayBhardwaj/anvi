@@ -82,6 +82,27 @@ Handle version selection, if `$ARGUMENTS` asked for it:
 Absent → target is the latest (this clone's tree), the default flow below.
 </step>
 
+<step name="2c_store_durability">
+Check that the STORE itself is durable — a git repo with a remote — because the
+whole centralized model rests on it: without a tracked repo + remote, every
+project's catalogues and the memory mirror are preserved NOWHERE (the V5/V2
+failure mode at the store level).
+
+  bash "$REPO/scripts/ensure-store-durable.sh" "$STORE"   # DETECT only — no writes, no network
+
+Read the `STATE:` line it prints:
+- DURABLE  → the store is a git repo with a remote; nothing to do here.
+- NO_DIR   → the store doesn't exist yet (a fresh machine); /anvi:init creates it.
+             Note it, continue — there is nothing to back up until init runs.
+- NO_REPO  → the store dir exists but is not a git repo — its catalogues are
+             tracked nowhere. Offer to fix it (step 3b question + step 4b).
+- NO_REMOTE→ it is a git repo but has no remote — commits stay on this machine,
+             pushed nowhere. Offer to create the backup repo (step 3b + 4b).
+
+Detection is always safe to run; CREATING the backup repo is outward-facing and
+happens only with explicit consent in step 4b.
+</step>
+
 <step name="3_pull">
 Bring the working tree to latest, if there is anything to pull:
 
@@ -110,7 +131,13 @@ question already answered by `$ARGUMENTS` or existing config.
    memory into the store (→ the anvi_artifacts remote) at session end; it is
    one-directional and off by default. Write the chosen boolean to the config.
    If the key already exists, do not re-ask — respect the standing choice.
-3. SPLIT-BRAIN resolution is NOT asked up front — it only arises if a project is
+3. STORE BACKUP REPO — ONLY if step 2c reported NO_REPO or NO_REMOTE. The store
+   has no durable backup; ask whether to create one, and if so, for the repo NAME
+   (default `anvi_artifacts`) and VISIBILITY (default `private` — catalogues and
+   memory are private knowledge). Empty answers take the defaults. If the user
+   declines, skip step 4b and warn plainly that catalogues are not backed up.
+   Creating a GitHub repo is outward-facing — never do it without this consent.
+4. SPLIT-BRAIN resolution is NOT asked up front — it only arises if a project is
    refused in step 4 (both a local and a central `.anvi` exist). Handle it there.
 </step>
 
@@ -135,6 +162,20 @@ A project may be REFUSED (non-zero, surfaced, run continues):
 Report each refusal in plain language; never work around it silently.
 </step>
 
+<step name="4b_store_backup">
+Only if step 2c found the store not durable AND the user consented in step 3b —
+create the backup repo (outward-facing, so gated on that consent):
+
+  bash "$REPO/scripts/ensure-store-durable.sh" --apply --create-remote \
+       --repo-name <name> --visibility <private|public> "$STORE"
+
+It `git init`s the store if needed, then runs `gh repo create <name> --<vis>
+--source "$STORE" --remote origin --push`. If `gh` is absent or unauthenticated
+it prints the exact manual steps and exits non-zero — relay them, do NOT invent a
+remote. Pass the name/visibility the user chose (omit a flag to take its default).
+If the user declined, skip this step and leave the store as-is.
+</step>
+
 <step name="5_verify">
 Observe that the update actually landed — do not infer from "the script exited 0":
 
@@ -149,6 +190,9 @@ Observe that the update actually landed — do not infer from "the script exited
    mutates, the state detection is wrong; stop and find out why.
 5. Per-project: each migrated project's `.anvi` is a symlink into the store and
    its `.claude/settings.local.json` grants `~/.anvideck/projects/<name>`.
+6. Store durability: `ensure-store-durable.sh "$STORE"` reports DURABLE (unless the
+   user declined the backup repo, in which case it is correctly still NO_REPO/
+   NO_REMOTE and that was their explicit choice — say so).
 </step>
 
 <step name="6_report">
@@ -170,6 +214,10 @@ remind the user the store commits + pushes on session end (the checkpoint hook).
   the user reconcile. A wrong merge silently loses catalogue knowledge.
 - memorySync is opt-in and off by default — never enable it without explicit
   consent; respect an existing choice without re-asking.
+- Creating the store backup repo is outward-facing (a real GitHub repo) — do it
+  ONLY with explicit consent, default private, and only in the interactive flow.
+  Detection (`ensure-store-durable.sh` with no `--apply`) is always safe; the
+  installer's `--migrate` only detects+reports, it never creates.
 - anvi is PUBLIC: no catalogue IDs in any outward-facing content (commits, PRs,
   issues) — V6.
 </guardrails>
@@ -177,8 +225,10 @@ remind the user the store commits + pushes on session end (the checkpoint hook).
 <success_criteria>
 - [ ] Installed-vs-latest delta detected and reported BEFORE any change
 - [ ] Working tree pulled if behind (non-fatal if not); migrate applied regardless
-- [ ] Only genuine questions asked (which projects, memorySync if unset); existing
-      choices respected
+- [ ] Store durability checked; if not a tracked repo with a remote, the backup
+      repo was offered (consented, name/visibility chosen) or the user's decline noted
+- [ ] Only genuine questions asked (which projects, memorySync if unset, store-backup
+      repo if the store isn't durable); existing choices respected
 - [ ] `install.sh --migrate` run for the selected projects; refusals surfaced with
       the manual fix, not worked around
 - [ ] Verified: `--check` up to date, hook-liveness green, no foreign hook pruned,

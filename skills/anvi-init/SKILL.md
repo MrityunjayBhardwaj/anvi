@@ -188,15 +188,23 @@ to lose. Durability then depends only on that store being a tracked git repo (th
 `anvideck-checkpoint` hook commits it to `anvi_artifacts`). Verify:
 
 ```bash
-if [ -d "$HOME/.anvideck/.git" ]; then
-  echo "✓ Centralized store is a git repo (~/.anvideck → anvi_artifacts) — durability OK"
-else
-  echo "⚠ ~/.anvideck is not a git repo — catalogues are written but NOT tracked anywhere."
-  echo "  Initialize the anvi_artifacts store (git init + remote) so the checkpoint hook preserves them."
-fi
+bash "$HOME/.claude/anvi/scripts/ensure-store-durable.sh" "$HOME/.anvideck"   # DETECT only
 ```
 
-Report the result to the user so the durability state is explicit, not silent.
+Read the `STATE:` line and report it so durability is explicit, not silent:
+- DURABLE  → the store is a git repo with a remote; nothing to do.
+- NO_REPO / NO_REMOTE → the store is NOT backed up. OFFER to create the backup
+  repo, asking the repo NAME (default `anvi_artifacts`) and VISIBILITY (default
+  `private` — catalogues/memory are private). Only with the user's consent, run:
+
+  ```bash
+  bash "$HOME/.claude/anvi/scripts/ensure-store-durable.sh" --apply --create-remote \
+       --repo-name <name> --visibility <private|public> "$HOME/.anvideck"
+  ```
+
+  Creating a GitHub repo is outward-facing — never do it without that consent. If
+  `gh` is absent/unauthenticated the script prints the manual steps; relay them.
+- NO_DIR   → the store doesn't exist yet; it is created as catalogues are written.
 
 ### Step 7: Offer Ground Truth setup (v1.1.0+)
 
