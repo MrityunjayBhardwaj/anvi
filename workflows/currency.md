@@ -9,7 +9,7 @@ The gate is already built (`hooks/currency.js` computer, `scripts/currency-repor
 batch, the injector's point-of-use nudge). This workflow is the discoverable
 entry point plus the discipline for acting on what it reports — the codified
 version of the manual ritual "run the report, re-confirm the drifted entries
-against the code, stamp them validated."
+against the code, and stamp or supersede them."
 
 Full prose spec: ENFORCE.md §Currency.
 </purpose>
