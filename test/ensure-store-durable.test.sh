@@ -75,6 +75,15 @@ rc=$?
 ok '[ "$rc" != 0 ]'                              'exits non-zero when gh is missing'
 ok 'echo "$OUT" | grep -qiE "gh .* not found|remote add origin"' 'prints the manual fallback'
 
+echo "one-shot fresh machine — NO_REPO + --apply --create-remote git-inits AND creates in one call"
+P5="$ROOT/fresh"; mkdir -p "$P5/projects/y/.anvi"; echo data > "$P5/projects/y/.anvi/vyapti.md"
+GH_CALLS="$ROOT/calls5"; : > "$GH_CALLS"
+OUT="$(ANVI_GH_BIN="$STUB/gh" GH_CALLS="$GH_CALLS" "$SH" --apply --create-remote --repo-name fresh_store --visibility private "$P5" 2>&1)"
+ok 'git -C "$P5" rev-parse --git-dir >/dev/null 2>&1'         'git-inited the fresh store'
+ok '[ "$(git -C "$P5" rev-list --count HEAD 2>/dev/null)" -ge 1 ]' 'committed the store contents'
+ok 'grep -q "repo create fresh_store --private --source $P5 --remote origin --push" "$GH_CALLS"' 'created the repo in the same call'
+ok 'echo "$OUT" | grep -qi "now durable"'                     'reports durable at the end'
+
 echo "DURABLE — git repo with a remote is a clean no-op"
 P4="$ROOT/durable"; git -C "$P4" init -q 2>/dev/null; mkdir -p "$P4"; git -C "$P4" init -q; git -C "$P4" remote add origin https://example.test/x.git
 OUT="$("$SH" "$P4" 2>&1)"
