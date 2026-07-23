@@ -141,7 +141,8 @@ migrate_projects() {
   # Report store durability (DETECT only — never creates a remote here; that's
   # outward-facing and belongs to the interactive /anvi:update flow). A migrated
   # project's catalogues are worthless if the store they live in is backed up
-  # nowhere (V5), so surface the state even though we don't fix it.
+  # nowhere (knowledge that isn't committed doesn't exist), so surface the state
+  # even though we don't fix it.
   local durable_sh="$SCRIPT_DIR/scripts/ensure-store-durable.sh"
   if [ -f "$durable_sh" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

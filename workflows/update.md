@@ -85,8 +85,8 @@ Absent → target is the latest (this clone's tree), the default flow below.
 <step name="2c_store_durability">
 Check that the STORE itself is durable — a git repo with a remote — because the
 whole centralized model rests on it: without a tracked repo + remote, every
-project's catalogues and the memory mirror are preserved NOWHERE (the V5/V2
-failure mode at the store level).
+project's catalogues and the memory mirror are preserved NOWHERE — knowledge that
+isn't committed to a tracked, pushed repo doesn't exist.
 
   bash "$REPO/scripts/ensure-store-durable.sh" "$STORE"   # DETECT only — no writes, no network
 

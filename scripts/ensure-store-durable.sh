@@ -2,7 +2,8 @@
 # Ensure the centralized store (~/.anvideck) is DURABLE: a git repo with a remote,
 # so the checkpoint hook can commit AND push catalogues + the memory mirror. The
 # whole store model rests on this — without a tracked repo + remote, every
-# project's catalogues are preserved nowhere (the V5/V2 failure mode).
+# project's catalogues are preserved nowhere (knowledge that isn't committed to a
+# tracked, pushed repo doesn't exist).
 #
 # DETECT by default (always safe — no writes, no network). --apply repairs the
 # LOCAL side (git init). Creating the REMOTE is outward-facing, so it needs an
