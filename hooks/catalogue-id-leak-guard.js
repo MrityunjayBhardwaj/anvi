@@ -135,26 +135,55 @@ process.stdin.on('end', () => {
       const prefixLen = m[1].length, num = parseInt(m[2], 10);
       return prefixLen >= 2 || num >= 10; // multi-letter prefix OR 2+ digit number
     };
-    const bareHits = [];
     const ids = projectEntryIds(cwd);
-    if (ids.size) {
-      const seen = new Set();
-      for (const tm of scanned.matchAll(/\b([A-Z]{1,3}\d{1,4})\b/g)) {
-        const id = tm[1];
-        if (ids.has(id) && flaggableIdShape(id) && !seen.has(id)) { seen.add(id); bareHits.push(id); }
-      }
-    }
+    // Every DISTINCT id-shaped token in the outward text, computed once and reused by
+    // the bare-id, cluster, and density detectors below.
+    const idTokens = [...new Set([...scanned.matchAll(/\b([A-Z]{1,3}\d{1,4})\b/g)].map(m => m[1]))];
 
-    if (!keyHit && !bareHits.length) process.exit(0);
+    const bareHits = ids.size
+      ? idTokens.filter(id => ids.has(id) && flaggableIdShape(id))
+      : [];
+
+    // Detector 3 — the CLUSTER. A single bare ID is ambiguous, which is why the
+    // collision filter drops H1/K3 above. But a *cluster* is not: 3+ tokens that are
+    // each a REAL entry in this project's catalogue, co-occurring in one publish, is a
+    // pasted catalogue reference — not "V8 engine" appearing three times. This recovers
+    // exactly the collision-prone own-IDs the per-token filter must skip, and it stays
+    // sound because every counted token is cross-referenced to a real entry (so a
+    // crypto/codec run like SHA1/MD5/CRC32 — none of them entries — never trips it).
+    const CLUSTER_MIN = 3;
+    const ownCluster = ids.size ? idTokens.filter(id => ids.has(id)) : [];
+    const clusterHits = ownCluster.length >= CLUSTER_MIN ? ownCluster : [];
+
+    // Detector 4 — DENSITY, the only available signal for FOREIGN ids. A currency
+    // report pasted from ANOTHER repo carries ids that aren't in this project's
+    // catalogue, so nothing above sees them, and their shape alone is unsafe to flag
+    // (SHA1/MD5/UTF8 share it). Their tell is density: 5+ distinct id-shaped tokens in
+    // one short publish is, in practice, pasted catalogue/report output. Deliberately
+    // heuristic and recall-oriented — it CAN false-fire on a commit naming many
+    // crypto/codec tokens. Accepted only because it never blocks: the cost of a wrong
+    // nudge is one glance, and the shape it catches is otherwise almost always a leak.
+    const DENSITY_MIN = 5;
+    const denseHits = idTokens.length >= DENSITY_MIN ? idTokens : [];
+
+    if (!keyHit && !bareHits.length && !clusterHits.length && !denseHits.length) process.exit(0);
 
     const surface = isGh ? 'this GitHub issue/PR' : 'this commit message';
-    const matched = [keyHit ? `\`${keyHit[0]}\`` : null, ...bareHits.map(id => `\`${id}\``)]
+    // Union the tokens every detector matched, in a stable order, deduped.
+    const tokenSet = new Set([...bareHits, ...clusterHits, ...denseHits]);
+    const matched = [keyHit ? `\`${keyHit[0]}\`` : null, ...[...tokenSet].map(id => `\`${id}\``)]
       .filter(Boolean).join(', ');
-    const plural = bareHits.length + (keyHit ? 1 : 0) > 1;
+    const plural = tokenSet.size + (keyHit ? 1 : 0) > 1;
+    // A cluster/dense run reads as pasted catalogue or currency-report output, so name
+    // that specifically — it is the likeliest source and the most actionable hint.
+    const clusterNote = (clusterHits.length || denseHits.length)
+      ? `\nThat is a run of ${tokenSet.size} ID-shaped tokens — the shape of pasted catalogue or currency-report output. ` +
+        `If these are catalogue IDs, they do not belong in public content; if they are not (e.g. codec/hash names), ignore this.`
+      : '';
     const message =
       `CATALOGUE-ID LEAK CHECK: ${surface} references ${plural ? 'internal catalogue keys' : 'an internal catalogue key'} ` +
       `(matched ${matched}). Catalogue IDs are private index keys — meaningless to ` +
-      `outside readers and a leak of the framework into public content.\n` +
+      `outside readers and a leak of the framework into public content.${clusterNote}\n` +
       `→ State the FINDING in plain language instead. The ID→PR link lives only in ` +
       `the private catalogue's FIX: field (private → public), never in the public ` +
       `artifact. If this genuinely belongs in ~/.anvideck, run the command in that repo.`;

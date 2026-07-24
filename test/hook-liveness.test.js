@@ -271,6 +271,43 @@ r = fire('catalogue-id-leak-guard.js', {
 });
 ok(/H21/.test(r.ctx), 'ALIVE: a leak in a --body-file body is caught (the #417 blind spot)');
 
+// #94 — the CLUSTER: 3+ of THIS project's real entries co-occurring is a pasted
+// catalogue reference, even when each is individually collision-prone (H1/V1/V2 are
+// all single-digit and each passes the per-token filter). The cluster overrides that
+// filter — soundly, because every token is cross-referenced to a real fixture entry.
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'git commit -m "re-validated H1, V1, V2 against the trunk"' },
+});
+ok(/H1/.test(r.ctx) && /V1/.test(r.ctx) && /V2/.test(r.ctx), 'ALIVE: a cluster of 3 collision-prone OWN ids is flagged (#94 cluster)');
+
+// #94 — below the cluster threshold: 2 own ids stay silent, pinned at exactly 2 so a
+// future threshold change is caught (the collision filter still governs the 1–2 case).
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'git commit -m "touched the H1 and V1 markers only"' },
+});
+ok(r.ctx === '', 'silent on a 2-own-id cluster — below the threshold (#94 cluster)');
+
+// #94 — DENSITY, the foreign-id path: 5 distinct id-shaped tokens, NONE of which are
+// this project's entries (H48/H64/V40/V41/B11 are foreign, pasted from another repo's
+// report), trip the density detector — the only available signal when cross-reference
+// cannot see them.
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'gh pr create --title "x" --body "surfaced H48, H64, V40, V41, B11 in the report"' },
+});
+ok(/H48/.test(r.ctx) && /B11/.test(r.ctx), 'ALIVE: a dense run of 5 FOREIGN ids is flagged (#94 density)');
+
+// #94 — density precision boundary: 4 distinct id-shaped tokens stay silent, so an
+// ordinary commit naming a few hash/codec names (SHA1, MD5, CRC32, UTF8 — all share
+// the id shape) is not nagged. 5 is the documented heuristic floor.
+r = fire('catalogue-id-leak-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'git commit -m "migrate SHA1, MD5, CRC32, UTF8 helpers"' },
+});
+ok(r.ctx === '', 'silent on 4 distinct id-shaped tokens (SHA1/MD5/CRC32/UTF8) — below the density floor (#94 density)');
+
 // --- 7. degradation ---------------------------------------------------------
 // Malformed stdin and a non-project cwd: every hook must fall to SILENCE, never to
 // a crash or a non-zero exit. This is the contract the blanket catch exists for —
