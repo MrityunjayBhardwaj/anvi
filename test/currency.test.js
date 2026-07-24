@@ -170,8 +170,8 @@ eq(entryKind('dharana.md', dh[2]), 'boundary', 'dharana ### B1 → boundary');
 // THE per-id-diff assertion: the invariant and its dharana alignment share an id but
 // get different join keys, so a join keyed on (id, kind) yields TWO distinct buckets,
 // never one collided pair.
-const invKey  = ['SV12', entryKind('vyapti.md',  { id: 'SV12', level: 2 })].join(' ');
-const alignKey = ['SV12', entryKind('dharana.md', dh[0])].join(' ');
+const invKey  = ['SV12', entryKind('vyapti.md',  { id: 'SV12', level: 2 })].join('\0');
+const alignKey = ['SV12', entryKind('dharana.md', dh[0])].join('\0');
 ok(invKey !== alignKey, 'invariant and alignment of the same id → distinct (id,kind) keys — no cross-pairing');
 
 // --- addenda outside dharana (#85) -------------------------------------------
