@@ -174,6 +174,55 @@ const invKey  = ['SV12', entryKind('vyapti.md',  { id: 'SV12', level: 2 })].join
 const alignKey = ['SV12', entryKind('dharana.md', dh[0])].join(' ');
 ok(invKey !== alignKey, 'invariant and alignment of the same id → distinct (id,kind) keys — no cross-pairing');
 
+// --- addenda outside dharana (#85) -------------------------------------------
+// The rule above only ever covered dharana. Every OTHER catalogue may append a dated
+// `### <ID> — ADDENDUM` under the `## <ID>` it amends, which collided on (id, kind).
+// The discriminator is the PARENT's presence, never the heading depth: whole
+// catalogues author their primary entries at level 3, and calling those addenda
+// would mislabel them wholesale.
+console.log('entryKind (#85 addendum vs primary)');
+const KRAMA_MD = [
+  '## K5 — Merging a STACKED PR chain: bottom-up, rebase between each',
+  'the lifecycle',
+  '### K5 — ADDENDUM 2026-07-20: after the base is SQUASH-merged, pick by branch SHAPE',
+  'the amendment',
+  '## K6: an unrelated lifecycle',
+  'body',
+].join('\n');
+const kr = parseEntries(KRAMA_MD);
+eq(kr.length, 3, 'parses the parent, its addendum, and the unrelated entry');
+eq(kr[0].level, 2, 'parent is level 2');
+eq(kr[1].level, 3, 'addendum is level 3');
+ok(kr[1].amends === true, 'a level-3 heading whose id is also a level-2 heading here → marked as amending');
+ok(!kr[0].amends, 'the level-2 parent is never marked as amending itself');
+ok(!kr[2].amends, 'an unrelated level-2 entry is not marked');
+eq(entryKind('krama.md', kr[0]), 'lifecycle', 'krama ## parent → lifecycle');
+eq(entryKind('krama.md', kr[1]), 'addendum', 'krama ### addendum of the same id → addendum');
+const parentKey = ['K5', entryKind('krama.md', kr[0])].join(' ');
+const addKey    = ['K5', entryKind('krama.md', kr[1])].join(' ');
+ok(parentKey !== addKey, 'a lifecycle entry and its addendum → distinct (id,kind) keys — the #79 fix, generalized');
+// Same shape in the other pattern catalogues.
+const HET_MD = ['## H31: a pattern', 'body', '### H31 — ADDENDUM: a later note', 'more'].join('\n');
+const het = parseEntries(HET_MD);
+eq(entryKind('hetvabhasa.md', het[0]), 'error', 'hetvabhasa ## → error');
+eq(entryKind('hetvabhasa.md', het[1]), 'addendum', 'hetvabhasa ### of the same id → addendum');
+const VY_MD = ['## V11: an invariant', 'body', '### V11 — ADDENDUM: refined', 'more'].join('\n');
+eq(entryKind('vyapti.md', parseEntries(VY_MD)[1]), 'addendum', 'vyapti ### of the same id → addendum');
+// THE REGRESSION GUARD: a catalogue that authors EVERY primary entry at level 3 (no
+// level-2 headings at all) must keep the catalogue role. 877 such headings exist
+// fleet-wide vs 65 real addenda — a depth-only rule would mislabel all of them.
+const ALL_H3 = ['### K1: a primary', 'body', '### K2: another primary', 'body'].join('\n');
+const orphans = parseEntries(ALL_H3);
+eq(orphans.length, 2, 'level-3-only catalogue still parses its entries');
+ok(!orphans[0].amends && !orphans[1].amends, 'level-3 entries with no level-2 parent are NOT amendments');
+eq(entryKind('krama.md', orphans[0]), 'lifecycle', 'an orphan level-3 primary keeps the catalogue role');
+eq(entryKind('vyapti.md', parseEntries('### V9: primary\nbody')[0]), 'invariant', 'orphan level-3 in vyapti → invariant');
+// dharana keeps its own rule even when the id IS also a level-2 heading there.
+const DH_SHARED = ['## B11: a boundary', 'body', '### B11 — ADDENDUM: note', 'more'].join('\n');
+const dhs = parseEntries(DH_SHARED);
+eq(entryKind('dharana.md', dhs[1]), 'boundary', 'dharana ### keeps boundary/alignment, not addendum (rule order)');
+eq(entryKind('dharana.md', dhs[0]), 'focus', 'dharana ## primary → focus');
+
 // --- the anchor ladder ------------------------------------------------------
 // git mock with sha reachability + a store history for the time rung.
 function ladderGit({ live = [], logMap = {}, revList = null } = {}) {

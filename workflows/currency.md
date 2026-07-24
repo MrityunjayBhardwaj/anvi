@@ -144,12 +144,20 @@ did not touch changed verdict, stop and find out why before persisting.
 
 When you pair before/after rows by id, key the join on **(id, kind)** — the second
 column the report prints (`invariant` / `error` / `lifecycle` / `focus` /
-`alignment` / `boundary`). A dharana `### <ID>` alignment or boundary cross-ref
-legitimately REUSES a vyapti `## <ID>` invariant's id (deliberate span-tracking,
-not a duplicate), so the report shows two rows for that id with different kinds. A
-join on id alone pairs the invariant's "before" against the alignment's "after" and
-manufactures a spurious flip — read once as "duplicate ids" (#79). Key on (id,
-kind) and the two rows stay in separate buckets.
+`alignment` / `boundary` / `addendum`). Two rows may legitimately share an id:
+- a dharana `### <ID>` alignment or boundary cross-ref REUSES a vyapti `## <ID>`
+  invariant's id (deliberate span-tracking, not a duplicate) — kinds `invariant`
+  vs `alignment`/`boundary` (#79);
+- a dated `### <ID> — ADDENDUM` amends the `## <ID>` entry above it in any other
+  catalogue — kinds `error`/`invariant`/`lifecycle` vs `addendum` (#85).
+Neither is a duplicate id to renumber (that would break the link and violate the
+no-reuse rule). A join on id alone pairs the parent's "before" against the
+cross-ref's "after" and manufactures a spurious flip — read once as "duplicate
+ids". Key on (id, kind) and the rows stay in separate buckets.
+
+Note a level-3 heading is NOT an addendum just by being level 3 — whole catalogues
+author every primary entry at level 3. It is an addendum only when a level-2
+heading in the same file claims the same id.
 </step>
 
 <step name="7_persist">

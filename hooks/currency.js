@@ -290,6 +290,15 @@ function parseEntries(md) {
       lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
     });
   }
+  // An `### ID` that AMENDS a `## ID` in this same catalogue (a dated addendum
+  // appended to a live entry, keeping the parent's id as the link) is not a second
+  // primary entry — but a level-3 heading on its own is NOT evidence of that. Whole
+  // catalogues author every primary entry at level 3, so "level 3 ⇒ addendum" would
+  // mislabel them wholesale (877 such headings fleet-wide vs 65 real addenda). The
+  // discriminator is the PARENT's presence, not the depth: mark the amendment only
+  // when the id is also claimed by a level-2 heading here (#85).
+  const primaries = new Set(entries.filter((e) => e.level === 2).map((e) => e.id));
+  for (const e of entries) if (e.level === 3 && primaries.has(e.id)) e.amends = true;
   return entries;
 }
 
@@ -388,6 +397,12 @@ function entryKind(catalogue, entry) {
   if (base === 'dharana' && entry && entry.level === 3) {
     return /^B\d+$/.test(entry.id || '') ? 'boundary' : 'alignment';
   }
+  // Outside dharana, a level-3 heading is a primary entry unless it AMENDS a level-2
+  // one of the same id (parseEntries decides that by the parent's presence, never by
+  // depth alone). Giving the amendment its own kind is what keeps a per-id join from
+  // pairing the parent's "before" against the addendum's "after" — the same collision
+  // the dharana rule above fixes, which only ever covered dharana (#85).
+  if (entry && entry.amends) return 'addendum';
   return CATALOGUE_ROLE[base] || base || 'entry';
 }
 
