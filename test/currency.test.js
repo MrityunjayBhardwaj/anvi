@@ -138,6 +138,41 @@ eq(parsed[1].validatedField, 'abc1234 2026-07-01', 'VALIDATED field');
 eq(parsed[1].fixField, undefined, 'prose "Root fix:" is not the FIX field');
 eq(parsed[0].level, 2, 'h2 entry → level 2');
 
+// --- heading delimiter shapes (#87) -----------------------------------------
+// A heading separates the id from its title with whitespace, a colon, OR a period.
+// The period form (`## H5. "Title"`) was silently unparsed — whole catalogues use
+// it, so one project lost over a third of its entries. `\b` must still keep a
+// shorter id (H4) from matching the head of a longer one (H48).
+console.log('parseEntries (#87 delimiter shapes)');
+const DELIM_MD = [
+  '## H5. "A period-delimited title"',   // 1  period + space + quote
+  '**REF:** a.js',                        // 2
+  '',                                     // 3
+  '## H6: A colon title',                 // 4  colon (unchanged)
+  'body',                                 // 5
+  '',                                     // 6
+  '## H7 A space title',                  // 7  bare space (unchanged)
+  'body',                                 // 8
+  '',                                     // 9
+  '### V3. A period-delimited h3',        // 10 period on a level-3 heading
+  'body',                                 // 11
+].join('\n');
+const delim = parseEntries(DELIM_MD);
+eq(delim.length, 4, 'period, colon, space, and h3-period headings all parse');
+eq(delim.map(e => e.id).join(','), 'H5,H6,H7,V3', 'ids captured from every delimiter form');
+// `(x||{})` so a missing entry (e.g. when the fix is reverted) fails cleanly rather
+// than throwing and aborting the rest of the witness.
+eq((delim[0]||{}).title, '"A period-delimited title"', 'period is a delimiter, not part of the title');
+eq((delim[0]||{}).refField, 'a.js', 'a period-delimited entry still reads its fields');
+eq((delim[3]||{}).level, 3, 'a period-delimited level-3 heading keeps its level');
+// The \b guard: `## H4.` must not be swallowed as the start of `## H48`, and an id
+// abutting a letter (not a delimiter) is still not an entry.
+const GUARD_MD = ['## H4. short id', 'body', '## H48. long id', 'body'].join('\n');
+const guard = parseEntries(GUARD_MD);
+eq(guard.length, 2, 'H4. and H48. are two separate entries, not one');
+eq(guard.map(e => e.id).join(','), 'H4,H48', 'the shorter id is not read as a prefix of the longer');
+eq(parseEntries('## H5FOO bar\nbody').length, 0, 'an id abutting a letter is still not an entry');
+
 // --- entryKind + the per-id join (#79) --------------------------------------
 // A dharana `### <ID>` alignment/boundary cross-ref reuses a vyapti `## <ID>` id.
 // The parser must keep them distinguishable (level + kind) so a per-id before/after

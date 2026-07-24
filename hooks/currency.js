@@ -257,7 +257,19 @@ function lintEntry(entry, { catalogue } = {}) {
 //
 // One parser, used by both the report and the injector: they read the same corpus,
 // so two parsers would be two chances to disagree about what an entry IS.
-const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+)\b[:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
+//
+// The delimiter class after the id is `[.:\s]` — a heading may separate the id from
+// its title with whitespace (`## H5 Title`), a colon (`## H5: Title`), or a PERIOD
+// (`## H5. "Title"`). The period form is not marginal: whole catalogues author every
+// heading that way, and requiring only `[:\s]` silently dropped 138 headings
+// fleet-wide — over a third of one project's catalogue vanished from the report, the
+// injector, and the leak guard's id set, with no error. `\b` still rejects `H4`
+// masquerading as the start of `H48`, so widening by a period is narrow and cannot
+// admit a longer id as a shorter one plus a digit (#87). Two rarer composite shapes
+// are deliberately left for their own decision — a sub-id `### B1.1 …` (widening
+// parses it as `B1` with a mangled title) and a multi-id `## PV49/PV53 …` (recording
+// only the first id would silently drop the second); see the follow-up issue.
+const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+)\b[.:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
 
 function field(body, name) {
   // Anchor to line start + require the UPPERCASE field marker, so prose like
