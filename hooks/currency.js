@@ -273,7 +273,7 @@ function lintEntry(entry, { catalogue } = {}) {
 // a digit follows it — `B4. Compose` has punctuation, `B1.1 + B14` has a sub-id — so
 // the two forms need no disambiguation beyond the digit.
 //
-// Slash-composite headings (`## PV49/PV53 addendum`, 3 fleet-wide) stay unparsed on
+// Slash-composite headings (`## <ID-A>/<ID-B> addendum`, 3 fleet-wide) stay unparsed on
 // purpose: accepting `/` would record only the first id and drop the second just as
 // silently as this bug did. One heading naming two entries needs a decision about
 // what it PRODUCES, not a wider character class (#89).
@@ -415,7 +415,12 @@ const CATALOGUE_ROLE = { vyapti: 'invariant', hetvabhasa: 'error', krama: 'lifec
 function entryKind(catalogue, entry) {
   const base = String(catalogue || '').replace(/\.md$/, '').toLowerCase();
   if (base === 'dharana' && entry && entry.level === 3) {
-    return /^B\d+$/.test(entry.id || '') ? 'boundary' : 'alignment';
+    // `(?:\.\d+)*` so a boundary SUB-id (`B1.1`) is still a boundary. Without it the
+    // shape test falls through to 'alignment' — an invariant-span note, which a
+    // boundary sub-entry is not. The sub-id form only became reachable when the
+    // parser started capturing it (#87); the rule beneath tests an id SHAPE, so a new
+    // shape has to be admitted here too or this guard silently mislabels it.
+    return /^B\d+(?:\.\d+)*$/.test(entry.id || '') ? 'boundary' : 'alignment';
   }
   // Outside dharana, a level-3 heading is a primary entry unless it AMENDS a level-2
   // one of the same id (parseEntries decides that by the parent's presence, never by
