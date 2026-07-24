@@ -257,7 +257,27 @@ function lintEntry(entry, { catalogue } = {}) {
 //
 // One parser, used by both the report and the injector: they read the same corpus,
 // so two parsers would be two chances to disagree about what an entry IS.
-const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+)\b[:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
+//
+// The character AFTER the id is a DELIMITER, and which one a catalogue uses is a
+// house style, not a contract — measured across the live fleet: space 1584, colon
+// 996, period 138, slash 3. Accepting only `[:\s]` therefore did not "skip a rare
+// form", it dropped every entry of any catalogue that writes `## ID. "Title"`,
+// silently and wholesale — one project lost 137 of its 386 headings, so >1/3 of its
+// knowledge was invisible to the report, the injector AND the leak guard's id set
+// while the project looked small and covered (#87). The terminating lookahead below
+// never required a delimiter, which is why those headings still ENDED the previous
+// entry correctly: bodies were right, the entries themselves just never existed.
+//
+// `(?:\.\d+)*` captures a SUB-ID (`B1.1`) as its own id rather than truncating it to
+// `B1` and spilling the `.1` into the title. A period is a sub-id separator only when
+// a digit follows it — `B4. Compose` has punctuation, `B1.1 + B14` has a sub-id — so
+// the two forms need no disambiguation beyond the digit.
+//
+// Slash-composite headings (`## PV49/PV53 addendum`, 3 fleet-wide) stay unparsed on
+// purpose: accepting `/` would record only the first id and drop the second just as
+// silently as this bug did. One heading naming two entries needs a decision about
+// what it PRODUCES, not a wider character class (#89).
+const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+(?:\.\d+)*)\b[.:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
 
 function field(body, name) {
   // Anchor to line start + require the UPPERCASE field marker, so prose like
