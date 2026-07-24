@@ -162,10 +162,14 @@ eq(dot[0].lineEnd, 4, 'period form → lineEnd (the time rung depends on this ra
 // A sub-id is its own id, not the parent id with the remainder spilled into the
 // title. A period means "sub-id" only when a digit follows it, so `B4. Compose`
 // (punctuation) and `B1.1 + B14` (sub-id) need no further disambiguation.
+// Indexed reads below are guarded with `|| {}` on purpose: under a regression these
+// arrays go EMPTY, and an unguarded `[0].id` throws a TypeError that aborts the whole
+// file — every case after it silently unreported, which reads as "nothing else broke."
+// A guard turns that into an ordinary red.
 const SUB = parseEntries('### B1.1 + B14 v0.7 extension (#195)\nbody');
-eq(SUB[0].id, 'B1.1', 'a sub-id is captured whole, not truncated to its parent');
-eq(SUB[0].title, '+ B14 v0.7 extension (#195)', 'a sub-id does not spill its own digits into the title');
-eq(parseEntries('## B4. Compose → Lottie emitter\nbody')[0].id, 'B4',
+eq((SUB[0] || {}).id, 'B1.1', 'a sub-id is captured whole, not truncated to its parent');
+eq((SUB[0] || {}).title, '+ B14 v0.7 extension (#195)', 'a sub-id does not spill its own digits into the title');
+eq((parseEntries('## B4. Compose → Lottie emitter\nbody')[0] || {}).id, 'B4',
   'a period followed by a space is punctuation, not a sub-id');
 // Deliberately still unparsed: one heading naming TWO ids needs a decision about
 // what it produces, not a wider character class. Accepting `/` here would record
@@ -185,8 +189,9 @@ eq(mixed[0].lineEnd, 2, 'the entry ABOVE a recovered heading keeps its extent');
 // 4 ids in one project — invisible to the earlier fix through no fault of its guard.
 const DOT_PARENT = ['## H48. "the parent"', 'body', '### H48 amendment — a later note', 'more'].join('\n');
 const dp = parseEntries(DOT_PARENT);
-ok(dp[1].amends === true, 'an addendum links to a PERIOD-delimited parent');
-eq(entryKind('hetvabhasa.md', dp[1]), 'addendum', 'and therefore gets its own kind');
+eq(dp.length, 2, 'a period-delimited parent and its addendum both parse');
+ok((dp[1] || {}).amends === true, 'an addendum links to a PERIOD-delimited parent');
+eq(entryKind('hetvabhasa.md', dp[1] || {}), 'addendum', 'and therefore gets its own kind');
 
 // --- entryKind + the per-id join (#79) --------------------------------------
 // A dharana `### <ID>` alignment/boundary cross-ref reuses a vyapti `## <ID>` id.
