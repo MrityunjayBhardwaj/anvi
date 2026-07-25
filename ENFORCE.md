@@ -284,3 +284,50 @@ drifted," never "true"); every verdict is a re-verify prompt.
   blind spot: the injector's never-block guard **fails open**, so a broken wiring —
   a missing import, a renamed export — deletes currency entirely while every unit
   stays green and the hook still exits 0. Only running the hook proves it is live.
+
+### Conformance — is the INSTALLATION still what the setup scripts require?
+
+Currency asks whether an *entry* is still real. Conformance asks the layer below:
+is the machinery that lets a project reach its entries at all still in place? Three
+scripts set that up (`link-catalogues.sh`, `grant-catalogue-access.sh`,
+`ensure-store-durable.sh`) and each classifies-then-repairs. None of them answers
+the read-only question, so it kept being answered by throwaway probes written from
+memory — and a probe that keys a concept on a **name** reports a confident zero for
+a project that satisfies the concept under a different name. A false positive gets
+investigated and dies; a false negative becomes a fact in a note.
+
+- **Report:** `node ~/.claude/anvi/scripts/conformance-report.js [project-dir ...]`
+  (`--issues` prints only the projects with findings). Default target is the cwd; a
+  fleet run is a shell loop over project dirs, same as the setup scripts. Read-only,
+  no network, **always exit 0** — a worklist, not a gate. Every finding names the
+  exact script and flag that repairs it.
+- **Four checks.** *link* — the symlink states the linker classifies, plus the three
+  it can't name (a link to a store copy under a different name, a dangling link, the
+  legacy `artifacts/` layout). *grant* — present, and **scoped** to this project's own
+  envelope; a blanket grant, a grant naming another project's envelope, and a
+  git-tracked settings file are each their own state. *repo* — is `.anvi` tracked (a
+  second, frozen copy of the catalogues living in the project repo), and does the
+  ignore rule cover it. *durable* — the store's own state in the four states
+  `ensure-store-durable.sh` emits, plus whether *this* project's knowledge is
+  committed and pushed.
+- **Where a name could lie, it reads content.** A link into the store counts even
+  when the store copy is named differently (the target is resolved, never compared
+  against `basename()`) — and the report says out loud that running the linker there
+  would repoint a working link at a path that doesn't exist. Before anyone concludes
+  "backed up nowhere", a local-only catalogue is matched against every store copy's
+  *text*; template catalogues are excluded, since a fresh init makes them identical
+  everywhere, and an ambiguous match claims nothing.
+- **Tracked and ignored are two questions.** `git check-ignore` skips tracked paths
+  by default, so it answers "not ignored" for a path whose ignore rule is present and
+  correct — blaming a missing rule for a stale index entry. The report asks
+  `ls-files` and `check-ignore --no-index` separately, and compares a tracked copy
+  against the store before advising `git rm --cached`: a **diverged** tracked copy
+  holds knowledge the store does not have and must be merged, never dropped.
+- **The verdict is a pure function of state** (one `OK_STATES` table). A note
+  explains; only the state judges. The first cut let an informational note downgrade
+  the verdict and printed a row that contradicted its own label.
+- **Tests:** `node test/conformance-report.test.js` — hermetic fixtures on a temp
+  `HOME`, with real git repos and a real bare remote. Mocks are avoided deliberately:
+  the two hardest behaviours here (`check-ignore` skipping tracked paths; a symlink
+  and its target counting as **one** physical directory) belong to the real tools, and
+  a fixture that doesn't run them cannot see either.
