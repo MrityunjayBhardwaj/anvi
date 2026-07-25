@@ -137,7 +137,19 @@ Stamp only what you re-confirmed. Add or update the entry's field:
 </step>
 
 <step name="6_verify">
-Re-run the report and verify the flip PER-ENTRY, not by summary counts (a count
+**COMMIT the catalogue edits BEFORE re-running.** The report reads each entry's line
+range from the file on disk, then asks git a question anchored on that range — and git
+interprets the range against the COMMITTED content. On a dirty tree the two disagree by
+exactly the lines you inserted, so every entry BELOW your edit is queried at the wrong
+offset and attributed to whatever history sits at those lines in HEAD. Nothing errors;
+the answers are well-formed and wrong. Observed: 13 stamps produced 18 changed rows,
+five of them entries nobody had touched. **Tell: the flipped anchors are a PERMUTATION
+of existing values, traded between neighbours** — the signature of a positional offset,
+not of real change. Do not explain the surplus away as the known provisional flap; that
+converts an investigable artifact into permanent noise. Commit, re-run, and the
+untouched entries revert byte-identically.
+
+Then verify the flip PER-ENTRY, not by summary counts (a count
 can move the right way for the wrong reason). Confirm exactly the scoped entries
 flipped to 🟢 `VALIDATED@<trunk-sha>` and NOTHING ELSE changed. If an entry you
 did not touch changed verdict, stop and find out why before persisting.
@@ -190,6 +202,8 @@ Probes stayed in a scratch dir — verify nothing stray landed under `.anvi/`.
       superseded entry annotated (dated note, historical body kept), not stamped
 - [ ] VALIDATED stamped at the trunk sha (post-merge), leading the field, with a
       concrete re-confirmation note
-- [ ] Flip verified per-entry (not by summary counts); no untouched entry changed
+- [ ] Catalogue edits COMMITTED before the verifying re-run (a dirty tree misattributes
+      every entry below the edit); flip verified per-entry (not by summary counts); no
+      untouched entry changed
 - [ ] Catalogue changes committed + pushed to anvi_artifacts; no stray probe under .anvi/
 </success_criteria>
