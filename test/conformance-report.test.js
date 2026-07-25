@@ -51,12 +51,14 @@ const git = (cwd, ...args) => execFileSync('git', args, {
 const write = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s); };
 
 // A catalogue with a real entry heading — "substantive" for the content match.
-const entry = (id) => `# Catalogue\n\n## ${id}: something observed\n**Root cause:** x\n`;
+// The labels are deliberately synthetic prose, not id-shaped: this repo is public,
+// and a fixture heading that looks like a catalogue id reads as a reference to one.
+const entry = (label) => `# Catalogue\n\n## Sample entry ${label}: something observed\n**Root cause:** x\n`;
 // A template catalogue: no entry headings. Byte-identical across projects by
 // construction, which is exactly why it must never count as evidence.
 const TEMPLATE = '# Catalogue\n\n_No entries yet._\n';
 
-function storeProject(name, files = { 'hetvabhasa.md': entry('H1') }) {
+function storeProject(name, files = { 'hetvabhasa.md': entry('one') }) {
   const dir = path.join(PROJECTS, name, '.anvi');
   fs.mkdirSync(dir, { recursive: true });
   for (const [f, body] of Object.entries(files)) write(path.join(dir, f), body);
@@ -108,7 +110,7 @@ console.log('\nlink — the states, from the filesystem');
 {
   // THE ACCEPTANCE CASE: the store copy is named differently from the project.
   // A name-keyed check calls this a wrong link and would repoint it at nothing.
-  storeProject('guides-store', { 'vyapti.md': entry('V1') });
+  storeProject('guides-store', { 'vyapti.md': entry('two') });
   const d = project('Guides');
   fs.symlinkSync(path.join(PROJECTS, 'guides-store', '.anvi'), path.join(d, '.anvi'));
   const c = classifyLink(d);
@@ -131,21 +133,30 @@ console.log('\nlink — the states, from the filesystem');
 }
 {
   const d = project('localonly');
-  write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('H9'));
+  write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('five'));
   eq(classifyLink(d).state, 'LOCAL_ONLY', 'real local dir, no store copy');
 }
 {
   storeProject('splitbrain');
   const d = project('splitbrain');
-  write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('H2'));
+  write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('six'));
   eq(classifyLink(d).state, 'SPLIT_BRAIN', 'real local dir AND a store copy');
 }
 {
   storeProject('legacy');
   const d = project('legacy');
   fs.symlinkSync(path.join(PROJECTS, 'legacy', '.anvi'), path.join(d, '.anvi'));
-  write(path.join(d, 'artifacts', '.anvi', 'hetvabhasa.md'), entry('H3'));
+  write(path.join(d, 'artifacts', '.anvi', 'hetvabhasa.md'), entry('seven'));
   eq(classifyLink(d).state, 'ARTIFACTS_LAYOUT', "the resolver's second candidate is a real dir → refuse");
+}
+{
+  // Same predicate the linker uses: a directory OR a symlink there counts, so the
+  // two scripts can never disagree about whether this state is present.
+  storeProject('legacy-link');
+  const d = project('legacy-link');
+  fs.mkdirSync(path.join(d, 'artifacts'), { recursive: true });
+  fs.symlinkSync(path.join(PROJECTS, 'legacy-link', '.anvi'), path.join(d, 'artifacts', '.anvi'));
+  eq(classifyLink(d).state, 'ARTIFACTS_LAYOUT', 'a SYMLINK at artifacts/.anvi counts too');
 }
 {
   storeProject('centralonly');
@@ -158,8 +169,8 @@ console.log('\nlink — an alias link while an OWN-named store copy also exists 
   // classifyLink alone says LINKED_ALIAS (true of the link), but the shared
   // resolver sees TWO physically distinct .anvi for this project and serves the
   // first, silently shadowing the other. The full computer must say so.
-  storeProject('alias-target', { 'krama.md': entry('K1') });
-  storeProject('AliasDup', { 'krama.md': entry('K2') });
+  storeProject('alias-target', { 'krama.md': entry('three') });
+  storeProject('AliasDup', { 'krama.md': entry('four') });
   const d = project('AliasDup');
   fs.symlinkSync(path.join(PROJECTS, 'alias-target', '.anvi'), path.join(d, '.anvi'));
   eq(classifyLink(d).state, 'LINKED_ALIAS', 'the link itself is a valid alias link');
@@ -170,7 +181,7 @@ console.log('\nlink — an alias link while an OWN-named store copy also exists 
 
 console.log('\nlink — LOCAL_ONLY looks for the same catalogues in the store under ANY name');
 {
-  const body = entry('H42');
+  const body = entry('eight');
   storeProject('renamed-in-store', { 'hetvabhasa.md': body });
   const d = project('LocalWithAlias');
   write(path.join(d, '.anvi', 'hetvabhasa.md'), body);
@@ -192,7 +203,7 @@ console.log('\nlink — LOCAL_ONLY looks for the same catalogues in the store un
   eq(m.ambiguous.length, 0, 'and it is not reported as ambiguous either');
 }
 {
-  const body = entry('H77');
+  const body = entry('nine');
   storeProject('dup-one', { 'hetvabhasa.md': body });
   storeProject('dup-two', { 'hetvabhasa.md': body });
   const d = project('AmbiguousLocal');
@@ -269,7 +280,7 @@ console.log('\nrepo — tracked and ignored are two questions, asked separately'
   // The migration left the OLD real directory's paths in the index. `git
   // check-ignore` (without --no-index) reports such a path as NOT ignored, so a
   // one-predicate check would blame a missing rule that is present and correct.
-  const body = entry('H5');
+  const body = entry('ten');
   storeProject('tracked-repo', { 'hetvabhasa.md': body });
   const d = project('tracked-repo', { repo: true });
   write(path.join(d, '.anvi', 'hetvabhasa.md'), body);
@@ -295,15 +306,29 @@ console.log('\nrepo — tracked and ignored are two questions, asked separately'
 }
 {
   // A tracked copy that DIFFERS from the store holds knowledge the store lacks.
-  storeProject('diverged-repo', { 'hetvabhasa.md': entry('H6') });
+  storeProject('diverged-repo', { 'hetvabhasa.md': entry('eleven') });
   const d = project('diverged-repo', { repo: true });
-  write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('H6') + '\n## H7: only in the repo copy\n');
+  write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('eleven') + '\n## Sample entry thirteen: only in the repo copy\n');
   git(d, 'add', '.anvi/hetvabhasa.md'); git(d, 'commit', '-q', '-m', 'old catalogues');
   fs.rmSync(path.join(d, '.anvi'), { recursive: true });
   fs.symlinkSync(path.join(PROJECTS, 'diverged-repo', '.anvi'), path.join(d, '.anvi'));
   const c = classifyRepo(d, 'diverged-repo');
   eq(c.state, 'TRACKED', 'still tracked');
   has(c.notes[0], 'merge before untracking', 'diverged content must be merged, never dropped');
+}
+{
+  // The symlink ITSELF committed: a machine-specific absolute path in the repo.
+  // Different defect from a stale copy of the files, and there is no content to
+  // compare — the earlier cut would have called the link "diverged from the store".
+  storeProject('tracked-link');
+  const d = project('tracked-link', { repo: true });
+  fs.symlinkSync(path.join(PROJECTS, 'tracked-link', '.anvi'), path.join(d, '.anvi'));
+  git(d, 'add', '-f', '.anvi');
+  git(d, 'commit', '-q', '-m', 'committed the link');
+  const c = classifyRepo(d, 'tracked-link');
+  eq(c.state, 'TRACKED', 'a committed symlink is a tracked finding');
+  has(c.detail, 'SYMLINK itself is committed', 'named as the link, not as a stale copy');
+  has(c.detail, 'resolves nowhere on any other machine', 'says why that matters');
 }
 {
   storeProject('unignored');
@@ -348,7 +373,7 @@ console.log('\ndurable — the store, and this project inside it');
 }
 {
   // A dirty CATALOGUE is a finding: nothing else will come along and commit it.
-  write(path.join(PROJECTS, 'linked', '.anvi', 'vyapti.md'), entry('V9'));
+  write(path.join(PROJECTS, 'linked', '.anvi', 'vyapti.md'), entry('twelve'));
   const c = classifyDurability('linked', storeState());
   eq(c.state, 'UNCOMMITTED', 'an uncommitted catalogue file in the store');
   has(c.remedy, 'git add -A', 'remedy commits and pushes it');
@@ -363,6 +388,15 @@ console.log('\ndurable — the store, and this project inside it');
   eq(c.ok, true, 'and it stays conformant');
   has(c.notes[0], 'checkpoint hook commits these', 'it is reported as in-flight, with the mechanism that owns it');
   git(STORE, 'add', '-A'); git(STORE, 'commit', '-q', '-m', 'memory'); git(STORE, 'push', '-q');
+}
+{
+  // The mirror is one specific path (projects/<name>/memory/). A catalogue file
+  // that merely HAS "memory" in its path is not in flight and nothing else will
+  // commit it — so the exemption is keyed on the prefix, not on the substring.
+  write(path.join(PROJECTS, 'linked', '.anvi', 'memory', 'notes.md'), '# not the mirror\n');
+  const c = classifyDurability('linked', storeState());
+  eq(c.state, 'UNCOMMITTED', 'a catalogue path containing "memory" is NOT excused as the mirror');
+  fs.rmSync(path.join(PROJECTS, 'linked', '.anvi', 'memory'), { recursive: true });
 }
 eq(classifyDurability(null, storeState()).state, 'NOT_APPLICABLE', 'no store copy → the link check owns that verdict');
 

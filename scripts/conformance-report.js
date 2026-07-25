@@ -27,6 +27,13 @@
 // this is a worklist, and a check that breaks a build teaches people to stop
 // running it.
 //
+// SCOPE, stated so the report's own limits travel with it:
+//   - the catalogues (`.anvi`). The store's `ref/` and `investigations/` ride the
+//     same envelope grant and the same store repo, and are not checked separately.
+//   - one project per argument. A store copy with NO live project pointing at it is
+//     therefore invisible here — a per-project audit cannot enumerate orphans, and
+//     "nothing reported" means "nothing found in what I was pointed at".
+//
 // Usage:
 //   node scripts/conformance-report.js [project-dir ...]   (default: cwd)
 //   node scripts/conformance-report.js --issues [dirs...]  (only non-conformant)
@@ -40,7 +47,9 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-// --- locate shared modules from both install trees (V7) ---------------------
+// --- locate shared modules from both install trees --------------------------
+// A module used by both the hooks and a CLI has to be findable from either tree,
+// so the candidate list spans both rather than assuming one layout.
 function loadFromCandidates(name) {
   const cands = [
     path.join(__dirname, '..', 'hooks', name),          // repo: scripts/ ↔ hooks/ siblings
@@ -134,8 +143,11 @@ function classifyLink(dir) {
 
   // The legacy layout is the resolver's second candidate. A top-level symlink
   // beside a real artifacts/.anvi is two distinct physical directories = genuine
-  // split-brain, which is why the linker refuses rather than repairs.
-  if (lstatSafe(legacy)) {
+  // split-brain, which is why the linker refuses rather than repairs. Tested with
+  // the linker's own predicate (a directory OR a symlink) so the two scripts can
+  // never disagree about whether this state is present.
+  const legacySt = lstatSafe(legacy);
+  if (legacySt && (legacySt.isDirectory() || legacySt.isSymbolicLink())) {
     return check('link', 'ARTIFACTS_LAYOUT', `a legacy ${tilde(legacy)} exists — the resolver's second candidate`,
       { remedy: 'consolidate artifacts/.anvi into the store by hand (link-catalogues.sh refuses this state)' });
   }
@@ -317,6 +329,13 @@ function classifyRepo(dir, storeName) {
   const ruleCovers = git(['check-ignore', '--no-index', '-q', '--', '.anvi']).ok;
 
   if (tracked.length) {
+    // `.anvi` tracked as a path in its own right means the SYMLINK is committed —
+    // a machine-specific absolute path in the repo, which is a different defect
+    // from a stale copy of the catalogue files and has no content to compare.
+    if (tracked.includes('.anvi')) {
+      return check('repo', 'TRACKED', 'the .anvi SYMLINK itself is committed — the repo now carries a machine-specific absolute path that resolves nowhere on any other machine',
+        { remedy: `cd "${dir}" && git rm --cached .anvi   (keeps the link on disk), then ensure '.anvi' is in .gitignore` });
+    }
     const store = storeName ? path.join(storeProjects(), storeName, '.anvi') : null;
     const diverged = [];
     for (const rel of tracked) {
@@ -379,11 +398,16 @@ function classifyDurability(storeName, store) {
     return check('durable', 'NO_UPSTREAM', 'the store branch tracks no upstream — commits never reach the remote',
       { remedy: `cd "${store.root}" && git push -u origin HEAD` });
   }
-  // A path under memory/ is the mirror the checkpoint hook rewrites and commits
-  // on session end, so uncommitted files there are in flight rather than lost. A
-  // catalogue file is the project's own reasoning and nothing else will come
-  // along and commit it — that one is a finding.
-  const catalogueDirty = dirty.filter(l => !/\/memory\//.test(l));
+  // A path under the project's memory MIRROR is the one the checkpoint hook
+  // rewrites and commits on session end, so uncommitted files there are in flight
+  // rather than lost. A catalogue file is the project's own reasoning and nothing
+  // else will come along and commit it — that one is a finding.
+  //
+  // Keyed on the mirror's actual path prefix, not on "contains /memory/": the
+  // substring form would also excuse a catalogue file that merely has the word in
+  // its path, which is the whole class of mistake this report exists to avoid.
+  const mirrorPrefix = `${rel}/memory/`;
+  const catalogueDirty = dirty.filter(l => !l.slice(3).replace(/^"|"$/g, '').startsWith(mirrorPrefix));
   if (catalogueDirty.length) {
     return check('durable', 'UNCOMMITTED', `${catalogueDirty.length} catalogue path(s) under ${rel} are uncommitted in the store`,
       { remedy: `cd "${store.root}" && git add -A -- "${rel}" && git commit && git push` });
