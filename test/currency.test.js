@@ -138,6 +138,69 @@ eq(parsed[1].validatedField, 'abc1234 2026-07-01', 'VALIDATED field');
 eq(parsed[1].fixField, undefined, 'prose "Root fix:" is not the FIX field');
 eq(parsed[0].level, 2, 'h2 entry → level 2');
 
+// --- the delimiter after an id (#87) ----------------------------------------
+// Which character separates an id from its title is a catalogue's house style, not
+// a contract. Accepting only `[:\s]` did not skip a rare form — it dropped EVERY
+// entry of any catalogue writing `## ID. "Title"`, wholesale and silently (137 of
+// one project's 386 headings). Each delimiter in the live corpus gets a case.
+// Fixtures are neutral on purpose: they reproduce the SHAPES observed in the live
+// corpus (quoted title, parenthetical, arrow, sub-id, slash pair) without carrying
+// another project's catalogue text into this public repo (V6).
+const DOT_MD = [
+  '## H70. "A quoted title with punctuation" (#123, 2026-01-02)', // 1
+  'Root cause: y',            // 2
+  '**REF:** emit/layer.ts',   // 3
+  '',                         // 4
+  '## H71: colon form',       // 5
+  'body',                     // 6
+].join('\n');
+const dot = parseEntries(DOT_MD);
+eq(dot.length, 2, 'a period-delimited heading is an entry, alongside a colon one');
+eq(dot[0].id, 'H70', 'period form → id');
+eq(dot[0].title, '"A quoted title with punctuation" (#123, 2026-01-02)',
+  'the period is the delimiter and does not survive into the title');
+eq(dot[0].refField, 'emit/layer.ts', 'fields parse inside a period-delimited entry');
+eq(dot[0].lineStart, 1, 'period form → lineStart');
+eq(dot[0].lineEnd, 4, 'period form → lineEnd (the time rung depends on this range)');
+// A sub-id is its own id, not the parent id with the remainder spilled into the
+// title. A period means "sub-id" only when a digit follows it, so `B4. Compose`
+// (punctuation) and `B1.1 + B14` (sub-id) need no further disambiguation.
+// Indexed reads below are guarded with `|| {}` on purpose: under a regression these
+// arrays go EMPTY, and an unguarded `[0].id` throws a TypeError that aborts the whole
+// file — every case after it silently unreported, which reads as "nothing else broke."
+// A guard turns that into an ordinary red.
+const SUB = parseEntries('### B41.2 + B47 v0.7 extension (#123)\nbody');
+eq((SUB[0] || {}).id, 'B41.2', 'a sub-id is captured whole, not truncated to its parent');
+eq((SUB[0] || {}).title, '+ B47 v0.7 extension (#123)', 'a sub-id does not spill its own digits into the title');
+eq((parseEntries('## B47. Renderer → output boundary\nbody')[0] || {}).id, 'B47',
+  'a period followed by a space is punctuation, not a sub-id');
+// Deliberately still unparsed: one heading naming TWO ids needs a decision about
+// what it produces, not a wider character class. Accepting `/` here would record
+// the first id and drop the second exactly as silently as this bug dropped both.
+eq(parseEntries('## QA5/QA6 addendum — covers two ids at once\nbody').length, 0,
+  'a slash-composite heading stays unparsed on purpose (#89)');
+// ADDITIVITY: a heading that was previously unparsed still TERMINATED the entry
+// above it (the lookahead never required a delimiter), so recovering it must not
+// move any existing entry's extent — the property that makes this fix safe to ship
+// against a corpus nobody re-validates.
+const MIXED = ['## H1: first', 'body', '## H2. second', 'body2'].join('\n');
+const mixed = parseEntries(MIXED);
+eq(mixed.length, 2, 'the recovered entry appears');
+eq(mixed[0].lineEnd, 2, 'the entry ABOVE a recovered heading keeps its extent');
+// THE #85 INTERACTION: an addendum is discriminated by its parent's presence, so a
+// parent that never parsed left its addenda unlinked. 8 such addenda exist across
+// 4 ids in one project — invisible to the earlier fix through no fault of its guard.
+const DOT_PARENT = ['## H70. "the parent"', 'body', '### H70 amendment — a later note', 'more'].join('\n');
+const dp = parseEntries(DOT_PARENT);
+// dharana routes a level-3 heading by ID SHAPE, so admitting a new shape upstream
+// means admitting it here too — otherwise a boundary sub-entry silently reads as an
+// invariant-span alignment note, which is a different kind of entry entirely.
+eq(entryKind('dharana.md', parseEntries('### B41.2 + B47 extension\nbody')[0] || {}), 'boundary',
+  'a dharana boundary SUB-id is still a boundary, not an alignment note');
+eq(dp.length, 2, 'a period-delimited parent and its addendum both parse');
+ok((dp[1] || {}).amends === true, 'an addendum links to a PERIOD-delimited parent');
+eq(entryKind('hetvabhasa.md', dp[1] || {}), 'addendum', 'and therefore gets its own kind');
+
 // --- entryKind + the per-id join (#79) --------------------------------------
 // A dharana `### <ID>` alignment/boundary cross-ref reuses a vyapti `## <ID>` id.
 // The parser must keep them distinguishable (level + kind) so a per-id before/after
