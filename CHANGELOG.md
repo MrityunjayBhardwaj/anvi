@@ -227,6 +227,19 @@ resolves it.
   entry below an uncommitted edit is attributed to the wrong history. Nothing errors and
   the answers are well-formed and wrong.
 
+## [2.1.0] — 2026-07-26
+
+### Added
+- **Copilot compatibility layer** (`copilot-compat/`) — same shape as `gsd-compat/`:
+  four hook files (executor, planner, checker, debugger) carrying the cognitive
+  discipline, plus a README documenting the three ways to load them into VS Code
+  Copilot Chat, which has no hook mechanism of its own: a `.github/copilot-instructions.md`
+  directive (auto-attached every request), injection into a `.github/prompts/*.prompt.md`
+  file, or a fork into a `.github/agents/*.agent.md` custom agent definition.
+- `install.sh` now copies `copilot-compat/` into `~/.claude/anvi/` alongside `gsd-compat/`.
+- `SKILL.md` gained a "Copilot Integration" section mirroring "GSD Integration",
+  pointing at the four installed hook files.
+
 ## [2.0.0] — 2026-07-23
 **MIGRATION REQUIRED** — catalogues move into the store; an install from 1.1.0 or earlier keeps them in a local `.anvi/`
 

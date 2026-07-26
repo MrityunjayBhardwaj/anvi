@@ -397,6 +397,9 @@ cp -r "$SCRIPT_DIR/templates" "$ANVI_DIR/"
 # GSD compatibility layer (if exists)
 [ -d "$SCRIPT_DIR/gsd-compat" ] && cp -r "$SCRIPT_DIR/gsd-compat" "$ANVI_DIR/"
 
+# Copilot compatibility layer (if exists)
+[ -d "$SCRIPT_DIR/copilot-compat" ] && cp -r "$SCRIPT_DIR/copilot-compat" "$ANVI_DIR/"
+
 # CLI tool + vendored planning lib (see bin/lib/VENDORED.md)
 mkdir -p "$ANVI_DIR/bin"
 cp "$SCRIPT_DIR/bin/anvi-tools.cjs" "$ANVI_DIR/bin/"
