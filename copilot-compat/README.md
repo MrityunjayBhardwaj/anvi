@@ -1,5 +1,23 @@
 # Copilot Compatibility Layer
 
+## Quick start: copy the templates
+
+`templates/.github/` has ready-to-use files for all three options below —
+copy the whole folder into any project's `.github/`:
+
+```sh
+cp -r templates/.github <path-to-your-project>/
+```
+
+That gives the project:
+- `copilot-instructions.md` — Option A, auto-loaded every request
+- `prompts/anvi-{execute,plan,check,debug}.prompt.md` — Option B, run via `/anvi-execute` etc. in Copilot Chat
+- `agents/anvi-{executor,planner,checker,debugger}.agent.md` — Option C, selectable from Copilot's agent dropdown
+
+These coexist with Claude Code's `~/.claude/agents/anvi-*.md` and
+`~/.claude/skills/anvi-*` without any conflict — different tool, different
+directory, both fully active on the same project at once.
+
 ## How Hooks Load
 
 These hooks don't load automatically. VS Code Copilot Chat has no
