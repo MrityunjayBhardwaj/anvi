@@ -27,8 +27,8 @@ set -euo pipefail
 #                             is never checked out or mutated).
 #   ./install.sh --only=<list>
 #                             Install only the given integration(s), comma-separated:
-#                             claude (native agents/skills/hooks), gsd (gsd-compat/),
-#                             copilot (copilot-compat/), or all. Combine freely, e.g.
+#                             claude (native agents/skills/hooks), copilot
+#                             (copilot-compat/), or all. Combine freely, e.g.
 #                             --only=claude,copilot. Skips the interactive picker.
 #                             The shared framework (cognitive-os, workflows, CLI)
 #                             always installs — every integration reads it.
@@ -66,21 +66,18 @@ done
 
 # Which integration(s) to install. The shared framework (cognitive-os,
 # workflows, templates, CLI) always installs underneath — every integration
-# reads it. Default is all three; --only=<list> or the interactive picker
-# below narrow that.
+# reads it. Default is both; --only=<list> or the interactive picker below narrow that.
 INSTALL_CLAUDE=true
-INSTALL_GSD=true
 INSTALL_COPILOT=true
 if [ -n "$ONLY_ARG" ]; then
-  INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
+  INSTALL_CLAUDE=false; INSTALL_COPILOT=false
   IFS=',' read -ra ONLY_CHOICES <<< "$ONLY_ARG"
   for choice in "${ONLY_CHOICES[@]}"; do
     case "$choice" in
-      all)     INSTALL_CLAUDE=true; INSTALL_GSD=true; INSTALL_COPILOT=true ;;
+      all)     INSTALL_CLAUDE=true; INSTALL_COPILOT=true ;;
       claude)  INSTALL_CLAUDE=true ;;
-      gsd)     INSTALL_GSD=true ;;
       copilot) INSTALL_COPILOT=true ;;
-      *) echo "✗ unknown --only value: '$choice' (choices: claude, gsd, copilot, all)" >&2; exit 2 ;;
+      *) echo "✗ unknown --only value: '$choice' (choices: claude, copilot, all)" >&2; exit 2 ;;
     esac
   done
 fi
@@ -362,33 +359,31 @@ if [ -d "$ANVI_DIR" ]; then
 fi
 
 # Interactive picker: which integration(s)? Skipped if --only was given, or
-# in non-interactive modes (--sync/--migrate/--dev default to installing all
-# three, matching prior behavior; pass --only explicitly to narrow those too).
+# in non-interactive modes (--sync/--migrate/--dev default to installing both,
+# matching prior behavior; pass --only explicitly to narrow those too).
 if [ "$MODE" = "interactive" ] && [ -z "$ONLY_ARG" ]; then
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo " Which integration(s) do you want to install?"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   echo "  1) Claude Code   — native agents/skills/hooks (~/.claude/agents, ~/.claude/skills)"
-  echo "  2) GSD compat    — cognitive hooks for GSD's agents (gsd-compat/)"
-  echo "  3) Copilot compat — cognitive hooks + .github templates for VS Code Copilot Chat (copilot-compat/)"
+  echo "  2) Copilot compat — cognitive hooks + .github templates for VS Code Copilot Chat (copilot-compat/)"
   echo ""
-  echo "  Pick any combination (e.g. '1,3' or '1 3'). Leave blank to install all three."
+  echo "  Pick any combination (e.g. '1,2' or '1 2'). Leave blank to install both."
   echo -n "  Install: "
   read -r PICKS
   if [ -n "$PICKS" ]; then
-    INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
+    INSTALL_CLAUDE=false; INSTALL_COPILOT=false
     for pick in $(echo "$PICKS" | tr ',' ' '); do
       case "$pick" in
         1) INSTALL_CLAUDE=true ;;
-        2) INSTALL_GSD=true ;;
-        3) INSTALL_COPILOT=true ;;
+        2) INSTALL_COPILOT=true ;;
         *) echo "  ⚠ ignoring unrecognized choice '$pick'" ;;
       esac
     done
-    if [ "$INSTALL_CLAUDE" = false ] && [ "$INSTALL_GSD" = false ] && [ "$INSTALL_COPILOT" = false ]; then
-      echo "  No valid choice recognized — installing all three."
-      INSTALL_CLAUDE=true; INSTALL_GSD=true; INSTALL_COPILOT=true
+    if [ "$INSTALL_CLAUDE" = false ] && [ "$INSTALL_COPILOT" = false ]; then
+      echo "  No valid choice recognized — installing both."
+      INSTALL_CLAUDE=true; INSTALL_COPILOT=true
     fi
   fi
   echo ""
@@ -458,13 +453,6 @@ cp -r "$SCRIPT_DIR/templates" "$ANVI_DIR/"
 
 # References (if exists)
 [ -d "$SCRIPT_DIR/references" ] && cp -r "$SCRIPT_DIR/references" "$ANVI_DIR/"
-
-# GSD compatibility layer (if exists and selected — additive only, an
-# unselected run leaves a previously-installed layer untouched)
-if [ "$INSTALL_GSD" = true ] && [ -d "$SCRIPT_DIR/gsd-compat" ]; then
-  cp -r "$SCRIPT_DIR/gsd-compat" "$ANVI_DIR/"
-  echo "  ✓ GSD compat installed"
-fi
 
 # Copilot compatibility layer (if exists and selected — additive only)
 if [ "$INSTALL_COPILOT" = true ] && [ -d "$SCRIPT_DIR/copilot-compat" ]; then
@@ -554,7 +542,6 @@ if [ "$INSTALL_CLAUDE" = true ]; then
   echo "  Agents:     ${AGENT_COUNT} in ${AGENTS_DIR}"
   echo "  Skills:     ${SKILL_COUNT} in ${SKILLS_DIR}"
 fi
-[ "$INSTALL_GSD" = true ]     && echo "  GSD compat:     ${ANVI_DIR}/gsd-compat/"
 [ "$INSTALL_COPILOT" = true ] && echo "  Copilot compat: ${ANVI_DIR}/copilot-compat/ (templates: copy copilot-compat/templates/.github/ into a project)"
 echo ""
 if [ "$INSTALL_CLAUDE" = true ]; then
@@ -648,22 +635,6 @@ if [ "$MODE" = "interactive" ]; then
   else
     echo "  Memory backup OFF. Enable later in ~/.claude/anvi-config.json."
   fi
-  echo ""
-fi
-
-# ─── Optional: GSD coexistence ──────────────────────────────────────────────
-
-if [ -d "$HOME/.claude/get-shit-done" ]; then
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo " GSD detected — coexistence mode"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo ""
-  echo "  GSD and Anvi can coexist. Both use .planning/ (compatible format)."
-  echo "  /gsd: commands still work alongside /anvi: commands."
-  echo "  Anvi is standalone — its CLI uses a vendored planning lib (bin/lib/)."
-  echo ""
-  echo "  To migrate: replace /gsd: with /anvi: in your workflow."
-  echo "  Run /anvi:sync to track GSD upstream changes."
   echo ""
 fi
 

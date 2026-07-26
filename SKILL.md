@@ -5,7 +5,8 @@ description: >
   discipline to all reasoning — diagnose bugs via causal chain analysis,
   design with ownership and lifecycle mapping, review with structural
   validation, recover from cascading failures via controlled retreat.
-  Works standalone or as a layer under GSD.
+  Works standalone in Claude Code, or from VS Code Copilot Chat via the
+  Copilot compatibility layer.
 trigger: >
   Use when: debugging complex issues, designing new features, reviewing
   architectural decisions, or when a fix doesn't work and you need to
@@ -58,14 +59,6 @@ Load project-specific catalogues if they exist (`.anvi/` in project root):
 - Internal reasoning uses Sanskrit terms for precision
 - Output translates to user profile language or plain English
 - Framework terminology is NEVER exposed to the user
-
-## GSD Integration
-
-When used with GSD, load the compatibility hooks:
-- `~/.claude/anvi/gsd-compat/executor-hook.md`
-- `~/.claude/anvi/gsd-compat/planner-hook.md`
-- `~/.claude/anvi/gsd-compat/checker-hook.md`
-- `~/.claude/anvi/gsd-compat/debugger-hook.md`
 
 ## Copilot Integration
 
