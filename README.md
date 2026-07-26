@@ -283,4 +283,6 @@ It earns its weight on **novel integrations, framework boundaries, architectural
 
 <sub>🙏 Anvi is built on top of <a href="https://github.com/get-shit-done"><b>GSD</b></a> — go check it out.</sub>
 
+<sub>Also runs from VS Code Copilot Chat via the <a href="copilot-compat/README.md"><b>Copilot compatibility layer</b></a>.</sub>
+
 </div>

@@ -67,6 +67,16 @@ When used with GSD, load the compatibility hooks:
 - `~/.claude/anvi/gsd-compat/checker-hook.md`
 - `~/.claude/anvi/gsd-compat/debugger-hook.md`
 
+## Copilot Integration
+
+When used from VS Code Copilot Chat (no native hook mechanism, so this
+must be loaded explicitly — see `copilot-compat/README.md` for the three
+load paths):
+- `~/.claude/anvi/copilot-compat/executor-hook.md`
+- `~/.claude/anvi/copilot-compat/planner-hook.md`
+- `~/.claude/anvi/copilot-compat/checker-hook.md`
+- `~/.claude/anvi/copilot-compat/debugger-hook.md`
+
 ## Project Initialization
 
 To create project-specific catalogues:
