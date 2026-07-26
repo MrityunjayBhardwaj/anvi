@@ -25,6 +25,13 @@ set -euo pipefail
 #                             this clone's tree; an older tagged version is taken
 #                             from `git archive <tag>` into a temp dir (your clone
 #                             is never checked out or mutated).
+#   ./install.sh --only=<list>
+#                             Install only the given integration(s), comma-separated:
+#                             claude (native agents/skills/hooks), gsd (gsd-compat/),
+#                             copilot (copilot-compat/), or all. Combine freely, e.g.
+#                             --only=claude,copilot. Skips the interactive picker.
+#                             The shared framework (cognitive-os, workflows, CLI)
+#                             always installs — every integration reads it.
 
 ANVI_DIR="$HOME/.claude/anvi"
 AGENTS_DIR="$HOME/.claude/agents"
@@ -36,6 +43,7 @@ VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
 MODE="interactive"
 PROJECTS=()          # positional args = project dirs to migrate (--migrate only)
 TARGET_VERSION=""    # --version <v>: pin to a specific release (upgrade-only)
+ONLY_ARG=""          # --only=<list>: which integration(s) to install
 while [ $# -gt 0 ]; do
   case "$1" in
     --sync)         MODE="sync" ;;
@@ -47,11 +55,35 @@ while [ $# -gt 0 ]; do
     --version=*)    TARGET_VERSION="${1#--version=}" ;;
     --version)      shift; TARGET_VERSION="${1:-}"
                     [ -n "$TARGET_VERSION" ] || { echo "--version needs a version, e.g. --version 2.0.0" >&2; exit 2; } ;;
+    --only=*)       ONLY_ARG="${1#--only=}" ;;
+    --only)         shift; ONLY_ARG="${1:-}"
+                    [ -n "$ONLY_ARG" ] || { echo "--only needs a value, e.g. --only=claude,copilot" >&2; exit 2; } ;;
     -*)             echo "unknown flag: $1" >&2; exit 2 ;;
     *)              PROJECTS+=("$1") ;;
   esac
   shift
 done
+
+# Which integration(s) to install. The shared framework (cognitive-os,
+# workflows, templates, CLI) always installs underneath — every integration
+# reads it. Default is all three; --only=<list> or the interactive picker
+# below narrow that.
+INSTALL_CLAUDE=true
+INSTALL_GSD=true
+INSTALL_COPILOT=true
+if [ -n "$ONLY_ARG" ]; then
+  INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
+  IFS=',' read -ra ONLY_CHOICES <<< "$ONLY_ARG"
+  for choice in "${ONLY_CHOICES[@]}"; do
+    case "$choice" in
+      all)     INSTALL_CLAUDE=true; INSTALL_GSD=true; INSTALL_COPILOT=true ;;
+      claude)  INSTALL_CLAUDE=true ;;
+      gsd)     INSTALL_GSD=true ;;
+      copilot) INSTALL_COPILOT=true ;;
+      *) echo "✗ unknown --only value: '$choice' (choices: claude, gsd, copilot, all)" >&2; exit 2 ;;
+    esac
+  done
+fi
 
 # --migrate prunes retired hooks; every other mode stays additive-only.
 PRUNE_FLAG=""
@@ -329,6 +361,39 @@ if [ -d "$ANVI_DIR" ]; then
   fi
 fi
 
+# Interactive picker: which integration(s)? Skipped if --only was given, or
+# in non-interactive modes (--sync/--migrate/--dev default to installing all
+# three, matching prior behavior; pass --only explicitly to narrow those too).
+if [ "$MODE" = "interactive" ] && [ -z "$ONLY_ARG" ]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " Which integration(s) do you want to install?"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "  1) Claude Code   — native agents/skills/hooks (~/.claude/agents, ~/.claude/skills)"
+  echo "  2) GSD compat    — cognitive hooks for GSD's agents (gsd-compat/)"
+  echo "  3) Copilot compat — cognitive hooks + .github templates for VS Code Copilot Chat (copilot-compat/)"
+  echo ""
+  echo "  Pick any combination (e.g. '1,3' or '1 3'). Leave blank to install all three."
+  echo -n "  Install: "
+  read -r PICKS
+  if [ -n "$PICKS" ]; then
+    INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
+    for pick in $(echo "$PICKS" | tr ',' ' '); do
+      case "$pick" in
+        1) INSTALL_CLAUDE=true ;;
+        2) INSTALL_GSD=true ;;
+        3) INSTALL_COPILOT=true ;;
+        *) echo "  ⚠ ignoring unrecognized choice '$pick'" ;;
+      esac
+    done
+    if [ "$INSTALL_CLAUDE" = false ] && [ "$INSTALL_GSD" = false ] && [ "$INSTALL_COPILOT" = false ]; then
+      echo "  No valid choice recognized — installing all three."
+      INSTALL_CLAUDE=true; INSTALL_GSD=true; INSTALL_COPILOT=true
+    fi
+  fi
+  echo ""
+fi
+
 # --dev mode: symlink repo dirs instead of copying
 if [ "$MODE" = "dev" ]; then
   echo "DEV MODE: symlinking repo → live installation"
@@ -394,11 +459,18 @@ cp -r "$SCRIPT_DIR/templates" "$ANVI_DIR/"
 # References (if exists)
 [ -d "$SCRIPT_DIR/references" ] && cp -r "$SCRIPT_DIR/references" "$ANVI_DIR/"
 
-# GSD compatibility layer (if exists)
-[ -d "$SCRIPT_DIR/gsd-compat" ] && cp -r "$SCRIPT_DIR/gsd-compat" "$ANVI_DIR/"
+# GSD compatibility layer (if exists and selected — additive only, an
+# unselected run leaves a previously-installed layer untouched)
+if [ "$INSTALL_GSD" = true ] && [ -d "$SCRIPT_DIR/gsd-compat" ]; then
+  cp -r "$SCRIPT_DIR/gsd-compat" "$ANVI_DIR/"
+  echo "  ✓ GSD compat installed"
+fi
 
-# Copilot compatibility layer (if exists)
-[ -d "$SCRIPT_DIR/copilot-compat" ] && cp -r "$SCRIPT_DIR/copilot-compat" "$ANVI_DIR/"
+# Copilot compatibility layer (if exists and selected — additive only)
+if [ "$INSTALL_COPILOT" = true ] && [ -d "$SCRIPT_DIR/copilot-compat" ]; then
+  cp -r "$SCRIPT_DIR/copilot-compat" "$ANVI_DIR/"
+  echo "  ✓ Copilot compat installed"
+fi
 
 # CLI tool + vendored planning lib (see bin/lib/VENDORED.md)
 mkdir -p "$ANVI_DIR/bin"
@@ -415,8 +487,9 @@ cp -r "$SCRIPT_DIR/bin/lib" "$ANVI_DIR/bin/"
   chmod +x "$ANVI_DIR/scripts/"*.sh 2>/dev/null || true
 }
 
-# Hooks (enforcement chain — see ENFORCE.md)
-if [ -d "$SCRIPT_DIR/hooks" ]; then
+# Hooks (enforcement chain — see ENFORCE.md). Claude-Code-specific: they
+# register in Claude Code's settings.json, so only install with that integration.
+if [ "$INSTALL_CLAUDE" = true ] && [ -d "$SCRIPT_DIR/hooks" ]; then
   mkdir -p "$HOOKS_DIR"
   HOOK_COUNT=0
   for hook_file in "$SCRIPT_DIR/hooks/"*.js; do
@@ -439,32 +512,34 @@ FRAMEWORK_COUNT=$(find "$ANVI_DIR" -type f | wc -l | tr -d ' ')
 echo "  ✓ ${FRAMEWORK_COUNT} framework files installed"
 
 # ─── Agents ─────────────────────────────────────────────────────────────────
-
-echo "Installing agents to ${AGENTS_DIR}..."
+# Claude Code subagents — only relevant to the Claude Code integration.
 
 AGENT_COUNT=0
-for agent_file in "$SCRIPT_DIR/agents/"anvi-*.md; do
-  [ -f "$agent_file" ] || continue
-  cp "$agent_file" "$AGENTS_DIR/"
-  AGENT_COUNT=$((AGENT_COUNT + 1))
-done
-
-echo "  ✓ ${AGENT_COUNT} agents installed"
+if [ "$INSTALL_CLAUDE" = true ]; then
+  echo "Installing agents to ${AGENTS_DIR}..."
+  for agent_file in "$SCRIPT_DIR/agents/"anvi-*.md; do
+    [ -f "$agent_file" ] || continue
+    cp "$agent_file" "$AGENTS_DIR/"
+    AGENT_COUNT=$((AGENT_COUNT + 1))
+  done
+  echo "  ✓ ${AGENT_COUNT} agents installed"
+fi
 
 # ─── Skills ─────────────────────────────────────────────────────────────────
-
-echo "Installing skills to ${SKILLS_DIR}..."
+# Claude Code slash commands — only relevant to the Claude Code integration.
 
 SKILL_COUNT=0
-for skill_dir in "$SCRIPT_DIR/skills/"anvi*/; do
-  [ -d "$skill_dir" ] || continue
-  skill_name=$(basename "$skill_dir")
-  mkdir -p "$SKILLS_DIR/$skill_name"
-  cp "$skill_dir/SKILL.md" "$SKILLS_DIR/$skill_name/"
-  SKILL_COUNT=$((SKILL_COUNT + 1))
-done
-
-echo "  ✓ ${SKILL_COUNT} skills installed"
+if [ "$INSTALL_CLAUDE" = true ]; then
+  echo "Installing skills to ${SKILLS_DIR}..."
+  for skill_dir in "$SCRIPT_DIR/skills/"anvi*/; do
+    [ -d "$skill_dir" ] || continue
+    skill_name=$(basename "$skill_dir")
+    mkdir -p "$SKILLS_DIR/$skill_name"
+    cp "$skill_dir/SKILL.md" "$SKILLS_DIR/$skill_name/"
+    SKILL_COUNT=$((SKILL_COUNT + 1))
+  done
+  echo "  ✓ ${SKILL_COUNT} skills installed"
+fi
 
 # ─── Summary ────────────────────────────────────────────────────────────────
 
@@ -474,16 +549,22 @@ echo " ✓ Ānvīkṣikī v${VERSION} installed"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  Framework:  ${ANVI_DIR}"
-echo "  Agents:     ${AGENT_COUNT} in ${AGENTS_DIR}"
-echo "  Skills:     ${SKILL_COUNT} in ${SKILLS_DIR}"
 echo "  CLI:        ${ANVI_DIR}/bin/anvi-tools.cjs"
+if [ "$INSTALL_CLAUDE" = true ]; then
+  echo "  Agents:     ${AGENT_COUNT} in ${AGENTS_DIR}"
+  echo "  Skills:     ${SKILL_COUNT} in ${SKILLS_DIR}"
+fi
+[ "$INSTALL_GSD" = true ]     && echo "  GSD compat:     ${ANVI_DIR}/gsd-compat/"
+[ "$INSTALL_COPILOT" = true ] && echo "  Copilot compat: ${ANVI_DIR}/copilot-compat/ (templates: copy copilot-compat/templates/.github/ into a project)"
 echo ""
-echo "Available commands:"
-echo "  /anvi:help              Show all commands"
-echo "  /anvi:new-project       Start a new project"
-echo "  /anvi:debug             Debug with cognitive OS"
-echo "  /anvi:init              Initialize project catalogues"
-echo ""
+if [ "$INSTALL_CLAUDE" = true ]; then
+  echo "Available commands:"
+  echo "  /anvi:help              Show all commands"
+  echo "  /anvi:new-project       Start a new project"
+  echo "  /anvi:debug             Debug with cognitive OS"
+  echo "  /anvi:init              Initialize project catalogues"
+  echo ""
+fi
 
 # ─── Migrate: per-project structural migration ──────────────────────────────
 # --migrate is a one-pass upgrade. The framework + prune are done above; now
