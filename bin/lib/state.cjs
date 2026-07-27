@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { escapeRegex, loadConfig, getMilestoneInfo, getMilestonePhaseFilter, normalizeMd, planningPaths, output, error } = require('./core.cjs');
+const { escapeRegex, loadConfig, getMilestoneInfo, getMilestonePhaseFilter, normalizeMd, planningPaths, output, error, planningRoot} = require('./core.cjs');
 const { extractFrontmatter, reconstructFrontmatter } = require('./frontmatter.cjs');
 
 /** Shorthand — every state command needs this path */
@@ -894,7 +894,7 @@ function cmdStateBeginPhase(cwd, phaseNumber, phaseName, planCount, raw) {
  * Fixes #1034.
  */
 function cmdSignalWaiting(cwd, type, question, options, phase, raw) {
-  const gsdDir = fs.existsSync(path.join(cwd, '.gsd')) ? path.join(cwd, '.gsd') : path.join(cwd, '.planning');
+  const gsdDir = fs.existsSync(path.join(cwd, '.gsd')) ? path.join(cwd, '.gsd') : planningRoot(cwd);
   const waitingPath = path.join(gsdDir, 'WAITING.json');
 
   const signal = {
@@ -921,7 +921,7 @@ function cmdSignalWaiting(cwd, type, question, options, phase, raw) {
 function cmdSignalResume(cwd, raw) {
   const paths = [
     path.join(cwd, '.gsd', 'WAITING.json'),
-    path.join(cwd, '.planning', 'WAITING.json'),
+    path.join(planningRoot(cwd), 'WAITING.json'),
   ];
 
   let removed = false;

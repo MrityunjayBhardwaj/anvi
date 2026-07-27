@@ -7,11 +7,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, getMilestonePhaseFilter } = require('./core.cjs');
+const { output, error, getMilestonePhaseFilter, planningRoot} = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 
 function cmdAuditUat(cwd, raw) {
-  const phasesDir = path.join(cwd, '.planning', 'phases');
+  const phasesDir = path.join(planningRoot(cwd), 'phases');
   if (!fs.existsSync(phasesDir)) {
     error('No .planning/phases directory found');
   }

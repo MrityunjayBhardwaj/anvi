@@ -149,7 +149,7 @@ ${checkpoint.warnings.length > 0
     : '(none)'}
 `;
 
-  const target = outputFile || path.join(cwd, '.planning', 'debug', 'tattva-checkpoint.md');
+  const target = outputFile || path.join(gsdCore().planningRoot(cwd), 'debug', 'tattva-checkpoint.md');
   const dir = path.dirname(target);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(target, md);
@@ -251,7 +251,7 @@ function cmdCognitiveState(cwd, raw) {
   }
 
   // Check for active debug sessions
-  const debugDir = path.join(cwd, '.planning', 'debug');
+  const debugDir = path.join(gsdCore().planningRoot(cwd), 'debug');
   let activeSessions = 0;
   if (fs.existsSync(debugDir)) {
     const files = fs.readdirSync(debugDir).filter(f => f.endsWith('.md') && f !== 'knowledge-base.md');

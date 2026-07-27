@@ -12,7 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { output, error, safeReadFile } = require('./core.cjs');
+const { output, error, safeReadFile, planningRoot} = require('./core.cjs');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -278,7 +278,7 @@ function extractMarkdownSection(content, sectionName) {
 // ─── CLAUDE.md Section Generators ─────────────────────────────────────────────
 
 function generateProjectSection(cwd) {
-  const projectPath = path.join(cwd, '.planning', 'PROJECT.md');
+  const projectPath = path.join(planningRoot(cwd), 'PROJECT.md');
   const content = safeReadFile(projectPath);
   if (!content) {
     return { content: CLAUDE_MD_FALLBACKS.project, source: 'PROJECT.md', hasFallback: true };
@@ -308,8 +308,8 @@ function generateProjectSection(cwd) {
 }
 
 function generateStackSection(cwd) {
-  const codebasePath = path.join(cwd, '.planning', 'codebase', 'STACK.md');
-  const researchPath = path.join(cwd, '.planning', 'research', 'STACK.md');
+  const codebasePath = path.join(planningRoot(cwd), 'codebase', 'STACK.md');
+  const researchPath = path.join(planningRoot(cwd), 'research', 'STACK.md');
   let content = safeReadFile(codebasePath);
   let source = 'codebase/STACK.md';
   if (!content) {
@@ -336,7 +336,7 @@ function generateStackSection(cwd) {
 }
 
 function generateConventionsSection(cwd) {
-  const conventionsPath = path.join(cwd, '.planning', 'codebase', 'CONVENTIONS.md');
+  const conventionsPath = path.join(planningRoot(cwd), 'codebase', 'CONVENTIONS.md');
   const content = safeReadFile(conventionsPath);
   if (!content) {
     return { content: CLAUDE_MD_FALLBACKS.conventions, source: 'CONVENTIONS.md', hasFallback: true };
@@ -352,7 +352,7 @@ function generateConventionsSection(cwd) {
 }
 
 function generateArchitectureSection(cwd) {
-  const architecturePath = path.join(cwd, '.planning', 'codebase', 'ARCHITECTURE.md');
+  const architecturePath = path.join(planningRoot(cwd), 'codebase', 'ARCHITECTURE.md');
   const content = safeReadFile(architecturePath);
   if (!content) {
     return { content: CLAUDE_MD_FALLBACKS.architecture, source: 'ARCHITECTURE.md', hasFallback: true };
