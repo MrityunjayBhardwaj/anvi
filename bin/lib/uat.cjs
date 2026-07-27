@@ -13,7 +13,7 @@ const { extractFrontmatter } = require('./frontmatter.cjs');
 function cmdAuditUat(cwd, raw) {
   const phasesDir = path.join(planningRoot(cwd), 'phases');
   if (!fs.existsSync(phasesDir)) {
-    error('No .planning/phases directory found');
+    error(`No ${pmRel(cwd, 'phases')} directory found`);
   }
 
   const isDirInMilestone = getMilestonePhaseFilter(cwd);

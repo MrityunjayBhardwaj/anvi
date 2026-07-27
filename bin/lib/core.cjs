@@ -38,19 +38,19 @@ function detectSubRepos(cwd) {
 }
 
 /**
- * Walk up from `startDir` to find the project root that owns pmRel(cwd, ).
+ * Walk up from `startDir` to find the project root that owns the project-management tree.
  *
  * In multi-repo workspaces, Claude may open inside a sub-repo (e.g. `backend/`)
- * instead of the project root. This function prevents pmRel(cwd, ) from being
+ * instead of the project root. This function prevents that tree from being
  * created inside the sub-repo by locating the nearest ancestor that already has
- * a pmRel(cwd, ) directory.
+ * a project-management directory.
  *
  * Detection strategy (checked in order for each ancestor):
- * 1. Parent has pmRel(cwd, 'config.json') with `sub_repos` listing this directory
- * 2. Parent has pmRel(cwd, 'config.json') with `multiRepo: true` (legacy format)
- * 3. Parent has pmRel(cwd, ) and current dir has its own `.git` (heuristic)
+ * 1. Parent has a tree whose `config.json` has `sub_repos` listing this directory
+ * 2. Parent has a tree whose `config.json` has `multiRepo: true` (legacy format)
+ * 3. Parent has a tree and current dir has its own `.git` (heuristic)
  *
- * Returns `startDir` unchanged when no ancestor pmRel(cwd, ) is found (first-run
+ * Returns `startDir` unchanged when no ancestor tree is found (first-run
  * or single-repo projects).
  */
 function findProjectRoot(startDir) {
@@ -497,7 +497,7 @@ function withPlanningLock(cwd, fn) {
 // repo that the checkpoint hook auto-commits and pushes. Nesting them there is
 // what makes them durable; the project repo is no longer the durability target.
 //
-// The pre-migration location was a top-level pmRel(cwd, ). It is still read
+// The pre-migration location was a top-level `.planning/`. It is still read
 // when present, so an unmigrated project keeps working — but the fallback
 // announces itself, because a project silently running on the old layout is
 // exactly the unobserved state this move exists to eliminate.
@@ -622,7 +622,7 @@ function planningRootRelative(cwd) {
  * agents then open. Relative when the tree is inside the project, absolute when
  * it resolves into the centralized store — `pathExistsInternal` accepts either,
  * and an agent can open either. What it must never be is a relative path built
- * on the wrong root, which is what a hardcoded pmRel(cwd, '…') becomes the moment
+ * on the wrong root, which is what a hardcoded '.planning/…' becomes the moment
  * a project migrates: a well-formed string naming a file that is not there.
  */
 function pmRel(cwd, ...parts) {
@@ -776,7 +776,7 @@ function findPhaseInternal(cwd, phase) {
     for (const archiveName of archiveDirs) {
       const version = archiveName.match(/^(v[\d.]+)-phases$/)[1];
       const archivePath = path.join(milestonesDir, archiveName);
-      const relBase = pmRel(cwd, 'milestones') + archiveName;
+      const relBase = pmRel(cwd, 'milestones', archiveName);
       const result = searchPhaseInDir(archivePath, relBase, normalized);
       if (result) {
         result.archived = version;

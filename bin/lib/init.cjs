@@ -26,7 +26,7 @@ function getLatestCompletedMilestone(cwd) {
 
 /**
  * Inject `project_root` into an init result object.
- * Workflows use this to prefix pmRel(cwd, ) paths correctly when Claude's CWD
+ * Workflows use this to prefix project-management paths correctly when Claude's CWD
  * differs from the project root (e.g., inside a sub-repo).
  */
 function withProjectRoot(cwd, result) {
@@ -622,7 +622,7 @@ function cmdInitTodos(cwd, area, raw) {
           created: createdMatch ? createdMatch[1].trim() : 'unknown',
           title: titleMatch ? titleMatch[1].trim() : 'Untitled',
           area: todoArea,
-          path: pmRel(cwd, 'todos', 'pending') + file,
+          path: pmRel(cwd, 'todos', 'pending', file),
         });
       } catch { /* intentionally empty */ }
     }
@@ -808,7 +808,7 @@ function cmdInitProgress(cwd, raw) {
       const phaseInfo = {
         number: phaseNumber,
         name: phaseName,
-        directory: pmRel(cwd, 'phases') + dir,
+        directory: pmRel(cwd, 'phases', dir),
         status,
         plan_count: plans.length,
         summary_count: summaries.length,

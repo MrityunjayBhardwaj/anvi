@@ -186,6 +186,30 @@ console.log('\n— relative form, for staging globs and reported paths —');
   noMatch(r.value.currentRel, '\\', 'never emits a backslash — these strings go into git pathspecs');
 }
 
+console.log('\n— pmRel joins its parts, and every reported path is well-formed —');
+
+{
+  const dir = project({ current: true });
+  const r = capture(() => ({
+    one: C.pmRel(dir, 'STATE.md'),
+    deep: C.pmRel(dir, 'todos', 'pending', 't1.md'),
+    bare: C.pmRel(dir),
+  }));
+  eq(r.value.one, '.anvi/project_management/STATE.md', 'a single part is separated from the root');
+  eq(r.value.deep, '.anvi/project_management/todos/pending/t1.md', 'every part is separated');
+  eq(r.value.bare, '.anvi/project_management', 'no parts yields the root with no trailing slash');
+
+  // Regression guard. Converting `'.planning/phases/' + dir` mechanically to
+  // `pmRel(cwd,'phases') + dir` drops the separator and yields
+  // `.../phasesXX-name` — a well-formed-looking string naming nothing. It
+  // compiled, and every suite stayed green, because no assertion looked at the
+  // shape of a joined path. Concatenation is the bug; joining is the fix.
+  const joined = C.pmRel(dir, 'phases', '01-name');
+  ok(!/phases[^/]/.test(joined.slice(joined.indexOf('phases'))),
+     'a part never fuses onto the previous one (the lost-separator regression)');
+  ok(!joined.includes('//'), 'and no doubled separator either');
+}
+
 console.log('\n— the planning-root command, spawned as workflows invoke it —');
 
 {

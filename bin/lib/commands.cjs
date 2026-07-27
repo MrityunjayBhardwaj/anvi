@@ -332,7 +332,7 @@ function cmdCommitToSubrepo(cwd, message, files, raw) {
   const subRepos = config.sub_repos;
 
   if (!subRepos || subRepos.length === 0) {
-    error('no sub_repos configured in .planning/config.json');
+    error(`no sub_repos configured in ${pmRel(cwd, 'config.json')}`);
   }
 
   if (!files || files.length === 0) {

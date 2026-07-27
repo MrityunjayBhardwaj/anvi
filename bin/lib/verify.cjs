@@ -779,7 +779,7 @@ function cmdValidateHealth(cwd, options, raw) {
             const milestone = getMilestoneInfo(cwd);
             let stateContent = `# Session State\n\n`;
             stateContent += `## Project Reference\n\n`;
-            stateContent += `See: .planning/PROJECT.md\n\n`;
+            stateContent += `See: ${pmRel(cwd, 'PROJECT.md')}\n\n`;
             stateContent += `## Position\n\n`;
             stateContent += `**Milestone:** ${milestone.version} ${milestone.name}\n`;
             stateContent += `**Current phase:** (determining...)\n`;
