@@ -186,5 +186,54 @@ console.log('\n— relative form, for staging globs and reported paths —');
   noMatch(r.value.currentRel, '\\', 'never emits a backslash — these strings go into git pathspecs');
 }
 
+console.log('\n— the planning-root command, spawned as workflows invoke it —');
+
+{
+  // Spawned, not called: cmdPlanningRoot ends in output(), which exits the
+  // process. In-process it could only be tested by faking that away, which
+  // would prove the fake works. A workflow runs `node anvi-tools planning-root`
+  // and reads stdout, so that is what is asserted.
+  const { execFileSync } = require('child_process');
+  const CLI = path.join(__dirname, '..', 'bin', 'anvi-tools.cjs');
+  const git = (d, ...a) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
+  const run = (d, ...a) => {
+    try { return execFileSync('node', [CLI, ...a], { cwd: d, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }); }
+    catch (e) { return e.stdout || ''; }
+  };
+
+  const legacy = path.join(TMP, 'cli-legacy');
+  fs.mkdirSync(path.join(legacy, '.planning'), { recursive: true });
+  git(legacy, 'init', '-q', '.');
+
+  // POSITIVE control: a tracked, unignored legacy tree really is durable.
+  const before = JSON.parse(run(legacy, 'planning-root'));
+  eq(before.legacy, true, 'a legacy tree is reported as legacy');
+  eq(before.durable, true, 'with no ignore rule, the project repo does hold it');
+
+  // NEGATIVE control: the ignore rule is the ONLY thing that changes.
+  fs.writeFileSync(path.join(legacy, '.gitignore'), '.planning/\n');
+  const after = JSON.parse(run(legacy, 'planning-root'));
+  eq(after.durable, false, 'adding the ignore rule alone flips durable to false');
+  ok(before.path === after.path, 'and nothing else about the answer moved');
+
+  // The two surfaces must agree — a project cannot be durable here and not there.
+  const commit = JSON.parse(run(legacy, 'commit', '--message', 'x'));
+  eq(commit.reason, 'skipped_gitignored', 'the durability step agrees it is skipping');
+  eq(commit.durable, false, 'and reports the same durability as planning-root');
+
+  const migrated = path.join(TMP, 'cli-migrated');
+  fs.mkdirSync(path.join(migrated, PM_RELATIVE), { recursive: true });
+  git(migrated, 'init', '-q', '.');
+  const m = JSON.parse(run(migrated, 'planning-root'));
+  eq(m.legacy, false, 'a migrated tree is not legacy');
+  eq(m.durable, true, 'a migrated tree is durable — the store commits it');
+  eq(run(migrated, 'planning-root', '--raw').trim(), '.anvi/project_management',
+     '--raw prints the bare path, for PM=$(… --raw) in a shell step');
+
+  const mc = JSON.parse(run(migrated, 'commit', '--message', 'x'));
+  eq(mc.reason, 'durable_in_store',
+     'the durability step does not borrow the word "skipped" for the durable case');
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} planning-root: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

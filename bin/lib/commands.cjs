@@ -42,6 +42,28 @@ function cmdCurrentTimestamp(format, raw) {
   output({ timestamp: result }, raw, result);
 }
 
+/**
+ * Report where this project's development-lifecycle documents live.
+ *
+ * Workflows and agents cannot call the resolver, so without this they spell the
+ * location by hand — which is how the location became hardcoded in ~250 places
+ * to begin with. `--raw` prints the path alone, for `PM=$(… planning-root
+ * --raw)` in a shell step.
+ */
+function cmdPlanningRoot(cwd, raw) {
+  const rel = planningRootRelative(cwd);
+  const legacy = usesLegacyPlanning(cwd);
+  const result = {
+    root: planningRoot(cwd),
+    path: rel,
+    legacy,
+    // A legacy tree is durable only if the project repo actually tracks it;
+    // a migrated one is durable because the store commits and pushes it.
+    durable: legacy ? !isGitIgnored(cwd, rel) : true,
+  };
+  output(result, raw, rel);
+}
+
 function cmdListTodos(cwd, area, raw) {
   const pendingDir = path.join(planningRoot(cwd), 'todos', 'pending');
 
@@ -926,6 +948,7 @@ function cmdStats(cwd, format, raw) {
 module.exports = {
   cmdGenerateSlug,
   cmdCurrentTimestamp,
+  cmdPlanningRoot,
   cmdListTodos,
   cmdVerifyPathExists,
   cmdHistoryDigest,

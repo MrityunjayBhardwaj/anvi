@@ -470,6 +470,7 @@ async function main() {
       else error('Unknown verify subcommand');
       break;
     }
+    case 'planning-root': commands.cmdPlanningRoot(cwd, raw); break;
     case 'generate-slug': commands.cmdGenerateSlug(args[1], raw); break;
     case 'current-timestamp': commands.cmdCurrentTimestamp(args[1] || 'full', raw); break;
     case 'list-todos': commands.cmdListTodos(cwd, args[1], raw); break;
