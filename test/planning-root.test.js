@@ -186,6 +186,47 @@ console.log('\n— relative form, for staging globs and reported paths —');
   noMatch(r.value.currentRel, '\\', 'never emits a backslash — these strings go into git pathspecs');
 }
 
+console.log('\n— creating the tree must not fork a project that already has one —');
+
+{
+  // The highest-severity failure available here: a project whose `.anvi` lives
+  // in the store has no local directory, so a resolver that defaulted to
+  // `cwd/.anvi` would CREATE one — and because project-local wins resolution,
+  // the new empty tree would then shadow the real one. Two knowledge bases for
+  // one project, the second silently preferred. Asserted by creating the tree
+  // through the CLI and requiring the store to receive it and the project to
+  // stay clean.
+  const { execFileSync } = require('child_process');
+  const CLI = path.join(__dirname, '..', 'bin', 'anvi-tools.cjs');
+
+  const home = path.join(TMP, 'shadow-home');
+  const storeAnvi = path.join(home, '.anvideck', 'projects', 'shadowproj', '.anvi');
+  fs.mkdirSync(storeAnvi, { recursive: true });
+  const proj = path.join(TMP, 'shadow-work', 'shadowproj');
+  fs.mkdirSync(proj, { recursive: true });
+  execFileSync('git', ['init', '-q', '.'], { cwd: proj, stdio: 'pipe' });
+
+  execFileSync('node', [CLI, 'config-new-project'], {
+    cwd: proj, env: { ...process.env, HOME: home }, stdio: 'pipe', encoding: 'utf8',
+  });
+
+  ok(fs.existsSync(path.join(storeAnvi, 'project_management', 'config.json')),
+     'the tree is created in the store, where this project already keeps its knowledge');
+  ok(!fs.existsSync(path.join(proj, '.anvi')),
+     'and NO local .anvi appears — a local one would shadow the store on every later lookup');
+
+  // The complementary case: a genuinely new project has no store entry either,
+  // and must get a local tree rather than nothing at all.
+  const fresh = path.join(TMP, 'shadow-work', 'freshproj');
+  fs.mkdirSync(fresh, { recursive: true });
+  execFileSync('git', ['init', '-q', '.'], { cwd: fresh, stdio: 'pipe' });
+  execFileSync('node', [CLI, 'config-new-project'], {
+    cwd: fresh, env: { ...process.env, HOME: home }, stdio: 'pipe', encoding: 'utf8',
+  });
+  ok(fs.existsSync(path.join(fresh, '.anvi', 'project_management', 'config.json')),
+     'a project with no tree anywhere gets a local one — the fallback still creates');
+}
+
 console.log('\n— pmRel joins its parts, and every reported path is well-formed —');
 
 {
