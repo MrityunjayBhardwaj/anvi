@@ -483,14 +483,93 @@ function withPlanningLock(cwd, fn) {
   return fn();
 }
 
-/** Get the .planning directory path */
-function planningDir(cwd) {
-  return path.join(cwd, '.planning');
+// ─── Project-management tree ─────────────────────────────────────────────────
+//
+// The development-lifecycle documents (phases, todos, debug, roadmap, state…)
+// live under `.anvi/`, which is a symlink into the ~/.anvideck store — a git
+// repo that the checkpoint hook auto-commits and pushes. Nesting them there is
+// what makes them durable; the project repo is no longer the durability target.
+//
+// The pre-migration location was a top-level `.planning/`. It is still read
+// when present, so an unmigrated project keeps working — but the fallback
+// announces itself, because a project silently running on the old layout is
+// exactly the unobserved state this move exists to eliminate.
+
+/** Location of the project-management tree, relative to the project root. */
+const PM_RELATIVE = path.join('.anvi', 'project_management');
+
+/** Pre-migration location. Read when present; never written to by new code. */
+const LEGACY_PM_RELATIVE = '.planning';
+
+/** Projects already warned about, so the notice fires once per process, not per lookup. */
+const legacyNoticeShown = new Set();
+
+function warnOnce(cwd, key, message) {
+  const seen = `${key}:${cwd}`;
+  if (legacyNoticeShown.has(seen)) return;
+  legacyNoticeShown.add(seen);
+  // stderr, never stdout: stdout is a JSON data channel that callers parse.
+  try { process.stderr.write(message); } catch { /* never let a notice break a command */ }
 }
 
-/** Get common .planning file paths */
+/**
+ * Resolve the project-management root for `cwd`.
+ *
+ * Prefers the current location; falls back to the legacy one when only that
+ * exists. A project with neither resolves to the current location, so a fresh
+ * project is created in the right place.
+ */
+function planningRoot(cwd) {
+  const current = path.join(cwd, PM_RELATIVE);
+  const legacy = path.join(cwd, LEGACY_PM_RELATIVE);
+  const hasCurrent = fs.existsSync(current);
+  const hasLegacy = fs.existsSync(legacy);
+
+  if (hasCurrent) {
+    if (hasLegacy) {
+      // Half-migrated: content in the old tree is now invisible to every command.
+      warnOnce(cwd, 'both',
+        `anvi: both ${PM_RELATIVE} and ${LEGACY_PM_RELATIVE} exist in ${cwd}.\n` +
+        `      Reading ${PM_RELATIVE}; the ${LEGACY_PM_RELATIVE} tree is being IGNORED.\n` +
+        `      Finish the migration or remove the leftover tree — run: anvi update\n`);
+    }
+    return current;
+  }
+
+  if (hasLegacy) {
+    warnOnce(cwd, 'legacy',
+      `anvi: reading project documents from the legacy ${LEGACY_PM_RELATIVE}/ in ${cwd}.\n` +
+      `      This location is NOT durable — it is gitignored in most projects, so\n` +
+      `      nothing here is committed anywhere. Migrate to ${PM_RELATIVE}: anvi update\n`);
+    return legacy;
+  }
+
+  return current;
+}
+
+/** True when `cwd` is still on the pre-migration layout. */
+function usesLegacyPlanning(cwd) {
+  return !fs.existsSync(path.join(cwd, PM_RELATIVE))
+    && fs.existsSync(path.join(cwd, LEGACY_PM_RELATIVE));
+}
+
+/**
+ * The project-management root as a repo-relative POSIX path.
+ * For the string contexts: staging globs, ignore checks, and the `directory:`
+ * fields that agents read back out of command output.
+ */
+function planningRootRelative(cwd) {
+  return toPosixPath(path.relative(cwd, planningRoot(cwd)));
+}
+
+/** Get the project-management directory path */
+function planningDir(cwd) {
+  return planningRoot(cwd);
+}
+
+/** Get common project-management file paths */
 function planningPaths(cwd) {
-  const base = path.join(cwd, '.planning');
+  const base = planningRoot(cwd);
   return {
     planning: base,
     state: path.join(base, 'STATE.md'),
@@ -1008,4 +1087,9 @@ module.exports = {
   MODEL_ALIAS_MAP,
   planningDir,
   planningPaths,
+  planningRoot,
+  planningRootRelative,
+  usesLegacyPlanning,
+  PM_RELATIVE,
+  LEGACY_PM_RELATIVE,
 };
