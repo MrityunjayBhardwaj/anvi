@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { escapeRegex, loadConfig, normalizePhaseName, comparePhaseNum, findPhaseInternal, getArchivedPhaseDirs, generateSlugInternal, getMilestonePhaseFilter, stripShippedMilestones, extractCurrentMilestone, replaceInCurrentMilestone, toPosixPath, output, error, planningRoot} = require('./core.cjs');
+const { escapeRegex, loadConfig, normalizePhaseName, comparePhaseNum, findPhaseInternal, getArchivedPhaseDirs, generateSlugInternal, getMilestonePhaseFilter, stripShippedMilestones, extractCurrentMilestone, replaceInCurrentMilestone, toPosixPath, output, error, planningRoot, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { writeStateMd, stateExtractField, stateReplaceField, stateReplaceFieldWithFallback } = require('./state.cjs');
 
@@ -180,7 +180,7 @@ function cmdFindPhase(cwd, phase, raw) {
 
     const result = {
       found: true,
-      directory: toPosixPath(path.join('.planning', 'phases', match)),
+      directory: pmRel(cwd, 'phases', match),
       phase_number: phaseNumber,
       phase_name: phaseName,
       plans,
@@ -372,7 +372,7 @@ function cmdPhaseAdd(cwd, description, raw, customId) {
     padded: typeof newPhaseId === 'number' ? String(newPhaseId).padStart(2, '0') : String(newPhaseId),
     name: description,
     slug,
-    directory: `.planning/phases/${dirName}`,
+    directory: pmRel(cwd, 'phases', dirName),
     naming_mode: config.phase_naming,
   };
 
@@ -455,7 +455,7 @@ function cmdPhaseInsert(cwd, afterPhase, description, raw) {
     after_phase: afterPhase,
     name: description,
     slug,
-    directory: `.planning/phases/${dirName}`,
+    directory: pmRel(cwd, 'phases', dirName),
   };
 
   output(result, raw, decimalPhase);

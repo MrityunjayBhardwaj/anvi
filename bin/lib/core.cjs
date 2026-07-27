@@ -38,19 +38,19 @@ function detectSubRepos(cwd) {
 }
 
 /**
- * Walk up from `startDir` to find the project root that owns `.planning/`.
+ * Walk up from `startDir` to find the project root that owns pmRel(cwd, ).
  *
  * In multi-repo workspaces, Claude may open inside a sub-repo (e.g. `backend/`)
- * instead of the project root. This function prevents `.planning/` from being
+ * instead of the project root. This function prevents pmRel(cwd, ) from being
  * created inside the sub-repo by locating the nearest ancestor that already has
- * a `.planning/` directory.
+ * a pmRel(cwd, ) directory.
  *
  * Detection strategy (checked in order for each ancestor):
- * 1. Parent has `.planning/config.json` with `sub_repos` listing this directory
- * 2. Parent has `.planning/config.json` with `multiRepo: true` (legacy format)
- * 3. Parent has `.planning/` and current dir has its own `.git` (heuristic)
+ * 1. Parent has pmRel(cwd, 'config.json') with `sub_repos` listing this directory
+ * 2. Parent has pmRel(cwd, 'config.json') with `multiRepo: true` (legacy format)
+ * 3. Parent has pmRel(cwd, ) and current dir has its own `.git` (heuristic)
  *
- * Returns `startDir` unchanged when no ancestor `.planning/` is found (first-run
+ * Returns `startDir` unchanged when no ancestor pmRel(cwd, ) is found (first-run
  * or single-repo projects).
  */
 function findProjectRoot(startDir) {
@@ -76,8 +76,15 @@ function findProjectRoot(startDir) {
     if (parent === dir) break; // filesystem root
     if (parent === homedir) break; // never go above home
 
-    const parentPlanning = path.join(parent, '.planning');
-    if (fs.existsSync(parentPlanning) && fs.statSync(parentPlanning).isDirectory()) {
+    // Look for EITHER layout: an ancestor owns the project if it has the
+    // current tree or the pre-migration one. Checking only the old name would
+    // walk straight past a migrated parent and create a second tree inside the
+    // sub-repo — the exact failure this function exists to prevent.
+    const parentPlanning = [
+      path.join(parent, PM_RELATIVE),
+      path.join(parent, LEGACY_PM_RELATIVE),
+    ].find(d => { try { return fs.existsSync(d) && fs.statSync(d).isDirectory(); } catch { return false; } });
+    if (parentPlanning) {
       const configPath = path.join(parentPlanning, 'config.json');
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -238,7 +245,7 @@ function loadConfig(cwd) {
         if (explicit !== undefined) return explicit;
         // Auto-detection: when no explicit value and .planning/ is gitignored,
         // default to false instead of true
-        if (isGitIgnored(cwd, '.planning/')) return false;
+        if (isGitIgnored(cwd, pmRel(cwd, ))) return false;
         return defaults.commit_docs;
       })(),
       search_gitignored: get('search_gitignored', { section: 'planning', field: 'search_gitignored' }) ?? defaults.search_gitignored,
@@ -490,7 +497,7 @@ function withPlanningLock(cwd, fn) {
 // repo that the checkpoint hook auto-commits and pushes. Nesting them there is
 // what makes them durable; the project repo is no longer the durability target.
 //
-// The pre-migration location was a top-level `.planning/`. It is still read
+// The pre-migration location was a top-level pmRel(cwd, ). It is still read
 // when present, so an unmigrated project keeps working — but the fallback
 // announces itself, because a project silently running on the old layout is
 // exactly the unobserved state this move exists to eliminate.
@@ -608,6 +615,18 @@ function planningRootRelative(cwd) {
   // wrong-but-plausible is the failure mode worth avoiding here.
   if (rel.startsWith('../') || path.isAbsolute(rel)) return toPosixPath(root);
   return rel;
+}
+
+/**
+ * A path INSIDE the project-management tree, in the form callers report and
+ * agents then open. Relative when the tree is inside the project, absolute when
+ * it resolves into the centralized store — `pathExistsInternal` accepts either,
+ * and an agent can open either. What it must never be is a relative path built
+ * on the wrong root, which is what a hardcoded pmRel(cwd, '…') becomes the moment
+ * a project migrates: a well-formed string naming a file that is not there.
+ */
+function pmRel(cwd, ...parts) {
+  return [planningRootRelative(cwd), ...parts].join('/');
 }
 
 /** Get the project-management directory path */
@@ -739,7 +758,7 @@ function findPhaseInternal(cwd, phase) {
   const normalized = normalizePhaseName(phase);
 
   // Search current phases first
-  const current = searchPhaseInDir(phasesDir, '.planning/phases', normalized);
+  const current = searchPhaseInDir(phasesDir, pmRel(cwd, 'phases'), normalized);
   if (current) return current;
 
   // Search archived milestone phases (newest first)
@@ -757,7 +776,7 @@ function findPhaseInternal(cwd, phase) {
     for (const archiveName of archiveDirs) {
       const version = archiveName.match(/^(v[\d.]+)-phases$/)[1];
       const archivePath = path.join(milestonesDir, archiveName);
-      const relBase = '.planning/milestones/' + archiveName;
+      const relBase = pmRel(cwd, 'milestones') + archiveName;
       const result = searchPhaseInDir(archivePath, relBase, normalized);
       if (result) {
         result.archived = version;
@@ -794,7 +813,7 @@ function getArchivedPhaseDirs(cwd) {
         results.push({
           name: dir,
           milestone: version,
-          basePath: path.join('.planning', 'milestones', archiveName),
+          basePath: pmRel(cwd, 'milestones', archiveName),
           fullPath: path.join(archivePath, dir),
         });
       }
@@ -1137,6 +1156,7 @@ module.exports = {
   planningPaths,
   planningRoot,
   planningRootRelative,
+  pmRel,
   usesLegacyPlanning,
   PM_RELATIVE,
   LEGACY_PM_RELATIVE,

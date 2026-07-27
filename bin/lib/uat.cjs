@@ -7,7 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, getMilestonePhaseFilter, planningRoot} = require('./core.cjs');
+const { output, error, getMilestonePhaseFilter, planningRoot, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 
 function cmdAuditUat(cwd, raw) {
@@ -41,7 +41,7 @@ function cmdAuditUat(cwd, raw) {
           phase: phaseNum,
           phase_dir: dir,
           file,
-          file_path: `.planning/phases/${dir}/${file}`,
+          file_path: pmRel(cwd, 'phases', dir, file),
           type: 'uat',
           status: (extractFrontmatter(content).status || 'unknown'),
           items,
@@ -60,7 +60,7 @@ function cmdAuditUat(cwd, raw) {
             phase: phaseNum,
             phase_dir: dir,
             file,
-            file_path: `.planning/phases/${dir}/${file}`,
+            file_path: pmRel(cwd, 'phases', dir, file),
             type: 'verification',
             status,
             items,

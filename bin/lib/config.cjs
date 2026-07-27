@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, planningRoot} = require('./core.cjs');
+const { output, error, planningRoot, pmRel } = require('./core.cjs');
 const {
   VALID_PROFILES,
   getAgentToModelMapForProfile,
@@ -179,7 +179,7 @@ function cmdConfigNewProject(cwd, choicesJson, raw) {
 
   try {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-    output({ created: true, path: '.planning/config.json' }, raw, 'created');
+    output({ created: true, path: pmRel(cwd, 'config.json') }, raw, 'created');
   } catch (err) {
     error('Failed to write config.json: ' + err.message);
   }
@@ -213,7 +213,7 @@ function ensureConfigFile(cwd) {
 
   try {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-    return { created: true, path: '.planning/config.json' };
+    return { created: true, path: pmRel(cwd, 'config.json') };
   } catch (err) {
     error('Failed to create config.json: ' + err.message);
   }

@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { loadConfig, resolveModelInternal, findPhaseInternal, getRoadmapPhaseInternal, pathExistsInternal, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, stripShippedMilestones, extractCurrentMilestone, normalizePhaseName, toPosixPath, output, error, planningRoot} = require('./core.cjs');
+const { loadConfig, resolveModelInternal, findPhaseInternal, getRoadmapPhaseInternal, pathExistsInternal, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, stripShippedMilestones, extractCurrentMilestone, normalizePhaseName, toPosixPath, output, error, planningRoot, pmRel } = require('./core.cjs');
 
 function getLatestCompletedMilestone(cwd) {
   const milestonesPath = path.join(planningRoot(cwd), 'MILESTONES.md');
@@ -26,7 +26,7 @@ function getLatestCompletedMilestone(cwd) {
 
 /**
  * Inject `project_root` into an init result object.
- * Workflows use this to prefix `.planning/` paths correctly when Claude's CWD
+ * Workflows use this to prefix pmRel(cwd, ) paths correctly when Claude's CWD
  * differs from the project root (e.g., inside a sub-repo).
  */
 function withProjectRoot(cwd, result) {
@@ -115,13 +115,13 @@ function cmdInitExecutePhase(cwd, phase, raw) {
     milestone_slug: generateSlugInternal(milestone.name),
 
     // File existence
-    state_exists: pathExistsInternal(cwd, '.planning/STATE.md'),
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    config_exists: pathExistsInternal(cwd, '.planning/config.json'),
+    state_exists: pathExistsInternal(cwd, pmRel(cwd, 'STATE.md')),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    config_exists: pathExistsInternal(cwd, pmRel(cwd, 'config.json')),
     // File paths
-    state_path: '.planning/STATE.md',
-    roadmap_path: '.planning/ROADMAP.md',
-    config_path: '.planning/config.json',
+    state_path: pmRel(cwd, 'STATE.md'),
+    roadmap_path: pmRel(cwd, 'ROADMAP.md'),
+    config_path: pmRel(cwd, 'config.json'),
   };
 
   output(withProjectRoot(cwd, result), raw);
@@ -188,13 +188,13 @@ function cmdInitPlanPhase(cwd, phase, raw) {
     plan_count: phaseInfo?.plans?.length || 0,
 
     // Environment
-    planning_exists: pathExistsInternal(cwd, '.planning'),
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
 
     // File paths
-    state_path: '.planning/STATE.md',
-    roadmap_path: '.planning/ROADMAP.md',
-    requirements_path: '.planning/REQUIREMENTS.md',
+    state_path: pmRel(cwd, 'STATE.md'),
+    roadmap_path: pmRel(cwd, 'ROADMAP.md'),
+    requirements_path: pmRel(cwd, 'REQUIREMENTS.md'),
   };
 
   if (phaseInfo?.directory) {
@@ -245,7 +245,7 @@ function cmdInitNewProject(cwd, raw) {
   let hasPackageFile = false;
   try {
     const codeExtensions = new Set(['.ts', '.js', '.py', '.go', '.rs', '.swift', '.java']);
-    const skipDirs = new Set(['node_modules', '.git', '.planning', '.claude', '__pycache__', 'target', 'dist', 'build']);
+    const skipDirs = new Set(['node_modules', '.git', '.planning', '.anvi', '.claude', '__pycache__', 'target', 'dist', 'build']);
     function findCodeFiles(dir, depth) {
       if (depth > 3) return false;
       let entries;
@@ -277,15 +277,15 @@ function cmdInitNewProject(cwd, raw) {
     commit_docs: config.commit_docs,
 
     // Existing state
-    project_exists: pathExistsInternal(cwd, '.planning/PROJECT.md'),
-    has_codebase_map: pathExistsInternal(cwd, '.planning/codebase'),
-    planning_exists: pathExistsInternal(cwd, '.planning'),
+    project_exists: pathExistsInternal(cwd, pmRel(cwd, 'PROJECT.md')),
+    has_codebase_map: pathExistsInternal(cwd, pmRel(cwd, 'codebase')),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
 
     // Brownfield detection
     has_existing_code: hasCode,
     has_package_file: hasPackageFile,
     is_brownfield: hasCode || hasPackageFile,
-    needs_codebase_map: (hasCode || hasPackageFile) && !pathExistsInternal(cwd, '.planning/codebase'),
+    needs_codebase_map: (hasCode || hasPackageFile) && !pathExistsInternal(cwd, pmRel(cwd, 'codebase')),
 
     // Git state
     has_git: pathExistsInternal(cwd, '.git'),
@@ -296,7 +296,7 @@ function cmdInitNewProject(cwd, raw) {
     exa_search_available: hasExaSearch,
 
     // File paths
-    project_path: '.planning/PROJECT.md',
+    project_path: pmRel(cwd, 'PROJECT.md'),
   };
 
   output(withProjectRoot(cwd, result), raw);
@@ -333,17 +333,17 @@ function cmdInitNewMilestone(cwd, raw) {
     latest_completed_milestone: latestCompleted?.version || null,
     latest_completed_milestone_name: latestCompleted?.name || null,
     phase_dir_count: phaseDirCount,
-    phase_archive_path: latestCompleted ? `.planning/milestones/${latestCompleted.version}-phases` : null,
+    phase_archive_path: latestCompleted ? pmRel(cwd, 'milestones', `${latestCompleted.version}-phases`) : null,
 
     // File existence
-    project_exists: pathExistsInternal(cwd, '.planning/PROJECT.md'),
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    state_exists: pathExistsInternal(cwd, '.planning/STATE.md'),
+    project_exists: pathExistsInternal(cwd, pmRel(cwd, 'PROJECT.md')),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    state_exists: pathExistsInternal(cwd, pmRel(cwd, 'STATE.md')),
 
     // File paths
-    project_path: '.planning/PROJECT.md',
-    roadmap_path: '.planning/ROADMAP.md',
-    state_path: '.planning/STATE.md',
+    project_path: pmRel(cwd, 'PROJECT.md'),
+    roadmap_path: pmRel(cwd, 'ROADMAP.md'),
+    state_path: pmRel(cwd, 'STATE.md'),
   };
 
   output(withProjectRoot(cwd, result), raw);
@@ -395,12 +395,12 @@ function cmdInitQuick(cwd, description, raw) {
     timestamp: now.toISOString(),
 
     // Paths
-    quick_dir: '.planning/quick',
-    task_dir: slug ? `.planning/quick/${quickId}-${slug}` : null,
+    quick_dir: pmRel(cwd, 'quick'),
+    task_dir: slug ? pmRel(cwd, 'quick', `${quickId}-${slug}`) : null,
 
     // File existence
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    planning_exists: pathExistsInternal(cwd, '.planning'),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
 
   };
 
@@ -418,15 +418,15 @@ function cmdInitResume(cwd, raw) {
 
   const result = {
     // File existence
-    state_exists: pathExistsInternal(cwd, '.planning/STATE.md'),
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    project_exists: pathExistsInternal(cwd, '.planning/PROJECT.md'),
-    planning_exists: pathExistsInternal(cwd, '.planning'),
+    state_exists: pathExistsInternal(cwd, pmRel(cwd, 'STATE.md')),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    project_exists: pathExistsInternal(cwd, pmRel(cwd, 'PROJECT.md')),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
 
     // File paths
-    state_path: '.planning/STATE.md',
-    roadmap_path: '.planning/ROADMAP.md',
-    project_path: '.planning/PROJECT.md',
+    state_path: pmRel(cwd, 'STATE.md'),
+    roadmap_path: pmRel(cwd, 'ROADMAP.md'),
+    project_path: pmRel(cwd, 'PROJECT.md'),
 
     // Agent state
     has_interrupted_agent: !!interruptedAgentId,
@@ -560,13 +560,13 @@ function cmdInitPhaseOp(cwd, phase, raw) {
     plan_count: phaseInfo?.plans?.length || 0,
 
     // File existence
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    planning_exists: pathExistsInternal(cwd, '.planning'),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
 
     // File paths
-    state_path: '.planning/STATE.md',
-    roadmap_path: '.planning/ROADMAP.md',
-    requirements_path: '.planning/REQUIREMENTS.md',
+    state_path: pmRel(cwd, 'STATE.md'),
+    roadmap_path: pmRel(cwd, 'ROADMAP.md'),
+    requirements_path: pmRel(cwd, 'REQUIREMENTS.md'),
   };
 
   if (phaseInfo?.directory) {
@@ -622,7 +622,7 @@ function cmdInitTodos(cwd, area, raw) {
           created: createdMatch ? createdMatch[1].trim() : 'unknown',
           title: titleMatch ? titleMatch[1].trim() : 'Untitled',
           area: todoArea,
-          path: '.planning/todos/pending/' + file,
+          path: pmRel(cwd, 'todos', 'pending') + file,
         });
       } catch { /* intentionally empty */ }
     }
@@ -642,13 +642,13 @@ function cmdInitTodos(cwd, area, raw) {
     area_filter: area || null,
 
     // Paths
-    pending_dir: '.planning/todos/pending',
-    completed_dir: '.planning/todos/completed',
+    pending_dir: pmRel(cwd, 'todos', 'pending'),
+    completed_dir: pmRel(cwd, 'todos', 'completed'),
 
     // File existence
-    planning_exists: pathExistsInternal(cwd, '.planning'),
-    todos_dir_exists: pathExistsInternal(cwd, '.planning/todos'),
-    pending_dir_exists: pathExistsInternal(cwd, '.planning/todos/pending'),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
+    todos_dir_exists: pathExistsInternal(cwd, pmRel(cwd, 'todos')),
+    pending_dir_exists: pathExistsInternal(cwd, pmRel(cwd, 'todos', 'pending')),
   };
 
   output(withProjectRoot(cwd, result), raw);
@@ -705,11 +705,11 @@ function cmdInitMilestoneOp(cwd, raw) {
     archive_count: archivedMilestones.length,
 
     // File existence
-    project_exists: pathExistsInternal(cwd, '.planning/PROJECT.md'),
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    state_exists: pathExistsInternal(cwd, '.planning/STATE.md'),
-    archive_exists: pathExistsInternal(cwd, '.planning/archive'),
-    phases_dir_exists: pathExistsInternal(cwd, '.planning/phases'),
+    project_exists: pathExistsInternal(cwd, pmRel(cwd, 'PROJECT.md')),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    state_exists: pathExistsInternal(cwd, pmRel(cwd, 'STATE.md')),
+    archive_exists: pathExistsInternal(cwd, pmRel(cwd, 'archive')),
+    phases_dir_exists: pathExistsInternal(cwd, pmRel(cwd, 'phases')),
   };
 
   output(withProjectRoot(cwd, result), raw);
@@ -735,15 +735,15 @@ function cmdInitMapCodebase(cwd, raw) {
     parallelization: config.parallelization,
 
     // Paths
-    codebase_dir: '.planning/codebase',
+    codebase_dir: pmRel(cwd, 'codebase'),
 
     // Existing maps
     existing_maps: existingMaps,
     has_maps: existingMaps.length > 0,
 
     // File existence
-    planning_exists: pathExistsInternal(cwd, '.planning'),
-    codebase_dir_exists: pathExistsInternal(cwd, '.planning/codebase'),
+    planning_exists: pathExistsInternal(cwd, pmRel(cwd)),
+    codebase_dir_exists: pathExistsInternal(cwd, pmRel(cwd, 'codebase')),
   };
 
   output(withProjectRoot(cwd, result), raw);
@@ -808,7 +808,7 @@ function cmdInitProgress(cwd, raw) {
       const phaseInfo = {
         number: phaseNumber,
         name: phaseName,
-        directory: '.planning/phases/' + dir,
+        directory: pmRel(cwd, 'phases') + dir,
         status,
         plan_count: plans.length,
         summary_count: summaries.length,
@@ -883,14 +883,14 @@ function cmdInitProgress(cwd, raw) {
     has_work_in_progress: !!currentPhase,
 
     // File existence
-    project_exists: pathExistsInternal(cwd, '.planning/PROJECT.md'),
-    roadmap_exists: pathExistsInternal(cwd, '.planning/ROADMAP.md'),
-    state_exists: pathExistsInternal(cwd, '.planning/STATE.md'),
+    project_exists: pathExistsInternal(cwd, pmRel(cwd, 'PROJECT.md')),
+    roadmap_exists: pathExistsInternal(cwd, pmRel(cwd, 'ROADMAP.md')),
+    state_exists: pathExistsInternal(cwd, pmRel(cwd, 'STATE.md')),
     // File paths
-    state_path: '.planning/STATE.md',
-    roadmap_path: '.planning/ROADMAP.md',
-    project_path: '.planning/PROJECT.md',
-    config_path: '.planning/config.json',
+    state_path: pmRel(cwd, 'STATE.md'),
+    roadmap_path: pmRel(cwd, 'ROADMAP.md'),
+    project_path: pmRel(cwd, 'PROJECT.md'),
+    config_path: pmRel(cwd, 'config.json'),
   };
 
   output(withProjectRoot(cwd, result), raw);
