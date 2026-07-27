@@ -495,14 +495,56 @@ function withPlanningLock(cwd, fn) {
 // announces itself, because a project silently running on the old layout is
 // exactly the unobserved state this move exists to eliminate.
 
-/** Location of the project-management tree, relative to the project root. */
-const PM_RELATIVE = path.join('.anvi', 'project_management');
+/** Directory name of the project-management tree, inside the resolved `.anvi`. */
+const PM_LEAF = 'project_management';
+
+/** Canonical display form of the tree's location, for messages and docs. */
+const PM_RELATIVE = path.join('.anvi', PM_LEAF);
 
 /** Pre-migration location. Read when present; never written to by new code. */
 const LEGACY_PM_RELATIVE = '.planning';
 
 /** Projects already warned about, so the notice fires once per process, not per lookup. */
 const legacyNoticeShown = new Set();
+
+// Locate the shared artifact resolver — the SINGLE source of path-resolution
+// logic, so the CLI can never disagree with the hooks about where `.anvi` lives
+// (V1). `.anvi` has three legitimate homes (project-local, artifacts/, and the
+// centralized store), and joining `cwd/.anvi` directly would silently create a
+// shadow tree for any project not on the first layout.
+//
+// The resolver itself uses cwd + homedir only, so it is vendoring-safe; only
+// LOCATING it depends on layout, and bin/lib/ is vendored — hence a candidate
+// list spanning both depths as well as the installed tree (V7, and H5's
+// __dirname-escape trap).
+function loadAnviPathsForPlanning() {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'hooks', 'anvi-paths.js'), // repo: bin/lib → hooks
+    path.join(__dirname, '..', 'hooks', 'anvi-paths.js'),       // vendored one level shallower
+    path.join(require('os').homedir(), '.claude', 'hooks', 'anvi-paths.js'),
+  ];
+  for (const c of candidates) {
+    try { return require(c); } catch { /* try next layout */ }
+  }
+  return null;
+}
+const _anviPaths = loadAnviPathsForPlanning();
+
+/**
+ * The `.anvi` directory for `cwd`, resolved the same way every hook resolves it.
+ * Falls back to the project-local path when no `.anvi` exists yet, so a fresh
+ * project is created in the right place.
+ */
+function anviDirFor(cwd) {
+  if (_anviPaths) {
+    const resolved = _anviPaths.resolveDir(cwd, '.anvi');
+    if (resolved) return resolved;
+  } else {
+    warnOnce(cwd, 'resolver',
+      'anvi: shared path resolver not found; using cwd-only .anvi lookup.\n');
+  }
+  return path.join(cwd, '.anvi');
+}
 
 function warnOnce(cwd, key, message) {
   const seen = `${key}:${cwd}`;
@@ -520,7 +562,7 @@ function warnOnce(cwd, key, message) {
  * project is created in the right place.
  */
 function planningRoot(cwd) {
-  const current = path.join(cwd, PM_RELATIVE);
+  const current = path.join(anviDirFor(cwd), PM_LEAF);
   const legacy = path.join(cwd, LEGACY_PM_RELATIVE);
   const hasCurrent = fs.existsSync(current);
   const hasLegacy = fs.existsSync(legacy);
@@ -549,7 +591,7 @@ function planningRoot(cwd) {
 
 /** True when `cwd` is still on the pre-migration layout. */
 function usesLegacyPlanning(cwd) {
-  return !fs.existsSync(path.join(cwd, PM_RELATIVE))
+  return !fs.existsSync(path.join(anviDirFor(cwd), PM_LEAF))
     && fs.existsSync(path.join(cwd, LEGACY_PM_RELATIVE));
 }
 
@@ -559,7 +601,13 @@ function usesLegacyPlanning(cwd) {
  * fields that agents read back out of command output.
  */
 function planningRootRelative(cwd) {
-  return toPosixPath(path.relative(cwd, planningRoot(cwd)));
+  const root = planningRoot(cwd);
+  const rel = toPosixPath(path.relative(cwd, root));
+  // A centrally-stored `.anvi` resolves OUTSIDE the project, and a `../..` path
+  // is meaningless as a git pathspec. Report the absolute path in that case —
+  // wrong-but-plausible is the failure mode worth avoiding here.
+  if (rel.startsWith('../') || path.isAbsolute(rel)) return toPosixPath(root);
+  return rel;
 }
 
 /** Get the project-management directory path */

@@ -29,6 +29,13 @@ const noMatch = (hay, needle, msg) => ok(!String(hay).includes(needle), `${msg} 
 // about the same directory.
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-pmroot-')));
 
+// Temp HOME, set BEFORE requiring the module under test: `.anvi` has a
+// centralized candidate under ~/.anvideck, and the centralized-layout case
+// below is the one that distinguishes resolving through the shared resolver
+// from joining `cwd/.anvi` directly. Without it the suite passes either way.
+process.env.HOME = TMP;
+ok(os.homedir() === TMP, 'os.homedir() follows $HOME — the temp store is reachable in-process');
+
 const C = require('../bin/lib/core.cjs');
 const { planningRoot, planningRootRelative, planningPaths, planningDir,
         usesLegacyPlanning, PM_RELATIVE, LEGACY_PM_RELATIVE } = C;
@@ -97,6 +104,33 @@ console.log('\n— resolution —');
   eq(r.out, '', 'the half-migrated notice also stays off stdout');
   has(r.err, 'IGNORED', 'a half-migrated project is told its leftover tree is invisible, not merely that both exist');
   eq(usesLegacyPlanning(dir), false, 'half-migrated is not "legacy" — the current tree is authoritative');
+}
+
+console.log('\n— the centralized layout, where `.anvi` is not under the project —');
+
+{
+  // `.anvi` legitimately lives in three places; the store is one of them, and a
+  // project whose `.anvi` is ONLY there has no local directory to join onto.
+  // Joining `cwd/.anvi` here would silently build a second, shadow tree beside
+  // the real one — the divergent-resolution trap this boundary exists to catch.
+  const dir = path.join(TMP, 'central-proj');
+  fs.mkdirSync(dir, { recursive: true });
+  const storeAnvi = path.join(TMP, '.anvideck', 'projects', 'central-proj', '.anvi');
+  fs.mkdirSync(path.join(storeAnvi, 'project_management', 'phases'), { recursive: true });
+
+  const r = capture(() => ({ root: planningRoot(dir), rel: planningRootRelative(dir), legacy: usesLegacyPlanning(dir) }));
+
+  eq(r.value.root, path.join(storeAnvi, 'project_management'),
+     'resolves into the store, NOT cwd/.anvi — no shadow tree beside the real one');
+  ok(!r.value.root.startsWith(dir + path.sep),
+     'the resolved tree is genuinely outside the project directory');
+  eq(r.value.legacy, false, 'a centrally-stored tree is migrated, not legacy');
+  noMatch(r.value.rel, '../',
+     'the relative form never emits ../ — that would be meaningless as a git pathspec');
+
+  const paths = capture(() => planningPaths(dir)).value;
+  eq(paths.phases, path.join(storeAnvi, 'project_management', 'phases'),
+     'planningPaths children resolve into the store too');
 }
 
 console.log('\n— the notice fires once per project, not once per lookup —');
