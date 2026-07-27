@@ -47,7 +47,7 @@ Tag every finding with confidence level.
 </research_areas>
 
 <output_format>
-Write to `.planning/research/{FOCUS_AREA}.md`:
+Write to `.anvi/project_management/research/{FOCUS_AREA}.md`:
 
 ```markdown
 ---

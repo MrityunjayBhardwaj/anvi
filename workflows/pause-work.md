@@ -62,14 +62,14 @@ New ungrounded observations: {observations about external system behavior not ye
 
 Also use CLI if available:
 ```bash
-node "$CLI_PATH" tattva-checkpoint .planning/HANDOFF-cognitive.md \
+node "$CLI_PATH" tattva-checkpoint .anvi/project_management/HANDOFF-cognitive.md \
   --classification "{type}" \
   --insight "{compressed insight}"
 ```
 </step>
 
 <step name="create_handoff">
-Write `.planning/HANDOFF.json` (machine-readable):
+Write `.anvi/project_management/HANDOFF.json` (machine-readable):
 ```json
 {
   "timestamp": "{ISO}",
@@ -87,7 +87,7 @@ Write `.planning/HANDOFF.json` (machine-readable):
 }
 ```
 
-Write `.planning/.continue-here.md` (human-readable):
+Write `.anvi/project_management/.continue-here.md` (human-readable):
 ```markdown
 # Continue Here
 
@@ -109,7 +109,7 @@ Write `.planning/.continue-here.md` (human-readable):
 
 <step name="wip_commit">
 ```bash
-node "$CLI_PATH" commit "wip: pause at phase ${PHASE} plan ${PLAN}" --files .planning/HANDOFF.json .planning/.continue-here.md
+node "$CLI_PATH" commit "wip: pause at phase ${PHASE} plan ${PLAN}" --files "$(node "$CLI_PATH" planning-root --raw)"/HANDOFF.json "$(node "$CLI_PATH" planning-root --raw)"/.continue-here.md
 ```
 </step>
 

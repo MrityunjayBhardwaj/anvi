@@ -1,6 +1,6 @@
 ---
 name: anvi:pr-branch
-description: Create a clean PR branch by filtering out .planning/ commits
+description: Create a clean PR branch by filtering out .anvi/project_management/ commits
 argument-hint:
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion]
 ---

@@ -125,7 +125,7 @@ created: {ISO timestamp}
 ```markdown
 ## RESEARCH COMPLETE
 
-**Output:** .planning/phases/XX-name/RESEARCH.md
+**Output:** .anvi/project_management/phases/XX-name/RESEARCH.md
 **Confidence:** {overall confidence}
 **Boundaries scanned:** {count}
 **Risks identified:** {count}

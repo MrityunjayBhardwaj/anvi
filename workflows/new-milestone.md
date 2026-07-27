@@ -72,7 +72,7 @@ Agent(
 
 <step name="commit_and_offer_next">
 ```bash
-node "$CLI_PATH" commit "docs: start milestone ${VERSION}" --files .planning/ PROJECT.md
+node "$CLI_PATH" commit "docs: start milestone ${VERSION}" --files "$(node "$CLI_PATH" planning-root --raw)"/ PROJECT.md
 ```
 Offer: `/anvi:plan-phase 1` or `/anvi:discuss-phase 1`.
 </step>

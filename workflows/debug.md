@@ -7,7 +7,7 @@ This is not advisory — the workflow structure makes skipping impossible.
 </purpose>
 
 <paths>
-DEBUG_DIR=.planning/debug
+DEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug
 </paths>
 
 <core_principle>

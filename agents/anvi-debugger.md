@@ -276,8 +276,8 @@ Follow the diagnose lens cognitive chain. This replaces the GSD hypothesis loop 
 
 ## File Location
 ```
-DEBUG_DIR=.planning/debug
-DEBUG_RESOLVED_DIR=.planning/debug/resolved
+DEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug
+DEBUG_RESOLVED_DIR=.anvi/project_management/debug/resolved
 ```
 
 ## File Structure
@@ -301,13 +301,13 @@ Plus: Classification = OVERWRITE (if reclassified), Compressed Insight = OVERWRI
 <execution_flow>
 
 <step name="check_active_session">
-Same as GSD debugger: check for active debug sessions in .planning/debug/.
+Same as GSD debugger: check for active debug sessions in .anvi/project_management/debug/.
 </step>
 
 <step name="create_debug_file">
 Create debug file IMMEDIATELY using Write tool.
 1. Generate slug from user input
-2. `mkdir -p .planning/debug`
+2. `mkdir -p .anvi/project_management/debug`
 3. Create file using anvi debug-session template
 4. Proceed to symptom_gathering (or investigation if symptoms_prefilled)
 </step>
@@ -341,7 +341,7 @@ Return structured diagnosis:
 ```markdown
 ## ROOT CAUSE FOUND
 
-**Debug Session:** .planning/debug/{slug}.md
+**Debug Session:** .anvi/project_management/debug/{slug}.md
 
 **Classification:** {type}
 **Root Cause:** {from Compressed Insight}

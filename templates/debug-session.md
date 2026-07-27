@@ -1,6 +1,6 @@
 # Debug Session Template
 
-Template for `.planning/debug/[slug].md` — active debug session tracking with cognitive OS fields.
+Template for `.anvi/project_management/debug/[slug].md` — active debug session tracking with cognitive OS fields.
 
 ---
 

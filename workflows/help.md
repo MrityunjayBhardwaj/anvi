@@ -60,7 +60,7 @@
   /anvi:remove-phase    Remove future phase
   /anvi:complete-milestone  Archive and tag milestone
   /anvi:cleanup         Archive accumulated phase directories
-  /anvi:pr-branch       Create a clean PR branch (filters .planning/)
+  /anvi:pr-branch       Create a clean PR branch (filters .anvi/project_management/)
   /anvi:pause-work      Save state for later
 
 ## Notes & Ideas

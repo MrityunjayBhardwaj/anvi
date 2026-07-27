@@ -2,6 +2,6 @@
 
 <process>
 <step name="parse">Extract seed idea and trigger conditions from $ARGUMENTS.</step>
-<step name="create">Write to `.planning/seeds/{slug}.md` with trigger conditions.</step>
+<step name="create">Write to `.anvi/project_management/seeds/{slug}.md` with trigger conditions.</step>
 <step name="commit">Commit seed file.</step>
 </process>
