@@ -217,3 +217,14 @@ if ! git -C "$STORE_ROOT" diff --cached --quiet 2>/dev/null; then
 fi
 
 say "done — $NAME now reads .anvi/project_management"
+
+# The chain is commit AND push. Reporting "done" while the store has not reached
+# its remote would claim a durability that a laptop loss still defeats — the
+# exact overstatement this whole move exists to remove. Report, don't push:
+# pushing mid-migration can race a concurrent session writing to the store, and
+# the checkpoint hook pushes on session end.
+ahead=$(git -C "$STORE_ROOT" rev-list --count @{u}..HEAD 2>/dev/null || echo "?")
+if [ "$ahead" != "0" ] && [ "$ahead" != "?" ]; then
+  say "note: the store is $ahead commit(s) ahead of its remote — durable here, not yet"
+  say "      off this machine. The checkpoint hook pushes on session end, or: git -C \"$STORE_ROOT\" push"
+fi

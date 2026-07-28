@@ -35,7 +35,7 @@ process.env.HOME = HOME;
 ok(os.homedir() === HOME, 'os.homedir() follows $HOME — the temp store is reachable in-process');
 
 const R = require('../scripts/conformance-report.js');
-const { computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability,
+const { computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
         storeState, findStoreCopyByContent, isInside, check } = R;
 
 const STORE = path.join(HOME, '.anvideck');
@@ -436,6 +436,66 @@ console.log('\nintegration — spawn the SHIPPED script against the temp store')
   ok(!run(['--help']).includes('check: LINK'), '…and not the internal section comments');
 
   has(run([path.join(WORK, 'no-such-directory')]), 'not a directory', 'a bad target is reported, not thrown');
+}
+
+
+console.log('\nplanning — which layout holds the lifecycle documents');
+{
+  // MIGRATED / NONE are the only passing states: a legacy tree is a finding
+  // even when its files are committed, because they are not where any command
+  // reads them, and the hard cut waits on this check reporting zero.
+  const migrated = project('pm-migrated');
+  fs.mkdirSync(path.join(migrated, '.anvi', 'project_management'), { recursive: true });
+  const c1 = classifyPlanning(migrated);
+  eq(c1.state, 'MIGRATED', 'the current layout passes');
+  ok(c1.ok, 'and is conformant');
+
+  eq(classifyPlanning(project('pm-none')).state, 'NONE', 'a project with no documents is not a finding');
+  ok(classifyPlanning(project('pm-none')).ok, 'and is conformant');
+
+  const both = project('pm-both');
+  fs.mkdirSync(path.join(both, '.anvi', 'project_management'), { recursive: true });
+  fs.mkdirSync(path.join(both, '.planning'), { recursive: true });
+  const c2 = classifyPlanning(both);
+  eq(c2.state, 'BOTH', 'both trees present is its own state');
+  ok(!c2.ok, 'and is a finding');
+  has(c2.detail, 'IGNORED', 'saying the older tree is being ignored, which is the cost');
+}
+
+console.log('\nplanning — a legacy tree reports how much of it the repo actually holds');
+{
+  // "LEGACY" alone flattens two different costs: documents in the old place but
+  // committed, and documents committed nowhere at all. The remedy is the same;
+  // the urgency is not.
+  const nowhere = project('pm-nowhere');
+  git(nowhere, 'init', '-q', '.');
+  write(path.join(nowhere, '.planning', 'STATE.md'), 'x\n');
+  write(path.join(nowhere, '.gitignore'), '.planning\n');
+  git(nowhere, 'add', '-A'); git(nowhere, 'commit', '-qm', 'seed');
+  const c1 = classifyPlanning(nowhere);
+  eq(c1.state, 'LEGACY', 'an untracked legacy tree is a finding');
+  has(c1.detail, 'committed NOWHERE', 'and says the documents exist only on this machine');
+
+  const held = project('pm-held');
+  git(held, 'init', '-q', '.');
+  write(path.join(held, '.planning', 'STATE.md'), 'x\n');
+  git(held, 'add', '-A'); git(held, 'commit', '-qm', 'seed');
+  const c2 = classifyPlanning(held);
+  eq(c2.state, 'LEGACY', 'a tracked legacy tree is still a finding');
+  has(c2.detail, 'not where commands read', 'but the detail distinguishes it from losing the files');
+  ok(!c2.detail.includes('NOWHERE'), 'and does NOT claim they are committed nowhere');
+
+  const partial = project('pm-partial');
+  git(partial, 'init', '-q', '.');
+  write(path.join(partial, '.planning', 'A.md'), 'x\n');
+  git(partial, 'add', '-A'); git(partial, 'commit', '-qm', 'seed');
+  write(path.join(partial, '.planning', 'B.md'), 'x\n');
+  write(path.join(partial, '.gitignore'), '.planning\n');
+  const c3 = classifyPlanning(partial);
+  eq(c3.state, 'LEGACY', 'a partially tracked tree is a finding');
+  has(c3.detail, '1 of 2', 'and reports the split rather than rounding it either way');
+
+  has(c3.remedy, 'migrate-planning.sh', 'every legacy finding carries the command that fixes it');
 }
 
 // --- cleanup ----------------------------------------------------------------

@@ -75,6 +75,10 @@ const OK_STATES = {
   grant:   ['GRANTED', 'NOT_APPLICABLE'],
   repo:    ['CLEAN', 'NO_GIT', 'NOT_APPLICABLE'],
   durable: ['DURABLE', 'NOT_APPLICABLE'],
+  // A legacy tree is a finding, not a neutral fact: the documents in it are
+  // durable only by accident of the project repo, and the hard cut to the new
+  // layout happens when this check reports zero legacy projects.
+  planning: ['MIGRATED', 'NONE'],
 };
 function check(id, state, detail, extra = {}) {
   if (!OK_STATES[id]) throw new Error(`unknown check id: ${id}`);
@@ -421,6 +425,49 @@ function classifyDurability(storeName, store) {
 // --- the computer -----------------------------------------------------------
 // Side-effect-free: reads the filesystem and git, writes nothing, returns data.
 // The CLI below is the only part that prints.
+// --- check: PLANNING --------------------------------------------------------
+// Which layout holds this project's development-lifecycle documents.
+//
+// Reported per project rather than inferred from a fleet count, because the
+// states differ in what they cost: a LEGACY tree may still be committed to its
+// own repo (durable, but not where every command looks), while BOTH means the
+// older tree is being silently ignored by every command that reads one.
+function classifyPlanning(dir) {
+  const legacy = path.join(dir, '.planning');
+  const current = path.join(dir, '.anvi', 'project_management');
+  const hasLegacy = isDir(legacy);
+  const hasCurrent = isDir(current);
+
+  if (hasLegacy && hasCurrent) {
+    return check('planning', 'BOTH', `${tilde(current)} is being read; ${tilde(legacy)} is IGNORED by every command`,
+      { remedy: 'decide which copy is current, merge by hand, remove the other' });
+  }
+  if (hasCurrent) return check('planning', 'MIGRATED', '.anvi/project_management — the store commits it');
+  if (!hasLegacy) return check('planning', 'NONE', 'no project-management documents for this project');
+
+  // Legacy only. Say how much of it the project repo actually holds — "legacy"
+  // alone does not distinguish a tree that is merely in the old place from one
+  // that is committed nowhere at all.
+  let detail = `.planning — the pre-migration location`;
+  if (isRepo(dir)) {
+    const ls = gitIn(dir)(['ls-files', '--', '.planning']);
+    const tracked = ls.ok ? ls.out.split('\n').filter(Boolean).length : 0;
+    let total = 0;
+    const walk = (d) => {
+      let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) e.isDirectory() ? walk(path.join(d, e.name)) : e.isFile() && total++;
+    };
+    walk(legacy);
+    detail = tracked === 0
+      ? `.planning — ${total} file(s), committed NOWHERE`
+      : tracked >= total
+        ? `.planning — ${total} file(s), committed to this repo but not where commands read`
+        : `.planning — ${tracked} of ${total} file(s) committed; the other ${total - tracked} exist only here`;
+  }
+  return check('planning', 'LEGACY', detail,
+    { remedy: 'scripts/migrate-planning.sh --apply <project-dir>' });
+}
+
 function computeConformance(dir, store = storeState()) {
   const project = path.resolve(dir);
   const name = path.basename(project);
@@ -452,6 +499,7 @@ function computeConformance(dir, store = storeState()) {
     classifyGrant(project, envelope),
     classifyRepo(project, storeName),
     classifyDurability(storeName, store),
+    classifyPlanning(project),
   ];
   return { dir: project, name, storeName, checks, ok: checks.every(c => c.ok) };
 }
@@ -504,7 +552,7 @@ function main(argv) {
 }
 
 module.exports = {
-  computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability,
+  computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
   storeState, findStoreCopyByContent, storeProjectOf, isInside, check, OK_STATES, main, CATALOGUES,
 };
 
