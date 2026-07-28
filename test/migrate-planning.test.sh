@@ -110,6 +110,17 @@ ok 'echo "$OUT" | grep -q "DIRTY_INDEX"'       'names the state'
 ok 'echo "$OUT" | grep -q "src.txt"'           'and shows what would have been swept in'
 ok '[ -d "$P/.planning" ]'                     'the tree is untouched'
 
+# NOTHING tracked, but a leftover ignore rule still produces a commit. Guarding
+# the check on "are files tracked" instead of "will this commit" let another
+# author's staged work land in a migration commit describing something else.
+P="$(mkproj dirty-untracked 1 0 1)"
+echo "unrelated" > "$P/src.txt"; git -C "$P" add src.txt
+OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
+ok '[ "$RC" != 0 ]'                            'DIRTY_INDEX also fires when nothing is tracked but a commit will still happen'
+ok 'echo "$OUT" | grep -q "src.txt"'           'and names the work it refused to sweep up'
+ok '[ -d "$P/.planning" ]'                     'the tree is untouched'
+ok '[ "$(git -C "$P" log --oneline | wc -l | tr -d " ")" = 1 ]' 'and no migration commit was made'
+
 echo "a failed copy must lose nothing — the original outlives the attempt"
 # The contract that matters most: the tree is copied and verified BEFORE the
 # original is removed, so an interrupted or partial copy costs nothing. Forced

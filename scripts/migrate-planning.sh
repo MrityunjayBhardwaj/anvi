@@ -128,9 +128,20 @@ total=$(find "$LEGACY" -type f | wc -l | tr -d ' ')
 
 say "state: MIGRATABLE — $total file(s), $tracked tracked by the project repo"
 
-# Untracking commits to the project repo. If anything else is staged, that
-# commit would carry unrelated work — refuse rather than silently widen it.
-if [ "$in_repo" -eq 1 ] && [ "$tracked" -gt 0 ]; then
+# This commits to the project repo if it will untrack files OR drop a stale
+# ignore rule. If anything else is staged, that commit would carry unrelated
+# work — refuse rather than silently widen it.
+#
+# Guarded on "will this commit", NOT on "are files tracked". Those came apart:
+# a project with nothing tracked but a leftover ignore rule still commits, and
+# the narrower condition let another author's staged work be swept into a
+# migration commit under a message describing something else entirely.
+has_ignore_rule=0
+grep -qE '^\.planning/?$' "$PROJ/.gitignore" 2>/dev/null && has_ignore_rule=1
+will_commit=0
+{ [ "$tracked" -gt 0 ] || [ "$has_ignore_rule" -eq 1 ]; } && will_commit=1
+
+if [ "$in_repo" -eq 1 ] && [ "$will_commit" -eq 1 ]; then
   staged_other=$(git -C "$PROJ" diff --cached --name-only | grep -v '^\.planning/' | head -5)
   if [ -n "$staged_other" ]; then
     say "DIRTY_INDEX — REFUSING."
