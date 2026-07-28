@@ -88,6 +88,10 @@ console.log('\n— resolution —');
 
 {
   const dir = project({ legacy: true });         // unmigrated
+  // With a real document in it: the notice reports what the repo holds, and an
+  // EMPTY tree has nothing to lose, so it says so instead. An unmigrated
+  // project that matters has files — the empty case is covered on its own below.
+  fs.writeFileSync(path.join(dir, LEGACY_PM_RELATIVE, 'STATE.md'), 'x\n');
   const r = capture(() => planningRoot(dir));
   eq(r.value, path.join(dir, LEGACY_PM_RELATIVE), 'only legacy present → still reads it, so the project keeps working');
   eq(r.out, '', 'the notice does NOT go to stdout — stdout carries JSON the workflows parse');
@@ -331,6 +335,39 @@ console.log('\n— the planning-root command, spawned as workflows invoke it —
   eq(p.durable, false, 'a partially committed tree is not durable — some of it is lost');
   eq(p.files_committed, 1, 'and the committed count is the part that survives');
   eq(p.files, 2, 'against the total on disk');
+
+  // TRACKED THEN DELETED. `git ls-files` still lists a file that was committed
+  // and later removed from disk, so counting its output raw put the committed
+  // count ABOVE the file count (3 of 1) and flipped `durable` to false while
+  // the notice said durable — the same two-channel split this fix closes,
+  // reintroduced one edge over. Only a file that is here can be lost here.
+  const deleted = newRepo('cli-legacy-deleted');
+  seed(deleted, 'a.md', 'b.md', 'c.md');
+  git(deleted, 'add', '-A');
+  git(deleted, 'commit', '-qm', 'seed');
+  fs.unlinkSync(path.join(deleted, '.planning', 'b.md'));
+  fs.unlinkSync(path.join(deleted, '.planning', 'c.md'));
+  const del = JSON.parse(run(deleted, 'planning-root'));
+  ok(del.files_committed <= del.files,
+     'the committed count never exceeds the file count');
+  eq(del.files, 1, 'only what is on disk is counted');
+  eq(del.files_committed, 1, 'and a tracked-but-deleted file is not counted as present');
+  eq(del.durable, true, 'every file that is here is committed, so it is durable');
+  const delRun = require('child_process').spawnSync('node', [CLI, 'planning-root'],
+    { cwd: deleted, encoding: 'utf8' });
+  has(delRun.stderr, 'ARE committed to this repo',
+     'and the notice agrees with the field rather than contradicting it');
+
+  // AN EMPTY legacy tree has nothing to lose; "none of its 0 files are
+  // committed" reads as a warning about data that does not exist.
+  const empty = newRepo('cli-legacy-empty');
+  fs.mkdirSync(path.join(empty, '.planning'), { recursive: true });
+  const emp = JSON.parse(run(empty, 'planning-root'));
+  eq(emp.files, 0, 'an empty tree reports no files');
+  const empRun = require('child_process').spawnSync('node', [CLI, 'planning-root'],
+    { cwd: empty, encoding: 'utf8' });
+  has(empRun.stderr, 'It is empty', 'and says so instead of counting zero files as lost');
+  noMatch(empRun.stderr, '0 file(s) are committed', 'not phrased as missing data');
 
   // IGNORED AND EMPTY-OF-COMMITS — still the clearest not-durable case.
   const ignored = newRepo('cli-legacy-ignored');

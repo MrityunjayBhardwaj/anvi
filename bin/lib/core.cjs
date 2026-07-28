@@ -586,13 +586,13 @@ function warnOnce(cwd, key, message) {
 function legacyTreeDurability(cwd) {
   const abs = path.join(cwd, LEGACY_PM_RELATIVE);
 
-  let total = 0;
+  const onDisk = new Set();
   const walk = (dir) => {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (entry.isDirectory()) walk(path.join(dir, entry.name));
-      else if (entry.isFile()) total++;
+      else if (entry.isFile()) onDisk.add(path.join(dir, entry.name));
     }
   };
   walk(abs);
@@ -603,13 +603,22 @@ function legacyTreeDurability(cwd) {
       cwd,
       stdio: 'pipe',
     }).toString();
-    tracked = out.split('\0').filter(Boolean).length;
+    for (const entry of out.split('\0')) {
+      if (!entry) continue;
+      // `git ls-files` also lists files that are tracked but no longer on disk,
+      // and its paths are relative to the cwd it ran in. Counting them raw puts
+      // the committed count ABOVE the file count for a tree whose files were
+      // committed and later deleted — which then disagrees with the notice, the
+      // very split this function exists to close. Only a file that is here can
+      // be lost here, so count the intersection.
+      if (onDisk.has(path.resolve(cwd, entry))) tracked++;
+    }
   } catch {
     // Not a git repo, or git unavailable: nothing is committed here.
     tracked = 0;
   }
 
-  return { total, tracked, durable: total > 0 && tracked === total };
+  return { total: onDisk.size, tracked, durable: onDisk.size > 0 && tracked === onDisk.size };
 }
 
 /**
@@ -641,9 +650,14 @@ function planningRoot(cwd) {
       const { total, tracked } = legacyTreeDurability(cwd);
       const head = `anvi: reading project documents from the legacy ${LEGACY_PM_RELATIVE}/ in ${cwd}.\n`;
       const migrate = `      Migrate to ${PM_RELATIVE}: anvi update\n`;
-      // Three genuinely different states. Telling a project whose tree IS
-      // committed that "nothing here is committed anywhere" is the same defect
-      // this tree was moved to fix, pointed at the operator instead of a caller.
+      // Genuinely different states. Telling a project whose tree IS committed
+      // that "nothing here is committed anywhere" is the same defect this tree
+      // was moved to fix, pointed at the operator instead of a caller.
+      if (total === 0) {
+        // An empty tree has nothing to lose; "none of its 0 files" reads as a
+        // warning about data that does not exist.
+        return head + `      It is empty — nothing to migrate yet.\n` + migrate;
+      }
       if (tracked === 0) {
         return head +
           `      This location is NOT durable — none of its ${total} file(s) are committed\n` +
