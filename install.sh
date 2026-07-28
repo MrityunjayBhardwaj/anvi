@@ -124,6 +124,7 @@ migrate_projects() {
   else
     local link_sh="$SCRIPT_DIR/scripts/link-catalogues.sh"
     local grant_sh="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
+    local plan_sh="$SCRIPT_DIR/scripts/migrate-planning.sh"
     local proj
     for proj in "${PROJECTS[@]}"; do
       echo "▶ $proj"
@@ -134,6 +135,15 @@ migrate_projects() {
       fi
       bash "$link_sh"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
       bash "$grant_sh" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
+      # The project-management tree, AFTER the link: it is durable because it
+      # lands inside .anvi, so migrating it before .anvi points at the store
+      # would move documents somewhere nothing commits. Ordering is the
+      # precondition, which is why this is last and not first.
+      #
+      # Every unmigrated project's notice says "Migrate to
+      # .anvi/project_management: anvi update". Until this call existed, that
+      # instruction pointed at a command that only linked catalogues.
+      bash "$plan_sh"  --apply "$proj" || echo "  ⚠ project-management migration refused for $proj (resolve by hand — see message above)"
       echo ""
     done
   fi
