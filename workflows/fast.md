@@ -53,7 +53,7 @@ NEVER `git add .` or `git add -A`.
 </step>
 
 <step name="log_to_state">
-If `.planning/STATE.md` exists and has a "Quick Tasks Completed" table, append:
+If `.anvi/project_management/STATE.md` exists and has a "Quick Tasks Completed" table, append:
 
 ```
 | fast-{timestamp} | {description} | {date} | {commit-hash} | done | inline |

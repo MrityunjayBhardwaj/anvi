@@ -223,7 +223,7 @@ created: {ISO timestamp}
 **Artifacts:** {verified}/{total}
 **Key Links:** {verified}/{total}
 
-**Report:** .planning/phases/XX-name/VERIFICATION.md
+**Report:** .anvi/project_management/phases/XX-name/VERIFICATION.md
 
 {If GAPS_FOUND: list specific gaps}
 {If HUMAN_NEEDED: list what needs manual verification}

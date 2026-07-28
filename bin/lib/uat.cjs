@@ -7,13 +7,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, getMilestonePhaseFilter } = require('./core.cjs');
+const { output, error, getMilestonePhaseFilter, planningRoot, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 
 function cmdAuditUat(cwd, raw) {
-  const phasesDir = path.join(cwd, '.planning', 'phases');
+  const phasesDir = path.join(planningRoot(cwd), 'phases');
   if (!fs.existsSync(phasesDir)) {
-    error('No .planning/phases directory found');
+    error(`No ${pmRel(cwd, 'phases')} directory found`);
   }
 
   const isDirInMilestone = getMilestonePhaseFilter(cwd);
@@ -41,7 +41,7 @@ function cmdAuditUat(cwd, raw) {
           phase: phaseNum,
           phase_dir: dir,
           file,
-          file_path: `.planning/phases/${dir}/${file}`,
+          file_path: pmRel(cwd, 'phases', dir, file),
           type: 'uat',
           status: (extractFrontmatter(content).status || 'unknown'),
           items,
@@ -60,7 +60,7 @@ function cmdAuditUat(cwd, raw) {
             phase: phaseNum,
             phase_dir: dir,
             file,
-            file_path: `.planning/phases/${dir}/${file}`,
+            file_path: pmRel(cwd, 'phases', dir, file),
             type: 'verification',
             status,
             items,

@@ -9,7 +9,7 @@ over `~/.claude/settings.json` `cleanupPeriodDays`.
 <step name="show_current">
 Display current settings from BOTH scopes:
 
-1. Project config — read `.planning/config.json` (if present): workflow toggles
+1. Project config — read `.anvi/project_management/config.json` (if present): workflow toggles
    + model profile.
 
 2. Session retention — read `~/.claude/settings.json` and show `cleanupPeriodDays`

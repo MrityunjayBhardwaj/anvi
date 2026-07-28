@@ -17,7 +17,7 @@ If the prompt contains a `<files_to_read>` block, you MUST use the `Read` tool t
 <process>
 
 ### 1. Read All Research Files
-Read all 4 research outputs from `.planning/research/`.
+Read all 4 research outputs from `.anvi/project_management/research/`.
 
 ### 2. Synthesize
 Produce a unified view:
@@ -35,7 +35,7 @@ If researchers disagree (e.g., stack recommends library A, architecture recommen
 - Let the roadmapper decide
 
 ### 4. Write Output
-Write `.planning/research/SUMMARY.md`:
+Write `.anvi/project_management/research/SUMMARY.md`:
 
 ```markdown
 ---
@@ -67,7 +67,7 @@ created: {ISO timestamp}
 ### 5. Commit
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-node "$CLI_PATH" commit "docs: synthesize research" --files .planning/research/
+node "$CLI_PATH" commit "docs: synthesize research" --files "$(node "$CLI_PATH" planning-root --raw)"/research/
 ```
 
 </process>

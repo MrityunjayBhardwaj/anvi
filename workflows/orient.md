@@ -27,9 +27,9 @@ Read current context to determine position:
 ```
 Sources (check in order):
 1. $ARGUMENTS — user specified a focus area
-2. .planning/STATE.md — current phase, plan, task
-3. .planning/debug/*.md — active debug sessions
-4. .planning/.continue-here.md — resuming from pause
+2. .anvi/project_management/STATE.md — current phase, plan, task
+3. .anvi/project_management/debug/*.md — active debug sessions
+4. .anvi/project_management/.continue-here.md — resuming from pause
 5. git log --oneline -3 — recent activity
 6. Current conversation context — what we've been discussing
 ```

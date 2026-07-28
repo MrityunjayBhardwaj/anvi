@@ -38,19 +38,19 @@ function detectSubRepos(cwd) {
 }
 
 /**
- * Walk up from `startDir` to find the project root that owns `.planning/`.
+ * Walk up from `startDir` to find the project root that owns the project-management tree.
  *
  * In multi-repo workspaces, Claude may open inside a sub-repo (e.g. `backend/`)
- * instead of the project root. This function prevents `.planning/` from being
+ * instead of the project root. This function prevents that tree from being
  * created inside the sub-repo by locating the nearest ancestor that already has
- * a `.planning/` directory.
+ * a project-management directory.
  *
  * Detection strategy (checked in order for each ancestor):
- * 1. Parent has `.planning/config.json` with `sub_repos` listing this directory
- * 2. Parent has `.planning/config.json` with `multiRepo: true` (legacy format)
- * 3. Parent has `.planning/` and current dir has its own `.git` (heuristic)
+ * 1. Parent has a tree whose `config.json` has `sub_repos` listing this directory
+ * 2. Parent has a tree whose `config.json` has `multiRepo: true` (legacy format)
+ * 3. Parent has a tree and current dir has its own `.git` (heuristic)
  *
- * Returns `startDir` unchanged when no ancestor `.planning/` is found (first-run
+ * Returns `startDir` unchanged when no ancestor tree is found (first-run
  * or single-repo projects).
  */
 function findProjectRoot(startDir) {
@@ -76,8 +76,15 @@ function findProjectRoot(startDir) {
     if (parent === dir) break; // filesystem root
     if (parent === homedir) break; // never go above home
 
-    const parentPlanning = path.join(parent, '.planning');
-    if (fs.existsSync(parentPlanning) && fs.statSync(parentPlanning).isDirectory()) {
+    // Look for EITHER layout: an ancestor owns the project if it has the
+    // current tree or the pre-migration one. Checking only the old name would
+    // walk straight past a migrated parent and create a second tree inside the
+    // sub-repo — the exact failure this function exists to prevent.
+    const parentPlanning = [
+      path.join(parent, PM_RELATIVE),
+      path.join(parent, LEGACY_PM_RELATIVE),
+    ].find(d => { try { return fs.existsSync(d) && fs.statSync(d).isDirectory(); } catch { return false; } });
+    if (parentPlanning) {
       const configPath = path.join(parentPlanning, 'config.json');
       try {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -146,7 +153,7 @@ function safeReadFile(filePath) {
 }
 
 function loadConfig(cwd) {
-  const configPath = path.join(cwd, '.planning', 'config.json');
+  const configPath = path.join(planningRoot(cwd), 'config.json');
   const defaults = {
     model_profile: 'balanced',
     commit_docs: true,
@@ -238,7 +245,7 @@ function loadConfig(cwd) {
         if (explicit !== undefined) return explicit;
         // Auto-detection: when no explicit value and .planning/ is gitignored,
         // default to false instead of true
-        if (isGitIgnored(cwd, '.planning/')) return false;
+        if (isGitIgnored(cwd, pmRel(cwd, ))) return false;
         return defaults.commit_docs;
       })(),
       search_gitignored: get('search_gitignored', { section: 'planning', field: 'search_gitignored' }) ?? defaults.search_gitignored,
@@ -483,14 +490,236 @@ function withPlanningLock(cwd, fn) {
   return fn();
 }
 
-/** Get the .planning directory path */
-function planningDir(cwd) {
-  return path.join(cwd, '.planning');
+// ─── Project-management tree ─────────────────────────────────────────────────
+//
+// The development-lifecycle documents (phases, todos, debug, roadmap, state…)
+// live under `.anvi/`, which is a symlink into the ~/.anvideck store — a git
+// repo that the checkpoint hook auto-commits and pushes. Nesting them there is
+// what makes them durable; the project repo is no longer the durability target.
+//
+// The pre-migration location was a top-level `.planning/`. It is still read
+// when present, so an unmigrated project keeps working — but the fallback
+// announces itself, because a project silently running on the old layout is
+// exactly the unobserved state this move exists to eliminate.
+
+/** Directory name of the project-management tree, inside the resolved `.anvi`. */
+const PM_LEAF = 'project_management';
+
+/** Canonical display form of the tree's location, for messages and docs. */
+const PM_RELATIVE = path.join('.anvi', PM_LEAF);
+
+/** Pre-migration location. Read when present; never written to by new code. */
+const LEGACY_PM_RELATIVE = '.planning';
+
+/** Projects already warned about, so the notice fires once per process, not per lookup. */
+const legacyNoticeShown = new Set();
+
+// Locate the shared artifact resolver — the SINGLE source of path-resolution
+// logic, so the CLI can never disagree with the hooks about where `.anvi` lives
+// (V1). `.anvi` has three legitimate homes (project-local, artifacts/, and the
+// centralized store), and joining `cwd/.anvi` directly would silently create a
+// shadow tree for any project not on the first layout.
+//
+// The resolver itself uses cwd + homedir only, so it is vendoring-safe; only
+// LOCATING it depends on layout, and bin/lib/ is vendored — hence a candidate
+// list spanning both depths as well as the installed tree (V7, and H5's
+// __dirname-escape trap).
+function loadAnviPathsForPlanning() {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'hooks', 'anvi-paths.js'), // repo: bin/lib → hooks
+    path.join(__dirname, '..', 'hooks', 'anvi-paths.js'),       // vendored one level shallower
+    path.join(require('os').homedir(), '.claude', 'hooks', 'anvi-paths.js'),
+  ];
+  for (const c of candidates) {
+    try { return require(c); } catch { /* try next layout */ }
+  }
+  return null;
+}
+const _anviPaths = loadAnviPathsForPlanning();
+
+/**
+ * The `.anvi` directory for `cwd`, resolved the same way every hook resolves it.
+ * Falls back to the project-local path when no `.anvi` exists yet, so a fresh
+ * project is created in the right place.
+ */
+function anviDirFor(cwd) {
+  if (_anviPaths) {
+    const resolved = _anviPaths.resolveDir(cwd, '.anvi');
+    if (resolved) return resolved;
+  } else {
+    warnOnce(cwd, 'resolver',
+      'anvi: shared path resolver not found; using cwd-only .anvi lookup.\n');
+  }
+  return path.join(cwd, '.anvi');
 }
 
-/** Get common .planning file paths */
+/**
+ * Emit a notice at most once per (key, project) per process.
+ *
+ * `message` may be a function, evaluated only when the notice actually fires.
+ * `planningRoot` is on the hot path — every `pmRel` call reaches it — so a
+ * message whose text costs a directory walk must not be built for a notice that
+ * is about to be dropped.
+ */
+function warnOnce(cwd, key, message) {
+  const seen = `${key}:${cwd}`;
+  if (legacyNoticeShown.has(seen)) return;
+  legacyNoticeShown.add(seen);
+  const text = typeof message === 'function' ? message() : message;
+  // stderr, never stdout: stdout is a JSON data channel that callers parse.
+  try { process.stderr.write(text); } catch { /* never let a notice break a command */ }
+}
+
+/**
+ * How much of a legacy tree the project repo actually holds.
+ *
+ * Measures a DATA fact — what is committed — rather than the config fact of
+ * whether an ignore rule exists. The two come apart in both directions, and
+ * reading the rule alone is wrong both times: a tree with no ignore rule and
+ * nothing committed is durable NOWHERE while reading as ignored=false, and a
+ * tree that was committed before the rule was added stays durable despite it.
+ *
+ * Returns per-file counts, because a tree is not one outcome: an ignore rule
+ * added after some files were already committed leaves the tree split, and a
+ * single boolean has to round that to a lie in one direction or the other.
+ */
+function legacyTreeDurability(cwd) {
+  const abs = path.join(cwd, LEGACY_PM_RELATIVE);
+
+  const onDisk = new Set();
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.isDirectory()) walk(path.join(dir, entry.name));
+      else if (entry.isFile()) onDisk.add(path.join(dir, entry.name));
+    }
+  };
+  walk(abs);
+
+  let tracked = 0;
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--', LEGACY_PM_RELATIVE], {
+      cwd,
+      stdio: 'pipe',
+    }).toString();
+    for (const entry of out.split('\0')) {
+      if (!entry) continue;
+      // `git ls-files` also lists files that are tracked but no longer on disk,
+      // and its paths are relative to the cwd it ran in. Counting them raw puts
+      // the committed count ABOVE the file count for a tree whose files were
+      // committed and later deleted — which then disagrees with the notice, the
+      // very split this function exists to close. Only a file that is here can
+      // be lost here, so count the intersection.
+      if (onDisk.has(path.resolve(cwd, entry))) tracked++;
+    }
+  } catch {
+    // Not a git repo, or git unavailable: nothing is committed here.
+    tracked = 0;
+  }
+
+  return { total: onDisk.size, tracked, durable: onDisk.size > 0 && tracked === onDisk.size };
+}
+
+/**
+ * Resolve the project-management root for `cwd`.
+ *
+ * Prefers the current location; falls back to the legacy one when only that
+ * exists. A project with neither resolves to the current location, so a fresh
+ * project is created in the right place.
+ */
+function planningRoot(cwd) {
+  const current = path.join(anviDirFor(cwd), PM_LEAF);
+  const legacy = path.join(cwd, LEGACY_PM_RELATIVE);
+  const hasCurrent = fs.existsSync(current);
+  const hasLegacy = fs.existsSync(legacy);
+
+  if (hasCurrent) {
+    if (hasLegacy) {
+      // Half-migrated: content in the old tree is now invisible to every command.
+      warnOnce(cwd, 'both',
+        `anvi: both ${PM_RELATIVE} and ${LEGACY_PM_RELATIVE} exist in ${cwd}.\n` +
+        `      Reading ${PM_RELATIVE}; the ${LEGACY_PM_RELATIVE} tree is being IGNORED.\n` +
+        `      Finish the migration or remove the leftover tree — run: anvi update\n`);
+    }
+    return current;
+  }
+
+  if (hasLegacy) {
+    warnOnce(cwd, 'legacy', () => {
+      const { total, tracked } = legacyTreeDurability(cwd);
+      const head = `anvi: reading project documents from the legacy ${LEGACY_PM_RELATIVE}/ in ${cwd}.\n`;
+      const migrate = `      Migrate to ${PM_RELATIVE}: anvi update\n`;
+      // Genuinely different states. Telling a project whose tree IS committed
+      // that "nothing here is committed anywhere" is the same defect this tree
+      // was moved to fix, pointed at the operator instead of a caller.
+      if (total === 0) {
+        // An empty tree has nothing to lose; "none of its 0 files" reads as a
+        // warning about data that does not exist.
+        return head + `      It is empty — nothing to migrate yet.\n` + migrate;
+      }
+      if (tracked === 0) {
+        return head +
+          `      This location is NOT durable — none of its ${total} file(s) are committed\n` +
+          `      anywhere, so they exist only on this machine.\n` + migrate;
+      }
+      if (tracked < total) {
+        return head +
+          `      PARTIALLY durable — ${tracked} of ${total} file(s) are committed to this repo;\n` +
+          `      the other ${total - tracked} exist only on this machine.\n` + migrate;
+      }
+      return head +
+        `      Its ${total} file(s) ARE committed to this repo, so they are durable today.\n` +
+        `      Migrating moves the durability target to the store — preserve the history\n` +
+        `      rather than orphaning it.\n` + migrate;
+    });
+    return legacy;
+  }
+
+  return current;
+}
+
+/** True when `cwd` is still on the pre-migration layout. */
+function usesLegacyPlanning(cwd) {
+  return !fs.existsSync(path.join(anviDirFor(cwd), PM_LEAF))
+    && fs.existsSync(path.join(cwd, LEGACY_PM_RELATIVE));
+}
+
+/**
+ * The project-management root as a repo-relative POSIX path.
+ * For the string contexts: staging globs, ignore checks, and the `directory:`
+ * fields that agents read back out of command output.
+ */
+function planningRootRelative(cwd) {
+  const root = planningRoot(cwd);
+  const rel = toPosixPath(path.relative(cwd, root));
+  // A centrally-stored `.anvi` resolves OUTSIDE the project, and a `../..` path
+  // is meaningless as a git pathspec. Report the absolute path in that case —
+  // wrong-but-plausible is the failure mode worth avoiding here.
+  if (rel.startsWith('../') || path.isAbsolute(rel)) return toPosixPath(root);
+  return rel;
+}
+
+/**
+ * A path INSIDE the project-management tree, in the form callers report and
+ * agents then open. Relative when the tree is inside the project, absolute when
+ * it resolves into the centralized store — `pathExistsInternal` accepts either,
+ * and an agent can open either. What it must never be is a relative path built
+ * on the wrong root, which is what a hardcoded '.planning/…' becomes the moment
+ * a project migrates: a well-formed string naming a file that is not there.
+ */
+function pmRel(cwd, ...parts) {
+  return [planningRootRelative(cwd), ...parts].join('/');
+}
+
+/** Get the project-management directory path */
+function planningDir(cwd) {
+  return planningRoot(cwd);
+}
+
+/** Get common project-management file paths */
 function planningPaths(cwd) {
-  const base = path.join(cwd, '.planning');
+  const base = planningRoot(cwd);
   return {
     planning: base,
     state: path.join(base, 'STATE.md'),
@@ -608,15 +837,15 @@ function searchPhaseInDir(baseDir, relBase, normalized) {
 function findPhaseInternal(cwd, phase) {
   if (!phase) return null;
 
-  const phasesDir = path.join(cwd, '.planning', 'phases');
+  const phasesDir = path.join(planningRoot(cwd), 'phases');
   const normalized = normalizePhaseName(phase);
 
   // Search current phases first
-  const current = searchPhaseInDir(phasesDir, '.planning/phases', normalized);
+  const current = searchPhaseInDir(phasesDir, pmRel(cwd, 'phases'), normalized);
   if (current) return current;
 
   // Search archived milestone phases (newest first)
-  const milestonesDir = path.join(cwd, '.planning', 'milestones');
+  const milestonesDir = path.join(planningRoot(cwd), 'milestones');
   if (!fs.existsSync(milestonesDir)) return null;
 
   try {
@@ -630,7 +859,7 @@ function findPhaseInternal(cwd, phase) {
     for (const archiveName of archiveDirs) {
       const version = archiveName.match(/^(v[\d.]+)-phases$/)[1];
       const archivePath = path.join(milestonesDir, archiveName);
-      const relBase = '.planning/milestones/' + archiveName;
+      const relBase = pmRel(cwd, 'milestones', archiveName);
       const result = searchPhaseInDir(archivePath, relBase, normalized);
       if (result) {
         result.archived = version;
@@ -643,7 +872,7 @@ function findPhaseInternal(cwd, phase) {
 }
 
 function getArchivedPhaseDirs(cwd) {
-  const milestonesDir = path.join(cwd, '.planning', 'milestones');
+  const milestonesDir = path.join(planningRoot(cwd), 'milestones');
   const results = [];
 
   if (!fs.existsSync(milestonesDir)) return results;
@@ -667,7 +896,7 @@ function getArchivedPhaseDirs(cwd) {
         results.push({
           name: dir,
           milestone: version,
-          basePath: path.join('.planning', 'milestones', archiveName),
+          basePath: pmRel(cwd, 'milestones', archiveName),
           fullPath: path.join(archivePath, dir),
         });
       }
@@ -711,7 +940,7 @@ function extractCurrentMilestone(content, cwd) {
   // 1. Get current milestone version from STATE.md frontmatter
   let version = null;
   try {
-    const statePath = path.join(cwd, '.planning', 'STATE.md');
+    const statePath = path.join(planningRoot(cwd), 'STATE.md');
     if (fs.existsSync(statePath)) {
       const stateRaw = fs.readFileSync(statePath, 'utf-8');
       const milestoneMatch = stateRaw.match(/^milestone:\s*(.+)/m);
@@ -794,7 +1023,7 @@ function replaceInCurrentMilestone(content, pattern, replacement) {
 
 function getRoadmapPhaseInternal(cwd, phaseNum) {
   if (!phaseNum) return null;
-  const roadmapPath = path.join(cwd, '.planning', 'ROADMAP.md');
+  const roadmapPath = path.join(planningRoot(cwd), 'ROADMAP.md');
   if (!fs.existsSync(roadmapPath)) return null;
 
   try {
@@ -901,7 +1130,7 @@ function generateSlugInternal(text) {
 
 function getMilestoneInfo(cwd) {
   try {
-    const roadmap = fs.readFileSync(path.join(cwd, '.planning', 'ROADMAP.md'), 'utf-8');
+    const roadmap = fs.readFileSync(path.join(planningRoot(cwd), 'ROADMAP.md'), 'utf-8');
 
     // First: check for list-format roadmaps using 🚧 (in-progress) marker
     // e.g. "- 🚧 **v2.1 Belgium** — Phases 24-28 (in progress)"
@@ -944,7 +1173,7 @@ function getMilestoneInfo(cwd) {
 function getMilestonePhaseFilter(cwd) {
   const milestonePhaseNums = new Set();
   try {
-    const roadmap = extractCurrentMilestone(fs.readFileSync(path.join(cwd, '.planning', 'ROADMAP.md'), 'utf-8'), cwd);
+    const roadmap = extractCurrentMilestone(fs.readFileSync(path.join(planningRoot(cwd), 'ROADMAP.md'), 'utf-8'), cwd);
     // Match both numeric phases (Phase 1:) and custom IDs (Phase PROJ-42:)
     const phasePattern = /#{2,4}\s*Phase\s+([\w][\w.-]*)\s*:/gi;
     let m;
@@ -982,6 +1211,7 @@ module.exports = {
   safeReadFile,
   loadConfig,
   isGitIgnored,
+  legacyTreeDurability,
   execGit,
   normalizeMd,
   escapeRegex,
@@ -1008,4 +1238,10 @@ module.exports = {
   MODEL_ALIAS_MAP,
   planningDir,
   planningPaths,
+  planningRoot,
+  planningRootRelative,
+  pmRel,
+  usesLegacyPlanning,
+  PM_RELATIVE,
+  LEGACY_PM_RELATIVE,
 };

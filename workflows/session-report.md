@@ -38,7 +38,7 @@ Include in report:
 </step>
 
 <step name="generate_report">
-Write `.planning/reports/SESSION_REPORT_{timestamp}.md`:
+Write `.anvi/project_management/reports/SESSION_REPORT_{timestamp}.md`:
 
 ```markdown
 # Session Report — {date}

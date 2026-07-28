@@ -22,7 +22,7 @@ CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init new-project)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
-Check for auto-mode, existing .planning/, brownfield detection.
+Check for auto-mode, existing .anvi/project_management/, brownfield detection.
 </step>
 
 <step name="gather_context">
@@ -98,7 +98,7 @@ Roadmapper produces ROADMAP.md with goal-backward success criteria per phase.
 </step>
 
 <step name="initialize_anvi">
-After .planning/ is created, also initialize .anvi/:
+After .anvi/project_management/ is created, also initialize .anvi/:
 - Create `.anvi/hetvabhasa.md` with project-specific section
 - Create `.anvi/vyapti.md` with project-specific section
 - Create `.anvi/krama.md` with project-specific section
@@ -123,7 +123,7 @@ node "$CLI_PATH" config-new-project "${PROJECT_NAME}"
 
 <step name="commit_and_offer_next">
 ```bash
-node "$CLI_PATH" commit "docs: initialize project" --files .planning/ .anvi/ PROJECT.md
+node "$CLI_PATH" commit "docs: initialize project" --files "$(node "$CLI_PATH" planning-root --raw)"/ .anvi/ PROJECT.md
 ```
 
 Offer: `/anvi:plan-phase 1` to start planning first phase.

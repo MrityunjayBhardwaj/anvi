@@ -44,7 +44,7 @@ Also load cognitive state:
 <step name="check_existing_context">
 Check for existing CONTEXT.md from /anvi:discuss-phase:
 ```bash
-ls .planning/phases/*/CONTEXT.md 2>/dev/null
+ls "$(node "$CLI_PATH" planning-root --raw)"/phases/*/CONTEXT.md 2>/dev/null
 ```
 If exists: load as locked decisions for planner. User vision is sacrosanct.
 </step>
@@ -71,8 +71,8 @@ Agent(
   </cognitive_context>
 
   <files_to_read>
-  - .planning/ROADMAP.md
-  - .planning/STATE.md
+  - .anvi/project_management/ROADMAP.md
+  - .anvi/project_management/STATE.md
   - {CONTEXT.md if exists}
   </files_to_read>
   """,
@@ -111,8 +111,8 @@ Agent(
   </cognitive_context>
 
   <files_to_read>
-  - .planning/ROADMAP.md
-  - .planning/STATE.md
+  - .anvi/project_management/ROADMAP.md
+  - .anvi/project_management/STATE.md
   - {RESEARCH.md if exists}
   - {CONTEXT.md if exists}
   </files_to_read>
@@ -148,7 +148,7 @@ Agent(
 
   <files_to_read>
   - {PLAN.md path}
-  - .planning/ROADMAP.md
+  - .anvi/project_management/ROADMAP.md
   - {CONTEXT.md if exists}
   </files_to_read>
   """,
@@ -173,7 +173,7 @@ Same as GSD: if frontend phase, check for UI-SPEC.md.
 
 <step name="commit_plan">
 ```bash
-node "$CLI_PATH" commit "docs(${PHASE}): create phase plan" --files .planning/phases/XX-name/
+node "$CLI_PATH" commit "docs(${PHASE}): create phase plan" --files "$(node "$CLI_PATH" planning-root --raw)"/phases/XX-name/
 ```
 </step>
 

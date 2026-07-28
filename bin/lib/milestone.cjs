@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { escapeRegex, getMilestonePhaseFilter, extractOneLinerFromBody, normalizeMd, planningPaths, output, error } = require('./core.cjs');
+const { escapeRegex, getMilestonePhaseFilter, extractOneLinerFromBody, normalizeMd, planningPaths, output, error, planningRoot, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { writeStateMd, stateReplaceFieldWithFallback } = require('./state.cjs');
 
@@ -93,8 +93,8 @@ function cmdMilestoneComplete(cwd, version, options, raw) {
   const roadmapPath = planningPaths(cwd).roadmap;
   const reqPath = planningPaths(cwd).requirements;
   const statePath = planningPaths(cwd).state;
-  const milestonesPath = path.join(cwd, '.planning', 'MILESTONES.md');
-  const archiveDir = path.join(cwd, '.planning', 'milestones');
+  const milestonesPath = path.join(planningRoot(cwd), 'MILESTONES.md');
+  const archiveDir = path.join(planningRoot(cwd), 'milestones');
   const phasesDir = planningPaths(cwd).phases;
   const today = new Date().toISOString().split('T')[0];
   const milestoneName = options.name || version;
@@ -159,12 +159,12 @@ function cmdMilestoneComplete(cwd, version, options, raw) {
   // Archive REQUIREMENTS.md
   if (fs.existsSync(reqPath)) {
     const reqContent = fs.readFileSync(reqPath, 'utf-8');
-    const archiveHeader = `# Requirements Archive: ${version} ${milestoneName}\n\n**Archived:** ${today}\n**Status:** SHIPPED\n\nFor current requirements, see \`.planning/REQUIREMENTS.md\`.\n\n---\n\n`;
+    const archiveHeader = `# Requirements Archive: ${version} ${milestoneName}\n\n**Archived:** ${today}\n**Status:** SHIPPED\n\nFor current requirements, see \`${pmRel(cwd, 'REQUIREMENTS.md')}\`.\n\n---\n\n`;
     fs.writeFileSync(path.join(archiveDir, `${version}-REQUIREMENTS.md`), archiveHeader + reqContent, 'utf-8');
   }
 
   // Archive audit file if exists
-  const auditFile = path.join(cwd, '.planning', `${version}-MILESTONE-AUDIT.md`);
+  const auditFile = path.join(planningRoot(cwd), `${version}-MILESTONE-AUDIT.md`);
   if (fs.existsSync(auditFile)) {
     fs.renameSync(auditFile, path.join(archiveDir, `${version}-MILESTONE-AUDIT.md`));
   }

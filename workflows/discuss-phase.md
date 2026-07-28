@@ -142,7 +142,7 @@ decisions: {count}
 
 Commit:
 ```bash
-node "$CLI_PATH" commit "docs(${PHASE}): capture phase context" --files .planning/phases/XX-name/CONTEXT.md
+node "$CLI_PATH" commit "docs(${PHASE}): capture phase context" --files "$(node "$CLI_PATH" planning-root --raw)"/phases/XX-name/CONTEXT.md
 ```
 </step>
 

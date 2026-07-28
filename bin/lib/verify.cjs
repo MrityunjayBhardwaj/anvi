@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { safeReadFile, loadConfig, normalizePhaseName, execGit, findPhaseInternal, getMilestoneInfo, stripShippedMilestones, extractCurrentMilestone, output, error } = require('./core.cjs');
+const { safeReadFile, loadConfig, normalizePhaseName, execGit, findPhaseInternal, getMilestoneInfo, stripShippedMilestones, extractCurrentMilestone, output, error, planningRoot, pmRel } = require('./core.cjs');
 const { extractFrontmatter, parseMustHavesBlock } = require('./frontmatter.cjs');
 const { writeStateMd } = require('./state.cjs');
 
@@ -396,8 +396,8 @@ function cmdVerifyKeyLinks(cwd, planFilePath, raw) {
 }
 
 function cmdValidateConsistency(cwd, raw) {
-  const roadmapPath = path.join(cwd, '.planning', 'ROADMAP.md');
-  const phasesDir = path.join(cwd, '.planning', 'phases');
+  const roadmapPath = path.join(planningRoot(cwd), 'ROADMAP.md');
+  const phasesDir = path.join(planningRoot(cwd), 'phases');
   const errors = [];
   const warnings = [];
 
@@ -533,7 +533,7 @@ function cmdValidateHealth(cwd, options, raw) {
     return;
   }
 
-  const planningDir = path.join(cwd, '.planning');
+  const planningDir = planningRoot(cwd);
   const projectPath = path.join(planningDir, 'PROJECT.md');
   const roadmapPath = path.join(planningDir, 'ROADMAP.md');
   const statePath = path.join(planningDir, 'STATE.md');
@@ -555,7 +555,7 @@ function cmdValidateHealth(cwd, options, raw) {
 
   // ─── Check 1: .planning/ exists ───────────────────────────────────────────
   if (!fs.existsSync(planningDir)) {
-    addIssue('error', 'E001', '.planning/ directory not found', 'Run /gsd:new-project to initialize');
+    addIssue('error', 'E001', pmRel(cwd, ' directory not found'), 'Run /gsd:new-project to initialize');
     output({
       status: 'broken',
       errors,
@@ -779,7 +779,7 @@ function cmdValidateHealth(cwd, options, raw) {
             const milestone = getMilestoneInfo(cwd);
             let stateContent = `# Session State\n\n`;
             stateContent += `## Project Reference\n\n`;
-            stateContent += `See: .planning/PROJECT.md\n\n`;
+            stateContent += `See: ${pmRel(cwd, 'PROJECT.md')}\n\n`;
             stateContent += `## Position\n\n`;
             stateContent += `**Milestone:** ${milestone.version} ${milestone.name}\n`;
             stateContent += `**Current phase:** (determining...)\n`;

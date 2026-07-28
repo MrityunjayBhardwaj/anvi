@@ -90,9 +90,9 @@ No extra context needed — base layer sufficient.
 </step>
 
 <step name="check_project">
-For routes that need `.planning/` (execute, plan, progress, resume, verify):
+For routes that need `.anvi/project_management/` (execute, plan, progress, resume, verify):
 ```bash
-ls .planning/ 2>/dev/null
+ls "$(node "$CLI_PATH" planning-root --raw)"/ 2>/dev/null
 ```
 If missing and the route needs it: suggest `/anvi:new-project` first.
 </step>

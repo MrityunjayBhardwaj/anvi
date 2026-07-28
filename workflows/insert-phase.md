@@ -10,7 +10,7 @@ node "$CLI_PATH" phase insert "${AFTER_PHASE}" "${DESCRIPTION}"
 </step>
 <step name="commit">
 ```bash
-node "$CLI_PATH" commit "docs: insert phase after ${AFTER_PHASE}" --files .planning/ROADMAP.md
+node "$CLI_PATH" commit "docs: insert phase after ${AFTER_PHASE}" --files "$(node "$CLI_PATH" planning-root --raw)"/ROADMAP.md
 ```
 </step>
 <step name="offer_next">Offer `/anvi:plan-phase {N.1}`.</step>

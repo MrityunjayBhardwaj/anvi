@@ -2,11 +2,11 @@
 
 <process>
 <step name="parse">Extract todo description from $ARGUMENTS or conversation context.</step>
-<step name="create">Write to `.planning/todos/pending/{slug}.md`.</step>
+<step name="create">Write to `.anvi/project_management/todos/pending/{slug}.md`.</step>
 <step name="commit">
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-node "$CLI_PATH" commit "docs: add todo — ${DESCRIPTION}" --files .planning/todos/
+node "$CLI_PATH" commit "docs: add todo — ${DESCRIPTION}" --files "$(node "$CLI_PATH" planning-root --raw)"/todos/
 ```
 </step>
 </process>

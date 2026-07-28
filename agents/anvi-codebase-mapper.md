@@ -22,5 +22,5 @@ If the prompt contains a `<files_to_read>` block, read them first.
 </focus_areas>
 
 <output>
-Write to `.planning/codebase/{focus}.md` with structured findings.
+Write to `.anvi/project_management/codebase/{focus}.md` with structured findings.
 </output>

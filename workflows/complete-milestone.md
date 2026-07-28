@@ -75,7 +75,7 @@ Confirm before pushing.
 
 <step name="commit_and_report">
 ```bash
-node "$CLI_PATH" commit "docs: complete milestone ${VERSION}" --files .planning/ PROJECT.md
+node "$CLI_PATH" commit "docs: complete milestone ${VERSION}" --files "$(node "$CLI_PATH" planning-root --raw)"/ PROJECT.md
 ```
 
 Report completion with cognitive growth summary.

@@ -44,7 +44,7 @@ If branching configured: create quick-task branch.
 
 <step name="create_task_directory">
 ```bash
-mkdir -p .planning/phases/${quick_dir}
+mkdir -p .anvi/project_management/phases/${quick_dir}
 ```
 </step>
 
@@ -118,7 +118,7 @@ Spawn verifier to check must_haves.
 </step>
 
 <step name="update_state">
-If `.planning/STATE.md` exists, append to "Quick Tasks Completed" table:
+If `.anvi/project_management/STATE.md` exists, append to "Quick Tasks Completed" table:
 ```
 | {quick_id} | {description} | {date} | {commit} | {status} | {directory} |
 ```
@@ -127,7 +127,7 @@ If `.planning/STATE.md` exists, append to "Quick Tasks Completed" table:
 <step name="final_commit">
 Commit planning docs:
 ```bash
-node "$CLI_PATH" commit "docs: complete quick task ${quick_id}" --files .planning/phases/${quick_dir}/
+node "$CLI_PATH" commit "docs: complete quick task ${quick_id}" --files "$(node "$CLI_PATH" planning-root --raw)"/phases/${quick_dir}/
 ```
 </step>
 

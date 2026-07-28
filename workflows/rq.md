@@ -25,9 +25,9 @@ ranks questions by how much uncertainty answering them would collapse.
 Gather current context from 5 sources:
 
 **1. What are you working on?**
-- `.planning/STATE.md` — current phase, plan, task
-- `.planning/.continue-here.md` — if resuming
-- Active debug sessions in `.planning/debug/`
+- `.anvi/project_management/STATE.md` — current phase, plan, task
+- `.anvi/project_management/.continue-here.md` — if resuming
+- Active debug sessions in `.anvi/project_management/debug/`
 - Recent git log (last 5 commits)
 - $ARGUMENTS if provided (focus area)
 

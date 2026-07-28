@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { safeReadFile, loadConfig, isGitIgnored, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal } = require('./core.cjs');
+const { safeReadFile, loadConfig, isGitIgnored, legacyTreeDurability, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { MODEL_PROFILES } = require('./model-profiles.cjs');
 
@@ -42,8 +42,41 @@ function cmdCurrentTimestamp(format, raw) {
   output({ timestamp: result }, raw, result);
 }
 
+/**
+ * Report where this project's development-lifecycle documents live.
+ *
+ * Workflows and agents cannot call the resolver, so without this they spell the
+ * location by hand — which is how the location became hardcoded in ~250 places
+ * to begin with. `--raw` prints the path alone, for `PM=$(… planning-root
+ * --raw)` in a shell step.
+ */
+function cmdPlanningRoot(cwd, raw) {
+  const rel = planningRootRelative(cwd);
+  const legacy = usesLegacyPlanning(cwd);
+  // A legacy tree is durable only if the project repo actually holds its files;
+  // a migrated one is durable because the store commits and pushes it.
+  //
+  // Measured by what is TRACKED, not by whether an ignore rule exists. The
+  // absence of a rule is not the presence of a commit — a tree with neither
+  // reported `durable: true` while nothing in it was committed anywhere.
+  const legacyState = legacy ? legacyTreeDurability(cwd) : null;
+  const result = {
+    root: planningRoot(cwd),
+    path: rel,
+    legacy,
+    durable: legacyState ? legacyState.durable : true,
+  };
+  // Partial tracking is a real third state; a bare boolean has to round it to a
+  // lie, so report the counts that produced the verdict alongside it.
+  if (legacyState) {
+    result.files = legacyState.total;
+    result.files_committed = legacyState.tracked;
+  }
+  output(result, raw, rel);
+}
+
 function cmdListTodos(cwd, area, raw) {
-  const pendingDir = path.join(cwd, '.planning', 'todos', 'pending');
+  const pendingDir = path.join(planningRoot(cwd), 'todos', 'pending');
 
   let count = 0;
   const todos = [];
@@ -69,7 +102,7 @@ function cmdListTodos(cwd, area, raw) {
           created: createdMatch ? createdMatch[1].trim() : 'unknown',
           title: titleMatch ? titleMatch[1].trim() : 'Untitled',
           area: todoArea,
-          path: toPosixPath(path.join('.planning', 'todos', 'pending', file)),
+          path: pmRel(cwd, 'todos', 'pending', file),
         });
       } catch { /* intentionally empty */ }
     }
@@ -240,15 +273,35 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
     return;
   }
 
-  // Check if .planning is gitignored
-  if (isGitIgnored(cwd, '.planning')) {
-    const result = { committed: false, hash: null, reason: 'skipped_gitignored' };
+  const planningRel = planningRootRelative(cwd);
+
+  // A migrated tree lives under `.anvi/`, a symlink into the ~/.anvideck store —
+  // its own git repo, committed and pushed by the checkpoint hook. The project
+  // repo is not the durability target, and staging through the symlink would
+  // commit the link rather than the documents. Report that distinctly: "the
+  // store has it" and "nothing has it" are opposite outcomes and must not share
+  // a word.
+  if (!usesLegacyPlanning(cwd)) {
+    const result = { committed: false, hash: null, reason: 'durable_in_store', durable: true, planning_root: planningRel };
+    output(result, raw, 'store');
+    return;
+  }
+
+  // Legacy tree: still the project repo's job. An ignore rule here means the
+  // documents are durable NOWHERE — the project repo skips them and the store
+  // never sees them — so the skip is announced rather than merely returned.
+  if (isGitIgnored(cwd, planningRel)) {
+    process.stderr.write(
+      `anvi: ${planningRel}/ is gitignored — these documents are being committed NOWHERE.\n` +
+      `      The project repo skips them and the store does not hold them.\n` +
+      `      Migrate to .anvi/project_management to make them durable: anvi update\n`);
+    const result = { committed: false, hash: null, reason: 'skipped_gitignored', durable: false, planning_root: planningRel };
     output(result, raw, 'skipped');
     return;
   }
 
   // Stage files
-  const filesToStage = files && files.length > 0 ? files : ['.planning/'];
+  const filesToStage = files && files.length > 0 ? files : [`${planningRel}/`];
   for (const file of filesToStage) {
     const fullPath = path.join(cwd, file);
     if (!fs.existsSync(fullPath)) {
@@ -290,7 +343,7 @@ function cmdCommitToSubrepo(cwd, message, files, raw) {
   const subRepos = config.sub_repos;
 
   if (!subRepos || subRepos.length === 0) {
-    error('no sub_repos configured in .planning/config.json');
+    error(`no sub_repos configured in ${pmRel(cwd, 'config.json')}`);
   }
 
   if (!files || files.length === 0) {
@@ -543,7 +596,7 @@ function cmdProgressRender(cwd, format, raw) {
 function cmdTodoMatchPhase(cwd, phase, raw) {
   if (!phase) { error('phase required for todo match-phase'); }
 
-  const pendingDir = path.join(cwd, '.planning', 'todos', 'pending');
+  const pendingDir = path.join(planningRoot(cwd), 'todos', 'pending');
   const todos = [];
 
   // Load pending todos
@@ -664,8 +717,8 @@ function cmdTodoComplete(cwd, filename, raw) {
     error('filename required for todo complete');
   }
 
-  const pendingDir = path.join(cwd, '.planning', 'todos', 'pending');
-  const completedDir = path.join(cwd, '.planning', 'todos', 'completed');
+  const pendingDir = path.join(planningRoot(cwd), 'todos', 'pending');
+  const completedDir = path.join(planningRoot(cwd), 'todos', 'completed');
   const sourcePath = path.join(pendingDir, filename);
 
   if (!fs.existsSync(sourcePath)) {
@@ -727,7 +780,7 @@ function cmdScaffold(cwd, type, options, raw) {
       fs.mkdirSync(phasesParent, { recursive: true });
       const dirPath = path.join(phasesParent, dirName);
       fs.mkdirSync(dirPath, { recursive: true });
-      output({ created: true, directory: `.planning/phases/${dirName}`, path: dirPath }, raw, dirPath);
+      output({ created: true, directory: pmRel(cwd, 'phases', dirName), path: dirPath }, raw, dirPath);
       return;
     }
     default:
@@ -906,6 +959,7 @@ function cmdStats(cwd, format, raw) {
 module.exports = {
   cmdGenerateSlug,
   cmdCurrentTimestamp,
+  cmdPlanningRoot,
   cmdListTodos,
   cmdVerifyPathExists,
   cmdHistoryDigest,

@@ -11,7 +11,7 @@ node "$CLI_PATH" phase remove "${PHASE}" --force
 </step>
 <step name="commit">
 ```bash
-node "$CLI_PATH" commit "docs: remove phase ${PHASE}" --files .planning/ROADMAP.md
+node "$CLI_PATH" commit "docs: remove phase ${PHASE}" --files "$(node "$CLI_PATH" planning-root --raw)"/ROADMAP.md
 ```
 </step>
 </process>

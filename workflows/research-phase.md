@@ -32,7 +32,7 @@ PHASE_INFO=$(node "$CLI_PATH" roadmap get-phase "${PHASE}")
 <step name="check_existing">
 Check for existing RESEARCH.md:
 ```bash
-ls .planning/phases/*/RESEARCH.md 2>/dev/null
+ls "$(node "$CLI_PATH" planning-root --raw)"/phases/*/RESEARCH.md 2>/dev/null
 ```
 If exists: offer to skip or redo.
 </step>
@@ -67,8 +67,8 @@ Agent(
   </cognitive_context>
 
   <files_to_read>
-  - .planning/ROADMAP.md
-  - .planning/STATE.md
+  - .anvi/project_management/ROADMAP.md
+  - .anvi/project_management/STATE.md
   - {CONTEXT.md if exists}
   </files_to_read>
   """,
