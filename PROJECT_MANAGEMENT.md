@@ -265,6 +265,14 @@ REVISIONS  2026-07-27 · baseline was recorded as 4 projects, carried from a
            their own repo" — one holds 1 of its 96 files. A per-project label
            has to round a split tree to a lie in one direction.
            Evidence: `find -type f` against `git ls-files` per project.
+
+           2026-07-28 · first migration pass: 3 of 9 projects moved into the
+           store (40 files), leaving 6 and 758 files. Scope for the pass was
+           cut deliberately rather than the target lowered — three projects had
+           sessions active within hours, one is the two-working-copies blocker,
+           and two have no `.anvi` to migrate into. The target is unchanged;
+           only the distance to it moved.
+           Evidence: per-project re-measurement after the pass.
 ```
 
 Twice now the count moved because it was carried rather than measured, and both
@@ -510,7 +518,7 @@ Stated because an unstated gap reads as a solved problem.
 | Gap | Consequence |
 |-----|-------------|
 | Store isolation is by name, not binding | any same-named directory reads and writes this project's knowledge |
-| The migration has not run | 9 projects still on the legacy layout; 652 of their 798 files are committed nowhere |
+| The migration is partly run | 3 of 9 projects migrated; 6 remain, and 637 of their 758 files are committed nowhere |
 | Catalogue citations not re-pointed | of 110 cited paths, 10 gone and 65 untracked |
 | Epic contract not yet stored per epic | progress is reportable only as narrative |
 | Instruction layer has no witness | 15 workflow steps resolve the tree; 1 has been executed against both layouts |
