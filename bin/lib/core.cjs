@@ -553,12 +553,63 @@ function anviDirFor(cwd) {
   return path.join(cwd, '.anvi');
 }
 
+/**
+ * Emit a notice at most once per (key, project) per process.
+ *
+ * `message` may be a function, evaluated only when the notice actually fires.
+ * `planningRoot` is on the hot path — every `pmRel` call reaches it — so a
+ * message whose text costs a directory walk must not be built for a notice that
+ * is about to be dropped.
+ */
 function warnOnce(cwd, key, message) {
   const seen = `${key}:${cwd}`;
   if (legacyNoticeShown.has(seen)) return;
   legacyNoticeShown.add(seen);
+  const text = typeof message === 'function' ? message() : message;
   // stderr, never stdout: stdout is a JSON data channel that callers parse.
-  try { process.stderr.write(message); } catch { /* never let a notice break a command */ }
+  try { process.stderr.write(text); } catch { /* never let a notice break a command */ }
+}
+
+/**
+ * How much of a legacy tree the project repo actually holds.
+ *
+ * Measures a DATA fact — what is committed — rather than the config fact of
+ * whether an ignore rule exists. The two come apart in both directions, and
+ * reading the rule alone is wrong both times: a tree with no ignore rule and
+ * nothing committed is durable NOWHERE while reading as ignored=false, and a
+ * tree that was committed before the rule was added stays durable despite it.
+ *
+ * Returns per-file counts, because a tree is not one outcome: an ignore rule
+ * added after some files were already committed leaves the tree split, and a
+ * single boolean has to round that to a lie in one direction or the other.
+ */
+function legacyTreeDurability(cwd) {
+  const abs = path.join(cwd, LEGACY_PM_RELATIVE);
+
+  let total = 0;
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.isDirectory()) walk(path.join(dir, entry.name));
+      else if (entry.isFile()) total++;
+    }
+  };
+  walk(abs);
+
+  let tracked = 0;
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--', LEGACY_PM_RELATIVE], {
+      cwd,
+      stdio: 'pipe',
+    }).toString();
+    tracked = out.split('\0').filter(Boolean).length;
+  } catch {
+    // Not a git repo, or git unavailable: nothing is committed here.
+    tracked = 0;
+  }
+
+  return { total, tracked, durable: total > 0 && tracked === total };
 }
 
 /**
@@ -586,10 +637,28 @@ function planningRoot(cwd) {
   }
 
   if (hasLegacy) {
-    warnOnce(cwd, 'legacy',
-      `anvi: reading project documents from the legacy ${LEGACY_PM_RELATIVE}/ in ${cwd}.\n` +
-      `      This location is NOT durable — it is gitignored in most projects, so\n` +
-      `      nothing here is committed anywhere. Migrate to ${PM_RELATIVE}: anvi update\n`);
+    warnOnce(cwd, 'legacy', () => {
+      const { total, tracked } = legacyTreeDurability(cwd);
+      const head = `anvi: reading project documents from the legacy ${LEGACY_PM_RELATIVE}/ in ${cwd}.\n`;
+      const migrate = `      Migrate to ${PM_RELATIVE}: anvi update\n`;
+      // Three genuinely different states. Telling a project whose tree IS
+      // committed that "nothing here is committed anywhere" is the same defect
+      // this tree was moved to fix, pointed at the operator instead of a caller.
+      if (tracked === 0) {
+        return head +
+          `      This location is NOT durable — none of its ${total} file(s) are committed\n` +
+          `      anywhere, so they exist only on this machine.\n` + migrate;
+      }
+      if (tracked < total) {
+        return head +
+          `      PARTIALLY durable — ${tracked} of ${total} file(s) are committed to this repo;\n` +
+          `      the other ${total - tracked} exist only on this machine.\n` + migrate;
+      }
+      return head +
+        `      Its ${total} file(s) ARE committed to this repo, so they are durable today.\n` +
+        `      Migrating moves the durability target to the store — preserve the history\n` +
+        `      rather than orphaning it.\n` + migrate;
+    });
     return legacy;
   }
 
@@ -1128,6 +1197,7 @@ module.exports = {
   safeReadFile,
   loadConfig,
   isGitIgnored,
+  legacyTreeDurability,
   execGit,
   normalizeMd,
   escapeRegex,

@@ -266,23 +266,82 @@ console.log('\n— the planning-root command, spawned as workflows invoke it —
     catch (e) { return e.stdout || ''; }
   };
 
-  const legacy = path.join(TMP, 'cli-legacy');
-  fs.mkdirSync(path.join(legacy, '.planning'), { recursive: true });
-  git(legacy, 'init', '-q', '.');
+  // Durability is a DATA fact — what the repo actually holds — so every fixture
+  // here writes real files and commits (or does not commit) them. An earlier
+  // version of this block asserted `durable: true` for an EMPTY .planning with
+  // no ignore rule and called it a "tracked" control. Nothing in it was ever
+  // tracked; it only ever measured the absence of an ignore rule, so it agreed
+  // with the bug it was meant to catch. A control that cannot separate the two
+  // explanations is not a control.
+  const seed = (d, ...files) => {
+    fs.mkdirSync(path.join(d, '.planning'), { recursive: true });
+    for (const f of files) fs.writeFileSync(path.join(d, '.planning', f), 'x\n');
+  };
+  const newRepo = (name) => {
+    const d = path.join(TMP, name);
+    fs.mkdirSync(d, { recursive: true });
+    git(d, 'init', '-q', '.');
+    git(d, 'config', 'user.email', 't@t');
+    git(d, 'config', 'user.name', 't');
+    return d;
+  };
 
-  // POSITIVE control: a tracked, unignored legacy tree really is durable.
-  const before = JSON.parse(run(legacy, 'planning-root'));
-  eq(before.legacy, true, 'a legacy tree is reported as legacy');
-  eq(before.durable, true, 'with no ignore rule, the project repo does hold it');
+  // NOTHING COMMITTED, NO IGNORE RULE — the state that read as durable.
+  // dyzen-landing is the real instance: 2 files, 0 tracked, no rule.
+  const bare = newRepo('cli-legacy-bare');
+  seed(bare, 'a.md', 'b.md');
+  const b = JSON.parse(run(bare, 'planning-root'));
+  eq(b.legacy, true, 'a legacy tree is reported as legacy');
+  eq(b.durable, false,
+     'no ignore rule but nothing committed is NOT durable — a missing rule is not a commit');
+  eq(b.files_committed, 0, 'and it says how much is committed, not just yes/no');
+  eq(b.files, 2, 'out of how many files there are');
 
-  // NEGATIVE control: the ignore rule is the ONLY thing that changes.
-  fs.writeFileSync(path.join(legacy, '.gitignore'), '.planning/\n');
-  const after = JSON.parse(run(legacy, 'planning-root'));
-  eq(after.durable, false, 'adding the ignore rule alone flips durable to false');
-  ok(before.path === after.path, 'and nothing else about the answer moved');
+  // FULLY COMMITTED — the genuine positive control, which the old one was not.
+  const tracked = newRepo('cli-legacy-tracked');
+  seed(tracked, 'a.md', 'b.md');
+  git(tracked, 'add', '-A');
+  git(tracked, 'commit', '-qm', 'seed');
+  const t = JSON.parse(run(tracked, 'planning-root'));
+  eq(t.durable, true, 'a legacy tree the repo actually holds IS durable');
+  eq(t.files_committed, 2, 'with every file accounted for');
+  // stderr on the SUCCESS path: execFileSync only surfaces stderr when the
+  // command throws, so reading it from a catch block scores an empty string on
+  // every passing run — and `noMatch` against "" can never fail. Use spawnSync,
+  // which returns both streams regardless of exit code, and assert the message
+  // that must be PRESENT: a vacuous absence-check is not a witness.
+  const tRun = require('child_process').spawnSync('node', [CLI, 'planning-root'],
+    { cwd: tracked, encoding: 'utf8' });
+  ok(tRun.stderr.length > 0, 'the notice reaches stderr on the success path (guards the check below)');
+  has(tRun.stderr, 'ARE committed to this repo',
+     'the operator is told its committed tree is durable today');
+  noMatch(tRun.stderr, 'nothing here is committed',
+     'and is NOT told the same tree is lost');
+
+  // PARTIALLY COMMITTED — a rule added after some files were already in.
+  // basher (1 of 96) and stave (56 of 240) are the real instances. A bare
+  // boolean has to round this to a lie in one direction, so the counts carry it.
+  const partial = newRepo('cli-legacy-partial');
+  seed(partial, 'a.md');
+  git(partial, 'add', '-A');
+  git(partial, 'commit', '-qm', 'seed');
+  fs.writeFileSync(path.join(partial, '.planning', 'b.md'), 'x\n');
+  fs.writeFileSync(path.join(partial, '.gitignore'), '.planning/\n');
+  const p = JSON.parse(run(partial, 'planning-root'));
+  eq(p.durable, false, 'a partially committed tree is not durable — some of it is lost');
+  eq(p.files_committed, 1, 'and the committed count is the part that survives');
+  eq(p.files, 2, 'against the total on disk');
+
+  // IGNORED AND EMPTY-OF-COMMITS — still the clearest not-durable case.
+  const ignored = newRepo('cli-legacy-ignored');
+  seed(ignored, 'a.md');
+  fs.writeFileSync(path.join(ignored, '.gitignore'), '.planning/\n');
+  const after = JSON.parse(run(ignored, 'planning-root'));
+  eq(after.durable, false, 'an ignored, uncommitted tree is not durable');
+  eq(after.path, b.path, 'and nothing else about the answer moved');
 
   // The two surfaces must agree — a project cannot be durable here and not there.
-  const commit = JSON.parse(run(legacy, 'commit', '--message', 'x'));
+  const commit = JSON.parse(run(ignored, 'commit', '--message', 'x'));
   eq(commit.reason, 'skipped_gitignored', 'the durability step agrees it is skipping');
   eq(commit.durable, false, 'and reports the same durability as planning-root');
 

@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { safeReadFile, loadConfig, isGitIgnored, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
+const { safeReadFile, loadConfig, isGitIgnored, legacyTreeDurability, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { MODEL_PROFILES } = require('./model-profiles.cjs');
 
@@ -53,14 +53,25 @@ function cmdCurrentTimestamp(format, raw) {
 function cmdPlanningRoot(cwd, raw) {
   const rel = planningRootRelative(cwd);
   const legacy = usesLegacyPlanning(cwd);
+  // A legacy tree is durable only if the project repo actually holds its files;
+  // a migrated one is durable because the store commits and pushes it.
+  //
+  // Measured by what is TRACKED, not by whether an ignore rule exists. The
+  // absence of a rule is not the presence of a commit — a tree with neither
+  // reported `durable: true` while nothing in it was committed anywhere.
+  const legacyState = legacy ? legacyTreeDurability(cwd) : null;
   const result = {
     root: planningRoot(cwd),
     path: rel,
     legacy,
-    // A legacy tree is durable only if the project repo actually tracks it;
-    // a migrated one is durable because the store commits and pushes it.
-    durable: legacy ? !isGitIgnored(cwd, rel) : true,
+    durable: legacyState ? legacyState.durable : true,
   };
+  // Partial tracking is a real third state; a bare boolean has to round it to a
+  // lie, so report the counts that produced the verdict alongside it.
+  if (legacyState) {
+    result.files = legacyState.total;
+    result.files_committed = legacyState.tracked;
+  }
   output(result, raw, rel);
 }
 
