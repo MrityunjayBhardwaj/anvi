@@ -89,7 +89,7 @@ subdirectories. `project_management` names what was already there.
 **Never spell the location by hand.** It was hardcoded in roughly 250 places, which is
 what made moving it expensive and what would make the next move expensive again.
 
-**In code** — one resolver, `bin/lib/core.cjs:571`:
+**In code** — one resolver, `bin/lib/core.cjs:622`:
 
 ```js
 planningRoot(cwd)          // absolute path to the tree
@@ -98,7 +98,7 @@ pmRel(cwd, ...parts)       // a path INSIDE the tree, in reportable form
 usesLegacyPlanning(cwd)    // is this project still on the pre-migration layout?
 ```
 
-`pmRel` (`core.cjs:628`) **joins** its parts. It never concatenates — a dropped separator
+`pmRel` (`core.cjs:697`) **joins** its parts. It never concatenates — a dropped separator
 produces a well-formed string naming nothing, and no test that only checks resolution
 will see it.
 
@@ -182,7 +182,7 @@ since a date", it is not a skip — it is a disablement wearing a skip's vocabul
 | `committed` | legacy tree, tracked; the project repo holds it | yes |
 
 Reporting the first two both as `skipped` is what let the gap survive
-(`bin/lib/commands.cjs:274`).
+(`bin/lib/commands.cjs:298`).
 
 ---
 
@@ -236,16 +236,19 @@ day, the issue was rewritten, and the PR met one of three asks.
 OBJECTIVE  Every project's planning documents are committed somewhere that
            survives the loss of this laptop.
 
-BASELINE   2026-07-27 — 7 projects with a planning tree:
-             2 durable in their own repo
-             2 durable nowhere
-             3 ignored AND tracked
+BASELINE   2026-07-28 — 9 projects with a planning tree, counted per FILE:
+             798 files on disk
+             146 committed to their own repo
+             652 committed nowhere — they exist on one laptop
+           by project: 3 fully committed, 3 partially, 3 not at all
            195 catalogue lines cite the tree, 51 of them in reference fields
-           110 distinct cited paths: 10 gone, 65 untracked
-           the durability step no-ops in 5 of 7
+           110 distinct cited paths: 10 gone, 65 untracked  (carried, not re-measured)
 
-TARGET     7/7 durable in the store · 0 no-op durability reports
+TARGET     9/9 durable in the store · 798/798 files committed
+           0 no-op durability reports
            110/110 cited paths resolve · conformance reports 0 legacy projects
+           (two of the nine are working copies of one repository, so they are
+            one migration, parked behind that blocker — see §7)
 
 SKETCH     A planning document survives a laptop loss. A reference into planning
            grades like any other reference instead of being ungradeable.
@@ -253,7 +256,20 @@ SKETCH     A planning document survives a laptop loss. A reference into planning
 REVISIONS  2026-07-27 · baseline was recorded as 4 projects, carried from a
            session note. A per-project sweep found 7 — three had never been
            counted. Evidence: per-project measurement of tracked vs ignored state.
+
+           2026-07-28 · 7 → 9 projects, and the per-project classification
+           replaced with a per-file one. Two projects had still never been
+           counted, one of them in a state the earlier list had no name for:
+           untracked but NOT ignored, which the tooling reported as durable.
+           Measuring files rather than projects moved three out of "durable in
+           their own repo" — one holds 1 of its 96 files. A per-project label
+           has to round a split tree to a lie in one direction.
+           Evidence: `find -type f` against `git ls-files` per project.
 ```
+
+Twice now the count moved because it was carried rather than measured, and both
+times the correction was upward. A baseline that has never been re-measured
+should be read as a lower bound, not a number.
 
 Had that number been corrected silently, the epic would have read complete at
 four-of-four while three projects stayed broken.
@@ -451,15 +467,33 @@ Rules that must hold. Violating one is a defect, not a preference.
 
 A pre-migration `.planning/` is still read when it is the only tree present, so an
 unmigrated project keeps working. The fallback **announces itself** on every process
-(`core.cjs:571`), because a project silently running on the old layout is precisely the
+(`core.cjs:622`), because a project silently running on the old layout is precisely the
 unobserved state this design removes.
 
 ```
-legacy only     → read .planning/, warn: "NOT durable … migrate"
+legacy only     → read .planning/, warn — see the three states below
 both present    → read .anvi/project_management/, warn the leftover tree is IGNORED
 current only    → silent
 neither         → resolve to the current location, so new projects are created right
 ```
+
+The legacy notice reports what the repo **actually holds**, measured as tracked
+files rather than inferred from an ignore rule. The absence of a rule is not the
+presence of a commit — a tree with neither is durable nowhere, and any check
+reading only `.gitignore` calls it durable.
+
+```
+0 of N committed   → NOT durable; they exist only on this machine
+K of N committed   → PARTIALLY durable; the other N−K exist only on this machine
+N of N committed   → durable TODAY; migrating moves the target, so preserve history
+```
+
+Partial is not a rounding error — an ignore rule added after some files were
+already committed leaves the tree genuinely split, and one project holds 1 of its
+96 files. `planning-root` therefore reports `files` and `files_committed`
+alongside `durable`, because a bare boolean has to round that to a lie. Telling a
+project whose tree *is* committed that nothing in it is committed anywhere is the
+same defect as §4, aimed at the operator instead of a caller (invariant 7).
 
 Notices go to **stderr, never stdout** — stdout is the JSON channel the workflows parse,
 and a notice there would corrupt all of them. Command substitution captures stdout only,
@@ -476,7 +510,7 @@ Stated because an unstated gap reads as a solved problem.
 | Gap | Consequence |
 |-----|-------------|
 | Store isolation is by name, not binding | any same-named directory reads and writes this project's knowledge |
-| The migration has not run | 7 projects still on the legacy layout |
+| The migration has not run | 9 projects still on the legacy layout; 652 of their 798 files are committed nowhere |
 | Catalogue citations not re-pointed | of 110 cited paths, 10 gone and 65 untracked |
 | Epic contract not yet stored per epic | progress is reportable only as narrative |
 | Instruction layer has no witness | 15 workflow steps resolve the tree; 1 has been executed against both layouts |
