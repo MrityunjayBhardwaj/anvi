@@ -151,7 +151,10 @@ if [ "$APPLY" -eq 0 ]; then
 fi
 
 # ── apply ────────────────────────────────────────────────────────────────────
-mkdir -p "$CURRENT" || { say "✗ could not create $CURRENT"; exit 1; }
+mkdir -p "$CURRENT" 2>/dev/null || {
+  say "✗ could not create $CURRENT — original left untouched at $LEGACY"
+  exit 1
+}
 
 # Copy first, never move: the original stays until the copy is verified.
 if ! (cd "$LEGACY" && tar cf - .) | (cd "$CURRENT" && tar xf -); then

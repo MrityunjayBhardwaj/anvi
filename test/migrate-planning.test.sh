@@ -110,6 +110,21 @@ ok 'echo "$OUT" | grep -q "DIRTY_INDEX"'       'names the state'
 ok 'echo "$OUT" | grep -q "src.txt"'           'and shows what would have been swept in'
 ok '[ -d "$P/.planning" ]'                     'the tree is untouched'
 
+echo "a failed copy must lose nothing — the original outlives the attempt"
+# The contract that matters most: the tree is copied and verified BEFORE the
+# original is removed, so an interrupted or partial copy costs nothing. Forced
+# here by making the destination unwritable, which is the one failure mode a
+# test can induce without patching the script.
+P="$(mkproj copyfail 1 0 1)"
+chmod 500 "$STORE/projects/copyfail/.anvi"
+OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
+chmod 700 "$STORE/projects/copyfail/.anvi"
+ok '[ "$RC" != 0 ]'                                  'a failed copy exits non-zero'
+ok '[ -d "$P/.planning" ]'                           'the original tree is still there'
+ok '[ -f "$P/.planning/STATE.md" ]'                  'with its documents intact'
+ok '[ "$(find "$P/.planning" -type f | wc -l | tr -d " ")" = 2 ]' 'with both files still present'
+ok 'echo "$OUT" | grep -qi "left"'                   'and it says the original was left alone'
+
 echo "NO_TREE / ALREADY_MIGRATED are quiet successes, not errors"
 P="$ROOT/empty"; mkdir -p "$P"
 OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
