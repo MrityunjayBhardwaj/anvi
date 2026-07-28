@@ -151,6 +151,57 @@ ok 'echo "$OUT" | grep -q "STORE_NO_REMOTE"'    'names the state'
 ok '[ -d "$P/.planning" ]'                      'the tree is untouched'
 git -C "$STORE" remote add origin "$ROOT/remote.git"
 
+echo "a migration commits ONLY its own tree — never what another session left staged"
+# Every fixture above has a store whose index is clean apart from the migration
+# itself, so none of them could see this: `git commit` with no pathspec takes the
+# WHOLE index. The store is the multi-session surface, so this is where an
+# unrelated commit does real damage — a half-written catalogue entry becomes a
+# committed one that afterwards reads as finished.
+P="$(mkproj scoped 1 1 1)"
+mkdir -p "$STORE/projects/other/.anvi"
+echo "committed" > "$STORE/projects/other/.anvi/krama.md"
+git -C "$STORE" add -A; git -C "$STORE" commit -qm "seed other"
+# another session, mid-write in the store: staged on one project, unstaged on this one
+echo "draft nobody finished" >> "$STORE/projects/other/.anvi/krama.md"
+git -C "$STORE" add "projects/other/.anvi/krama.md"
+echo "draft" > "$STORE/projects/scoped/.anvi/hetvabhasa.md"
+BEFORE_STORE="$(git -C "$STORE" rev-parse HEAD)"
+BEFORE_PROJ="$(git -C "$P" rev-parse HEAD)"
+OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
+STORE_FILES="$(git -C "$STORE" diff --name-only "$BEFORE_STORE"..HEAD)"
+PROJ_FILES="$(git -C "$P" diff --name-only "$BEFORE_PROJ"..HEAD)"
+ok '[ "$RC" = 0 ]'                                              'the migration still succeeds'
+ok 'echo "$STORE_FILES" | grep -q "project_management/STATE.md"' 'the store commit carries the migrated tree'
+ok '! echo "$STORE_FILES" | grep -q "projects/other"'           'and NOT another project another session was writing'
+ok '! echo "$STORE_FILES" | grep -q "hetvabhasa"'               'and NOT this project’s in-progress catalogue edit'
+ok 'git -C "$STORE" diff --cached --name-only | grep -q "projects/other"' 'the other session’s work is left staged, not lost'
+ok 'echo "$PROJ_FILES" | grep -q "STATE.md"'                    'the project commit records the untracking'
+ok '[ ! -d "$P/.planning" ]'                                    'the legacy tree is gone'
+ok '[ "$(git -C "$P" ls-files -- .planning | wc -l | tr -d " ")" = 0 ]' 'and nothing under it is tracked any more'
+
+echo "…including on the project-repo path where the dirty-index refusal never runs"
+# Nothing tracked and no ignore rule, so the refusal above does not fire — yet a
+# commit could still happen, and it would have carried another author's staged
+# work. This is the case the widened refusal still does not cover.
+# Built by hand, not via mkproj: an un-ignored tree is picked up by `add -A`, so
+# "no ignore rule AND nothing tracked" only exists when the tree was created
+# after the last commit. That is a real fleet state, not a contrived one.
+P="$ROOT/unguarded"; mkdir -p "$P"
+( cd "$P" && git init -q . && git config user.email t@t && git config user.name t )
+echo "node_modules/" > "$P/.gitignore"
+( cd "$P" && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1 )
+mkdir -p "$P/.planning"; echo state > "$P/.planning/STATE.md"
+mkdir -p "$STORE/projects/unguarded/.anvi"; ln -s "$STORE/projects/unguarded/.anvi" "$P/.anvi"
+ok '[ "$(git -C "$P" ls-files -- .planning | wc -l | tr -d " ")" = 0 ]' 'fixture: nothing tracked'
+ok '! grep -qE "^\.planning/?$" "$P/.gitignore"'                        'fixture: and no ignore rule'
+echo "theirs" > "$P/UNRELATED.md"; git -C "$P" add UNRELATED.md
+BEFORE_PROJ="$(git -C "$P" rev-parse HEAD)"
+OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
+ok '[ "$RC" = 0 ]'                                       'the migration succeeds (no refusal applies)'
+ok '[ ! -d "$P/.planning" ]'                             'the tree moved'
+ok '[ "$(git -C "$P" rev-parse HEAD)" = "$BEFORE_PROJ" ]' 'and the project repo grew no commit at all'
+ok 'git -C "$P" diff --cached --name-only | grep -q "UNRELATED.md"' 'the other author’s work is still staged, uncommitted'
+
 echo ""
 if [ "$FAIL" = 0 ]; then echo "✓ migrate-planning: $PASS passed, 0 failed"; else echo "✗ migrate-planning: $PASS passed, $FAIL failed"; fi
 [ "$FAIL" = 0 ]

@@ -108,6 +108,12 @@ case "$STORE_ANVI" in
      say "  ($STORE_ROOT_REAL)."
      exit 1 ;;
 esac
+# Where this project lives in the store, derived from where the symlink actually
+# points rather than from the project's basename. The two can differ, and a
+# basename is not an identity (#105) — deriving it means the commit below is
+# scoped to the directory being written, not to a directory of the same name.
+STORE_REL="${STORE_ANVI#"$STORE_ROOT_REAL"/}"
+STORE_PM="$STORE_REL/project_management"
 
 # A store with no remote is not a backup, however tidy it looks (V12).
 if ! git -C "$STORE_ROOT" remote get-url origin >/dev/null 2>&1; then
@@ -199,9 +205,23 @@ if [ -f "$PROJ/.gitignore" ] && grep -qE '^\.planning/?$' "$PROJ/.gitignore"; th
   say "✓ dropped the stale .planning ignore rule"
 fi
 
+# The copy is verified above, so the original can go — and it has to go BEFORE
+# the commit, not after. The commit below is scoped to the paths this migration
+# touched, and a scoped commit takes the WORKING TREE state of those paths: with
+# the tree still on disk it would re-add the very files just untracked.
+rm -rf "$LEGACY"
+say "✓ removed $LEGACY"
+
+# Commit ONLY the paths this migration touched. Without the pathspec, `commit`
+# takes the whole index — so anything a concurrent session had staged, in this
+# repo or another project entirely, lands in a commit whose message describes a
+# migration. The DIRTY_INDEX refusal above warns about that case; the pathspec
+# is what makes it impossible, including on the path that refusal does not cover
+# (nothing tracked and no ignore rule, so no refusal runs, but a commit still
+# could).
 if [ "$in_repo" -eq 1 ]; then
   git -C "$PROJ" add -A .gitignore >/dev/null 2>&1 || true
-  if ! git -C "$PROJ" diff --cached --quiet 2>/dev/null; then
+  if ! git -C "$PROJ" diff --cached --quiet -- .gitignore .planning 2>/dev/null; then
     git -C "$PROJ" commit -q -m "📦 chore: move project-management documents into the store
 
 Problem: these documents lived in .planning/ in this repo, where they were
@@ -209,21 +229,24 @@ either gitignored (durable nowhere) or duplicated the store's job.
 
 Fix: they now live in .anvi/project_management/, a symlink into ~/.anvideck,
 which commits and pushes them. Untracked here rather than deleted — git history
-keeps every version that was ever committed." || say "⚠ project-repo commit reported nothing to do"
+keeps every version that was ever committed." -- .gitignore .planning \
+      || say "⚠ project-repo commit reported nothing to do"
     say "✓ committed the untracking in the project repo"
   fi
 fi
 
-rm -rf "$LEGACY"
-say "✓ removed $LEGACY"
-
 # Commit in the store. The checkpoint hook would eventually do this, but a
 # migration that depends on a later hook is not durable at the moment it claims
 # to be.
-git -C "$STORE_ROOT" add -A "projects/$NAME" >/dev/null 2>&1 || true
-if ! git -C "$STORE_ROOT" diff --cached --quiet 2>/dev/null; then
+#
+# Scoped to the migrated tree alone. The store is the surface that is genuinely
+# multi-session, so an unscoped commit here is worse than in the project repo:
+# it captures another session's half-written catalogue entry — turning a draft
+# nobody finished into a committed one that later reads as real.
+git -C "$STORE_ROOT" add -A -- "$STORE_PM" >/dev/null 2>&1 || true
+if ! git -C "$STORE_ROOT" diff --cached --quiet -- "$STORE_PM" 2>/dev/null; then
   git -C "$STORE_ROOT" commit -q -m "📦 $NAME — project-management tree migrated from .planning ($copied files)" \
-    || say "⚠ store commit reported nothing to do"
+    -- "$STORE_PM" || say "⚠ store commit reported nothing to do"
   say "✓ committed in the store"
 fi
 
