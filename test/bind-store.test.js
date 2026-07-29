@@ -35,6 +35,16 @@ process.env.HOME = HOME;
 const BS = require('../scripts/bind-store.js');
 const ID = require('../hooks/anvi-identity.js');
 
+// Collect what the tool printed, so a case can assert it SAID something rather
+// than only that the filesystem is unchanged.
+function capture(fn) {
+  const real = console.log;
+  let buf = '';
+  console.log = (...a) => { buf += a.join(' ') + '\n'; };
+  try { fn(); } finally { console.log = real; }
+  return buf;
+}
+
 const git = (d, ...a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
 function mkproj(name, remote, storeName = name) {
   const d = path.join(WORK, name);
@@ -45,7 +55,11 @@ function mkproj(name, remote, storeName = name) {
   fs.symlinkSync(path.join(PROJECTS, storeName, '.anvi'), path.join(d, '.anvi'));
   return fs.realpathSync(d);
 }
-const recordOf = (n) => ID.readProvenance(path.join(PROJECTS, n));
+// Never null: under a deliberately broken guard no record gets written, and a
+// test that dereferences null ABORTS instead of reporting. That hides exactly
+// the assertions a falsification run exists to check — the later refusal cases
+// never execute. Degrade to an empty record so every case still reports.
+const recordOf = (n) => ID.readProvenance(path.join(PROJECTS, n)) || { malformed: false, remote: null, worktrees: [] };
 const rawRecord = (n) => { try { return fs.readFileSync(path.join(PROJECTS, n, 'PROVENANCE.json'), 'utf8'); } catch { return null; } };
 
 console.log('first contact writes a record — but only with --apply');
@@ -88,8 +102,14 @@ console.log('a stranger is REFUSED, and the record is left untouched');
   eq(BS.classify(s).state, 'MISMATCH', 'a different repository on the same store project is a mismatch');
 
   const before = rawRecord('alpha');
-  BS.main(['--apply', s]);
+  // Capturing the output matters: "the record did not change" passes both when
+  // the refusal fires AND when the tool silently did nothing at all. Neutering
+  // the verdict to always-BOUND leaves the record untouched too, so without
+  // asserting that a refusal was REPORTED, this case is green either way.
+  const said = capture(() => BS.main(['--apply', s]));
   eq(rawRecord('alpha'), before, 'and --apply leaves the record BYTE-IDENTICAL');
+  ok(/MISMATCH — REFUSING/.test(said), 'and it says it refused, rather than passing over in silence');
+  ok(/1 refused/.test(said), 'and counts the refusal in its summary');
   ok(!recordOf('alpha').worktrees.includes(s), 'the stranger is not added as a worktree');
   eq(recordOf('alpha').remote, 'github.com/owner/alpha', 'and the remote is not rewritten');
 }
