@@ -62,6 +62,10 @@ function loadFromCandidates(name) {
 // candidate list. Two consumers each with their own list eventually disagree
 // about where a project's catalogues live, and the disagreement is invisible.
 const { existingDirs } = loadFromCandidates('anvi-paths.js');
+// Identity — what makes a directory THIS project rather than one sharing its
+// name. Same shared-module rule: computed in one place so the report and the
+// binding tool can never disagree about who a store project belongs to.
+const IDENT = loadFromCandidates('anvi-identity.js');
 
 const CATALOGUES = ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md'];
 
@@ -79,6 +83,11 @@ const OK_STATES = {
   // durable only by accident of the project repo, and the hard cut to the new
   // layout happens when this check reports zero legacy projects.
   planning: ['MIGRATED', 'NONE'],
+  // UNBOUND is a finding on purpose: until a store project records WHICH
+  // repository it belongs to, any directory sharing its basename resolves its
+  // knowledge. The count is the rollout worklist, and it drives to zero as the
+  // fleet is bound — which is the precondition for anything failing closed.
+  binding: ['BOUND', 'NOT_APPLICABLE'],
 };
 function check(id, state, detail, extra = {}) {
   if (!OK_STATES[id]) throw new Error(`unknown check id: ${id}`);
@@ -468,6 +477,40 @@ function classifyPlanning(dir) {
     { remedy: 'scripts/migrate-planning.sh --apply <project-dir>' });
 }
 
+// --- check: BINDING ---------------------------------------------------------
+// Does this store project record WHICH repository it belongs to, and does this
+// directory verify against that record?
+//
+// Reported per project and derived from where the `.anvi` link LANDS rather than
+// from the basename — assembling the store path from the name would key the
+// check on the very thing it exists to falsify.
+function classifyBinding(dir) {
+  const anvi = realSafe(path.join(dir, '.anvi'));
+  const projectsRoot = realSafe(storeProjects());
+  if (!anvi || !projectsRoot || !isInside(projectsRoot, anvi)) {
+    return check('binding', 'NOT_APPLICABLE', 'not linked into the store — nothing to bind yet');
+  }
+  const storeProject = path.dirname(anvi);
+  const identity = IDENT.identityOf(dir);
+  const verdict = IDENT.verifyBinding(identity, IDENT.readProvenance(storeProject));
+
+  if (verdict.state === 'BOUND') {
+    const c = check('binding', 'BOUND', identity.remote
+      ? `${identity.remote}`
+      : 'location-keyed (this directory has no remote)');
+    if (verdict.unlistedWorktree) c.notes.push('this working copy is not yet listed in the record');
+    return c;
+  }
+  if (verdict.state === 'UNBOUND') {
+    return check('binding', 'UNBOUND', identity.remote
+      ? `no record — any directory named "${path.basename(dir)}" resolves this project`
+      : `no record, and no remote to key one on`,
+      { remedy: `node scripts/bind-store.js --apply ${tilde(dir)}` });
+  }
+  return check('binding', verdict.state, verdict.reason,
+    { remedy: `resolve by hand: ${tilde(path.join(storeProject, IDENT.PROVENANCE))}` });
+}
+
 function computeConformance(dir, store = storeState()) {
   const project = path.resolve(dir);
   const name = path.basename(project);
@@ -500,6 +543,7 @@ function computeConformance(dir, store = storeState()) {
     classifyRepo(project, storeName),
     classifyDurability(storeName, store),
     classifyPlanning(project),
+    classifyBinding(project),
   ];
   return { dir: project, name, storeName, checks, ok: checks.every(c => c.ok) };
 }
@@ -526,9 +570,18 @@ function main(argv) {
   console.log(`Conformance report — ${targets.length} project(s)   (store: ${tilde(store.root)} — ${store.state})\n`);
 
   const tally = { conformant: 0, withFindings: 0, byCheck: {} };
+  // Identity is a FLEET fact, not a per-project one: "two directories are the
+  // same repository" cannot be seen from inside either of them. Collected here
+  // and reported after the per-project section.
+  const byRemote = new Map();
   let printed = 0;
   for (const t of targets) {
     if (!isDir(t)) { console.log(`── ${t}\n   ✗ not a directory\n`); continue; }
+    const ident = IDENT.identityOf(t);
+    if (ident.remote) {
+      if (!byRemote.has(ident.remote)) byRemote.set(ident.remote, []);
+      byRemote.get(ident.remote).push(t);
+    }
     const r = computeConformance(t, store);
     if (r.skipped) { console.log(`── ${r.name}   · skipped (${r.skipped})\n`); continue; }
     r.ok ? tally.conformant++ : tally.withFindings++;
@@ -544,6 +597,23 @@ function main(argv) {
     console.log('');
   }
 
+  // Two directories on one repository, each with its own store project, means
+  // knowledge about one codebase is accumulating in two places with neither
+  // aware of the other. Advisory only: which copy is authoritative is a
+  // judgement the owner makes, so this describes and never adjudicates.
+  const clusters = [...byRemote.entries()].filter(([, ds]) => ds.length > 1);
+  if (clusters.length) {
+    console.log('── shared remotes — one repository, more than one audited directory\n');
+    for (const [remote, ds] of clusters) {
+      console.log(`   ${remote}`);
+      for (const d of ds) {
+        const anvi = realSafe(path.join(d, '.anvi'));
+        console.log(`     · ${tilde(d)}${anvi ? `   → ${tilde(anvi)}` : '   (not linked)'}`);
+      }
+      console.log('');
+    }
+  }
+
   const byCheck = Object.entries(tally.byCheck).map(([k, v]) => `${k} ${v}`).join(', ');
   console.log(`── ${tally.conformant + tally.withFindings} audited: ✓ ${tally.conformant} conformant  ✗ ${tally.withFindings} with findings${byCheck ? `  (${byCheck})` : ''}`);
   if (issuesOnly && printed === 0) console.log('(nothing to report — every audited project is conformant)');
@@ -553,6 +623,7 @@ function main(argv) {
 
 module.exports = {
   computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
+  classifyBinding,
   storeState, findStoreCopyByContent, storeProjectOf, isInside, check, OK_STATES, main, CATALOGUES,
 };
 
