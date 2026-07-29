@@ -219,19 +219,33 @@ say "✓ removed $LEGACY"
 # is what makes it impossible, including on the path that refusal does not cover
 # (nothing tracked and no ignore rule, so no refusal runs, but a commit still
 # could).
+#
+# The pathspec lists only paths git actually knows. `.planning` belongs in it
+# when files were tracked — the commit records their removal — but on a project
+# where nothing was ever tracked it is in neither the index nor HEAD, and it is
+# off disk by now, so naming it makes git reject the WHOLE pathspec and commit
+# nothing, including the .gitignore edit that was perfectly valid.
 if [ "$in_repo" -eq 1 ]; then
   git -C "$PROJ" add -A .gitignore >/dev/null 2>&1 || true
-  if ! git -C "$PROJ" diff --cached --quiet -- .gitignore .planning 2>/dev/null; then
-    git -C "$PROJ" commit -q -m "📦 chore: move project-management documents into the store
+  set -- .gitignore
+  [ "$tracked" -gt 0 ] && set -- .gitignore .planning
+  if ! git -C "$PROJ" diff --cached --quiet -- "$@" 2>/dev/null; then
+    if git -C "$PROJ" commit -q -m "📦 chore: move project-management documents into the store
 
 Problem: these documents lived in .planning/ in this repo, where they were
 either gitignored (durable nowhere) or duplicated the store's job.
 
 Fix: they now live in .anvi/project_management/, a symlink into ~/.anvideck,
 which commits and pushes them. Untracked here rather than deleted — git history
-keeps every version that was ever committed." -- .gitignore .planning \
-      || say "⚠ project-repo commit reported nothing to do"
-    say "✓ committed the untracking in the project repo"
+keeps every version that was ever committed." -- "$@"; then
+      say "✓ committed the untracking in the project repo"
+    else
+      # Report the outcome, not the intention. A migration that says it
+      # committed when it did not is the exact overstatement this arc exists to
+      # remove, and it leaves a staged .gitignore nobody is looking for.
+      say "⚠ the project-repo commit FAILED — the documents are safe in the store,"
+      say "  but $PROJ still has a staged .gitignore. Commit it by hand."
+    fi
   fi
 fi
 

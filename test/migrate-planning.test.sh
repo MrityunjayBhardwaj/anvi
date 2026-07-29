@@ -60,6 +60,7 @@ ok '[ ! -d "$P/.anvi/project_management" ]'         'and nothing was created in 
 
 echo "MIGRATABLE, nothing tracked → moves, store commits"
 P="$(mkproj clean 1 0 1)"
+BEFORE="$(git -C "$P" rev-parse HEAD)"
 OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
 ok '[ "$RC" = 0 ]'                                          'exits 0'
 ok '[ ! -d "$P/.planning" ]'                                'the legacy tree is gone'
@@ -69,6 +70,15 @@ ok '! grep -qxF ".planning" "$P/.gitignore"'                'the stale ignore ru
 ok 'grep -qxF "node_modules/" "$P/.gitignore"'              'and unrelated rules are untouched'
 ok 'git -C "$STORE" log --oneline -1 | grep -q "clean"'     'the store committed it'
 ok 'git -C "$STORE" status --porcelain | grep -q . && false || true' 'store tree is clean afterwards'
+# The assertion above reads the WORKING TREE, so it stayed green while the commit
+# that should carry that edit failed outright. This is the untracked-but-ignored
+# shape — the largest trees in the fleet — where naming a never-tracked path in
+# the commit pathspec made git reject the whole thing.
+ok '[ "$(git -C "$P" rev-parse HEAD)" != "$BEFORE" ]'       'the project repo actually committed'
+ok 'git -C "$P" diff --cached --quiet'                      'nothing is left staged behind'
+ok 'git -C "$P" show --stat --oneline HEAD | grep -q ".gitignore"' 'and the commit carries the ignore-rule drop'
+ok '! echo "$OUT" | grep -q "did not match any file"'       'no pathspec error'
+ok '! echo "$OUT" | grep -q "FAILED"'                       'and it does not report a failed commit'
 
 echo "idempotence — the second run is a no-op"
 OUT="$(bash "$MP" --apply "$P" 2>&1)"; RC=$?
