@@ -76,7 +76,11 @@ ok 'git -C "$STORE" status --porcelain | grep -q . && false || true' 'store tree
 # the commit pathspec made git reject the whole thing.
 ok '[ "$(git -C "$P" rev-parse HEAD)" != "$BEFORE" ]'       'the project repo actually committed'
 ok 'git -C "$P" diff --cached --quiet'                      'nothing is left staged behind'
-ok 'git -C "$P" show --stat --oneline HEAD | grep -q ".gitignore"' 'and the commit carries the ignore-rule drop'
+# Naming the migration commit, not just any commit touching .gitignore: with the
+# fix reverted this assertion still passed, because HEAD was then the fixture's
+# own init commit, which also touches .gitignore. Green for the wrong reason.
+ok 'git -C "$P" show --stat --oneline HEAD | grep -q "move project-management documents"' 'HEAD is the migration commit'
+ok 'git -C "$P" show --stat --oneline HEAD | grep -q ".gitignore"' 'and it carries the ignore-rule drop'
 ok '! echo "$OUT" | grep -q "did not match any file"'       'no pathspec error'
 ok '! echo "$OUT" | grep -q "FAILED"'                       'and it does not report a failed commit'
 
