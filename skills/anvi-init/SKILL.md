@@ -11,7 +11,8 @@ allowed-tools: [Read, Write, Edit, Bash, Glob, AskUserQuestion]
 
 1. Creates the project's catalogues in the centralized `~/.anvideck` store and links the project's `.anvi/` to them
 2. Grants the project scoped permission to read/write its own centralized envelope (so a fresh session can actually open and append its catalogues)
-3. Optionally adds the Anvi directive to the project's `CLAUDE.md`
+3. Binds the store project to this repository's identity, so the catalogues are actually served — without a binding record the project is `UNBOUND` and every read is declined
+4. Optionally adds the Anvi directive to the project's `CLAUDE.md`
 
 ## Process
 
@@ -98,11 +99,15 @@ Binding here is not the auto-binding the design forbids: what must never bind it
 directory that merely *read* a project, and here the user has explicitly initialized this
 one.
 
+This runs **unconditionally** — including when the cwd is itself inside the store. The
+grant above is skipped there because a session already reaches its own directory, but
+binding answers a different question: not "may this session read it" but "whose project is
+this". A store-internal project with no record is `UNBOUND` and declined exactly like any
+other, so the guard that is right for the grant is wrong here.
+
 ```bash
-if [ -z "$INSIDE_STORE" ]; then
-  node "$HOME/.claude/anvi/scripts/bind-store.js" --apply "$PWD" \
-    || echo "  ⚠ bind-store refused — resolve by hand before relying on this project"
-fi
+node "$HOME/.claude/anvi/scripts/bind-store.js" --apply "$PWD" \
+  || echo "  ⚠ bind-store refused — resolve by hand before relying on this project"
 ```
 
 Then read the templates from `~/.claude/anvi/references/`, replace `[Project Name]`
