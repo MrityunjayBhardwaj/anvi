@@ -159,6 +159,12 @@ console.log('a project whose .anvi is LOCAL is skipped as unlinked, and never re
   eq(BS.classify(d).state, 'NOT_LINKED', 'local catalogues are a migrate situation, not a binding one');
   BS.main(['--apply', d]);
   eq(rawRecord('has-local'), null, 'and no record is written for the store project it did not claim');
+  // Not the same assertion. Disabling the local-.anvi guard makes the tool
+  // resolve the "store project" to the PROJECT'S OWN directory and write a
+  // record there — which leaves the store untouched, so the check above stays
+  // green while a file lands somewhere it never should. Name that location.
+  ok(!fs.existsSync(path.join(d, ID.PROVENANCE)),
+    'and none is written into the project directory either — the store is the only place records live');
 }
 
 console.log('an UNLINKED but store-backed directory binds — the case that was unreachable');
