@@ -85,6 +85,26 @@ if [ -z "$INSIDE_STORE" ]; then
 fi
 ```
 
+**Bind the store project to this repository's identity.** A store project is reached by
+name, and a name is not proof of ownership — so resolution **fails closed**: a store
+project with no provenance record is `UNBOUND`, and an unbound project's catalogues are
+declined for reads and refused for writes. Without this step the project you just created
+resolves to nothing, while init reports success. Like the grant, this is framework
+infrastructure — apply it automatically, **don't prompt**; just state what you're doing.
+
+It is idempotent, and it refuses (non-fatally) if a record already exists for a *different*
+repository rather than overwriting it — that case is a real collision and wants a human.
+Binding here is not the auto-binding the design forbids: what must never bind itself is a
+directory that merely *read* a project, and here the user has explicitly initialized this
+one.
+
+```bash
+if [ -z "$INSIDE_STORE" ]; then
+  node "$HOME/.claude/anvi/scripts/bind-store.js" --apply "$PWD" \
+    || echo "  ⚠ bind-store refused — resolve by hand before relying on this project"
+fi
+```
+
 Then read the templates from `~/.claude/anvi/references/`, replace `[Project Name]`
 with the directory name, and **write them to `.anvi/`** (which now resolves to the
 central store in both cases):
@@ -205,6 +225,19 @@ Read the `STATE:` line and report it so durability is explicit, not silent:
   Creating a GitHub repo is outward-facing — never do it without that consent. If
   `gh` is absent/unauthenticated the script prints the manual steps; relay them.
 - NO_DIR   → the store doesn't exist yet; it is created as catalogues are written.
+
+**Then confirm the project actually resolves** — the steps above can each succeed while
+the result is still declined, which is precisely how an unbound project used to read as a
+finished one. Don't infer this from the absence of errors; observe it:
+
+```bash
+node "$HOME/.claude/anvi/scripts/conformance-report.js" "$PWD"
+```
+
+Every check should read ✓. The one to look at hardest is `binding`: `BOUND` means the
+store project is verifiably this repository's. `UNBOUND` or `MISMATCH` means the
+catalogues you just wrote will not be served — report it and resolve it now, rather than
+letting the user discover it at their next read.
 
 ### Step 7: Offer Ground Truth setup (v1.1.0+)
 
