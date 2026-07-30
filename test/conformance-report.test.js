@@ -36,7 +36,7 @@ ok(os.homedir() === HOME, 'os.homedir() follows $HOME — the temp store is reac
 
 const R = require('../scripts/conformance-report.js');
 const { computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
-        storeState, findStoreCopyByContent, isInside, check } = R;
+        classifyBinding, storeState, findStoreCopyByContent, isInside, check } = R;
 
 const STORE = path.join(HOME, '.anvideck');
 const PROJECTS = path.join(STORE, 'projects');
@@ -275,6 +275,12 @@ console.log('\nrepo — tracked and ignored are two questions, asked separately'
   const d = project('clean', { repo: true, gitignore: '.anvi\n', settings: grantFor('clean') });
   fs.symlinkSync(path.join(PROJECTS, 'clean', '.anvi'), path.join(d, '.anvi'));
   eq(classifyRepo(d, 'clean').state, 'CLEAN', 'ignored, not tracked');
+  // …and bound, so it stays the fully-conformant control now that binding is a
+  // check. The fixture has no remote, so this is the location-keyed form — which
+  // also means the integration test exercises that branch end to end.
+  write(path.join(PROJECTS, 'clean', 'PROVENANCE.json'),
+    JSON.stringify({ remote: null, worktrees: [fs.realpathSync(d)] }, null, 2) + '\n');
+  eq(classifyBinding(d).state, 'BOUND', 'and bound to this working copy');
 }
 {
   // The migration left the OLD real directory's paths in the index. `git
@@ -405,6 +411,54 @@ console.log('\nthe store itself is never audited as a project');
   const inStore = path.join(PROJECTS, 'linked');
   has(computeConformance(inStore).skipped, 'inside the store', 'a directory inside the store is skipped');
   eq(computeConformance(inStore).ok, true, 'and does not count as a finding');
+}
+
+console.log('\nbinding — a basename is not an identity');
+{
+  // The demonstration from the issue, as a fixture: a directory that shares a
+  // project's NAME and has nothing else to do with it. Before binding it reads
+  // the project's store dir; the check is what makes that visible.
+  storeProject('bound');
+  const owner = project('bound', { repo: true, gitignore: '.anvi\n', settings: grantFor('bound') });
+  fs.symlinkSync(path.join(PROJECTS, 'bound', '.anvi'), path.join(owner, '.anvi'));
+  git(owner, 'remote', 'add', 'origin', 'git@github.com:owner/real.git');
+
+  eq(classifyBinding(owner).state, 'UNBOUND', 'with no record, nothing verifies');
+  ok(/any directory named/.test(classifyBinding(owner).detail), 'and the finding says what that exposes');
+  ok(/bind-store/.test(classifyBinding(owner).remedy), 'and names the command that fixes it');
+
+  write(path.join(PROJECTS, 'bound', 'PROVENANCE.json'),
+    JSON.stringify({ remote: 'github.com/owner/real', worktrees: [fs.realpathSync(owner)] }, null, 2) + '\n');
+  eq(classifyBinding(owner).state, 'BOUND', 'the owner verifies against its own record');
+
+  // The stranger: same basename, different repository, pointed at the same store
+  // project — which is exactly what basename addressing does today.
+  const stranger = project('bound-stranger', { repo: true });
+  git(stranger, 'remote', 'add', 'origin', 'git@github.com:someone/unrelated.git');
+  fs.symlinkSync(path.join(PROJECTS, 'bound', '.anvi'), path.join(stranger, '.anvi'));
+  const v = classifyBinding(stranger);
+  eq(v.state, 'MISMATCH', 'a stranger sharing the store project is a mismatch');
+  ok(/someone\/unrelated/.test(v.detail) && /owner\/real/.test(v.detail),
+     'and the detail names BOTH remotes, so the reader can tell which side is wrong');
+
+  // Two working copies of one repository is the CORRECT case and must not be
+  // rejected — that is the other half of the same defect.
+  const second = project('bound-second', { repo: true });
+  git(second, 'remote', 'add', 'origin', 'https://github.com/Owner/Real.git');
+  fs.symlinkSync(path.join(PROJECTS, 'bound', '.anvi'), path.join(second, '.anvi'));
+  const s = classifyBinding(second);
+  eq(s.state, 'BOUND', 'a second working copy of the same repo binds, despite a different URL spelling');
+  ok(s.notes.some(n => /not yet listed/.test(n)), 'and is noted as not yet recorded');
+
+  // A record that cannot be parsed must not read as "never bound".
+  storeProject('rotten');
+  const rotten = project('rotten', { repo: true });
+  fs.symlinkSync(path.join(PROJECTS, 'rotten', '.anvi'), path.join(rotten, '.anvi'));
+  write(path.join(PROJECTS, 'rotten', 'PROVENANCE.json'), '{ not json');
+  eq(classifyBinding(rotten).state, 'MALFORMED', 'a corrupt record is its own state, not first contact');
+
+  const unlinked = project('unlinked-bind', { repo: true });
+  eq(classifyBinding(unlinked).state, 'NOT_APPLICABLE', 'nothing to bind when nothing links into the store');
 }
 
 console.log('\nintegration — spawn the SHIPPED script against the temp store');
