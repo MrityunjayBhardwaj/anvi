@@ -55,6 +55,17 @@ function mkproj(name, remote, storeName = name) {
   fs.symlinkSync(path.join(PROJECTS, storeName, '.anvi'), path.join(d, '.anvi'));
   return fs.realpathSync(d);
 }
+// A store-backed directory with NO `.anvi` link — it reaches its store project
+// by basename alone. `parent` exists so two fixtures can share one basename from
+// different places, which is how the collision actually appears on disk.
+function mkunlinked(name, remote, parent = WORK) {
+  const d = path.join(parent, name);
+  fs.mkdirSync(d, { recursive: true });
+  if (remote) { git(d, 'init', '-q', '-b', 'main'); git(d, 'remote', 'add', 'origin', remote); }
+  fs.mkdirSync(path.join(PROJECTS, name, '.anvi'), { recursive: true });
+  return fs.realpathSync(d);
+}
+
 // Never null: under a deliberately broken guard no record gets written, and a
 // test that dereferences null ABORTS instead of reporting. That hides exactly
 // the assertions a falsification run exists to check — the later refusal cases
@@ -123,14 +134,72 @@ console.log('a corrupt record is refused, never silently replaced');
   eq(rawRecord('rotten'), '{ not json', 'and left exactly as found');
 }
 
-console.log('a project that does not link into the store is skipped, not bound');
+console.log('a directory with no store project at all is skipped, not bound');
 {
   const d = path.join(WORK, 'loose');
   fs.mkdirSync(d, { recursive: true });
   git(d, 'init', '-q', '-b', 'main');
-  eq(BS.classify(d).state, 'NOT_LINKED', 'nothing to bind');
-  BS.main(['--apply', d]);
+  eq(BS.classify(d).state, 'NO_STORE_PROJECT', 'nothing to bind — there is no project to bind it TO');
+  const said = capture(() => BS.main(['--apply', d]));
   ok(!fs.existsSync(path.join(PROJECTS, 'loose')), 'and no store project is conjured for it');
+  // The two skips are advised differently on purpose: this one needs onboarding,
+  // not a migration, and naming the wrong remedy is how a decline becomes a dead end.
+  ok(/Onboard it first/.test(said), 'and it points at onboarding rather than at migrate');
+}
+
+console.log('a project whose .anvi is LOCAL is skipped as unlinked, and never retried by name');
+{
+  // The store project exists under this basename, so a name-based retry WOULD
+  // find it. It must not: a local `.anvi` wins resolution outright, so this
+  // directory never reads the store and has no identity question to answer.
+  const d = path.join(WORK, 'has-local');
+  fs.mkdirSync(path.join(d, '.anvi'), { recursive: true });
+  git(d, 'init', '-q', '-b', 'main');
+  fs.mkdirSync(path.join(PROJECTS, 'has-local', '.anvi'), { recursive: true });
+  eq(BS.classify(d).state, 'NOT_LINKED', 'local catalogues are a migrate situation, not a binding one');
+  BS.main(['--apply', d]);
+  eq(rawRecord('has-local'), null, 'and no record is written for the store project it did not claim');
+}
+
+console.log('an UNLINKED but store-backed directory binds — the case that was unreachable');
+{
+  // No `.anvi` at all: this directory reaches the store by basename alone, which
+  // is the population fail-closed resolution affects. Before the split it
+  // reported NOT_LINKED and the tool refused to act, so the remedy a decline
+  // names would not have run.
+  const d = mkunlinked('unlinked-real', 'git@github.com:owner/unlinked-real.git');
+  const c = BS.classify(d);
+  eq(c.state, 'UNBOUND', 'it is reachable, and it is not yet bound');
+  eq(c.via, 'basename', 'and the route is recorded as by-name, not by-link');
+
+  const said = capture(() => BS.main(['--apply', d]));
+  ok(/reaches .* by NAME alone/.test(said), 'the output says how it was reached, since that is the weaker case');
+  const rec = recordOf('unlinked-real');
+  eq(rec.remote, 'github.com/owner/unlinked-real', 'the remote is recorded');
+  eq(rec.worktrees.join(','), d, 'along with this working copy');
+  eq(BS.classify(d).state, 'BOUND', 'and it verifies afterwards without ever being linked');
+}
+
+console.log('an unlinked same-named STRANGER is refused — the new route is not a way in');
+{
+  // The shape observed on disk: two directories share a basename, one is the
+  // real project and one is unrelated. The by-name route must let the owner bind
+  // and must still refuse the stranger, or the fix hands out the very access it
+  // exists to withhold. Neither has a remote, so this is the location-keyed path.
+  const owner = mkunlinked('shared-name', null);
+  BS.main(['--apply', owner]);
+  eq(BS.classify(owner).state, 'BOUND', 'the owner binds location-keyed');
+  const before = rawRecord('shared-name');
+
+  const elsewhere = path.join(TMP, 'elsewhere');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  const stranger = mkunlinked('shared-name', null, elsewhere);
+  eq(BS.classify(stranger).state, 'MISMATCH', 'a same-named directory elsewhere is a mismatch, not a second worktree');
+
+  const said = capture(() => BS.main(['--apply', stranger]));
+  eq(rawRecord('shared-name'), before, 'and --apply leaves the record BYTE-IDENTICAL');
+  ok(/MISMATCH — REFUSING/.test(said), 'and it says it refused');
+  ok(!recordOf('shared-name').worktrees.includes(stranger), 'the stranger is not added as a worktree');
 }
 
 console.log('a project with no remote binds by location');
