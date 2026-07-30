@@ -57,39 +57,11 @@ const storeRoot = () => path.join(os.homedir(), '.anvideck');
 const realSafe = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
 const tilde = (p) => (p && p.startsWith(os.homedir()) ? '~' + p.slice(os.homedir().length) : p);
 
-// The store project a directory reaches, and HOW it reaches it. There are two
-// routes and they must stay distinguishable:
-//
-//   via 'link'      .anvi resolves into ~/.anvideck/projects/<X>. Authoritative —
-//                   a symlink does not follow a directory that gets renamed.
-//   via 'basename'  no .anvi at all, and ~/.anvideck/projects/<basename> exists.
-//                   This is the *only* address such a directory has, and it is
-//                   exactly the population #105 is about.
-//
-// Deriving the candidate from the basename here is not the defect it looks like.
-// The basename picks WHICH record to consult; the record decides whether to
-// serve. Using a basename to AUTHORIZE is the bug — using it to locate the
-// question is unavoidable, because an unlinked directory has no other address,
-// and refusing to look is what left these directories unbindable.
-//
-// Returns null when the directory is not store-backed at all. An `.anvi` that
-// exists but points somewhere other than the store is deliberately NOT retried
-// by name: it has local catalogues, so store resolution never wins for it.
-function storeProjectDirFor(projectDir) {
-  const projectsRoot = realSafe(path.join(storeRoot(), 'projects'));
-  if (!projectsRoot) return null;
-
-  const anvi = realSafe(path.join(projectDir, '.anvi'));
-  if (anvi) {
-    const rel = path.relative(projectsRoot, anvi);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return null; // local .anvi — not store-backed
-    const parent = path.dirname(anvi);
-    return parent === projectsRoot ? null : { store: parent, via: 'link' };
-  }
-
-  const byName = realSafe(path.join(projectsRoot, path.basename(projectDir)));
-  return byName ? { store: byName, via: 'basename' } : null;
-}
+// Which store project this directory reaches, and how. Delegated to the identity
+// module so this tool and the conformance report that grades it resolve the
+// question identically — two implementations of "whose project is this" is the
+// divergence the shared modules exist to prevent.
+const storeProjectDirFor = (projectDir) => ID.storeProjectFor(projectDir, storeRoot());
 
 function classify(projectDir) {
   const dir = realSafe(projectDir) || path.resolve(projectDir);

@@ -129,6 +129,48 @@ function writeProvenance(storeProjectDir, record) {
   return body;
 }
 
+// --- which store project a directory reaches --------------------------------
+// Two routes, and they must stay distinguishable:
+//
+//   via 'link'      .anvi resolves into ~/.anvideck/projects/<X>. Authoritative —
+//                   a symlink does not follow a directory that gets renamed.
+//   via 'basename'  no .anvi at all, and ~/.anvideck/projects/<basename> exists.
+//                   The only address such a directory has, and exactly the
+//                   population the same-name defect is about.
+//
+// Deriving the candidate from the basename is not the defect it resembles: the
+// basename picks WHICH record to consult, and the record decides whether to
+// serve. Using a basename to AUTHORIZE is the bug; using it to locate the
+// question is unavoidable.
+//
+// Returns null when the directory is not store-backed. An `.anvi` that exists but
+// points elsewhere is deliberately NOT retried by name — it has local
+// catalogues, so store resolution never wins for it and there is nothing to
+// verify.
+//
+// This lives here, rather than in each consumer, because "which store project is
+// this directory's" is one question: the tool that writes bindings and the report
+// that grades them must never be able to disagree about the answer.
+function storeProjectFor(projectDir, storeRoot) {
+  const projectsRoot = realpathOrNull(path.join(storeRoot, 'projects'));
+  if (!projectsRoot) return null;
+
+  const anvi = realpathOrNull(path.join(projectDir, '.anvi'));
+  if (anvi) {
+    const rel = path.relative(projectsRoot, anvi);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null; // local .anvi
+    const parent = path.dirname(anvi);
+    return parent === projectsRoot ? null : { store: parent, via: 'link' };
+  }
+
+  const byName = realpathOrNull(path.join(projectsRoot, path.basename(projectDir)));
+  return byName ? { store: byName, via: 'basename' } : null;
+}
+
+function realpathOrNull(p) {
+  try { return fs.realpathSync(p); } catch { return null; }
+}
+
 // --- the verdict ------------------------------------------------------------
 // Four states, and the distinction that matters is UNBOUND vs MISMATCH:
 //
@@ -178,4 +220,5 @@ function verifyBinding(identity, record) {
 module.exports = {
   PROVENANCE, normalizeRemote, identityOf, defaultRun,
   provenancePath, readProvenance, writeProvenance, verifyBinding,
+  storeProjectFor,
 };
