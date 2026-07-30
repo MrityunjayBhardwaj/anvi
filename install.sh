@@ -124,6 +124,7 @@ migrate_projects() {
   else
     local link_sh="$SCRIPT_DIR/scripts/link-catalogues.sh"
     local grant_sh="$SCRIPT_DIR/scripts/grant-catalogue-access.sh"
+    local bind_js="$SCRIPT_DIR/scripts/bind-store.js"
     local plan_sh="$SCRIPT_DIR/scripts/migrate-planning.sh"
     local proj
     for proj in "${PROJECTS[@]}"; do
@@ -135,6 +136,17 @@ migrate_projects() {
       fi
       bash "$link_sh"  --apply "$proj" || echo "  ⚠ link-catalogues refused for $proj (resolve by hand — see message above)"
       bash "$grant_sh" --apply "$proj" || echo "  ⚠ grant refused for $proj (resolve by hand — see message above)"
+      # Bind BEFORE the documents move. Resolution now fails closed on a store
+      # project whose identity cannot be verified, so a project that is linked
+      # but unbound resolves to nothing — linking it without binding it would
+      # hand back a project that reads as migrated and serves nothing.
+      #
+      # This is not the auto-binding the design forbids. What must never bind
+      # automatically is a directory that merely READ a project, because that
+      # lets a stranger claim one by looking at it. Here an operator has named
+      # this directory on the command line, which is the confirmation. A record
+      # belonging to a different repository is still refused, untouched.
+      node "$bind_js"  --apply "$proj" || echo "  ⚠ bind-store refused for $proj (resolve by hand — see message above)"
       # The project-management tree, AFTER the link: it is durable because it
       # lands inside .anvi, so migrating it before .anvi points at the store
       # would move documents somewhere nothing commits. Ordering is the
