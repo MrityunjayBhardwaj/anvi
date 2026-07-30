@@ -190,6 +190,18 @@ Observe that the update actually landed — do not infer from "the script exited
    mutates, the state detection is wrong; stop and find out why.
 5. Per-project: each migrated project's `.anvi` is a symlink into the store and
    its `.claude/settings.local.json` grants `~/.anvideck/projects/<name>`.
+5b. Per-project BINDING — the link and the grant are both true of a project the
+   resolver now declines, so neither answers whether the project can actually read
+   its own catalogues. Run the conformance report and read the `binding` line:
+
+   ```bash
+   node "$REPO/scripts/conformance-report.js" <project-dir>
+   ```
+
+   `BOUND` is the pass. `UNBOUND` or `MISMATCH` means that project's knowledge is
+   not being served — report it with the remedy (`scripts/bind-store.js --apply
+   <dir>` for unbound; a mismatch is a real collision and wants a human). Do not
+   report the update as successful for a project that is not bound.
 6. Store durability: `ensure-store-durable.sh "$STORE"` reports DURABLE (unless the
    user declined the backup repo, in which case it is correctly still NO_REPO/
    NO_REMOTE and that was their explicit choice — say so).
