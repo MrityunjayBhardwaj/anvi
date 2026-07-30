@@ -7,7 +7,7 @@ anvi runs standalone, without a GSD installation.
 |---|---|
 | Source | `~/.claude/get-shit-done/bin/lib/` |
 | GSD version | **1.27.0** |
-| Vendored | 2026-07-07 (byte-identical, verified with `diff -r`) |
+| Vendored | 2026-07-07 (byte-identical at that date — **no longer true, see the warning below**) |
 | Consumer | `bin/anvi-tools.cjs` (`GSD_LIB` points here) |
 | License | MIT — see [`LICENSE.GSD`](./LICENSE.GSD) |
 
@@ -27,6 +27,21 @@ distributed under GPL-3.0, while these vendored modules keep their MIT notice.
 This is inherited code — ~9,250 lines encoding years of `.planning/` semantics we did
 not write. Modifying a module you don't fully understand risks breaking invariants that
 aren't visible from the call site.
+
+> ⚠ **Eleven of these sixteen modules now carry anvi patches — do NOT re-vendor wholesale.**
+> Measured against upstream 1.27.0 (the version above, which has not moved): `core.cjs` 302
+> differing lines, `init.cjs` 148, `commands.cjs` 78, `phase.cjs` 40, `config.cjs` 18, and
+> smaller deltas in `profile-output`, `verify`, `uat`, `milestone`, `state`, `template`.
+> The divergence is ours, not upstream drift.
+>
+> `core.cjs` in particular holds the shared-resolver integration (`anviDirFor`), the
+> project-management tree resolution, and identity enforcement on the write path.
+> Following the "re-vendor the module wholesale" advice below would delete all three in
+> one step, silently, while reading as safe housekeeping.
+>
+> A per-module patch inventory and a check that fails when this file and the tree disagree
+> are tracked in [#116](https://github.com/MrityunjayBhardwaj/anvi/issues/116). Until then:
+> re-vendor only after diffing, and re-apply the anvi commits for that module.
 
 The policy is **vendor now, rewrite later** ([#1](https://github.com/MrityunjayBhardwaj/anvi/issues/1)):
 
