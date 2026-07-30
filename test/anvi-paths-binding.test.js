@@ -261,6 +261,23 @@ console.log('end to end: the CLI refuses from a stranger, and creates nothing');
   ok(!/"root"/.test(r.stdout || ''), 'and prints no resolved root — the old code printed a local path here');
   ok(!fs.existsSync(path.join(s, '.anvi')),
      'and creates NO local .anvi — the silent redirect, which reported success while writing somewhere else');
+
+  // The SECOND write path. catalogue-append resolved through the read entry
+  // point, where null means both "no catalogues here" and "declined" — so a
+  // refused caller was told "No .anvi/ directory found. Run /anvi:init first."
+  // Nothing was written to the other project, but only because null happened to
+  // reach an error branch; the refusal was accidental, and the advice pointed at
+  // creating a local .anvi, which is not what went wrong.
+  const target = path.join(PROJECTS, 'clitest', '.anvi', 'hetvabhasa.md');
+  const before = fs.readFileSync(target, 'utf8');
+  const a = spawnSync(process.execPath, [CLI, 'catalogue-append', 'hetvabhasa',
+    JSON.stringify({ id: 'H99', title: 'injected by a stranger', root_cause: 'x', detection: 'y', trap: 'z', fix: 'w' })], {
+    cwd: s, encoding: 'utf8', env: { ...process.env, HOME: TMP },
+  });
+  eq(a.status, 3, 'appending from a stranger exits 3 — refused, not "not initialised"');
+  ok(/refusing to write/.test(a.stderr), 'and says it refused to WRITE');
+  ok(!/Run \/anvi:init first/.test(a.stderr), 'and no longer advises init, which would not address the refusal');
+  eq(fs.readFileSync(target, 'utf8'), before, "and the other project's catalogue is byte-identical");
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });
