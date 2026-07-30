@@ -583,4 +583,14 @@ async function main() {
   }
 }
 
-main();
+// A binding refusal is an expected outcome, not a crash: this directory resolves
+// into a store project it cannot prove is its own. Report it as the refusal it is
+// — one legible line and a non-zero exit — rather than a stack trace, which reads
+// as a bug in the tool and invites working around it.
+main().catch((e) => {
+  if (e && e.code === 'ANVI_BINDING_REFUSED') {
+    console.error(e.message);
+    process.exit(3);
+  }
+  throw e;
+});

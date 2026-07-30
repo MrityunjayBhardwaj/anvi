@@ -543,14 +543,30 @@ const _anviPaths = loadAnviPathsForPlanning();
  * project is created in the right place.
  */
 function anviDirFor(cwd) {
-  if (_anviPaths) {
-    const resolved = _anviPaths.resolveDir(cwd, '.anvi');
-    if (resolved) return resolved;
-  } else {
+  if (!_anviPaths) {
     warnOnce(cwd, 'resolver',
       'anvi: shared path resolver not found; using cwd-only .anvi lookup.\n');
+    return path.join(cwd, '.anvi');
   }
-  return path.join(cwd, '.anvi');
+
+  // An installed resolver may predate identity enforcement — the two install
+  // trees are not guaranteed to be the same version. Fall back to the old
+  // behaviour rather than crash on a missing function.
+  if (typeof _anviPaths.requireDirForWrite !== 'function') {
+    const resolved = _anviPaths.resolveDir(cwd, '.anvi');
+    return resolved || path.join(cwd, '.anvi');
+  }
+
+  // This is the WRITE path — every planning document lands under what this
+  // returns — so it must keep three outcomes apart, and the old code kept only
+  // two. It called resolveDir and read null as "fresh project, create locally".
+  // Once resolution can DECLINE, null also means "refused", so a stranger's
+  // planning tree was created in its own directory and every workflow reported
+  // success: the refusal became a silent redirect. requireDirForWrite throws on
+  // a refusal and returns null only when nothing exists yet, which is the one
+  // case where creating locally is right.
+  const resolved = _anviPaths.requireDirForWrite(cwd, '.anvi');
+  return resolved || path.join(cwd, '.anvi');
 }
 
 /**
