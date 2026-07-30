@@ -98,12 +98,22 @@ Roadmapper produces ROADMAP.md with goal-backward success criteria per phase.
 </step>
 
 <step name="initialize_anvi">
-After .anvi/project_management/ is created, also initialize .anvi/:
-- Create `.anvi/hetvabhasa.md` with project-specific section
-- Create `.anvi/vyapti.md` with project-specific section
-- Create `.anvi/krama.md` with project-specific section
+After .anvi/project_management/ is created, set the project up as an anvi project by
+running **`/anvi:init`** — do not create the catalogues here.
 
-This gives the cognitive OS a place to grow knowledge.
+Catalogues live in ONE place, the centralized store `~/.anvideck/projects/<name>/.anvi/`,
+which the project reaches through a symlinked `.anvi`. Setting a project up means store
++ link + scoped grant + binding, in that order, and a project missing any of them is not
+merely incomplete: an unbound project's catalogues are declined for reads and refused for
+writes, so writing three files into a local `.anvi/` here would produce a project that
+resolves to nothing while this workflow reported success.
+
+`/anvi:init` owns that sequence and verifies its own result. Restating it here is how this
+step went stale once already — one owner, one copy.
+
+If `/anvi:init` reports anything other than a clean conformance run, stop and surface it
+rather than continuing into the roadmap; everything downstream writes to catalogues that
+would not be served.
 </step>
 
 <step name="create_project_md">

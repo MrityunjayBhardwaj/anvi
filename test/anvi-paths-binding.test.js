@@ -124,6 +124,30 @@ console.log('the remedy named must be one that will actually act');
   ok(/bind-store\.js --apply/.test(unb.err), 'and THERE the remedy is bind-store, which does act');
 }
 
+// The shape /anvi:init produces. Every unbound case above reaches the store by
+// BASENAME (link:false) — the stranger. A project that init has set up is the
+// opposite: it is linked, granted, and legitimately its own store project. It
+// was still declined, because linkedness is not identity, and no case here said
+// so. Init not binding was invisible for exactly as long as this shape was.
+console.log('a LINKED project is still declined until it is bound — linkedness is not identity');
+{
+  mkstore('initshape');
+  const d = mkwork('initshape', { remote: 'git@github.com:owner/initshape.git' });  // link:true
+  ok(fs.lstatSync(path.join(d, '.anvi')).isSymbolicLink(), 'precondition: .anvi IS a symlink into the store');
+
+  const r = captureErr(() => P.resolveDir(d, '.anvi'));
+  eq(r.value, null, 'linked but unbound is declined for READS, despite the store holding real content');
+  eq(P.resolveDirVerdict(d, '.anvi').state, 'UNBOUND', 'and the state names WHY, so this cannot pass as an empty store');
+  let wState = 'ALLOWED';
+  try { P.requireDirForWrite(d, '.anvi'); } catch (e) { wState = e.state; }
+  eq(wState, 'UNBOUND', 'and writes are refused');
+
+  // The control: bind that same directory and it is served. Without this, a
+  // resolver broken shut would produce the three assertions above unchanged.
+  ID.writeProvenance(path.join(PROJECTS, 'initshape'), ID.identityOf(d));
+  ok(!!P.resolveDir(d, '.anvi'), 'CONTROL: the identical directory IS served once bound — the decline was the binding, not the fixture');
+}
+
 console.log('two working copies of one repository are both served');
 {
   mkstore('twin');
