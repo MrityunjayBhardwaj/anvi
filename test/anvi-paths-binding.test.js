@@ -304,6 +304,46 @@ console.log('end to end: the CLI refuses from a stranger, and creates nothing');
   eq(fs.readFileSync(target, 'utf8'), before, "and the other project's catalogue is byte-identical");
 }
 
+// A store project IS the owner of its own directory. `storeProjectOf` answers
+// "is this inside the store" without looking at the caller, so a project whose
+// working directory is its store directory was refused the knowledge it owns.
+console.log('a store project reading its OWN directory is served — it is not a stranger to itself');
+{
+  const own = fs.realpathSync(mkstore('selfowned'));      // cwd IS the store project
+  const v = P.resolveDirVerdict(own, '.anvi');
+  eq(v.state, 'LOCAL', 'the caller IS this project, so there is no identity to prove');
+  ok(!!P.resolveDir(own, '.anvi'), 'and its catalogues are served');
+  let wOk = true;
+  try { P.requireDirForWrite(own, '.anvi'); } catch { wOk = false; }
+  ok(wOk, 'and it may write to them — a project locked out of its own catalogues cannot record anything');
+}
+
+// The trap in the fix above. "Inside cwd" decided on path STRINGS would serve
+// any project's catalogues to anyone able to create a symlink, which is the
+// whole defect enforcement exists to close. Decided on realpaths, the link
+// lands in the store and stays gated. The victim is BOUND here on purpose, so a
+// decline means MISMATCH — the guard acting — rather than merely "no record".
+console.log('ADVERSARIAL: a symlink cannot fake being inside the caller\'s own directory');
+{
+  const victim = mkstore('victim');
+  const owner = mkwork('victim', { remote: 'git@github.com:owner/victim.git' });
+  ID.writeProvenance(victim, ID.identityOf(owner));
+  ok(!!P.resolveDir(owner, '.anvi'), 'precondition: the real owner is served');
+
+  const evil = path.join(WORK, 'evil');
+  fs.mkdirSync(evil, { recursive: true });
+  git(evil, 'init', '-q', '-b', 'main');
+  git(evil, 'remote', 'add', 'origin', 'git@github.com:someone/else.git');
+  fs.symlinkSync(path.join(victim, '.anvi'), path.join(evil, '.anvi'));
+  const e = fs.realpathSync(evil);
+
+  ok(fs.existsSync(path.join(e, '.anvi')), "precondition: the stranger's .anvi exists as a path inside its own dir");
+  const ev = P.resolveDirVerdict(e, '.anvi');
+  ok(ev.state !== 'LOCAL', `a symlink into the store is NOT local (got ${ev.state})`);
+  eq(P.resolveDir(e, '.anvi'), null, "and the victim's catalogues are not served through it");
+  eq(ev.state, 'MISMATCH', 'the record exists and this caller is not it — the guard acted, it did not merely find nothing');
+}
+
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? '✓' : '✗'} anvi-paths binding: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

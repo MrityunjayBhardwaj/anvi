@@ -144,11 +144,36 @@ function identityFor(dir) {
   return _identityCache.get(key);
 }
 
+// Whether `dir` physically lives inside `cwd` — the caller's own directory, which
+// it therefore owns and has nothing to prove about.
+//
+// BY REALPATH, NEVER BY PATH STRING. A stranger can place a symlink at
+// `<their dir>/.anvi` pointing into another project's store directory: that is
+// "inside cwd" as text, so a string comparison would hand another project's
+// catalogues to anyone who can create a symlink — reopening precisely what the
+// binding check closed. Resolved, such a link lands in the store, is not inside
+// cwd, and stays gated.
+function isInside(cwd, dir) {
+  const base = realSafe(cwd);
+  const real = realSafe(dir);
+  if (!base || !real) return false;
+  const rel = path.relative(base, real);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 // Whether `dir`, resolved for `cwd`, may be served. Verdict only — the policy
 // tables above are applied by the callers, because read and write differ.
 function checkAccess(cwd, dir) {
   const storeProject = storeProjectOf(dir);
   if (!storeProject) return { state: 'LOCAL', storeProject: null, reason: 'resolved inside the project — no identity to verify' };
+  // A store project reading its OWN directory. `storeProjectOf` answers "is this
+  // inside the store" and never looks at the caller, so without this a project
+  // whose working directory IS its store directory is refused the knowledge it
+  // owns. "Resolved inside cwd" is the condition the policy table has always
+  // stated for LOCAL; this is where it is actually decided.
+  if (isInside(cwd, dir)) {
+    return { state: 'LOCAL', storeProject, reason: 'resolved inside the caller\'s own directory — the caller IS this project' };
+  }
   if (!IDENTITY) {
     return {
       state: 'UNVERIFIABLE', storeProject,
