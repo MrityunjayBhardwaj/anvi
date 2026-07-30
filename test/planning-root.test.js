@@ -40,6 +40,14 @@ const C = require('../bin/lib/core.cjs');
 const { planningRoot, planningRootRelative, planningPaths, planningDir,
         usesLegacyPlanning, PM_RELATIVE, LEGACY_PM_RELATIVE } = C;
 
+// Bind a store project to a working directory, using the real record writer so
+// the fixture follows the format rather than restating it. Location-keyed: these
+// fixtures have no remote, which is the weaker identity and the one worth
+// exercising here.
+const ID = require('../hooks/anvi-identity.js');
+const bind = (storeName, dir, home = TMP) =>
+  ID.writeProvenance(path.join(home, '.anvideck', 'projects', storeName), { remote: null, worktrees: [dir] });
+
 eq(PM_RELATIVE, path.join('.anvi', 'project_management'), 'tree lives under .anvi/, which is the symlink into the store');
 eq(LEGACY_PM_RELATIVE, '.planning', 'legacy location is the pre-migration top-level tree');
 
@@ -121,6 +129,12 @@ console.log('\n— the centralized layout, where `.anvi` is not under the projec
   fs.mkdirSync(dir, { recursive: true });
   const storeAnvi = path.join(TMP, '.anvideck', 'projects', 'central-proj', '.anvi');
   fs.mkdirSync(path.join(storeAnvi, 'project_management', 'phases'), { recursive: true });
+  // Resolution fails closed on a store project whose identity cannot be
+  // verified, so a store-backed fixture must be BOUND to be a valid project at
+  // all. This is not a concession to the guard: an unbound store project is
+  // precisely what a same-named stranger exploits, so a fixture without a record
+  // would be testing a configuration the system no longer supports.
+  bind('central-proj', dir);
 
   const r = capture(() => ({ root: planningRoot(dir), rel: planningRootRelative(dir), legacy: usesLegacyPlanning(dir) }));
 
@@ -209,6 +223,10 @@ console.log('\n— creating the tree must not fork a project that already has on
   const proj = path.join(TMP, 'shadow-work', 'shadowproj');
   fs.mkdirSync(proj, { recursive: true });
   execFileSync('git', ['init', '-q', '.'], { cwd: proj, stdio: 'pipe' });
+  // This fixture runs the CLI under its OWN home, so it binds under that home.
+  // The path recorded must be the realpath, because that is what identity
+  // resolves to and a record listing anything else would not verify.
+  bind('shadowproj', fs.realpathSync(proj), home);
 
   execFileSync('node', [CLI, 'config-new-project'], {
     cwd: proj, env: { ...process.env, HOME: home }, stdio: 'pipe', encoding: 'utf8',

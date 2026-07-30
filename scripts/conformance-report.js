@@ -485,12 +485,17 @@ function classifyPlanning(dir) {
 // from the basename — assembling the store path from the name would key the
 // check on the very thing it exists to falsify.
 function classifyBinding(dir) {
-  const anvi = realSafe(path.join(dir, '.anvi'));
-  const projectsRoot = realSafe(storeProjects());
-  if (!anvi || !projectsRoot || !isInside(projectsRoot, anvi)) {
-    return check('binding', 'NOT_APPLICABLE', 'not linked into the store — nothing to bind yet');
+  // A directory reaches its store project by LINK or by BASENAME, and the second
+  // route is the one the whole identity arc is about. Gating this check on the
+  // link reported "nothing to bind" for projects that reach the store by name —
+  // ✓ and reassuring, about precisely the projects a same-named stranger can
+  // impersonate, and precisely the ones fail-closed resolution now declines.
+  // NOT_APPLICABLE is now reserved for a directory with no store project at all.
+  const found = IDENT.storeProjectFor(dir, storeRoot());
+  if (!found) {
+    return check('binding', 'NOT_APPLICABLE', 'no store project of this name — nothing to bind yet');
   }
-  const storeProject = path.dirname(anvi);
+  const { store: storeProject, via } = found;
   const identity = IDENT.identityOf(dir);
   const verdict = IDENT.verifyBinding(identity, IDENT.readProvenance(storeProject));
 
@@ -499,6 +504,7 @@ function classifyBinding(dir) {
       ? `${identity.remote}`
       : 'location-keyed (this directory has no remote)');
     if (verdict.unlistedWorktree) c.notes.push('this working copy is not yet listed in the record');
+    if (via === 'basename') c.notes.push('reached by name alone — no .anvi link; the record is what makes that safe');
     return c;
   }
   if (verdict.state === 'UNBOUND') {

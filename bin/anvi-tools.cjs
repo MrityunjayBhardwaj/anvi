@@ -87,8 +87,26 @@ function readCatalogue(cwd, name) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
+// The WRITE counterpart of findAnviDir. A write must refuse on purpose rather
+// than inherit a refusal from the read path: findAnviDir returns null both for
+// "no catalogues here" and for "declined", and appending read that as the first,
+// so a refused caller was told "No .anvi/ directory found. Run /anvi:init first."
+// The outcome was safe — nothing was written to the other project — but only
+// because null happened to reach an error branch, and the advice steered the
+// caller toward creating a local .anvi, which is not what went wrong.
+//
+// The throw propagates to main()'s handler, which reports it and exits 3.
+// Guarded by typeof because the two install trees are not guaranteed to be the
+// same version, and an older resolver has no such function.
+function anviDirForWrite(cwd) {
+  if (anviPaths && typeof anviPaths.requireDirForWrite === 'function') {
+    return anviPaths.requireDirForWrite(cwd, '.anvi');
+  }
+  return findAnviDir(cwd);
+}
+
 function appendToCatalogue(cwd, name, entry) {
-  const anviDir = findAnviDir(cwd);
+  const anviDir = anviDirForWrite(cwd);
   if (!anviDir) {
     console.error('No .anvi/ directory found. Run /anvi:init first.');
     process.exit(1);
@@ -583,4 +601,14 @@ async function main() {
   }
 }
 
-main();
+// A binding refusal is an expected outcome, not a crash: this directory resolves
+// into a store project it cannot prove is its own. Report it as the refusal it is
+// — one legible line and a non-zero exit — rather than a stack trace, which reads
+// as a bug in the tool and invites working around it.
+main().catch((e) => {
+  if (e && e.code === 'ANVI_BINDING_REFUSED') {
+    console.error(e.message);
+    process.exit(3);
+  }
+  throw e;
+});

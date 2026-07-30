@@ -12,6 +12,25 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// The identity module, located across both install trees (V7) — a hook loads it
+// from its own directory, the CLI from ~/.claude/hooks. Loaded DEFENSIVELY on
+// purpose: it arrived after some installs were already in place, so a tree that
+// predates it must degrade to a named verdict rather than throw inside a hook.
+// That verdict is UNVERIFIABLE, and it is deliberately not the same as UNBOUND —
+// see the policy tables below.
+function loadIdentity() {
+  const cands = [
+    path.join(__dirname, 'anvi-identity.js'),
+    path.join(os.homedir(), '.claude', 'hooks', 'anvi-identity.js'),
+  ];
+  for (const c of cands) { try { return require(c); } catch { /* next layout */ } }
+  return null;
+}
+const IDENTITY = loadIdentity();
+
+const realSafe = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+const storeProjectsRoot = () => path.join(os.homedir(), '.anvideck', 'projects');
+
 // kind: '.anvi' | 'ref' | 'investigations'
 function candidates(cwd, kind) {
   const name = path.basename(cwd);
@@ -67,12 +86,163 @@ function warnIfSplitBrain(kind, existing) {
   );
 }
 
-// Returns the first existing directory for `kind`, or null if none exist.
-// First existing candidate wins → project-local overrides centralized.
-function resolveDir(cwd, kind) {
+// --- identity enforcement ---------------------------------------------------
+//
+// The store is addressed as ~/.anvideck/projects/<basename>/<kind>, and a
+// basename is not an identity: an empty directory sharing a project's name reads
+// that project's whole catalogue set, and — now that the project-management tree
+// lives under `.anvi` — a write command writes its plans and state there too.
+//
+// So a resolved directory that lands INSIDE the store must prove it belongs to
+// the caller. A directory that resolves inside `cwd` proves nothing, because
+// there is nothing to prove: it is the caller's own.
+//
+// Note the asymmetry between reads and writes. It is not a hedge, it is the
+// shape of the damage: a wrong read is recoverable the moment it is noticed,
+// while a wrong write lands another project's plan in this project's tree and
+// the caller cannot tell it happened. So reads decline and say why; writes
+// refuse outright.
+//
+//   state         read            write     meaning
+//   LOCAL         serve           allow     resolved inside cwd — no store involved
+//   BOUND         serve           allow     identity verified against the record
+//   UNVERIFIABLE  serve + warn    REFUSE    our own identity module is missing
+//   UNBOUND       decline         REFUSE    no record — bind it first, never automatically
+//   MISMATCH      decline         REFUSE    a record exists and this caller is not it
+//   MALFORMED     decline         REFUSE    a record exists and cannot be read
+//
+// UNVERIFIABLE is deliberately NOT folded into UNBOUND. UNBOUND is a fact about
+// the caller and declining is the correct answer; UNVERIFIABLE is a fact about
+// this installation, and punishing every read because our own module is absent
+// would break working projects to enforce a rule we cannot currently evaluate.
+// Writes still refuse there, because an unverifiable write is the unrecoverable
+// direction and refusing costs only an error message.
+const READ_OK = new Set(['LOCAL', 'BOUND', 'UNVERIFIABLE']);
+const WRITE_OK = new Set(['LOCAL', 'BOUND']);
+
+// The store project a resolved directory belongs to, derived from where the path
+// actually LANDS — never assembled from a basename, which is the defect itself.
+// Returns null when the path is not inside the store at all.
+function storeProjectOf(dir) {
+  const root = realSafe(storeProjectsRoot());
+  if (!root) return null;
+  const real = realSafe(dir);
+  if (!real) return null;
+  const rel = path.relative(root, real);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return path.join(root, rel.split(path.sep)[0]);
+}
+
+// `identityOf` shells out to git, and this runs on a hot path — every planning
+// path lookup reaches it. Cache per resolved directory: a directory's remote does
+// not change inside one short-lived hook or CLI process. The provenance RECORD is
+// deliberately NOT cached, so a binding written mid-process takes effect at once.
+const _identityCache = new Map();
+function identityFor(dir) {
+  const key = realSafe(dir) || dir;
+  if (!_identityCache.has(key)) _identityCache.set(key, IDENTITY.identityOf(key));
+  return _identityCache.get(key);
+}
+
+// Whether `dir`, resolved for `cwd`, may be served. Verdict only — the policy
+// tables above are applied by the callers, because read and write differ.
+function checkAccess(cwd, dir) {
+  const storeProject = storeProjectOf(dir);
+  if (!storeProject) return { state: 'LOCAL', storeProject: null, reason: 'resolved inside the project — no identity to verify' };
+  if (!IDENTITY) {
+    return {
+      state: 'UNVERIFIABLE', storeProject,
+      reason: 'anvi-identity.js is not present in this installation, so the binding cannot be checked — re-run install.sh',
+    };
+  }
+  const v = IDENTITY.verifyBinding(identityFor(cwd), IDENTITY.readProvenance(storeProject));
+  return { state: v.state, storeProject, reason: v.reason };
+}
+
+// The remedy differs by state, and naming one that will not act is how a decline
+// becomes a dead end: bind-store REFUSES a MISMATCH by design, so telling anyone
+// to run it there would be advice that cannot work.
+function remedyFor(state, cwd, storeProject) {
+  const record = IDENTITY ? path.join(storeProject, IDENTITY.PROVENANCE) : path.join(storeProject, 'PROVENANCE.json');
+  switch (state) {
+    case 'UNBOUND':
+      return `bind this directory: node scripts/bind-store.js --apply ${cwd}`;
+    case 'MISMATCH':
+      return `resolve by hand — this is not repaired automatically, because the caller may be the stranger and nothing here can tell which side is wrong: ${record}`;
+    case 'MALFORMED':
+      return `repair the record by hand: ${record}`;
+    default:
+      return 're-run install.sh so the identity module is present';
+  }
+}
+
+// Say it once per (directory, kind, state) per process, to stderr — never stdout,
+// which is parsed. Same discipline as the split-brain warning: a hot path must
+// not be able to turn one condition into hundreds of identical lines.
+const _said = new Set();
+function sayOnce(prefix, cwd, kind, v) {
+  if (process.env.ANVI_SILENCE_BINDING) return;
+  const key = `${prefix}\0${cwd}\0${kind}\0${v.state}`;
+  if (_said.has(key)) return;
+  _said.add(key);
+  process.stderr.write(
+    `⚠ anvi: ${prefix} '${kind}' for ${cwd} — ${v.state}. ${v.reason}. ` +
+    `${remedyFor(v.state, cwd, v.storeProject)} ` +
+    `(silence: ANVI_SILENCE_BINDING=1)\n`
+  );
+}
+
+// The full picture: which directory would be served, and whether it may be.
+// `dir` is null with state NONE when nothing exists for this kind — which is not
+// a refusal, and callers that create things must keep telling the two apart.
+function resolveDirVerdict(cwd, kind) {
   const existing = existingDirs(cwd, kind);
   warnIfSplitBrain(kind, existing);
-  return existing.length ? existing[0] : null;
+  if (!existing.length) return { dir: null, state: 'NONE', storeProject: null, reason: `no '${kind}' directory resolves for this project` };
+  const dir = existing[0];
+  return { dir, ...checkAccess(cwd, dir) };
+}
+
+// Returns the first existing directory for `kind`, or null if none exist OR the
+// caller cannot prove the directory is its own. First existing candidate wins →
+// project-local overrides centralized.
+//
+// This is the READ path. Null already meant "nothing to serve" and every caller
+// already answers it by staying silent, which is exactly right for a decline
+// too — but the reason is written to stderr, because serving nothing silently is
+// indistinguishable from there being nothing, and that ambiguity is what let the
+// wrong project's knowledge look authoritative in the first place.
+function resolveDir(cwd, kind) {
+  const v = resolveDirVerdict(cwd, kind);
+  if (!v.dir) return null;
+  if (READ_OK.has(v.state)) {
+    if (v.state === 'UNVERIFIABLE') sayOnce('serving unverified', cwd, kind, v);
+    return v.dir;
+  }
+  sayOnce('declining to serve', cwd, kind, v);
+  return null;
+}
+
+// The WRITE path. Three outcomes, and they must stay distinguishable:
+//   a directory  → verified, write there
+//   null         → nothing exists yet; the caller may create its own locally
+//   THROWS       → refused, and the caller must not fall back to anything
+//
+// A refusal cannot be signalled with null here. Callers that create things treat
+// null as "fresh project, make one locally" — correct for NONE, and silently
+// wrong for MISMATCH, where it would report success while writing somewhere the
+// author never named.
+function requireDirForWrite(cwd, kind) {
+  const v = resolveDirVerdict(cwd, kind);
+  if (v.state === 'NONE') return null;
+  if (WRITE_OK.has(v.state)) return v.dir;
+  const err = new Error(
+    `anvi: refusing to write '${kind}' for ${cwd} — ${v.state}. ${v.reason}. ` +
+    `${remedyFor(v.state, cwd, v.storeProject)}`
+  );
+  err.code = 'ANVI_BINDING_REFUSED';
+  err.state = v.state;
+  throw err;
 }
 
 // The project that OWNS a file — its nearest ancestor that is a project root.
@@ -115,4 +285,9 @@ function resolveDirForFile(filePath, kind) {
 
 module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, resolveDirForFile,
+  // Enforcement. `existingDirs` stays deliberately UNGATED: it answers "what
+  // exists", which is the question an auditor asks, and the conformance report
+  // must be able to name an unbound project rather than go blind on exactly the
+  // projects it exists to report.
+  resolveDirVerdict, requireDirForWrite, storeProjectOf, checkAccess,
 };

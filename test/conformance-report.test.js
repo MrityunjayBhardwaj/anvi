@@ -458,7 +458,35 @@ console.log('\nbinding — a basename is not an identity');
   eq(classifyBinding(rotten).state, 'MALFORMED', 'a corrupt record is its own state, not first contact');
 
   const unlinked = project('unlinked-bind', { repo: true });
-  eq(classifyBinding(unlinked).state, 'NOT_APPLICABLE', 'nothing to bind when nothing links into the store');
+  eq(classifyBinding(unlinked).state, 'NOT_APPLICABLE', 'nothing to bind when there is no store project of that name');
+
+  // A directory reaches its store project by LINK or by BASENAME. Reporting
+  // NOT_APPLICABLE for the second route said "✓ nothing to bind" about exactly
+  // the projects a same-named stranger can impersonate — and about the ones
+  // fail-closed resolution declines, so the worklist could not count them.
+  storeProject('namealone');
+  const byName = project('namealone', { repo: true });
+  git(byName, 'remote', 'add', 'origin', 'git@github.com:owner/namealone.git');
+
+  const unboundByName = classifyBinding(byName);
+  eq(unboundByName.state, 'UNBOUND', 'an unlinked, store-backed project is UNBOUND — a real finding, not "not applicable"');
+  ok(/bind-store/.test(unboundByName.remedy), 'and it carries the remedy, so it enters the rollout worklist');
+
+  write(path.join(PROJECTS, 'namealone', 'PROVENANCE.json'),
+    JSON.stringify({ remote: 'github.com/owner/namealone', worktrees: [fs.realpathSync(byName)] }, null, 2) + '\n');
+  const boundByName = classifyBinding(byName);
+  eq(boundByName.state, 'BOUND', 'and once bound it reports BOUND, without ever being linked');
+  ok(boundByName.notes.some(n => /by name alone/.test(n)),
+     'noting the weaker route, because reaching the store by name is worth seeing');
+
+  // A purely local `.anvi` never reads the store, so it has no identity question
+  // — even though a store project of the same name exists and a name-based
+  // lookup would find one.
+  storeProject('haslocal');
+  const localOnly = project('haslocal', { repo: true });
+  fs.mkdirSync(path.join(localOnly, '.anvi'), { recursive: true });
+  eq(classifyBinding(localOnly).state, 'NOT_APPLICABLE',
+     'local catalogues raise no identity question — the store is never consulted for them');
 }
 
 console.log('\nintegration — spawn the SHIPPED script against the temp store');

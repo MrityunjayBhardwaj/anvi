@@ -146,6 +146,13 @@ const STORE = path.join(os.homedir(), '.anvideck', 'projects', projName);
 // A named vendored source (sources/<name>/file), matching production's layout, so
 // #61's manifest can sit beside its source root. V2 REFs core.rb here.
 fs.mkdirSync(path.join(STORE, 'ref', 'sources', 'upstream-lib'), { recursive: true });
+// Resolution fails closed on a store project whose identity cannot be verified,
+// so this store fixture must be bound or the injector correctly declines to read
+// it — and the reference branch below would never be reached. Location-keyed on
+// the realpath, since os.tmpdir() is a symlink on macOS and identity resolves
+// through realpath; recording the unresolved path would not verify.
+require('../hooks/anvi-identity.js').writeProvenance(STORE,
+  { remote: null, worktrees: [fs.realpathSync(P)] });
 fs.writeFileSync(path.join(STORE, 'ref', 'sources', 'upstream-lib', 'core.rb'), '# upstream source\n');
 // #61: the source opts into version-aware freshness with a colocated VENDOR.json.
 fs.writeFileSync(path.join(STORE, 'ref', 'sources', 'upstream-lib', 'VENDOR.json'),
