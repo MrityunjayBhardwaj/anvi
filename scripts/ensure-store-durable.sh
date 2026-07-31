@@ -15,12 +15,15 @@
 #   ensure-store-durable.sh --apply [STORE_DIR]                 # + git init (local, safe)
 #   ensure-store-durable.sh --apply --create-remote \
 #       [--repo-name NAME] [--visibility private|public] [STORE_DIR]   # + create GitHub repo & push
+#   ensure-store-durable.sh --record-decline [STORE_DIR]        # remember the user said no
 #
 # Repo name defaults to "anvi_artifacts", visibility to "private". When a value
 # is not passed as a flag and stdin is a TTY, the user is prompted (empty = default).
 #
 # Emits a machine-readable "STATE: <NO_DIR|NO_REPO|NO_REMOTE|DURABLE>" line first,
-# then a human summary. Exit 0 on detect/no-op/success; non-zero only when an
+# then a human summary. Where the user has already declined the backup, a
+# "DECLINED: <iso8601>" line follows it — a standing answer a caller should read
+# before asking again. Exit 0 on detect/no-op/success; non-zero only when an
 # explicitly-requested creation fails.
 set -u
 
@@ -28,11 +31,12 @@ set -u
 # exercise the gh-absent fallback) without touching PATH.
 GH_BIN="${ANVI_GH_BIN:-gh}"
 
-APPLY=0; CREATE_REMOTE=0; REPO_NAME=""; VIS=""; STORE=""
+APPLY=0; CREATE_REMOTE=0; RECORD_DECLINE=0; REPO_NAME=""; VIS=""; STORE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply)         APPLY=1 ;;
     --create-remote) CREATE_REMOTE=1 ;;
+    --record-decline) RECORD_DECLINE=1 ;;
     --repo-name)     REPO_NAME="${2:-}"; shift ;;
     --visibility)    VIS="${2:-}"; shift ;;
     -*)              echo "unknown flag: $1" >&2; exit 2 ;;
@@ -50,6 +54,35 @@ else                                                                     STATE="
 
 echo "STATE: $STATE"
 echo "  store: $STORE"
+
+# --- the standing answer ----------------------------------------------------
+# A declined backup is a decision, not a state. Recording it is what lets a
+# caller state durability without re-opening a question the user already closed;
+# without this, every init on the machine asks again, and the one prompt that
+# must never become noise is the first to become it.
+#
+# It is deleted the moment the store is actually durable. A record answering a
+# question that no longer exists would be read as a live preference, and the
+# next person to look would honour a decline about a remote that now exists.
+DECLINE_FILE="$STORE/.backup-decision.json"
+if [ "$STATE" = "DURABLE" ] && [ -f "$DECLINE_FILE" ]; then
+  rm -f "$DECLINE_FILE"
+fi
+if [ -f "$DECLINE_FILE" ]; then
+  echo "DECLINED: $(sed -n 's/.*"at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$DECLINE_FILE" | head -1)"
+fi
+
+if [ "$RECORD_DECLINE" = 1 ]; then
+  if [ ! -d "$STORE" ]; then
+    echo "  · nothing to record — the store does not exist yet, so nothing was offered" >&2
+  elif [ "$STATE" = "DURABLE" ]; then
+    echo "  · not recorded — the store is already durable, so there was nothing to decline"
+  else
+    printf '{\n  "backup": "declined",\n  "at": "%s",\n  "state": "%s"\n}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$STATE" > "$DECLINE_FILE"
+    echo "  ✓ recorded — the backup repo was declined at state $STATE; it will not be re-offered outside /anvi:update."
+  fi
+fi
 
 case "$STATE" in
   DURABLE)
@@ -77,9 +110,18 @@ esac
 # --- remote handling (may be reached directly, or after the git init above) ---
 if [ "$STATE" = "NO_REMOTE" ]; then
   if [ "$APPLY" != 1 ] || [ "$CREATE_REMOTE" != 1 ]; then
+    # The STATE is never softened — a user is always entitled to know their
+    # knowledge is on one disk. What changes once they have answered is the
+    # PITCH: an offer already declined is repeated as pressure, not information,
+    # and the prompt that gets dismissed by reflex is the one that mattered.
     echo "  · no git remote — commits stay on this machine, pushed NOWHERE."
-    echo "    Create the backup repo (outward-facing, so opt in explicitly):"
-    echo "      ensure-store-durable.sh --apply --create-remote [--repo-name N] [--visibility private|public] \"$STORE\""
+    if [ -f "$DECLINE_FILE" ]; then
+      echo "    You declined the backup; that answer stands and is not re-offered here."
+      echo "    To change it:  ensure-store-durable.sh --apply --create-remote \"$STORE\""
+    else
+      echo "    Create the backup repo (outward-facing, so opt in explicitly):"
+      echo "      ensure-store-durable.sh --apply --create-remote [--repo-name N] [--visibility private|public] \"$STORE\""
+    fi
     exit 0
   fi
 
