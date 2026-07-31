@@ -28,14 +28,14 @@ is byte-identical; the tree was renamed, not restructured. A legacy `.planning/`
 still read, indefinitely, but says so loudly, and the conformance report names every
 project that has not migrated.
 
-The status word was the other half of the defect, and is fixed too. "The store already
-holds these" and "nothing holds these at all" both reported as `skipped`, which is what
-let the gap survive as long as it did — a reader decides what to do next from that word
-alone, so collapsing two opposite outcomes into it does not lose detail, it inverts the
-decision. A migrated tree now reports **`durable_in_store`**; `skipped_gitignored` is kept
-only for a legacy tree that is ignored, where it also says on stderr that those documents
-are being committed nowhere; and a legacy tree the project repo genuinely tracks reports
-`committed`. Each outcome carries an explicit `durable` boolean.
+The status word needed fixing alongside the move, and got it. Moving the tree created an
+outcome that did not exist before — the store holds these documents — and with no word of
+its own it reported `skipped`, the same word as a tree held nowhere. That would have
+re-created this very defect in a new place on the day the move shipped. A migrated tree
+now reports **`durable_in_store`**, and `skipped_gitignored` is kept only for a legacy tree
+that is ignored, where it additionally says on stderr that those documents are being
+committed nowhere. Both carry an explicit `durable` boolean, because a reader decides what
+to do next from that word alone.
 
 **2. A directory that merely shared a project's name could read and write that
 project's knowledge.** A store project was addressed as
