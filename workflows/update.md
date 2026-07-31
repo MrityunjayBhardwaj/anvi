@@ -173,7 +173,21 @@ It `git init`s the store if needed, then runs `gh repo create <name> --<vis>
 --source "$STORE" --remote origin --push`. If `gh` is absent or unauthenticated
 it prints the exact manual steps and exits non-zero — relay them, do NOT invent a
 remote. Pass the name/visibility the user chose (omit a flag to take its default).
-If the user declined, skip this step and leave the store as-is.
+
+If the user DECLINED, do not skip silently — run the local half instead, exactly
+as `/anvi:init` does at the other door:
+
+  bash "$REPO/scripts/ensure-store-durable.sh" --apply "$STORE"
+
+This matters only when the state was NO_REPO, and there it matters a great deal:
+leaving the store as-is means the user's catalogues, memory and planning documents
+are tracked nowhere at all. `git init` publishes nothing and contacts nothing, so
+declining a GitHub repository must not also decline version history. A store that
+is already a repo (NO_REMOTE) needs none of this — it has its history and is only
+missing the off-machine copy.
+
+Then state the resulting state plainly and give the one-line command to create the
+remote later. Take no for an answer: do not re-ask on subsequent runs.
 </step>
 
 <step name="5_verify">

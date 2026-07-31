@@ -69,15 +69,26 @@ console.log('\nwhat the document promises about declining, some entry point perf
   ok(promisesHistory, `${CANON} states that declining the backup still leaves version history`);
 
   if (promisesHistory) {
-    const init = fs.readFileSync(path.join(ROOT, 'skills', 'anvi-init', 'SKILL.md'), 'utf8');
-    const invocations = init.split('\n').filter(l => l.includes('ensure-store-durable.sh') && l.includes('--apply'));
-    // The consent path carries --create-remote on the same line. The decline path
-    // is the one that must NOT, because creating a GitHub repository is the part
-    // that was declined — the local `git init` was never the question.
-    const localOnly = invocations.filter(l => !l.includes('--create-remote'));
-    ok(invocations.length >= 2, `init invokes the durability script for both answers (${invocations.length} invocations)`);
-    ok(localOnly.length >= 1, 'init has an --apply invocation WITHOUT --create-remote — the decline path keeps history');
-    ok(/if they decline/i.test(init), 'and says explicitly that it is the decline path, so it is not read as a duplicate');
+    // The set of doors is DERIVED, not listed. Anything that can create the
+    // remote is a door that can be declined at, so a third one added later fails
+    // this until it handles the decline — a hardcoded list would silently not
+    // cover it, which is how the second door came to differ from the first.
+    const doors = execFileSync('git', ['ls-files', 'skills', 'workflows', 'install.sh'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter(Boolean)
+      .filter(f => fs.readFileSync(path.join(ROOT, f), 'utf8').includes('--create-remote'));
+
+    ok(doors.length >= 2, `the offer is made at ${doors.length} entry points: ${doors.join(', ')}`);
+
+    for (const d of doors) {
+      const t = fs.readFileSync(path.join(ROOT, d), 'utf8');
+      const invocations = t.split('\n').filter(l => l.includes('ensure-store-durable.sh') && l.includes('--apply'));
+      // The consent path carries --create-remote on the same line. The decline
+      // path is the one that must NOT, because creating a GitHub repository is
+      // the part that was declined — the local `git init` was never the question.
+      const localOnly = invocations.filter(l => !l.includes('--create-remote'));
+      ok(localOnly.length >= 1, `${d} has an --apply invocation WITHOUT --create-remote — its decline path keeps history`);
+      ok(/declin/i.test(t), `${d} names the decline case, so the invocation is not read as a stray duplicate`);
+    }
 
     // The seam the instruction depends on. If the script ever folds the local
     // half into --create-remote, the instruction above silently becomes a no-op.
