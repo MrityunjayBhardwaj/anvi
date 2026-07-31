@@ -147,24 +147,48 @@ only — they'll load the framework manually or via `/anvi` per session.
 
 ### Step 4: Report
 
+Report the paths you ACTUALLY wrote, resolved and absolute — not the template. A user who
+has just been told their knowledge lives somewhere outside their repo needs to be able to
+`ls` it. Resolve them first, and print what comes back:
+
+```bash
+STORE_DIR="$(cd "$STORE" && pwd -P)"        # where the catalogues really are
+LINK_TGT="$(readlink .anvi 2>/dev/null)"    # what ./.anvi points at
+```
+
 ```
 ✓ Ānvīkṣikī initialized for [project name]
 
-Created in ~/.anvideck/projects/[name]/.anvi/  (linked as ./.anvi):
-  hetvabhasa.md — error patterns (empty, grows during work)
-  vyapti.md     — invariants (empty, grows during work)
-  krama.md      — lifecycle patterns (empty, grows during work)
-  [Granted read/write to ~/.anvideck/projects/[name] via .claude/settings.local.json
+Your knowledge is stored OUTSIDE this repo, at:
+  [absolute $STORE_DIR]
+    hetvabhasa.md — error patterns (empty, grows during work)
+    vyapti.md     — invariants (empty, grows during work)
+    krama.md      — lifecycle patterns (empty, grows during work)
+  Identity record: [absolute path to PROVENANCE.json]  ([BOUND to <remote>])
+
+Reached from here by a symlink (gitignored, never committed):
+  ./.anvi -> [$LINK_TGT]
+
+  [Granted read/write to [store project dir] via .claude/settings.local.json
    | ⚠ grant SKIPPED — .claude/settings.local.json is git-tracked; untrack it
      (add to .gitignore + `git rm --cached`) then re-run, else this project
      cannot read/append its own catalogues in a fresh session]
   [CLAUDE.md updated with Anvi directive | CLAUDE.md skipped (--no-claude-md)]
 
-./.anvi is a symlink to the central store, so catalogues load normally (@.anvi/,
-resolver, skills) while staying one copy tracked by anvi_artifacts. The scoped grant
-lets this project (and only this project) read and append its own catalogues in any
-fresh session. The framework loads automatically on next session, or run /anvi now.
+Durability: [STATE from step 6 — say it plainly]
+  DURABLE    → backed up to <remote>
+  NO_REMOTE  → versioned on this machine only, pushed NOWHERE. If this disk
+               dies, this knowledge is gone. Create the backup any time:
+               ensure-store-durable.sh --apply --create-remote ~/.anvideck
+  NO_REPO    → tracked nowhere at all — run step 6 before relying on it
+
+Layout, identity and durability in full: STORAGE.md
+The framework loads automatically on next session, or run /anvi now.
 ```
+
+Do not paraphrase the durability line into something reassuring. `NO_REMOTE` is a real
+state with a real consequence, and a user who chose it deliberately is served by seeing it
+named — one who reached it by accident is served far more.
 
 ### Step 5: Gitignore the link + local artifact dirs (by design)
 

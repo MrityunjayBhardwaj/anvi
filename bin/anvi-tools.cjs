@@ -227,10 +227,23 @@ ${entry.lifecycle || '1. (unknown)'}
 
   const filePath = appendToCatalogue(cwd, catalogue, entryMd);
 
+  // Report where the bytes actually LANDED, not the path we walked to get there.
+  // `.anvi` is normally a symlink into ~/.anvideck, so filePath reads as
+  // "<your repo>/.anvi/hetvabhasa.md" — which looks like the write stayed in the
+  // repo. It did not, and that is the single fact a user most needs about this
+  // command: their knowledge lives outside the project and is durable only if the
+  // store is. `path` keeps its old meaning for existing consumers; `resolved` is
+  // a separate field rather than a redefinition of that one.
+  let resolved = filePath;
+  try { resolved = require('fs').realpathSync(filePath); } catch { /* keep filePath */ }
+
   if (raw) {
-    console.log(JSON.stringify({ ok: true, catalogue, path: filePath }));
+    console.log(JSON.stringify({ ok: true, catalogue, path: filePath, resolved }));
+  } else if (resolved !== filePath) {
+    console.log(`Appended to ${catalogue}: ${resolved}`);
+    console.log(`  (reached via ${filePath} — a symlink; the file is NOT in this repo)`);
   } else {
-    console.log(`Appended to ${catalogue}: ${filePath}`);
+    console.log(`Appended to ${catalogue}: ${resolved}`);
   }
 }
 

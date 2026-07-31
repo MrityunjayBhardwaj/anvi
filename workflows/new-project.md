@@ -109,7 +109,9 @@ writes, so writing three files into a local `.anvi/` here would produce a projec
 resolves to nothing while this workflow reported success.
 
 `/anvi:init` owns that sequence and verifies its own result. Restating it here is how this
-step went stale once already — one owner, one copy.
+step went stale once already — one owner, one copy. The layout itself (where files land,
+the identity record, what durability means) is described once in `STORAGE.md`; point the
+user there rather than explaining it again.
 
 If `/anvi:init` reports anything other than a clean conformance run, stop and surface it
 rather than continuing into the roadmap; everything downstream writes to catalogues that

@@ -210,8 +210,24 @@ Observe that the update actually landed — do not infer from "the script exited
 <step name="6_report">
 Summarize what changed: installed version before → after, hooks added/pruned,
 projects migrated (and any refused, with the exact manual step to resolve them),
-and the memorySync setting. If any project needs durable catalogue persistence,
-remind the user the store commits + pushes on session end (the checkpoint hook).
+and the memorySync setting.
+
+Then, PER PROJECT, state where that project's knowledge lives and whether it is
+safe — resolved and absolute, not as a template. A migration moves a user's
+documents; saying where they landed is the minimum:
+
+  <project>  →  <absolute store path>   binding: BOUND|UNBOUND|MISMATCH
+                                        durable: DURABLE|NO_REMOTE|NO_REPO
+
+Take binding from the conformance run in step 5b and durability from
+`ensure-store-durable.sh`. Do not soften either. `NO_REMOTE` means the store is
+versioned on this machine and pushed NOWHERE — say that, and give the one-line
+remedy; the checkpoint hook commits the store, which is not the same as backing
+it up. If the store has no remote, offer to create the backup repo ONCE here
+(default `anvi_artifacts`, private, consent required — never create it silently)
+and take no for an answer without re-asking on later runs.
+
+Point at STORAGE.md for the layout rather than explaining it again.
 </step>
 
 </process>
