@@ -55,8 +55,26 @@ ok 'echo "$OUT" | grep -qi "no installable git tag"'                'says no ins
 
 echo "target == latest → installs from this clone (no checkout)"
 H="$(mkhome 0.9.0)"
-ok 'run "$H" --version 2.0.0 --sync | grep -qi "current version — installing from here"' \
+# DERIVED from VERSION, not written here. Pinned to a literal, this assertion goes
+# red on every release for the one reason that is not a defect — and the fix under
+# time pressure is to edit the number until it passes, which is how an assertion
+# stops meaning anything. What is under test is "target equals the clone's version",
+# so the test should ask the clone what that is.
+CLONE_VER="$(tr -d '[:space:]' < "$REPO/VERSION")"
+ok '[ -n "$CLONE_VER" ]' "the clone declares a version (got '${CLONE_VER}')"
+ok 'run "$H" --version "$CLONE_VER" --sync | grep -qi "current version — installing from here"' \
    'requesting the clone version installs in place'
+# The CHANGELOG is what makes a version installable — install.sh parses its
+# headings for both the table and the known-version gate, so a bump without an
+# entry is unreachable by name.
+#
+# Anchored to the TABLE ROW (two leading spaces, then a date), not to a bare
+# version string. Written the loose way this passed with VERSION bumped and no
+# entry at all, because it was matching the installer's own banner line — an
+# assertion about the CHANGELOG that never read the CHANGELOG. Caught by
+# falsifying it; it is redundant with the assertion above only when it is right.
+ok 'run "$H" --version-list | grep -qE "^  v${CLONE_VER//./\\.} +[0-9]{4}-"' \
+   'and that version has a CHANGELOG entry with a date, so --version can reach it'
 
 echo ""
 echo "$PASS passed, $FAIL failed"
