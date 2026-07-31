@@ -98,6 +98,15 @@ resolves it.
 - **A `supersede` disposition in the currency workflow** — a vanished reference has two
   opposite causes with an identical signal: the entry's remedy shipped, or a later change
   inverted its premise. Sweeping on file-existence alone retires still-true entries.
+- **The backup offer remembers your answer** (`--record-decline`). Declining used to be a
+  reprieve rather than a decision — the next `/anvi:init`, in any project on the machine,
+  found the same non-durable store and asked again. Repeatedly asking a question that has
+  been answered teaches you to dismiss the prompt unread, and this is the one prompt that
+  must still be read on the day it matters. `/anvi:init` now states durability without
+  re-opening the question; `/anvi:update` is deliberately the one place a standing decline
+  is revisited, and says so rather than pretending to ask for the first time. The record is
+  deleted once the store actually has a remote, since it then answers a question that no
+  longer exists.
 
 ### Changed
 - **`/anvi:init` binds the project it just created, and verifies itself** with a
@@ -116,6 +125,18 @@ resolves it.
 - **`/anvi:help` answers "where is my stuff"** without requiring you to already know.
 
 ### Fixed
+- **Knowledge that never left the machine read as durable.** A project whose catalogue
+  entries were committed but never pushed reported `DURABLE` and passed — the same status
+  word as a fully pushed project, the entire difference being a note attached to a passing
+  check. Losing an entry because it was never pushed is the same outcome as losing it
+  because it was never committed, by a slightly longer road, and every other way to lose it
+  here already had its own state. Now `UNPUSHED`, and asked per project rather than from the
+  store-wide ahead count, so one project's in-flight work does not report a finding against
+  every other project in the store.
+- **Declining the backup also cost you your history.** Where the store was not yet a git
+  repo, saying no left it tracked nowhere at all. A backup and a history are different
+  properties and only one of them is outward-facing — `git init` on a local directory
+  publishes nothing — so both doors that make the offer now run the local half on decline.
 - **A store project was refused the knowledge it owns.** The access check decided
   ownership from one operand — whether the path was inside the store — and never consulted
   the caller, so a project whose working directory *is* its store directory was asked to
