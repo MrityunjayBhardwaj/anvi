@@ -253,7 +253,30 @@ Read the `STATE:` line and report it so durability is explicit, not silent:
 
   Creating a GitHub repo is outward-facing — never do it without that consent. If
   `gh` is absent/unauthenticated the script prints the manual steps; relay them.
+
+  **If they decline, and the state was NO_REPO, still run the LOCAL half:**
+
+  ```bash
+  bash "$HOME/.claude/anvi/scripts/ensure-store-durable.sh" --apply "$HOME/.anvideck"
+  ```
+
+  A backup and a history are different properties, and only one of them is
+  outward-facing. `git init` on a local directory publishes nothing and contacts
+  nothing, so declining to create a GitHub repository must not also cost the user
+  the ability to see what an entry said last week or recover one deleted by
+  accident. Without this, declining leaves catalogues, memory and planning
+  documents tracked NOWHERE — the worst of the four states, reached by saying no
+  to a question about a different thing.
+
+  Then say plainly that the store is versioned on this machine and pushed
+  nowhere, and give the one-line command to create the remote later. Do not
+  re-ask in this session; a decline is an answer.
+
+  (NO_REMOTE needs none of this — the store is already a git repo, so the history
+  is already there and only the off-machine copy is missing.)
 - NO_DIR   → the store doesn't exist yet; it is created as catalogues are written.
+  Nothing to init and nothing to back up; the offer belongs at the first write,
+  not here.
 
 **Then confirm the project actually resolves** — the steps above can each succeed while
 the result is still declined, which is precisely how an unbound project used to read as a

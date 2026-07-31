@@ -59,5 +59,33 @@ for (const f of explainers) {
 }
 ok(explainers.length > 0, 'the predicate matches something — a contract matching nothing passes vacuously');
 
+// A promise in the canonical document is a claim about behaviour, and the doc is
+// the last place that should be wrong about where knowledge lives. This asserts
+// the promise against the step that has to keep it, rather than against itself.
+console.log('\nwhat the document promises about declining, some entry point performs');
+{
+  const storage = fs.readFileSync(path.join(ROOT, CANON), 'utf8');
+  const promisesHistory = /decline/i.test(storage) && /local git repo/i.test(storage);
+  ok(promisesHistory, `${CANON} states that declining the backup still leaves version history`);
+
+  if (promisesHistory) {
+    const init = fs.readFileSync(path.join(ROOT, 'skills', 'anvi-init', 'SKILL.md'), 'utf8');
+    const invocations = init.split('\n').filter(l => l.includes('ensure-store-durable.sh') && l.includes('--apply'));
+    // The consent path carries --create-remote on the same line. The decline path
+    // is the one that must NOT, because creating a GitHub repository is the part
+    // that was declined — the local `git init` was never the question.
+    const localOnly = invocations.filter(l => !l.includes('--create-remote'));
+    ok(invocations.length >= 2, `init invokes the durability script for both answers (${invocations.length} invocations)`);
+    ok(localOnly.length >= 1, 'init has an --apply invocation WITHOUT --create-remote — the decline path keeps history');
+    ok(/if they decline/i.test(init), 'and says explicitly that it is the decline path, so it is not read as a duplicate');
+
+    // The seam the instruction depends on. If the script ever folds the local
+    // half into --create-remote, the instruction above silently becomes a no-op.
+    const sh = fs.readFileSync(path.join(ROOT, 'scripts', 'ensure-store-durable.sh'), 'utf8');
+    ok(/--apply\b(?!\s+--create-remote)/.test(sh) && /git -C "\$STORE" init/.test(sh),
+      'the script still performs a local git init under --apply alone');
+  }
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} storage doc contract: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
