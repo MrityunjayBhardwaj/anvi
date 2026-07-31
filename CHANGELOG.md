@@ -3,6 +3,156 @@
 All notable changes to Ānvīkṣikī are documented here.
 Format: [Semantic Versioning](https://semver.org/)
 
+## [3.0.0] — 2026-07-31
+
+Major release. Two changes make it one, and both require an existing install to
+migrate: **planning documents moved into the centralized store**, and **catalogue
+resolution now fails closed on identity**. 2.0.0 moved the catalogues out of your
+repo; 3.0.0 moves the rest of the work there, and makes the store prove who it
+belongs to before it serves anything.
+
+### Why this is a major version
+
+**1. Planning documents were durable nowhere, while every workflow reported a
+completed run.** When catalogues moved to the store, `.planning/` was gitignored so
+planning documents would not land in public repos. Nothing replaced the durability
+that removed. The step meant to make those documents durable checks whether
+`.planning` is ignored and, finding that it is, returns "skipped" — a per-run
+conditional that a one-line config change turned into a permanent disablement. It
+exits clean, reports honestly, and does nothing, so eleven workflows kept calling it
+and kept reporting success.
+
+Planning documents now live at **`.anvi/project_management/`** — inside the store,
+which is a git repo that the checkpoint hook commits and pushes. The internal layout
+is byte-identical; the tree was renamed, not restructured. A legacy `.planning/` is
+still read, indefinitely, but says so loudly, and the conformance report names every
+project that has not migrated.
+
+**2. A directory that merely shared a project's name could read and write that
+project's knowledge.** A store project was addressed as
+`~/.anvideck/projects/<basename-of-your-directory>/`, and a name is self-asserted —
+any folder can be called anything. An empty directory sharing a name resolved another
+project's entire catalogue set.
+
+Each store project now records the repository it belongs to in a `PROVENANCE.json`
+beside its `.anvi/`, and resolution **fails closed**: the name selects which record to
+consult, and the record decides whether you are served. A project with no record is
+`UNBOUND` and a project whose record names someone else is `MISMATCH`; both have reads
+declined and writes refused. **An install that does not bind its projects will find
+them declined**, which is why the migration is required rather than advisable.
+
+Reads and writes differ on purpose. Where anvi's own identity module is missing the
+verdict is `UNVERIFIABLE`, which still serves reads with a warning and still refuses
+writes — breaking every read because *our* module is absent would be worse than the
+risk it guards, and an unverifiable write is the direction you cannot undo.
+
+### Migration notes — upgrading an existing 2.0.0 clone
+
+Run **`/anvi:update`** (or `./install.sh --migrate <project-dirs>`). It is idempotent
+and state-driven, so a second run is a clean no-op. Per project it now performs link →
+grant → **bind** → migrate, in that order: migrating before the link moves documents
+somewhere nothing commits, and binding is what makes the result readable at all.
+
+Then **verify, rather than inferring success from the absence of errors**:
+
+```bash
+node ~/.claude/anvi/scripts/conformance-report.js <project-dir>
+```
+
+Every check should read ✓. The one to read hardest is `binding` — each of the setup
+steps can succeed while the project is still declined, which is exactly how an unbound
+project used to read as a finished one.
+
+A project is **refused, never silently repaired**, when its state needs a human: both a
+local and a central catalogue copy, a git-tracked `settings.local.json`, a dirty index,
+or a provenance record naming a different repository. Each refusal names the step that
+resolves it.
+
+### Added
+- **`STORAGE.md`** — the single description of where your knowledge lives: the layout,
+  why it is not in your repo, what each durability state means, how identity works, and
+  how to move or remove any of it. Commands link here instead of restating it.
+- **Identity binding** — `hooks/anvi-identity.js` (normalized remote, provenance record,
+  and the `BOUND`/`UNBOUND`/`MISMATCH`/`MALFORMED` verdicts), `scripts/bind-store.js` to
+  record it, and a `binding` conformance check whose unbound count is the rollout worklist.
+- **`scripts/conformance-report.js`** — a read-only audit answering the question the
+  three setup scripts do not: *is this project still in the state they require?* Reports
+  the link, the access grant, repo hygiene, durability, planning migration and binding.
+  Read-only always, and exit is always 0 — a check that breaks a build teaches people to
+  stop running it. Its governing rule: **where a name could lie, read content.**
+- **`scripts/ensure-store-durable.sh`** — the store is durable only as a git repo with a
+  remote. Detects by default; `--apply` repairs the local side; creating the GitHub repo
+  is outward-facing and needs an explicit `--create-remote` plus consent (default
+  `anvi_artifacts`, default private), falling back to printed manual steps without `gh`.
+- **`scripts/migrate-planning.sh`** — moves a project's planning tree into the store.
+  Dry-run by default, copies then verifies **by content** before removing anything, and
+  untracks with `git rm --cached` so history keeps every earlier version.
+- **`PROJECT_MANAGEMENT.md`** — the end-to-end account of where work lives and why it
+  survives, with the epic contract and the sidequest-routing model.
+- **`planning-root`** CLI command, so the instruction layer can *ask* where documents
+  live rather than hardcoding a path.
+- **Clustered-id detection in the catalogue leak guard** — a pasted list of entry ids in
+  a commit message or PR body is now caught, both for this project's own ids (which are
+  individually collision-prone but unmistakable as a group) and by density for foreign
+  ids a cross-reference can never match.
+- **A `supersede` disposition in the currency workflow** — a vanished reference has two
+  opposite causes with an identical signal: the entry's remedy shipped, or a later change
+  inverted its premise. Sweeping on file-existence alone retires still-true entries.
+
+### Changed
+- **`/anvi:init` binds the project it just created, and verifies itself** with a
+  conformance run. It previously created the catalogues, linked them, granted access —
+  and never bound, so with fail-closed resolution live it produced projects that were
+  declined while init printed success.
+- **`/anvi:update` reports, per project, where that knowledge lives and whether it is
+  safe** — resolved and absolute, with binding and durability stated rather than softened.
+- **`catalogue-append` reports where the write landed**, not the path it walked to get
+  there. Because `.anvi` is a symlink into the store, every write to a user's knowledge
+  base used to announce itself as landing inside their repo — the exact misconception the
+  storage model exists to correct.
+- **`link-catalogues.sh` says whether it wrote**, distinguishing "added `.anvi`" from
+  "already ignores `.anvi`", so idempotence is observable from the output rather than only
+  from `git status`.
+- **`/anvi:help` answers "where is my stuff"** without requiring you to already know.
+
+### Fixed
+- **A store project was refused the knowledge it owns.** The access check decided
+  ownership from one operand — whether the path was inside the store — and never consulted
+  the caller, so a project whose working directory *is* its store directory was asked to
+  prove it owned itself. Containment is now resolved by realpath rather than compared as
+  path strings, because a symlink can forge the string form.
+- **The migration's commits took the whole index.** Both ran `git commit` with no
+  pathspec, so migrating one project could commit another session's staged work, and sweep
+  half-written catalogue entries in beside its own tree. Scoping them then broke the common
+  case — a pathspec naming a path git has never tracked is rejected wholesale — which is
+  now handled, with the success line moved inside the branch that actually succeeded.
+- **Entry ids ending in `.` did not parse at all.** A catalogue writing `## <ID>. "Title"`
+  produced no entries, no error and no warning, leaving a large share of one project's
+  knowledge invisible to the report, the point-of-use injector and the leak guard. Sub-ids
+  such as `B1.1` are now captured as ids in their own right.
+- **A dated addendum collided with the entry it amends.** A level-3 heading reusing its
+  parent's id classified to the same role, so a per-id join could pair a parent's "before"
+  against an addendum's "after" and manufacture a spurious flip. The discriminator is the
+  parent's presence, never heading depth — whole catalogues author every primary entry at
+  level 3.
+- **A dharana alignment cross-reference was cross-paired with the invariant whose id it
+  reuses**, by a join that keyed on the id alone.
+- **`new-project` wrote catalogues into a local `.anvi/`** with no store awareness — the
+  last workflow still on the pre-2.0.0 model.
+- **The update's verify step confirmed the symlink and the grant**, both of which are true
+  of a project the resolver declines, so it could report success for a project unable to
+  read its own catalogues.
+- **`bind-store` skipped any project not already linked** — precisely the population that
+  fail-closed resolution affects, so the decline named a tool that would refuse to act.
+- **The conformance binding check printed `NOT_APPLICABLE` for bound projects**, so the
+  instrument whose count *is* the rollout worklist could not count them.
+- **A test file read as binary** because a join separator was written as a raw NUL byte,
+  which made BSD `grep` silently report zero matches for anything in it.
+- **Currency guidance on a dirty tree** — the report reads line ranges from disk and asks
+  git a question anchored on them, which git answers against committed content, so every
+  entry below an uncommitted edit is attributed to the wrong history. Nothing errors and
+  the answers are well-formed and wrong.
+
 ## [2.0.0] — 2026-07-23
 
 Major release. Since 1.1.0 the framework grew a **centralized knowledge store**:
