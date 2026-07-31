@@ -65,10 +65,16 @@ ok '[ -n "$CLONE_VER" ]' "the clone declares a version (got '${CLONE_VER}')"
 ok 'run "$H" --version "$CLONE_VER" --sync | grep -qi "current version — installing from here"' \
    'requesting the clone version installs in place'
 # The CHANGELOG is what makes a version installable — install.sh parses its
-# headings for the table and the known-version gate. A release that bumps VERSION
-# without adding the entry passes every check above and is unreachable by name.
-ok 'run "$H" --version-list | grep -qE "v${CLONE_VER//./\\.} "' \
-   'and that version has a CHANGELOG entry, so --version can reach it'
+# headings for both the table and the known-version gate, so a bump without an
+# entry is unreachable by name.
+#
+# Anchored to the TABLE ROW (two leading spaces, then a date), not to a bare
+# version string. Written the loose way this passed with VERSION bumped and no
+# entry at all, because it was matching the installer's own banner line — an
+# assertion about the CHANGELOG that never read the CHANGELOG. Caught by
+# falsifying it; it is redundant with the assertion above only when it is right.
+ok 'run "$H" --version-list | grep -qE "^  v${CLONE_VER//./\\.} +[0-9]{4}-"' \
+   'and that version has a CHANGELOG entry with a date, so --version can reach it'
 
 echo ""
 echo "$PASS passed, $FAIL failed"
