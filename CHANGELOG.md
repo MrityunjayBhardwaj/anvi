@@ -28,6 +28,15 @@ is byte-identical; the tree was renamed, not restructured. A legacy `.planning/`
 still read, indefinitely, but says so loudly, and the conformance report names every
 project that has not migrated.
 
+The status word needed fixing alongside the move, and got it. Moving the tree created an
+outcome that did not exist before — the store holds these documents — and it had no word of
+its own: the step would have reported `skipped`, the same word as a tree held nowhere,
+re-creating this very defect in a new place on the day the move shipped. A migrated tree
+now reports **`durable_in_store`**, and `skipped_gitignored` is kept only for a legacy tree
+that is ignored, where it additionally says on stderr that those documents are being
+committed nowhere. Both carry an explicit `durable` boolean, because a reader decides what
+to do next from that word alone.
+
 **2. A directory that merely shared a project's name could read and write that
 project's knowledge.** A store project was addressed as
 `~/.anvideck/projects/<basename-of-your-directory>/`, and a name is self-asserted —
@@ -133,6 +142,13 @@ resolves it.
   here already had its own state. Now `UNPUSHED`, and asked per project rather than from the
   store-wide ahead count, so one project's in-flight work does not report a finding against
   every other project in the store.
+- **`planning-root` called a tree durable because nothing ignored it.** The verdict came
+  from whether an ignore rule existed — a config fact standing in for a data fact — and the
+  absence of a rule is not the presence of a commit, so a project with neither reported
+  `durable: true` while its documents were held nowhere. It now measures what git actually
+  tracks. Partial tracking is real, and common — an ignore rule added after some files were
+  already committed — so the counts that produced the verdict (`files`, `files_committed`)
+  travel beside it rather than being rounded to whichever end is nearer.
 - **Declining the backup also cost you your history.** Where the store was not yet a git
   repo, saying no left it tracked nowhere at all. A backup and a history are different
   properties and only one of them is outward-facing — `git init` on a local directory
