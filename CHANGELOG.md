@@ -29,9 +29,9 @@ still read, indefinitely, but says so loudly, and the conformance report names e
 project that has not migrated.
 
 The status word needed fixing alongside the move, and got it. Moving the tree created an
-outcome that did not exist before — the store holds these documents — and with no word of
-its own it reported `skipped`, the same word as a tree held nowhere. That would have
-re-created this very defect in a new place on the day the move shipped. A migrated tree
+outcome that did not exist before — the store holds these documents — and it had no word of
+its own: the step would have reported `skipped`, the same word as a tree held nowhere,
+re-creating this very defect in a new place on the day the move shipped. A migrated tree
 now reports **`durable_in_store`**, and `skipped_gitignored` is kept only for a legacy tree
 that is ignored, where it additionally says on stderr that those documents are being
 committed nowhere. Both carry an explicit `durable` boolean, because a reader decides what
