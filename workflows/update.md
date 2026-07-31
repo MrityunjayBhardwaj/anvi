@@ -99,6 +99,17 @@ Read the `STATE:` line it prints:
 - NO_REMOTE→ it is a git repo but has no remote — commits stay on this machine,
              pushed nowhere. Offer to create the backup repo (step 3b + 4b).
 
+A `DECLINED:` line means the user has already refused the backup and `/anvi:init`
+has stopped asking. **An update is the one place that answer is revisited** — it is
+the moment the user has chosen to think about their installation, which nothing
+mid-work ever is. So do offer again here, but say that you are re-raising a settled
+question and name the date they declined; an offer that pretends to be the first one
+is how a prompt earns the reflex to dismiss it.
+
+If they decline again, re-record it (step 4b). If they accept, the record is cleared
+automatically when the remote is created — the question no longer exists, so neither
+should the answer.
+
 Detection is always safe to run; CREATING the backup repo is outward-facing and
 happens only with explicit consent in step 4b.
 </step>
@@ -186,8 +197,13 @@ declining a GitHub repository must not also decline version history. A store tha
 is already a repo (NO_REMOTE) needs none of this — it has its history and is only
 missing the off-machine copy.
 
-Then state the resulting state plainly and give the one-line command to create the
-remote later. Take no for an answer: do not re-ask on subsequent runs.
+Then record the answer, so init stops asking and this stays the only door that raises it:
+
+  bash "$REPO/scripts/ensure-store-durable.sh" --record-decline "$STORE"
+
+Run it after the local apply, as a separate call, so it records the state the store is
+actually left in. Then state that state plainly and give the one-line command to create
+the remote later.
 </step>
 
 <step name="5_verify">
