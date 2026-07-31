@@ -315,4 +315,11 @@ module.exports = {
   // must be able to name an unbound project rather than go blind on exactly the
   // projects it exists to report.
   resolveDirVerdict, requireDirForWrite, storeProjectOf, checkAccess,
+  // Exported so consumers that need to say WHERE something landed relative to
+  // the caller answer it with the same realpath containment the access check
+  // uses. The alternative — each consumer comparing path strings for itself —
+  // is how this file came to exist (H1), and here the string version is not
+  // merely divergent but wrong: a symlink pointing elsewhere INSIDE the repo
+  // compares as "different path" while remaining plainly inside it.
+  isInside,
 };

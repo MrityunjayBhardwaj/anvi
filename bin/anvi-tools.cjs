@@ -235,15 +235,33 @@ ${entry.lifecycle || '1. (unknown)'}
   // store is. `path` keeps its old meaning for existing consumers; `resolved` is
   // a separate field rather than a redefinition of that one.
   let resolved = filePath;
-  try { resolved = require('fs').realpathSync(filePath); } catch { /* keep filePath */ }
+  try { resolved = fs.realpathSync(filePath); } catch { /* keep filePath */ }
+
+  // "The path changed under resolution" and "the file left this repo" are two
+  // different claims, and only the second is worth telling anyone. A `.anvi`
+  // symlinked to a directory INSIDE the repo satisfies the first and refutes the
+  // second, so deciding the message on `resolved !== filePath` announces that a
+  // file sitting in the user's own repo is not in it — teaching a false model in
+  // the one command best placed to correct the true one.
+  //
+  // Containment is asked of the shared resolver, which answers it by realpath.
+  // By path STRING a symlink can forge containment, and that is not a hazard the
+  // CLI should re-derive its own opinion about. Guarded by typeof because the two
+  // install trees are not guaranteed to be the same version (H5/V7); an older
+  // resolver has no such export, and the fallback declines to make the stronger
+  // claim rather than guessing at it.
+  const canAsk = anviPaths && typeof anviPaths.isInside === 'function';
+  const leftTheRepo = canAsk ? !anviPaths.isInside(cwd, resolved) : false;
 
   if (raw) {
     console.log(JSON.stringify({ ok: true, catalogue, path: filePath, resolved }));
-  } else if (resolved !== filePath) {
-    console.log(`Appended to ${catalogue}: ${resolved}`);
-    console.log(`  (reached via ${filePath} — a symlink; the file is NOT in this repo)`);
   } else {
     console.log(`Appended to ${catalogue}: ${resolved}`);
+    if (resolved !== filePath && leftTheRepo) {
+      console.log(`  (reached via ${filePath} — a symlink; the file is NOT in this repo)`);
+    } else if (resolved !== filePath) {
+      console.log(`  (reached via ${filePath} — a symlink within this directory)`);
+    }
   }
 }
 
