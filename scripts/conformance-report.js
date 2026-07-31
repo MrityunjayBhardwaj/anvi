@@ -425,10 +425,28 @@ function classifyDurability(storeName, store) {
     return check('durable', 'UNCOMMITTED', `${catalogueDirty.length} catalogue path(s) under ${rel} are uncommitted in the store`,
       { remedy: `cd "${store.root}" && git add -A -- "${rel}" && git commit && git push` });
   }
+  // Committed is not durable. Losing an entry because it was never pushed is the
+  // same outcome as losing it because it was never committed, by a slightly
+  // longer road — and every other way to lose it here has its own state, so this
+  // one gets one too. It was a NOTE on a passing check, which renders as a tick
+  // and reads as "nothing needed here".
+  //
+  // Asked PER PROJECT, not from the store-wide ahead count. That count is only
+  // ever over-inclusive (ahead == 0 already implies every project is pushed), so
+  // failing on it would report a finding against every project in the store
+  // because one unrelated project has an unpushed commit — a check that cries
+  // wolf gets suppressed, and then it is not a check.
+  const unpushed = git(['rev-list', '-1', '@{u}..HEAD', '--', rel]).out.trim();
+  if (unpushed) {
+    return check('durable', 'UNPUSHED', `this project's knowledge is committed in ${tilde(store.root)} but has never reached the remote — it exists on this machine only`,
+      { remedy: `cd "${store.root}" && git push` });
+  }
   const notes = [];
   if (dirty.length) notes.push(`${dirty.length} memory-mirror path(s) under ${rel} are uncommitted — the checkpoint hook commits these on session end`);
-  if (ahead !== '0') notes.push(`the store is ${ahead} commit(s) ahead of its remote (store-wide, shared with every project)`);
-  return check('durable', 'DURABLE', `committed in ${tilde(store.root)}${ahead === '0' ? ' and pushed' : ''}`, { notes });
+  // Reaching here means THIS project is pushed, so a store ahead of its remote is
+  // genuinely someone else's in-flight work — information, not a swallowed finding.
+  if (ahead !== '0') notes.push(`the store is ${ahead} commit(s) ahead of its remote for OTHER projects — this project's knowledge is on the remote`);
+  return check('durable', 'DURABLE', `committed in ${tilde(store.root)} and pushed`, { notes });
 }
 
 // --- the computer -----------------------------------------------------------

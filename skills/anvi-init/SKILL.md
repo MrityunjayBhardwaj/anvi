@@ -240,7 +240,17 @@ to lose. Durability then depends only on that store being a tracked git repo (th
 bash "$HOME/.claude/anvi/scripts/ensure-store-durable.sh" "$HOME/.anvideck"   # DETECT only
 ```
 
-Read the `STATE:` line and report it so durability is explicit, not silent:
+Read the `STATE:` line and report it so durability is explicit, not silent.
+
+**First read the `DECLINED:` line, if there is one.** It means this user has already
+been offered the backup and said no. That answer stands: **state the durability, do
+not re-open the question.** A decision re-litigated every time a project is created
+is not a prompt any more, it is noise — and this is the one prompt that must still be
+read on the day it matters. `/anvi:update` is the only place a standing decline is
+revisited. Say where things stand in one line, give the command to change it if they
+want to, and move on to the conformance check below.
+
+With no `DECLINED:` line, the question has not been asked yet:
 - DURABLE  → the store is a git repo with a remote; nothing to do.
 - NO_REPO / NO_REMOTE → the store is NOT backed up. OFFER to create the backup
   repo, asking the repo NAME (default `anvi_artifacts`) and VISIBILITY (default
@@ -268,9 +278,18 @@ Read the `STATE:` line and report it so durability is explicit, not silent:
   documents tracked NOWHERE — the worst of the four states, reached by saying no
   to a question about a different thing.
 
+  **Then record the answer**, so the next project's init does not ask again:
+
+  ```bash
+  bash "$HOME/.claude/anvi/scripts/ensure-store-durable.sh" --record-decline "$HOME/.anvideck"
+  ```
+
+  Run it as a separate call, after the local apply — it records the state the store
+  is actually left in rather than the one it started from. It writes nothing when
+  the store is already durable or does not exist, so there is no case to guard.
+
   Then say plainly that the store is versioned on this machine and pushed
-  nowhere, and give the one-line command to create the remote later. Do not
-  re-ask in this session; a decline is an answer.
+  nowhere, and give the one-line command to create the remote later.
 
   (NO_REMOTE needs none of this — the store is already a git repo, so the history
   is already there and only the off-machine copy is missing.)

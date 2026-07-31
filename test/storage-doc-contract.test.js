@@ -88,7 +88,23 @@ console.log('\nwhat the document promises about declining, some entry point perf
       const localOnly = invocations.filter(l => !l.includes('--create-remote'));
       ok(localOnly.length >= 1, `${d} has an --apply invocation WITHOUT --create-remote — its decline path keeps history`);
       ok(/declin/i.test(t), `${d} names the decline case, so the invocation is not read as a stray duplicate`);
+      // An answer nobody writes down is an answer nobody can honour.
+      ok(t.includes('--record-decline'), `${d} records the answer rather than asking again next time`);
     }
+
+    // The two doors are deliberately ASYMMETRIC, and the asymmetry is the whole
+    // point: one must stop asking, the other is where the question may be
+    // reopened. Asserted separately because "both mention declining" would pass
+    // just as happily if both re-offered forever.
+    const init = fs.readFileSync(path.join(ROOT, 'skills', 'anvi-init', 'SKILL.md'), 'utf8');
+    const upd = fs.readFileSync(path.join(ROOT, 'workflows', 'update.md'), 'utf8');
+    ok(init.includes('DECLINED:'), 'init reads the standing answer before offering');
+    ok(/do not re-open|not re-open the question|does not ask again/i.test(init), 'and is told not to re-open it');
+    ok(upd.includes('DECLINED:') && /revisit|re-rais/i.test(upd), 'update is the one door that revisits the question');
+
+    // The canonical document must describe the file that now sits beside the
+    // store, or the layout it claims to be the single description of is stale.
+    ok(/backup-decision\.json/.test(storage), `${CANON} documents where the answer is kept`);
 
     // The seam the instruction depends on. If the script ever folds the local
     // half into --create-remote, the instruction above silently becomes a no-op.

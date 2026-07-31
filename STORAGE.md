@@ -16,6 +16,7 @@ your-repo/
   .gitignore                   contains `.anvi` — the link is never committed
 
 ~/.anvideck/                        ← a git repo of its own → anvi_artifacts (private)
+  .backup-decision.json             ← present only if you declined the backup (see below)
   projects/<name>/
     PROVENANCE.json                 ← identity record — BESIDE .anvi/, not inside it
     .anvi/                          ← the knowledge base
@@ -67,7 +68,15 @@ without your explicit consent.
 
 **If you decline**, the store is still made a local git repo, so you keep version history —
 you simply have no off-machine copy. That is a legitimate choice; it is only a problem when
-it is a surprise. You can create the remote later:
+it is a surprise.
+
+Your answer is remembered, in `~/.anvideck/.backup-decision.json`. `/anvi:init` will not ask
+again — it will still *tell* you where your knowledge stands, because you are always entitled
+to know that, but stating is not asking. Only `/anvi:update` revisits the question, and it
+says so when it does. The record is deleted the moment the store actually gets a remote, since
+by then it answers a question that no longer exists.
+
+You can create the remote later:
 
 ```bash
 bash ~/.claude/anvi/scripts/ensure-store-durable.sh --apply --create-remote \

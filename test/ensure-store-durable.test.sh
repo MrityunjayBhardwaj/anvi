@@ -90,6 +90,43 @@ OUT="$("$SH" "$P4" 2>&1)"
 ok 'echo "$OUT" | grep -q "^STATE: DURABLE"'   'reports DURABLE'
 ok 'echo "$OUT" | grep -qi "durable — git repo with remote"' 'names the remote'
 
+echo "declining is an ANSWER — recorded, honoured, and it does not cost version history"
+D="$ROOT/declined"; mkdir -p "$D/projects/z/.anvi"; echo note > "$D/projects/z/.anvi/hetvabhasa.md"
+# The decline path as the commands run it: local half, then record the answer.
+"$SH" --apply "$D" >/dev/null 2>&1
+OUT="$("$SH" --record-decline "$D" 2>&1)"
+ok 'echo "$OUT" | grep -qi "recorded"'                       'the declination is recorded'
+ok '[ -f "$D/.backup-decision.json" ]'                       'a decision file is written beside the store'
+ok 'grep -q "\"backup\": \"declined\"" "$D/.backup-decision.json"' 'it says what was decided'
+# Refusing a BACKUP must not refuse HISTORY — the two are different properties.
+ok '[ "$(git -C "$D" rev-list --count HEAD 2>/dev/null)" -ge 1 ]' 'the store still has version history after declining'
+ok '[ -z "$(git -C "$D" remote)" ]'                          'and still has no remote — nothing outward-facing happened'
+
+echo "a later session reads the standing answer instead of asking again"
+OUT="$("$SH" "$D" 2>&1)"
+ok 'echo "$OUT" | grep -q "^DECLINED: "'                     'detection reports the standing answer, machine-readably'
+ok 'echo "$OUT" | grep -qi "pushed NOWHERE"'                 'the STATE is still stated plainly — never softened'
+ok '! echo "$OUT" | grep -qi "opt in explicitly"'            'but the offer is NOT pitched again'
+ok 'echo "$OUT" | grep -qi "that answer stands"'             'it names the decision instead'
+# Idempotent: re-recording must not stack up or change the shape.
+"$SH" --record-decline "$D" >/dev/null 2>&1
+ok '[ "$(grep -c "\"backup\"" "$D/.backup-decision.json")" = 1 ]' 're-recording is idempotent'
+
+echo "an answer to a question that no longer exists is discarded"
+BARE2="$ROOT/declined-remote.git"; git -C "$ROOT" init -q --bare "$BARE2"
+git -C "$D" remote add origin "$BARE2"
+OUT="$("$SH" "$D" 2>&1)"
+ok 'echo "$OUT" | grep -q "^STATE: DURABLE"'                 'the store is now durable'
+ok '[ ! -f "$D/.backup-decision.json" ]'                     'the stale declination is cleared, not left to be read as a live preference'
+ok '! echo "$OUT" | grep -q "^DECLINED: "'                   'and is no longer reported'
+
+echo "recording is refused where there was nothing to decline"
+OUT="$("$SH" --record-decline "$D" 2>&1)"
+ok 'echo "$OUT" | grep -qi "nothing to decline"'             'a durable store records nothing'
+ok '[ ! -f "$D/.backup-decision.json" ]'                     'and writes no file'
+OUT="$("$SH" --record-decline "$ROOT/never-existed" 2>&1)"
+ok 'echo "$OUT" | grep -qi "does not exist"'                 'a store that does not exist records nothing'
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

@@ -404,6 +404,36 @@ console.log('\ndurable — the store, and this project inside it');
   eq(c.state, 'UNCOMMITTED', 'a catalogue path containing "memory" is NOT excused as the mirror');
   fs.rmSync(path.join(PROJECTS, 'linked', '.anvi', 'memory'), { recursive: true });
 }
+{
+  // Committed is not durable. Every OTHER way to lose knowledge here has its own
+  // state; this one used to be a note on a passing check, which renders as a tick.
+  // The fixtures above all push immediately after committing, which is exactly
+  // why the gap survived — a suite that never leaves work unpushed cannot see it.
+  write(path.join(PROJECTS, 'linked', '.anvi', 'krama.md'), entry('unpushed'));
+  git(STORE, 'add', '-A'); git(STORE, 'commit', '-q', '-m', 'committed, not pushed');
+  const c = classifyDurability('linked', storeState());
+  eq(c.state, 'UNPUSHED', 'committed but never pushed is a FINDING, not a durable tick');
+  eq(c.ok, false, 'and it does not read as conformant');
+  has(c.detail, 'this machine only', 'says what is actually at stake');
+  has(c.remedy, 'git push', 'and the remedy is the push');
+  git(STORE, 'push', '-q');
+  eq(classifyDurability('linked', storeState()).state, 'DURABLE', 'pushing it clears the finding');
+}
+{
+  // The predicate must be PER PROJECT. The store-wide ahead count is only ever
+  // over-inclusive, so failing on it would report a finding against every project
+  // because one unrelated project has work in flight — and a check that cries
+  // wolf gets suppressed. Falsification target: swap the per-project rev-list for
+  // the ahead count and 'linked' goes red here while nothing about it changed.
+  storeProject('other');
+  write(path.join(PROJECTS, 'other', '.anvi', 'hetvabhasa.md'), entry('someone else'));
+  git(STORE, 'add', '-A'); git(STORE, 'commit', '-q', '-m', "another project's work");
+  const mine = classifyDurability('linked', storeState());
+  eq(mine.state, 'DURABLE', "another project's unpushed commit does NOT make this project a finding");
+  eq(classifyDurability('other', storeState()).state, 'UNPUSHED', 'the finding lands on the project that owns it');
+  has(mine.notes.join(' '), 'OTHER projects', 'the store-wide count survives as information, not as a swallowed finding');
+  git(STORE, 'push', '-q');
+}
 eq(classifyDurability(null, storeState()).state, 'NOT_APPLICABLE', 'no store copy → the link check owns that verdict');
 
 console.log('\nthe store itself is never audited as a project');
