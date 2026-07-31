@@ -95,6 +95,16 @@
   /anvi:session-report  Session summary
   /anvi:sess-wrap       Wrap up a session — harvest learnings, print kickoff
   /anvi:ship            Create PR and prepare for merge
+
+## Where your knowledge is stored
+  NOT in this repo. Catalogues, memory and planning documents live in
+    ~/.anvideck/projects/<name>/
+  reached from here through ./.anvi, a gitignored symlink. The store is its
+  own git repo; if it has no remote, your knowledge is on this machine only.
+
+  Check it:  ensure-store-durable.sh ~/.anvideck        (durability, read-only)
+             conformance-report.js <project-dir>        (link, grant, binding)
+  Full layout, identity and durability:  STORAGE.md
 ```
 </step>
 </process>

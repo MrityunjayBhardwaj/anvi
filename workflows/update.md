@@ -173,7 +173,21 @@ It `git init`s the store if needed, then runs `gh repo create <name> --<vis>
 --source "$STORE" --remote origin --push`. If `gh` is absent or unauthenticated
 it prints the exact manual steps and exits non-zero — relay them, do NOT invent a
 remote. Pass the name/visibility the user chose (omit a flag to take its default).
-If the user declined, skip this step and leave the store as-is.
+
+If the user DECLINED, do not skip silently — run the local half instead, exactly
+as `/anvi:init` does at the other door:
+
+  bash "$REPO/scripts/ensure-store-durable.sh" --apply "$STORE"
+
+This matters only when the state was NO_REPO, and there it matters a great deal:
+leaving the store as-is means the user's catalogues, memory and planning documents
+are tracked nowhere at all. `git init` publishes nothing and contacts nothing, so
+declining a GitHub repository must not also decline version history. A store that
+is already a repo (NO_REMOTE) needs none of this — it has its history and is only
+missing the off-machine copy.
+
+Then state the resulting state plainly and give the one-line command to create the
+remote later. Take no for an answer: do not re-ask on subsequent runs.
 </step>
 
 <step name="5_verify">
@@ -210,8 +224,24 @@ Observe that the update actually landed — do not infer from "the script exited
 <step name="6_report">
 Summarize what changed: installed version before → after, hooks added/pruned,
 projects migrated (and any refused, with the exact manual step to resolve them),
-and the memorySync setting. If any project needs durable catalogue persistence,
-remind the user the store commits + pushes on session end (the checkpoint hook).
+and the memorySync setting.
+
+Then, PER PROJECT, state where that project's knowledge lives and whether it is
+safe — resolved and absolute, not as a template. A migration moves a user's
+documents; saying where they landed is the minimum:
+
+  <project>  →  <absolute store path>   binding: BOUND|UNBOUND|MISMATCH
+                                        durable: DURABLE|NO_REMOTE|NO_REPO
+
+Take binding from the conformance run in step 5b and durability from
+`ensure-store-durable.sh`. Do not soften either. `NO_REMOTE` means the store is
+versioned on this machine and pushed NOWHERE — say that, and give the one-line
+remedy; the checkpoint hook commits the store, which is not the same as backing
+it up. If the store has no remote, offer to create the backup repo ONCE here
+(default `anvi_artifacts`, private, consent required — never create it silently)
+and take no for an answer without re-asking on later runs.
+
+Point at STORAGE.md for the layout rather than explaining it again.
 </step>
 
 </process>

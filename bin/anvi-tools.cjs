@@ -227,10 +227,46 @@ ${entry.lifecycle || '1. (unknown)'}
 
   const filePath = appendToCatalogue(cwd, catalogue, entryMd);
 
+  // Report where the bytes actually LANDED, not the path we walked to get there.
+  // `.anvi` is normally a symlink into ~/.anvideck, so filePath reads as
+  // "<your repo>/.anvi/hetvabhasa.md" — which looks like the write stayed in the
+  // repo. It did not, and that is the single fact a user most needs about this
+  // command: their knowledge lives outside the project and is durable only if the
+  // store is. `path` keeps its old meaning for existing consumers; `resolved` is
+  // a separate field rather than a redefinition of that one.
+  let resolved = filePath;
+  try { resolved = fs.realpathSync(filePath); } catch { /* keep filePath */ }
+
+  // "The path changed under resolution" and "the file left this repo" are two
+  // different claims, and only the second is worth telling anyone. A `.anvi`
+  // symlinked to a directory INSIDE the repo satisfies the first and refutes the
+  // second, so deciding the message on `resolved !== filePath` announces that a
+  // file sitting in the user's own repo is not in it — teaching a false model in
+  // the one command best placed to correct the true one.
+  //
+  // Containment is asked of the shared resolver, which answers it by realpath.
+  // By path STRING a symlink can forge containment, and that is not a hazard the
+  // CLI should re-derive its own opinion about. Guarded by typeof because the two
+  // install trees are not guaranteed to be the same version (H5/V7): an older
+  // resolver has no such export.
+  //
+  // THREE states, not two. "Cannot tell" is not "inside" — reporting a file as
+  // having stayed in the directory when nothing established that is the same
+  // false claim this branch exists to prevent, only quieter and harder to catch.
+  // Where the question cannot be asked, name the traversal and stop there.
+  const canAsk = anviPaths && typeof anviPaths.isInside === 'function';
+  const where = !canAsk ? 'unknown' : (anviPaths.isInside(cwd, resolved) ? 'inside' : 'outside');
+
   if (raw) {
-    console.log(JSON.stringify({ ok: true, catalogue, path: filePath }));
+    console.log(JSON.stringify({ ok: true, catalogue, path: filePath, resolved }));
   } else {
-    console.log(`Appended to ${catalogue}: ${filePath}`);
+    console.log(`Appended to ${catalogue}: ${resolved}`);
+    if (resolved !== filePath) {
+      const note = where === 'outside' ? 'a symlink; the file is NOT in this repo'
+        : where === 'inside' ? 'a symlink within this directory'
+          : 'a symlink — resolve it to see where the file actually lives';
+      console.log(`  (reached via ${filePath} — ${note})`);
+    }
   }
 }
 

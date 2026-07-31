@@ -52,6 +52,14 @@ Rules:
   files themselves do.
 - If nothing durable was learned, say so and write nothing. Do NOT manufacture
   entries to look productive.
+- SAY WHERE IT LANDED. `catalogue-append` prints the resolved store path (and
+  notes when it was reached through the symlink); surface that rather than
+  summarising it into "harvested 3 entries". A user who cannot name the file
+  cannot check it, back it up, or notice when it stops being written — and the
+  path is outside their repo, which is the part that surprises people.
+- Then say whether it is SAFE, not merely written. The store commits on session
+  end; committing is not pushing. If the store has no remote, the entries you
+  just harvested exist on this machine only — state that plainly.
 </step>
 
 <step name="2_update_memory">
