@@ -78,6 +78,31 @@ console.log('\nthe raw contract keeps `path` and adds `resolved` beside it');
   ok(j.resolved === path.join(OUT, 'hetvabhasa.md'), '`resolved` is the new field carrying the real one');
 }
 
+console.log('\nan install tree too old to answer says so, rather than guessing "inside"');
+{
+  // The two install trees are not guaranteed to be the same version, so the CLI
+  // can be paired with a resolver that has no containment export. Built by
+  // copying the real tree and removing the export — a hand-written stub would
+  // test a resolver we do not ship.
+  const TREE = path.join(ROOT, 'oldtree');
+  fs.mkdirSync(TREE);
+  for (const d of ['bin', 'hooks']) fs.cpSync(path.join(__dirname, '..', d), path.join(TREE, d), { recursive: true });
+  const rp = path.join(TREE, 'hooks', 'anvi-paths.js');
+  const stripped = fs.readFileSync(rp, 'utf8').replace(/^\s*isInside,\s*$/m, '');
+  fs.writeFileSync(rp, stripped);
+  ok(typeof require(rp).isInside === 'undefined', 'the fixture tree genuinely lacks the export (else this proves nothing)');
+
+  const out = execFileSync('node', [path.join(TREE, 'bin', 'anvi-tools.cjs'), 'catalogue-append', 'hetvabhasa',
+    JSON.stringify({ pattern: 'skew', ref: 'x' })], { cwd: C, encoding: 'utf8' });
+  ok(out.includes(path.join(OUT, 'hetvabhasa.md')), 'still reports the resolved location');
+  ok(out.includes('reached via'), 'still names the traversal');
+  // C's .anvi points OUT of the repo, so "within this directory" would be false
+  // and "NOT in this repo" would be unearned. Neither may be claimed.
+  ok(!out.includes('within this directory'), 'does not claim the file stayed inside — that was never established');
+  ok(!out.includes('NOT in this repo'), 'does not make the strong claim either — it could not ask');
+  ok(/resolve it to see where/.test(out), 'says what the user can do instead');
+}
+
 console.log('\nthe three fixtures actually differ in what they exercise');
 {
   // Guards against the whole file passing because every case took one branch.

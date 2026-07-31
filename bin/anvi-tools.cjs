@@ -247,20 +247,25 @@ ${entry.lifecycle || '1. (unknown)'}
   // Containment is asked of the shared resolver, which answers it by realpath.
   // By path STRING a symlink can forge containment, and that is not a hazard the
   // CLI should re-derive its own opinion about. Guarded by typeof because the two
-  // install trees are not guaranteed to be the same version (H5/V7); an older
-  // resolver has no such export, and the fallback declines to make the stronger
-  // claim rather than guessing at it.
+  // install trees are not guaranteed to be the same version (H5/V7): an older
+  // resolver has no such export.
+  //
+  // THREE states, not two. "Cannot tell" is not "inside" — reporting a file as
+  // having stayed in the directory when nothing established that is the same
+  // false claim this branch exists to prevent, only quieter and harder to catch.
+  // Where the question cannot be asked, name the traversal and stop there.
   const canAsk = anviPaths && typeof anviPaths.isInside === 'function';
-  const leftTheRepo = canAsk ? !anviPaths.isInside(cwd, resolved) : false;
+  const where = !canAsk ? 'unknown' : (anviPaths.isInside(cwd, resolved) ? 'inside' : 'outside');
 
   if (raw) {
     console.log(JSON.stringify({ ok: true, catalogue, path: filePath, resolved }));
   } else {
     console.log(`Appended to ${catalogue}: ${resolved}`);
-    if (resolved !== filePath && leftTheRepo) {
-      console.log(`  (reached via ${filePath} — a symlink; the file is NOT in this repo)`);
-    } else if (resolved !== filePath) {
-      console.log(`  (reached via ${filePath} — a symlink within this directory)`);
+    if (resolved !== filePath) {
+      const note = where === 'outside' ? 'a symlink; the file is NOT in this repo'
+        : where === 'inside' ? 'a symlink within this directory'
+          : 'a symlink — resolve it to see where the file actually lives';
+      console.log(`  (reached via ${filePath} — ${note})`);
     }
   }
 }
