@@ -133,6 +133,25 @@ function storeProjectOf(dir) {
   return path.join(root, rel.split(path.sep)[0]);
 }
 
+// Which store project does THIS working directory OWN? Answered from where its
+// `.anvi` actually lands, never from the directory's name — a name is
+// self-asserted and any directory can claim one, which is the whole reason
+// resolution stopped trusting it.
+//
+// A non-null result is therefore evidence, not a guess: the symlink physically
+// points there. null means either no `.anvi`, or a local one that never reaches
+// the store — in both cases nothing proves this directory owns anything in it,
+// and a caller must not treat store paths as its own.
+//
+// Deliberately UNGATED, like existingDirs beside it: this answers "what do I
+// own", which is the question an auditor asks. A guard that consulted a gated
+// version would go blind on exactly the projects it exists to watch.
+function ownStoreProject(cwd) {
+  const anvi = realSafe(path.join(cwd, '.anvi'));
+  if (!anvi) return null;
+  return storeProjectOf(anvi);
+}
+
 // `identityOf` shells out to git, and this runs on a hot path — every planning
 // path lookup reaches it. Cache per resolved directory: a directory's remote does
 // not change inside one short-lived hook or CLI process. The provenance RECORD is
@@ -314,7 +333,7 @@ module.exports = {
   // exists", which is the question an auditor asks, and the conformance report
   // must be able to name an unbound project rather than go blind on exactly the
   // projects it exists to report.
-  resolveDirVerdict, requireDirForWrite, storeProjectOf, checkAccess,
+  resolveDirVerdict, requireDirForWrite, storeProjectOf, ownStoreProject, checkAccess,
   // Exported so consumers that need to say WHERE something landed relative to
   // the caller answer it with the same realpath containment the access check
   // uses. The alternative — each consumer comparing path strings for itself —
