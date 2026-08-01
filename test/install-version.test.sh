@@ -46,13 +46,30 @@ OUT="$(run "$H" --version 0.10.0 --sync)"
 ok '! echo "$OUT" | grep -qi "refusing to downgrade"' '0.9.0 → 0.10.0 is not refused as a downgrade'
 ok 'echo "$OUT" | grep -qi "Materializing v0.10.0"'   'resolves the v0.10.0 tag and materializes it (clone untouched)'
 
-echo "untagged intermediate version → honest error"
-H="$(mkhome 0.9.0)"
-# 1.1.0 exists in the CHANGELOG but has no git tag → not installable, but it is a
-# valid upgrade target so it passes the downgrade guard and fails at tag resolution.
-OUT="$(run "$H" --version 1.1.0)"
-ok '[ "$(run "$H" --version 1.1.0 >/dev/null 2>&1; echo $?)" = 2 ]' 'exits 2'
-ok 'echo "$OUT" | grep -qi "no installable git tag"'                'says no installable tag, lists what is installable'
+echo "untagged version → honest error"
+# This used 1.1.0, which was genuinely in the CHANGELOG with no tag — the test was
+# using a defect as its fixture, so backfilling that tag broke the assertion. The
+# behaviour is still worth covering, but it cannot depend on some real release
+# staying unreleasable, and changelog-tag-parity.test.sh now guarantees none does.
+#
+# So build the condition instead of borrowing it: a throwaway repo with an entry
+# and no tags at all. install.sh reads the CHANGELOG and the tags from SCRIPT_DIR,
+# so a minimal tree is enough to reach the resolution step.
+# The requested version must be OLDER than the fixture clone's own VERSION.
+# A target equal to the clone version installs in place and never reaches tag
+# resolution — the first attempt at this fixture did exactly that and passed
+# through a path it was not testing.
+FAKE="$(mktemp -d)"
+cp "$INSTALL" "$FAKE/install.sh"
+echo "8.8.8" > "$FAKE/VERSION"
+printf '# Changelog\n\n## [8.8.8] — 2026-02-01\n\nThe fixture clone.\n\n## [7.7.7] — 2026-01-01\n\nA release that was never tagged.\n' > "$FAKE/CHANGELOG.md"
+git -C "$FAKE" init -q 2>/dev/null
+git -C "$FAKE" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
+ok '[ -z "$(git -C "$FAKE" tag -l)" ]' 'the fixture repo genuinely has no tags'
+H="$(mkhome 1.0.0)"
+OUT="$(HOME="$H" bash "$FAKE/install.sh" --version 7.7.7 </dev/null 2>&1)"
+ok '[ "$(HOME="$H" bash "$FAKE/install.sh" --version 7.7.7 </dev/null >/dev/null 2>&1; echo $?)" = 2 ]' 'exits 2'
+ok 'echo "$OUT" | grep -qi "no installable git tag"' 'says no installable tag, lists what is installable'
 
 echo "target == latest → installs from this clone (no checkout)"
 H="$(mkhome 0.9.0)"

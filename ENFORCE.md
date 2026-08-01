@@ -126,6 +126,7 @@ centralized projects). See issue #5.
 | 7 | Retrying failed approach endlessly | ④ — 3-round limit, then "read more source" |
 | 8 | Adding ungrounded catalogue entries | ④ — post-resolution update requires REF field |
 | 9 | A hook silently dying and nobody noticing | `test/hook-liveness.test.js` — every hook must prove it still speaks |
+| 10 | A version offered by `--version-list` that cannot actually be installed | `test/changelog-tag-parity.test.sh` — every advertised version has a tag, every tag an entry; only the unreleased newest is exempt |
 
 ## Liveness — a quiet hook and a dead hook look identical
 
