@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Test the version selection in install.sh: --version-list and --version <v>.
-# Upgrade-only (never downgrade), semver-correct ordering (0.9.0 < 0.10.0), and
-# an honest error for an unknown or untagged version. HOME is always a throwaway
-# so the real install is never touched.
+# Upgrade-only (never downgrade), correct ordering within and across the two
+# schemes (0.9.0 < 0.10.0 < 2026.08.0), the migration marker, and an honest error
+# for an unknown or untagged version. HOME is always a throwaway so the real
+# install is never touched.
 # Run:  bash test/install-version.test.sh
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,7 +19,7 @@ echo "--version-list"
 H="$(mkhome 1.0.0)"
 OUT="$(run "$H" --version-list)"
 ok '[ "$(run "$H" --version-list >/dev/null 2>&1; echo $?)" = 0 ]' 'exits 0'
-ok 'echo "$OUT" | grep -qE "v2\.0\.0 +2026-07-23"'  'lists the latest version with its release date'
+ok 'echo "$OUT" | grep -qE "v2\.0\.0 +2026-07-23"'  'lists a semantic-versioned release with its date'
 ok 'echo "$OUT" | grep -qE "v0\.10\.0 +2026-03-23"' 'lists an older version with its date'
 ok 'echo "$OUT" | grep -q "SUMMARY"'                'has a summary column'
 ok 'echo "$OUT" | grep -qE "v1\.0\.0.*installed"'   'marks the installed version'

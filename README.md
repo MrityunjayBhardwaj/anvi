@@ -106,11 +106,35 @@ The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.c
 | `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
 | `./install.sh --sync` | Silent one-way copy from repo → live (no prompts) |
 | `./install.sh --migrate [dir ...]` | One-pass upgrade of an existing clone — framework sync + retired-hook prune + per-project catalogue migration for each `dir`. Idempotent. Usually driven by `/anvi:update`. |
-| `./install.sh --version-list` | List all releases (version + date + summary), marking installed and latest |
+| `./install.sh --version-list` | List all releases (version + date + whether it needs a migration + summary), marking installed and latest |
 | `./install.sh --version <v> [--migrate]` | Install/upgrade to a specific version. Upgrade-only (refuses to go below installed). Older tagged releases come from `git archive`; your clone is never checked out. |
 | `./install.sh --check` | Show repo version vs installed version, change nothing |
 
 **For contributors:** use `--dev` — the repo _is_ the live installation, no sync step needed.
+
+### Versions
+
+Releases are numbered **`YYYY.0M.PATCH`** — `2026.08.0`, then `2026.08.1` for a fix in
+the same month. The number tells you _when_ a release was cut, which is the useful fact
+when the install path is `git clone` and you want to know how far behind you are.
+
+Whether an upgrade needs you to do anything is a separate question, so it gets a separate
+answer: a release that requires one carries a **MIGRATION REQUIRED** line in the
+changelog, and `--version-list` shows it in the `MIGRATE` column.
+
+```
+  VERSION     RELEASED     MIGRATE  SUMMARY
+  v2026.08.0  2026-08-01   yes      Two changes require an existing install to...  ◀ installed
+  v2.0.0      2026-07-23   yes      Major release. Since 1.1.0 the framework...
+  v1.1.0      2026-04-02            Ground Truth — Three-Layer Grounded Abstr...
+```
+
+A blank means the release does not state one — not that it is safe to skip checking.
+Releases before `2026.08.0` used semantic versioning and keep their original numbers, so
+`--version 2.0.0` still resolves.
+
+The month is always zero-padded. Versions are matched as exact strings, so `2026.8.0` is
+a different version from `2026.08.0` and will be reported as unknown.
 
 </details>
 
