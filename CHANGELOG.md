@@ -19,6 +19,27 @@ the centralized store**, and **catalogue resolution now fails closed on identity
 2.0.0 moved the catalogues out of your repo; this release moves the rest of the work
 there, and makes the store prove who it belongs to before it serves anything.
 
+### Releases are numbered by date from here on
+
+This release is `2026.08.0` rather than `3.0.0`, and the change is not cosmetic.
+
+Under semantic versioning the major digit's only signal here was "you must migrate" —
+and 2.0.0 and 3.0.0 were both *correct* majors eight days apart, because this framework
+kept changing its own storage contract. A signal that is permanently on carries no
+information. Meanwhile the number could not answer the question the install path
+actually raises: `git clone` then `./install.sh` takes trunk, nobody pins a version, and
+what you want to know is how old your copy is.
+
+So the number now says **when** — `YYYY.0M.PATCH` — and whether an upgrade needs action
+from you gets its own field: a **MIGRATION REQUIRED** line beneath the version heading,
+which `--version-list` renders as a `MIGRATE` column. A blank there means the release
+does not state one, not that skipping the check is safe.
+
+Older releases keep the numbers they were published under, so `--version 2.0.0` still
+resolves, and `2.0.0`'s marker is backfilled because its own notes say the migration is
+required rather than optional. The month is always zero-padded: versions are matched as
+exact strings, so `2026.8.0` is a different version and reports as unknown.
+
 ### Why this release requires a migration
 
 **1. Planning documents were durable nowhere, while every workflow reported a
@@ -142,6 +163,14 @@ resolves it.
 - **`/anvi:help` answers "where is my stuff"** without requiring you to already know.
 
 ### Fixed
+- **`1.1.0` was listed as a release and could not be installed.** It had a changelog
+  entry and no git tag, so `--version-list` advertised it while tag resolution could not
+  produce it — since April, because publishing is two acts against two artifacts and
+  nothing bound them. It is now tagged at the commit that declared it, and a check
+  asserts both directions: every advertised version has a tag, every tag has an entry.
+  Only the newest entry is exempt, since an entry legitimately lands before the tag that
+  releases it, and the pending version is named in the output rather than skipped
+  silently.
 - **Knowledge that never left the machine read as durable.** A project whose catalogue
   entries were committed but never pushed reported `DURABLE` and passed — the same status
   word as a fully pushed project, the entire difference being a note attached to a passing
