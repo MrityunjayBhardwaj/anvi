@@ -76,6 +76,41 @@ ok 'run "$H" --version "$CLONE_VER" --sync | grep -qi "current version — insta
 ok 'run "$H" --version-list | grep -qE "^  v${CLONE_VER//./\\.} +[0-9]{4}-"' \
    'and that version has a CHANGELOG entry with a date, so --version can reach it'
 
+echo "calendar versioning — the scheme boundary"
+# An install sitting on the last semantic version must read the first calendar
+# version as an UPGRADE. sort -V happens to order 2.0.0 before 2026.08.0, but the
+# property under test is the installer's verdict, so ask the installer.
+H="$(mkhome 2.0.0)"
+OUT="$(run "$H" --version "$CLONE_VER" --sync)"
+ok '! echo "$OUT" | grep -qi "refusing to downgrade"' \
+   'a 2.0.0 install reads the calendar release as an upgrade, not a downgrade'
+
+# Versions are matched with grep -qxF, an exact string compare, so zero-padding is
+# part of the identity rather than cosmetic. The unpadded form must be rejected —
+# if it silently resolved, --version would install something other than what was named.
+H="$(mkhome 1.0.0)"
+UNPADDED="$(echo "$CLONE_VER" | sed 's/\.0\([1-9]\)\./.\1./')"
+ok '[ "$UNPADDED" != "$CLONE_VER" ]' "an unpadded form exists to test (got '$UNPADDED')"
+ok 'run "$H" --version "$UNPADDED" | grep -qi "unknown version"' \
+   'an unpadded month is rejected, not silently matched to the padded release'
+
+echo "migration marker"
+OUT="$(run "$H" --version-list)"
+ok 'echo "$OUT" | grep -q "MIGRATE"' 'the table carries a MIGRATE column'
+ok 'echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.} +[0-9-]+ +yes "' \
+   'the current release is flagged as requiring a migration'
+# The marker sits where desc is picked up, so a parser that does not consume it
+# reports it AS the summary. That is the defect this field exists to avoid.
+ok '! echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.}.*MIGRATION REQUIRED"' \
+   'the marker is consumed as a field, not mistaken for the summary'
+ok 'echo "$OUT" | grep -qE "^  v2\.0\.0 +[0-9-]+ +yes "' \
+   'a backfilled pre-marker release is flagged too, so the column is not only forward-looking'
+# Absence must render blank. "no" would be a claim about a release that never made one.
+ok '! echo "$OUT" | grep -qE "^  v1\.1\.0 +[0-9-]+ +yes "' \
+   'a release that states no migration is not flagged'
+ok '! echo "$OUT" | grep -qE "^  v[0-9][0-9.]* +[0-9-]+ +no "' \
+   'and no row claims "no" — an unstated migration is blank, not answered'
+
 echo ""
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
