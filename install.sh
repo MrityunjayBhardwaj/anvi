@@ -61,22 +61,30 @@ PRUNE_FLAG=""
 #    installable refs for older releases) ─────────────────────────────────────
 norm_ver() { echo "${1#v}"; }   # strip a leading 'v'
 
-# All versions declared in CHANGELOG.md, newest-first, as "ver<TAB>date<TAB>desc".
+# All versions declared in CHANGELOG.md, newest-first, as
+# "ver<TAB>date<TAB>desc<TAB>migrate", where migrate is "yes" or "no".
+#
+# A `**MIGRATION REQUIRED**` line directly beneath the heading is the marker. It is
+# consumed here rather than falling through to `desc` — left alone it would BE the
+# summary, since desc takes the first non-empty line after the heading. Absence of
+# the marker is reported as "no" and rendered as blank, never as a claim that no
+# migration is needed: releases predating the marker simply do not state it.
 changelog_versions() {
   awk '
     /^## \[/ {
-      if (ver != "") print ver "\t" date "\t" desc
+      if (ver != "") print ver "\t" date "\t" desc "\t" migrate
       match($0, /\[[^]]+\]/); ver = substr($0, RSTART+1, RLENGTH-2)
       rest = $0; sub(/^[^—]*—[[:space:]]*/, "", rest); date = rest
-      desc = ""; capture = 1; next
+      desc = ""; migrate = "no"; capture = 1; next
     }
     capture == 1 {
       l = $0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", l)
       if (l == "" || l ~ /^###/ || l ~ /^>/) next
+      if (l ~ /^\*\*MIGRATION REQUIRED\*\*/) { migrate = "yes"; next }
       sub(/^- /, "", l); gsub(/\*\*/, "", l); gsub(/`/, "", l)
       desc = l; capture = 0
     }
-    END { if (ver != "") print ver "\t" date "\t" desc }
+    END { if (ver != "") print ver "\t" date "\t" desc "\t" migrate }
   ' "$SCRIPT_DIR/CHANGELOG.md"
 }
 
@@ -94,17 +102,22 @@ list_versions() {
   local installed; installed=$(cat "$ANVI_DIR/VERSION" 2>/dev/null | tr -d '[:space:]' || true)
   echo "  Installed: v${installed:-none}     Latest in this clone: v${VERSION}"
   echo ""
-  printf "  %-9s %-12s %s\n" "VERSION" "RELEASED" "SUMMARY"
-  printf "  %-9s %-12s %s\n" "-------" "--------" "-------"
-  local ver date desc tag mark
-  while IFS=$'\t' read -r ver date desc; do
+  printf "  %-11s %-12s %-8s %s\n" "VERSION" "RELEASED" "MIGRATE" "SUMMARY"
+  printf "  %-11s %-12s %-8s %s\n" "-------" "--------" "-------" "-------"
+  local ver date desc migrate tag mark mig
+  while IFS=$'\t' read -r ver date desc migrate; do
     [ -n "$ver" ] || continue
     mark="  "
     [ "$ver" = "$installed" ] && mark="◀ installed"
     [ "$ver" = "$VERSION" ] && [ "$ver" != "$installed" ] && mark="◀ latest"
+    # Blank, not "no": a release predating the marker does not state whether it
+    # needs a migration, and printing "no" would answer a question it never asked.
+    mig=""; [ "$migrate" = "yes" ] && mig="yes"
     # trim the summary so the table stays readable
-    [ "${#desc}" -gt 66 ] && desc="${desc:0:63}..."
-    printf "  v%-8s %-12s %s  %s\n" "$ver" "$date" "$desc" "$mark"
+    [ "${#desc}" -gt 52 ] && desc="${desc:0:49}..."
+    # ASCII in the padded columns on purpose — printf pads by bytes, so a
+    # multibyte glyph here would shift every row after it. Markers go last.
+    printf "  v%-10s %-12s %-8s %s  %s\n" "$ver" "$date" "$mig" "$desc" "$mark"
   done < <(changelog_versions)
 }
 

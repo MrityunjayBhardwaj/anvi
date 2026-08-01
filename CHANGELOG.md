@@ -1,17 +1,25 @@
 # Changelog
 
 All notable changes to Ānvīkṣikī are documented here.
-Format: [Semantic Versioning](https://semver.org/)
 
-## [3.0.0] — 2026-07-31
+Version format: `YYYY.0M.PATCH` — the number says *when* a release was cut, not what
+it broke. Whether an existing install has to migrate is stated by a **MIGRATION
+REQUIRED** line directly beneath the version heading, which `install.sh` parses and
+surfaces in `--version-list`. The month is always zero-padded, because versions are
+matched as exact strings and `2026.8.0` would not find `2026.08.0`.
 
-Major release. Two changes make it one, and both require an existing install to
-migrate: **planning documents moved into the centralized store**, and **catalogue
-resolution now fails closed on identity**. 2.0.0 moved the catalogues out of your
-repo; 3.0.0 moves the rest of the work there, and makes the store prove who it
-belongs to before it serves anything.
+Releases before `2026.08.0` used [semantic versioning](https://semver.org/) and keep
+the numbers they were published under.
 
-### Why this is a major version
+## [2026.08.0] — 2026-08-01
+**MIGRATION REQUIRED** — run `/anvi:update`; until a project is bound, its catalogue reads are declined
+
+Two changes require an existing install to migrate: **planning documents moved into
+the centralized store**, and **catalogue resolution now fails closed on identity**.
+2.0.0 moved the catalogues out of your repo; this release moves the rest of the work
+there, and makes the store prove who it belongs to before it serves anything.
+
+### Why this release requires a migration
 
 **1. Planning documents were durable nowhere, while every workflow reported a
 completed run.** When catalogues moved to the store, `.planning/` was gitignored so
@@ -191,6 +199,7 @@ resolves it.
   the answers are well-formed and wrong.
 
 ## [2.0.0] — 2026-07-23
+**MIGRATION REQUIRED** — catalogues move into the store; an install from 1.1.0 or earlier keeps them in a local `.anvi/`
 
 Major release. Since 1.1.0 the framework grew a **centralized knowledge store**:
 catalogues, Ground Truth docs, and memory now live under `~/.anvideck` (backed by

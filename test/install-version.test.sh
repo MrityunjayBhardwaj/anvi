@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Test the version selection in install.sh: --version-list and --version <v>.
-# Upgrade-only (never downgrade), semver-correct ordering (0.9.0 < 0.10.0), and
-# an honest error for an unknown or untagged version. HOME is always a throwaway
-# so the real install is never touched.
+# Upgrade-only (never downgrade), correct ordering within and across the two
+# schemes (0.9.0 < 0.10.0 < 2026.08.0), the migration marker, and an honest error
+# for an unknown or untagged version. HOME is always a throwaway so the real
+# install is never touched.
 # Run:  bash test/install-version.test.sh
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,7 +19,7 @@ echo "--version-list"
 H="$(mkhome 1.0.0)"
 OUT="$(run "$H" --version-list)"
 ok '[ "$(run "$H" --version-list >/dev/null 2>&1; echo $?)" = 0 ]' 'exits 0'
-ok 'echo "$OUT" | grep -qE "v2\.0\.0 +2026-07-23"'  'lists the latest version with its release date'
+ok 'echo "$OUT" | grep -qE "v2\.0\.0 +2026-07-23"'  'lists a semantic-versioned release with its date'
 ok 'echo "$OUT" | grep -qE "v0\.10\.0 +2026-03-23"' 'lists an older version with its date'
 ok 'echo "$OUT" | grep -q "SUMMARY"'                'has a summary column'
 ok 'echo "$OUT" | grep -qE "v1\.0\.0.*installed"'   'marks the installed version'
@@ -75,6 +76,41 @@ ok 'run "$H" --version "$CLONE_VER" --sync | grep -qi "current version — insta
 # falsifying it; it is redundant with the assertion above only when it is right.
 ok 'run "$H" --version-list | grep -qE "^  v${CLONE_VER//./\\.} +[0-9]{4}-"' \
    'and that version has a CHANGELOG entry with a date, so --version can reach it'
+
+echo "calendar versioning — the scheme boundary"
+# An install sitting on the last semantic version must read the first calendar
+# version as an UPGRADE. sort -V happens to order 2.0.0 before 2026.08.0, but the
+# property under test is the installer's verdict, so ask the installer.
+H="$(mkhome 2.0.0)"
+OUT="$(run "$H" --version "$CLONE_VER" --sync)"
+ok '! echo "$OUT" | grep -qi "refusing to downgrade"' \
+   'a 2.0.0 install reads the calendar release as an upgrade, not a downgrade'
+
+# Versions are matched with grep -qxF, an exact string compare, so zero-padding is
+# part of the identity rather than cosmetic. The unpadded form must be rejected —
+# if it silently resolved, --version would install something other than what was named.
+H="$(mkhome 1.0.0)"
+UNPADDED="$(echo "$CLONE_VER" | sed 's/\.0\([1-9]\)\./.\1./')"
+ok '[ "$UNPADDED" != "$CLONE_VER" ]' "an unpadded form exists to test (got '$UNPADDED')"
+ok 'run "$H" --version "$UNPADDED" | grep -qi "unknown version"' \
+   'an unpadded month is rejected, not silently matched to the padded release'
+
+echo "migration marker"
+OUT="$(run "$H" --version-list)"
+ok 'echo "$OUT" | grep -q "MIGRATE"' 'the table carries a MIGRATE column'
+ok 'echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.} +[0-9-]+ +yes "' \
+   'the current release is flagged as requiring a migration'
+# The marker sits where desc is picked up, so a parser that does not consume it
+# reports it AS the summary. That is the defect this field exists to avoid.
+ok '! echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.}.*MIGRATION REQUIRED"' \
+   'the marker is consumed as a field, not mistaken for the summary'
+ok 'echo "$OUT" | grep -qE "^  v2\.0\.0 +[0-9-]+ +yes "' \
+   'a backfilled pre-marker release is flagged too, so the column is not only forward-looking'
+# Absence must render blank. "no" would be a claim about a release that never made one.
+ok '! echo "$OUT" | grep -qE "^  v1\.1\.0 +[0-9-]+ +yes "' \
+   'a release that states no migration is not flagged'
+ok '! echo "$OUT" | grep -qE "^  v[0-9][0-9.]* +[0-9-]+ +no "' \
+   'and no row claims "no" — an unstated migration is blank, not answered'
 
 echo ""
 echo "$PASS passed, $FAIL failed"
