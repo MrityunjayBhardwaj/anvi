@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { projectRootFor, resolveDirForFile } = require('./anvi-paths.js');
+const { projectRootFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
 const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
@@ -163,6 +163,12 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    // A hook is a process per event, so the resolver dedupes its explanations
+    // against a Set that is always empty unless it knows the session. Guarded:
+    // an install whose resolver predates this export must degrade to
+    // per-process, not die silently inside a hook — the catch below exits 0
+    // either way, which would read as a hook with nothing to say.
+    if (adoptSession) adoptSession(data.session_id);
     const toolInput = data.tool_input || {};
     const filePath = toolInput.file_path || '';
 

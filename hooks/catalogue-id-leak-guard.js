@@ -41,8 +41,8 @@ const fs = require('fs');
 // sibling require resolves in-repo and installed alike (V7). parseEntries is the ONE
 // catalogue parser (V7 again); a second ID scanner here would be a second chance to
 // disagree about what an entry IS.
-let resolveDir, parseEntries;
-try { ({ resolveDir } = require('./anvi-paths.js')); } catch { resolveDir = null; }
+let resolveDir, parseEntries, adoptSession;
+try { ({ resolveDir, adoptSession } = require('./anvi-paths.js')); } catch { resolveDir = null; }
 try { ({ parseEntries } = require('./currency.js')); } catch { parseEntries = null; }
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -91,6 +91,10 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    // A hook is a process per event — scope the resolver's explanations to the
+    // session. Guarded: this module is loaded defensively above, and an install
+    // predating the export must degrade to per-process, not throw inside a hook.
+    if (adoptSession) adoptSession(data.session_id);
     const cwd = data.cwd || process.cwd();
     const command = (data.tool_input && data.tool_input.command) || '';
     if (!command) process.exit(0);

@@ -11,7 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDir } = require('./anvi-paths.js');
+const { resolveDir, adoptSession } = require('./anvi-paths.js');
 
 // Size-triggered compaction threshold. When a catalogue passes this many lines,
 // the session-start message flags it so growth doesn't stay silent across
@@ -27,6 +27,12 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    // A hook is a process per event, so the resolver dedupes its explanations
+    // against a Set that is always empty unless it knows the session. Guarded:
+    // an install whose resolver predates this export must degrade to
+    // per-process, not die silently inside a hook — the catch below exits 0
+    // either way, which would read as a hook with nothing to say.
+    if (adoptSession) adoptSession(data.session_id);
     const cwd = data.cwd || process.cwd();
 
     // Find .anvi/ directory — shared resolver spans both layouts

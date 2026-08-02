@@ -40,8 +40,8 @@ const os = require('os');
 // defensively for the same reason every other guard does: an install predating
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
-let storeProjectOf = null, ownStoreProject = null;
-try { ({ storeProjectOf, ownStoreProject } = require('./anvi-paths.js')); } catch { /* older install */ }
+let storeProjectOf = null, ownStoreProject = null, adoptSession = null;
+try { ({ storeProjectOf, ownStoreProject, adoptSession } = require('./anvi-paths.js')); } catch { /* older install */ }
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -238,6 +238,10 @@ function resolveSessionId(data) {
 }
 
 function run(data) {
+  // A hook is a process per event — scope the resolver's explanations to the
+  // session. Guarded: the module above is loaded defensively, so an install
+  // predating the export must degrade to per-process rather than throw here.
+  if (adoptSession) adoptSession(data.session_id);
   const cwd = data.cwd || process.cwd();
   const toolName = data.tool_name || '';
   const toolInput = data.tool_input || {};
