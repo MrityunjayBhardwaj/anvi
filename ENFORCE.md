@@ -138,6 +138,7 @@ centralized projects). See issue #5.
 | 8 | Adding ungrounded catalogue entries | ④ — post-resolution update requires REF field |
 | 9 | A hook silently dying and nobody noticing | `test/hook-liveness.test.js` — every hook must prove it still speaks |
 | 10 | A version offered by `--version-list` that cannot actually be installed | `test/changelog-tag-parity.test.sh` — every advertised version has a tag, every tag an entry; only the unreleased newest is exempt |
+| 11 | A maintenance instruction still premised on a claim that has since gone stale | `test/vendored-doc-contract.test.js` — `bin/lib/VENDORED.md`'s patched/pristine table is derived from git history on every run, so a wholesale re-vendor can never stay advised for a module carrying anvi work |
 
 ## Liveness — a quiet hook and a dead hook look identical
 
