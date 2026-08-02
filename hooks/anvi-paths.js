@@ -256,9 +256,15 @@ function identityFor(dir) {
 // catalogues to anyone who can create a symlink — reopening precisely what the
 // binding check closed. Resolved, such a link lands in the store, is not inside
 // cwd, and stays gated.
+//
+// Resolved with `realDeep` rather than `realSafe` so a path that does not exist
+// yet still gets an answer. `realpathSync` fails on a missing leaf, which would
+// make every not-yet-created file report as "not inside" — silently, and in the
+// permissive direction for anything that treats outside as uninteresting. For
+// paths that DO exist the two are identical, so no existing verdict moves.
 function isInside(cwd, dir) {
-  const base = realSafe(cwd);
-  const real = realSafe(dir);
+  const base = realDeep(cwd);
+  const real = realDeep(dir);
   if (!base || !real) return false;
   const rel = path.relative(base, real);
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
