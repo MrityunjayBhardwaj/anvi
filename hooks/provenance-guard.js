@@ -92,20 +92,26 @@ function foreignProjectOf(absPath, cwd) {
   // reason to fall back to the name — it is the reason not to.
   const ownStore = ownStoreProject ? ownStoreProject(cwd) : null;
 
-  // In-envelope → never foreign.
-  if (isUnder(absPath, cwd)) return null;
-  if (ownStore && isUnder(absPath, ownStore)) return null;
-  if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
-
-  // (a) sibling repo: shares cwd's parent directory but isn't cwd.
-  const parent = path.dirname(cwd);
-  if (isUnder(absPath, parent)) {
-    const rel = path.relative(parent, absPath);
-    const sibling = rel.split(path.sep)[0];
-    if (sibling && sibling !== name && sibling !== '..') return sibling;
-  }
-
-  // (b) another project's centralized store.
+  // (b) another project's centralized store — asked FIRST, and on resolved paths.
+  //
+  // Order matters here, and it is the fix for a second forgery. The in-envelope
+  // tests below compare path strings, so a symlink inside the working directory
+  // pointing at another project's store is "inside cwd" as text: the read passed
+  // as in-envelope and the guard stayed silent on exactly what it exists to
+  // catch. Resolving the in-envelope tests instead would have been noisy —
+  // symlinks within a repository are ordinary — whereas a path that RESOLVES
+  // into another project's store is foreign however it is spelled, and one that
+  // resolves anywhere else is still in-envelope. So the resolved question runs
+  // first and the textual ones keep their cheap, permissive job.
+  //
+  // BOTH halves of it go to the shared resolver, by realpath. Asking it only
+  // WHICH project a path lands in, while deciding WHETHER it is in the store at
+  // all with a string prefix against a root this file assembled, left the inner
+  // question forgery-proof and the gate into it forgeable: with the store root
+  // behind a symlink, the same foreign catalogue fired via the `~/.anvideck`
+  // spelling and was silent via its canonical route. The failure direction is
+  // the wrong one — an absent warning is indistinguishable from a read that was
+  // fine.
   //
   // BOTH questions go to the shared resolver, by realpath. Asking it only WHICH
   // project a path lands in, while deciding WHETHER it is in the store at all
@@ -123,9 +129,25 @@ function foreignProjectOf(absPath, cwd) {
     : storeProjectOf ? storeProjectOf(absPath)
       : null;
   if (landed) {
-    if (ownStore && landed === ownStore) return null; // our own, proven above
+    if (ownStore && landed === ownStore) return null; // our own knowledge
     return path.basename(landed);
   }
+
+  // In-envelope → never foreign. Reached only once the resolved store question
+  // has said no, so a symlink cannot use these textual tests to launder a store
+  // path into the working directory.
+  if (isUnder(absPath, cwd)) return null;
+  if (ownStore && isUnder(absPath, ownStore)) return null;
+  if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
+
+  // (a) sibling repo: shares cwd's parent directory but isn't cwd.
+  const parent = path.dirname(cwd);
+  if (isUnder(absPath, parent)) {
+    const rel = path.relative(parent, absPath);
+    const sibling = rel.split(path.sep)[0];
+    if (sibling && sibling !== name && sibling !== '..') return sibling;
+  }
+
   // The resolver is unavailable (a partial install), or the path resolves
   // nowhere at all. The literal spelling is still worth checking: it is the only
   // route left, and ownership is unproven either way. The asymmetry is

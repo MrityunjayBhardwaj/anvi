@@ -159,6 +159,36 @@ console.log('\ncontainment on resolved paths, not on the spelling');
   ok(first && !again, 'and the same read repeated in one session speaks once, then stays quiet');
 }
 
+// ── a symlink inside the working directory must not launder a store path ────
+// "Inside cwd → never foreign" was decided on path STRINGS, so a link inside the
+// working directory pointing at another project's store passed as in-envelope
+// and the guard went silent. Resolving the in-envelope tests would have been the
+// noisy fix — links inside a repository are ordinary — so the resolved store
+// question runs FIRST instead: a path that lands in another project's store is
+// foreign however it is spelled, and one that lands anywhere else is still
+// in-envelope. Both halves need a case, or a fix that simply flags every symlink
+// would satisfy the first.
+console.log('\na symlink inside the working directory cannot launder a store path');
+{
+  const borrowed = path.join(OWNER, 'borrowed');
+  fs.symlinkSync(storeOf('beta'), borrowed);
+  ok(fs.realpathSync(path.join(borrowed, 'hetvabhasa.md')) === fs.realpathSync(BETA_CAT),
+     'the in-repo link really does reach beta\'s catalogue');
+  ok(fired(OWNER, path.join(borrowed, 'hetvabhasa.md')),
+     'reading beta\'s catalogue through a link inside the repo is flagged');
+
+  // The other half: the common case must stay quiet, or the fix is a noise
+  // generator that happens to catch the bug.
+  const outside = path.join(HOME, 'shared-pkg');
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, 'index.js'), '//\n');
+  fs.symlinkSync(outside, path.join(OWNER, 'packages'));
+  ok(!fired(OWNER, path.join(OWNER, 'packages', 'index.js')),
+     'while an ordinary link to a non-store directory stays in-envelope');
+  ok(!fired(OWNER, path.join(OWNER, '.anvi', 'hetvabhasa.md')),
+     'and the project still reads its own catalogue through its own .anvi link silently');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
