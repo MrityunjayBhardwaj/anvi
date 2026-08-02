@@ -37,8 +37,12 @@ const { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const LIB = path.join(ROOT, 'bin', 'lib');
 
-const git = (...args) =>
-  execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+// Bound to a root rather than closing over ROOT, so the derivation can be pointed
+// at a fixture. A guard whose only exercise is the tree it lives in is a guard
+// whose interesting cases stay untested.
+const gitIn = root => (...args) =>
+  execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+const git = gitIn(ROOT);
 
 // This reads bin/lib's history, so it only means anything inside the clone that
 // HAS that history. install.sh copies scripts/*.js into every installation, where
@@ -49,18 +53,18 @@ const git = (...args) =>
 // not. Compared by realpath, because in dev mode the install path is a symlink to
 // the clone and git reports the resolved location — a string comparison would
 // refuse the one layout that works.
-function assertOwnRepo() {
+function assertOwnRepo(root) {
   let top;
   try {
     top = execFileSync('git', ['rev-parse', '--show-toplevel'],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     throw new Error(
-      `${ROOT} is not inside a git repository.\n` +
+      `${root} is not inside a git repository.\n` +
       '  vendor-drift derives the inventory from this repo\'s own history, so it only\n' +
       '  works in an anvi clone. In an installation there is no history to read.');
   }
-  const here = fs.realpathSync(ROOT);
+  const here = fs.realpathSync(root);
   if (fs.realpathSync(top) !== here) {
     throw new Error(
       `${here} is not the root of the git repository that contains it (${top} is).\n` +
@@ -75,17 +79,30 @@ function assertOwnRepo() {
 // pristine. Returns null rather than guessing — the caller must fail on null, since
 // "no anchor" and "no patches" produce the same empty commit list, and treating them
 // alike is how a patched module would report as safe to overwrite.
-function addedIn(file) {
-  const out = git('log', '--diff-filter=A', '--abbrev=7', '--format=%h', '--', `bin/lib/${file}`);
+//
+// --follow because a rename fails in the destructive direction. Without it, the add
+// commit of a renamed module is the RENAME, every patch predates that anchor, and
+// the module reports pristine — which this document then records and a re-vendor
+// then acts on. `git mv bin/lib/core.cjs` would have been enough to mark 302 lines
+// of resolver integration and write-path enforcement as safe to overwrite.
+function addedIn(git, file) {
+  const out = git('log', '--follow', '--diff-filter=A', '--abbrev=7', '--format=%h', '--', `bin/lib/${file}`);
   const shas = out.split('\n').filter(Boolean);
   return shas.length ? shas[shas.length - 1] : null;
 }
 
 // Oldest first — this is the order a re-vendor must re-apply them in, so the
-// sequence is part of the answer and not just the set.
-function patchesSince(file, anchor) {
-  const out = git('log', '--reverse', '--abbrev=7', '--format=%h', `${anchor}..HEAD`, '--', `bin/lib/${file}`);
-  return out.split('\n').filter(Boolean);
+// sequence is part of the answer and not just the set. --follow for the same reason
+// as above: the patches to re-apply include the ones made under the old name.
+//
+// The reversal is done here rather than with --reverse because the two flags do not
+// compose: --follow rewrites the path as it walks the history, and --reverse makes
+// it stop at the rename and drop every commit before it. Together they return only
+// the rename itself — silently, and in the direction that reads as "no patches".
+// Observed on a fixture: with both flags one commit, with --follow alone two.
+function patchesSince(git, file, anchor) {
+  const out = git('log', '--follow', '--abbrev=7', '--format=%h', `${anchor}..HEAD`, '--', `bin/lib/${file}`);
+  return out.split('\n').filter(Boolean).reverse();
 }
 
 function subject(sha) {
@@ -111,12 +128,13 @@ function lineDelta(a, b) {
 // re-implementing it, so the tool that reports drift and the check that enforces
 // the report can never answer the same question two ways — the failure that let a
 // conformance check disagree with the binder it was auditing.
-function inventory() {
-  assertOwnRepo();
-  const modules = fs.readdirSync(LIB).filter(f => f.endsWith('.cjs')).sort();
+function inventory(root = ROOT) {
+  assertOwnRepo(root);
+  const g = gitIn(root);
+  const modules = fs.readdirSync(path.join(root, 'bin', 'lib')).filter(f => f.endsWith('.cjs')).sort();
   const rows = modules.map(file => {
-    const anchor = addedIn(file);
-    return { file, anchor, patches: anchor ? patchesSince(file, anchor) : [] };
+    const anchor = addedIn(g, file);
+    return { file, anchor, patches: anchor ? patchesSince(g, file, anchor) : [] };
   });
   return {
     modules,

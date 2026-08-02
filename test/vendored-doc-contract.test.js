@@ -197,5 +197,76 @@ console.log('\nthe tool refuses to report on a tree whose history it cannot see'
   }
 }
 
+// ── the document's INSTRUCTIONS, not just its claims ────────────────────────
+// The original defect was never the stale number. It was an instruction premised
+// on it. Enforcing the table while leaving the commands unchecked would rebuild
+// the same hazard one layer up: a document that tells you to run something that no
+// longer exists is exactly as misleading as one that tells you the modules match.
+console.log('\nthe commands the document tells you to run are commands the tool has');
+{
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const TOOL = path.join(ROOT, 'scripts', 'vendor-drift.js');
+  const src = fs.readFileSync(TOOL, 'utf8');
+  // Derived from the tool, not listed here — a list is the artifact that goes stale.
+  const known = new Set([...src.matchAll(/argv\.(?:indexOf|includes)\('(--[\w-]+)'\)/g)].map(m => m[1]));
+  ok(known.size > 0, `the tool recognises ${known.size} flags, read out of its own source`);
+
+  const invocations = [...text.matchAll(/node scripts\/vendor-drift\.js([^\n]*)/g)].map(m => m[1]);
+  ok(invocations.length > 0, `the document shows ${invocations.length} invocations`);
+  for (const inv of invocations) {
+    for (const flag of inv.match(/--[\w-]+/g) || []) {
+      ok(known.has(flag), `${flag} is a flag the tool actually reads`);
+    }
+  }
+  // And the plain form must genuinely work, not merely parse.
+  let code = 0;
+  try { execFileSync(process.execPath, [TOOL], { stdio: 'ignore' }); } catch (e) { code = e.status; }
+  ok(code === 0, `the documented no-argument invocation succeeds (exit ${code})`);
+}
+
+// ── a rename must not launder a patched module into a pristine one ──────────
+// Anchoring on the add commit means a renamed module's anchor becomes the RENAME,
+// every patch predates it, and the module reports pristine — which this document
+// would then record and a re-vendor would then act on. `git mv bin/lib/core.cjs`
+// would have been enough to mark 302 lines of safety properties safe to overwrite.
+console.log('\na renamed module still carries the patches made under its old name');
+{
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vendor-rename-'));
+  const g = (...a) => execFileSync('git', a, { cwd: tmp, encoding: 'utf8' }).trim();
+  try {
+    const lib = path.join(tmp, 'bin', 'lib');
+    fs.mkdirSync(lib, { recursive: true });
+    g('init', '-q');
+    g('config', 'user.email', 't@example.com');
+    g('config', 'user.name', 't');
+    fs.writeFileSync(path.join(lib, 'patched.cjs'), '// vendored\n');
+    fs.writeFileSync(path.join(lib, 'untouched.cjs'), '// vendored\n');
+    g('add', '-A'); g('commit', '-qm', 'vendor');
+    fs.appendFileSync(path.join(lib, 'patched.cjs'), '// an anvi patch\n');
+    g('add', '-A'); g('commit', '-qm', 'patch it');
+    const patchSha = g('log', '-1', '--abbrev=7', '--format=%h');
+    g('mv', 'bin/lib/patched.cjs', 'bin/lib/renamed.cjs');
+    g('add', '-A'); g('commit', '-qm', 'rename it');
+
+    // Assert the fixture reproduces the hazard BEFORE trusting the fix, or a pass
+    // could mean the rename simply never confused anything.
+    const naiveAnchor = g('log', '--diff-filter=A', '--abbrev=7', '--format=%h', '--', 'bin/lib/renamed.cjs').split('\n').pop();
+    const renameSha = g('log', '-1', '--abbrev=7', '--format=%h');
+    ok(naiveAnchor === renameSha, 'without rename-following the anchor WOULD be the rename commit — the hazard is present in this fixture');
+
+    const inv = inventory(tmp);
+    const renamed = inv.rows.find(r => r.file === 'renamed.cjs');
+    ok(!!renamed, 'the renamed module is in the inventory');
+    ok(inv.patched.some(r => r.file === 'renamed.cjs'), 'and it reads PATCHED, not pristine');
+    ok(renamed.patches.includes(patchSha), `and lists the patch made under its old name (${patchSha})`);
+    ok(inv.pristine.some(r => r.file === 'untouched.cjs'), 'while a genuinely untouched module still reads pristine');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} vendored doc contract: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
