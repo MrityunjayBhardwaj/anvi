@@ -141,5 +141,61 @@ console.log('\nthe re-vendor instruction carries its precondition');
   }
 }
 
+// ── the tool must know when it cannot answer ────────────────────────────────
+// install.sh copies scripts/*.js into every installation, so this tool ships to
+// machines with no anvi history to read. The failure that matters is not the
+// missing repository — it is the WRONG one. An installation kept inside some other
+// git repo makes `git log` answer from that repo, where these files have exactly
+// one commit each and therefore no patches, so the report reads
+// "16 pristine — safe to re-vendor wholesale": the precise instruction that
+// destroys core.cjs, stated with confidence about files it never looked at, exit 0.
+console.log('\nthe tool refuses to report on a tree whose history it cannot see');
+{
+  const os = require('os');
+  const { execFileSync } = require('child_process');
+  const TOOL = path.join(ROOT, 'scripts', 'vendor-drift.js');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vendor-drift-'));
+  const run = script => {
+    try {
+      const out = execFileSync(process.execPath, [script], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, out, err: '' };
+    } catch (e) {
+      return { code: e.status, out: String(e.stdout || ''), err: String(e.stderr || '') };
+    }
+  };
+  try {
+    // An install-shaped tree: the tool beside a bin/lib it did not come with.
+    const app = path.join(tmp, 'anvi');
+    fs.mkdirSync(path.join(app, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(app, 'bin', 'lib'), { recursive: true });
+    fs.copyFileSync(TOOL, path.join(app, 'scripts', 'vendor-drift.js'));
+    for (const f of modules) fs.writeFileSync(path.join(app, 'bin', 'lib', f), '// stub\n');
+    const copy = path.join(app, 'scripts', 'vendor-drift.js');
+
+    const noRepo = run(copy);
+    ok(noRepo.code === 2, `no repository at all → exit 2 (got ${noRepo.code})`);
+    ok(/not inside a git repository/.test(noRepo.err), 'and says so');
+    ok(!/at \w+ \(node:internal/.test(noRepo.err), 'with a message rather than a stack trace');
+
+    // Now the dangerous shape. Assert the fixture really is what it claims BEFORE
+    // trusting the refusal — an unrelated repo that failed to initialise would
+    // refuse for the first reason and the second case would pass for free.
+    execFileSync('git', ['init', '-q'], { cwd: tmp });
+    execFileSync('git', ['add', '-A'], { cwd: tmp });
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-qm', 'unrelated'], { cwd: tmp });
+    const topOf = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: app, encoding: 'utf8' }).trim();
+    ok(fs.realpathSync(topOf) === fs.realpathSync(tmp), 'the fixture is inside an unrelated repository whose root is NOT the app dir');
+    const tracked = execFileSync('git', ['log', '--diff-filter=A', '--format=%h', '--', 'bin/lib/core.cjs'], { cwd: app, encoding: 'utf8' }).trim();
+    ok(tracked !== '', 'and that repository does have history for bin/lib — so an unguarded read would have found something to report');
+
+    const wrongRepo = run(copy);
+    ok(wrongRepo.code === 2, `history from the wrong repository → exit 2 (got ${wrongRepo.code})`);
+    ok(/not the root of the git repository/.test(wrongRepo.err), 'and names the repository it would otherwise have read');
+    ok(!/PRISTINE/.test(wrongRepo.out), 'and prints no partition — a wrong answer here is the re-vendor instruction this file exists to prevent');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} vendored doc contract: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

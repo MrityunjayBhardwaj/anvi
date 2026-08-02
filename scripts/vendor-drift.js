@@ -40,6 +40,35 @@ const LIB = path.join(ROOT, 'bin', 'lib');
 const git = (...args) =>
   execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
 
+// This reads bin/lib's history, so it only means anything inside the clone that
+// HAS that history. install.sh copies scripts/*.js into every installation, where
+// there is no .git at all — and the failure that matters is not the missing repo
+// but the WRONG one: a user who keeps ~/.claude under version control would have
+// `git log` answer from that repo instead, and the report would name a state with
+// no relationship to these files. A crash is loud; a confident wrong partition is
+// not. Compared by realpath, because in dev mode the install path is a symlink to
+// the clone and git reports the resolved location — a string comparison would
+// refuse the one layout that works.
+function assertOwnRepo() {
+  let top;
+  try {
+    top = execFileSync('git', ['rev-parse', '--show-toplevel'],
+      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    throw new Error(
+      `${ROOT} is not inside a git repository.\n` +
+      '  vendor-drift derives the inventory from this repo\'s own history, so it only\n' +
+      '  works in an anvi clone. In an installation there is no history to read.');
+  }
+  const here = fs.realpathSync(ROOT);
+  if (fs.realpathSync(top) !== here) {
+    throw new Error(
+      `${here} is not the root of the git repository that contains it (${top} is).\n` +
+      '  Reading bin/lib history from that repository would describe different files.\n' +
+      '  Run this from an anvi clone.');
+  }
+}
+
 // The anchor is per-module rather than one repo-wide vendoring commit, so a module
 // vendored later than the others is measured from its own arrival. Oldest `A` entry
 // wins: a delete-then-re-add would otherwise anchor to the re-add and read as
@@ -83,6 +112,7 @@ function lineDelta(a, b) {
 // the report can never answer the same question two ways — the failure that let a
 // conformance check disagree with the binder it was auditing.
 function inventory() {
+  assertOwnRepo();
   const modules = fs.readdirSync(LIB).filter(f => f.endsWith('.cjs')).sort();
   const rows = modules.map(file => {
     const anchor = addedIn(file);
@@ -105,7 +135,16 @@ const argv = process.argv.slice(2);
 const upIdx = argv.indexOf('--upstream');
 const upstream = upIdx !== -1 ? argv[upIdx + 1] : null;
 
-const { modules, rows, unanchored, patched, pristine } = inventory();
+let inv;
+try {
+  inv = inventory();
+} catch (e) {
+  // A stack trace here would be noise: every reachable cause is "you ran a
+  // development tool outside the clone", which the message already says.
+  console.error(`✗ ${e.message}`);
+  process.exit(2);
+}
+const { modules, rows, unanchored, patched, pristine } = inv;
 const head = git('rev-parse', '--abbrev-ref', 'HEAD');
 const headSha = git('rev-parse', '--short=7', 'HEAD');
 
