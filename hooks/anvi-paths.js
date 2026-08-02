@@ -160,17 +160,61 @@ function warnIfSplitBrain(kind, existing) {
 const READ_OK = new Set(['LOCAL', 'BOUND', 'UNVERIFIABLE']);
 const WRITE_OK = new Set(['LOCAL', 'BOUND']);
 
-// The store project a resolved directory belongs to, derived from where the path
-// actually LANDS — never assembled from a basename, which is the defect itself.
-// Returns null when the path is not inside the store at all.
-function storeProjectOf(dir) {
+// Resolve the longest EXISTING prefix of a path and re-attach the remainder.
+//
+// `realpathSync` fails outright on a missing leaf, so a path that does not exist
+// yet resolves to nothing — and a containment test built on it then answers "not
+// in the store" for every path a tool is about to CREATE. That is the silent
+// direction: the reads a guard catches are the ones whose files are already
+// there, and the writes it should catch are exactly the ones whose files are not.
+// Walking up to the deepest component that does exist keeps the symlink-following
+// that makes containment a fact about the filesystem rather than about spelling,
+// without requiring the target itself to exist.
+function realDeep(p) {
+  if (!p) return null;
+  let cur = path.resolve(p);
+  const tail = [];
+  for (;;) {
+    const real = realSafe(cur);
+    if (real) return tail.length ? path.join(real, ...tail) : real;
+    const parent = path.dirname(cur);
+    if (parent === cur) return null; // reached the root having resolved nothing
+    tail.unshift(path.basename(cur));
+    cur = parent;
+  }
+}
+
+// The containment core both entry points below share. Separated so that "which
+// store project is this in" is answered ONE way — two consumers computing it
+// separately is how this file came to exist (H1), and here the two would differ
+// precisely on the symlinked-store case nobody exercises.
+function storeProjectOfReal(real) {
   const root = realSafe(storeProjectsRoot());
-  if (!root) return null;
-  const real = realSafe(dir);
-  if (!real) return null;
+  if (!root || !real) return null;
   const rel = path.relative(root, real);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   return path.join(root, rel.split(path.sep)[0]);
+}
+
+// The store project a resolved directory belongs to, derived from where the path
+// actually LANDS — never assembled from a basename, which is the defect itself.
+// Returns null when the path is not inside the store at all.
+//
+// Deliberately requires the path to EXIST: this feeds the access verdict, whose
+// callers pass directories the resolver already found, and a fail-closed gate
+// should not start reasoning about paths that are not there. Use
+// `storeProjectForPath` for arbitrary input that may not exist yet.
+function storeProjectOf(dir) {
+  const real = realSafe(dir);
+  if (!real) return null;
+  return storeProjectOfReal(real);
+}
+
+// Same question for a path that need not exist — a file a tool is about to read,
+// write, or glob. Containment is still decided on resolved paths, by resolving as
+// much of it as the filesystem actually has.
+function storeProjectForPath(p) {
+  return storeProjectOfReal(realDeep(p));
 }
 
 // Which store project does THIS working directory OWN? Answered from where its
@@ -386,6 +430,11 @@ module.exports = {
   // must be able to name an unbound project rather than go blind on exactly the
   // projects it exists to report.
   resolveDirVerdict, requireDirForWrite, storeProjectOf, ownStoreProject, checkAccess,
+  // The same containment question for a path that need not exist yet. Exported
+  // beside storeProjectOf rather than folded into it because their existence
+  // policies differ on purpose: the access verdict should not reason about paths
+  // that are not there, and a guard classifying tool input must.
+  storeProjectForPath,
   // Exported so consumers that need to say WHERE something landed relative to
   // the caller answer it with the same realpath containment the access check
   // uses. The alternative — each consumer comparing path strings for itself —
