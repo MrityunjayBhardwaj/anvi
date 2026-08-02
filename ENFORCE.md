@@ -108,6 +108,17 @@ no project has to migrate:
 `.anvi/` resolved by the order above."** This table is the one authoritative definition —
 the hooks and the docs must agree with it, not with each other ad hoc.
 
+**"Where do I look" and "what do I own" are different questions, and only the first
+may use the name.** The candidate order above is a search: the basename entry is a
+place to *try*, and a hit there is then gated by the binding record, so a directory
+cannot reach a store project merely by being named like it. Ownership is the other
+question — "is this path inside the store project this directory owns?" — and it is
+answered only by `ownStoreProject(cwd)`, from the realpath of `cwd/.anvi`. Answering
+it from the name instead is what let a same-named stranger read another project's
+catalogues unflagged while a renamed working copy saw its own reported as foreign.
+Null from `ownStoreProject` means nothing proves ownership, which is a reason to
+treat store paths as external, never a reason to fall back to the name.
+
 Rationale: before this was unified, the three hooks each checked a different subset of
 locations and silently failed on the layout they didn't handle (e.g. the injector
 no-op'd on projects using `artifacts/.anvi`; session-start reported "no GT docs" on

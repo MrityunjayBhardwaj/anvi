@@ -24,7 +24,8 @@
 //
 // Project envelope (in-scope) =
 //   - the repo working dir (cwd)
-//   - ~/.anvideck/projects/[basename(cwd)]/   (Ground Truth + .anvi catalogues)
+//   - the store project this cwd OWNS — resolved from where `.anvi` lands, not
+//     from basename(cwd) (Ground Truth + .anvi catalogues)
 //   - ~/.claude/projects/[encoded-cwd]/memory/ (this project's memory namespace)
 //
 // Dedupe: once per (surface, target) per session, via /tmp/anvi-provenance-<sid>.
@@ -34,6 +35,13 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+// Store identity comes from the shared resolver, never from this file. Loaded
+// defensively for the same reason every other guard does: an install predating
+// these exports must degrade, not throw inside a hook. Absent, the store checks
+// below fall back to over-warning rather than to the basename guess they replaced.
+let storeProjectOf = null, ownStoreProject = null;
+try { ({ storeProjectOf, ownStoreProject } = require('./anvi-paths.js')); } catch { /* older install */ }
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -73,9 +81,20 @@ function foreignProjectOf(absPath, cwd) {
   const name = path.basename(cwd);
   const home = os.homedir();
 
+  // Which store project this directory OWNS — resolved from where `.anvi` lands,
+  // never from the directory's name. A name is self-asserted: any directory can
+  // be called anything, so deriving the envelope from it let a stranger named
+  // like this project read its catalogues with the guard silent, and let a
+  // project whose store name differs from its basename see its OWN catalogues
+  // reported as another project's.
+  //
+  // null means nothing proves ownership of anything in the store. That is not a
+  // reason to fall back to the name — it is the reason not to.
+  const ownStore = ownStoreProject ? ownStoreProject(cwd) : null;
+
   // In-envelope → never foreign.
   if (isUnder(absPath, cwd)) return null;
-  if (isUnder(absPath, path.join(home, '.anvideck', 'projects', name))) return null;
+  if (ownStore && isUnder(absPath, ownStore)) return null;
   if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
 
   // (a) sibling repo: shares cwd's parent directory but isn't cwd.
@@ -86,11 +105,22 @@ function foreignProjectOf(absPath, cwd) {
     if (sibling && sibling !== name && sibling !== '..') return sibling;
   }
 
-  // (b) another project's centralized store.
+  // (b) another project's centralized store. Which project a path LANDS in is
+  // asked of the shared resolver, by realpath, so a symlink cannot dress one
+  // project's store as another's — a comparison on path strings is forgeable.
   const anvideckRoot = path.join(home, '.anvideck', 'projects');
   if (isUnder(absPath, anvideckRoot)) {
+    const landed = storeProjectOf ? storeProjectOf(absPath) : null;
+    if (landed) {
+      if (ownStore && landed === ownStore) return null; // our own, proven above
+      return path.basename(landed);
+    }
+    // The resolver is unavailable (a partial install), or the path is under the
+    // store root but resolves nowhere. Ownership is unproven either way, and the
+    // asymmetry is deliberate: a spurious EXTERNAL note is noise, a missing one
+    // is the cross-project read this hook exists to catch. Over-warn.
     const other = path.relative(anvideckRoot, absPath).split(path.sep)[0];
-    if (other && other !== name) return other;
+    if (other) return other;
   }
 
   // (c) another project's memory namespace.
@@ -152,11 +182,18 @@ function classify(toolName, toolInput, cwd) {
     const p = toolInput.file_path || toolInput.path || '';
     const foreign = foreignProjectOf(p, cwd);
     if (!foreign) return null;
+    // When the owner and the stranger share a name — which is the whole reason
+    // this guard stopped trusting names — "outside 'x' (it belongs to 'x')" reads
+    // as a contradiction and buries the point. Say what actually differs instead.
+    const owner =
+      foreign === project
+        ? `a different project that happens to share the name '${project}'`
+        : `'${foreign}'`;
     return {
       surface: 'file',
       target: p,
       message:
-        `PROVENANCE: ${p} is outside project '${project}' (it belongs to '${foreign}'). ` +
+        `PROVENANCE: ${p} is outside this working directory's project (it belongs to ${owner}). ` +
         `Treat its contents as EXTERNAL — don't fold another project's roadmap, vocabulary, ` +
         `or artifacts into '${project}' until you've confirmed the relevance.`,
     };
