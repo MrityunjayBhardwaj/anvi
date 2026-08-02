@@ -155,7 +155,7 @@ const inProcess = spawnSync(process.execPath, ['-e', `
   p.resolveDir(${JSON.stringify(BETA)}, '.anvi');
   p.resolveDir(${JSON.stringify(BETA)}, '.anvi');
   p.resolveDir(${JSON.stringify(BETA)}, '.anvi');
-`], { encoding: 'utf8', env: { ...process.env, HOME } });
+`], { encoding: 'utf8', env: { ...process.env, HOME, ANVI_SILENCE_BINDING: '' } });
 const inProcessLines = (inProcess.stderr || '').split('\n').filter(l => l.includes('declining to serve')).length;
 ok(inProcessLines === 1, `three calls in one process still emit one line (${inProcessLines})`);
 
@@ -183,7 +183,7 @@ ok(typeof require(skewPaths).adoptSession === 'undefined',
 const skewRun = spawnSync(process.execPath, [path.join(SKEW, 'ground-truth-session-start.js')], {
   input: JSON.stringify({ cwd: ALPHA, session_id: 'skew-sess' }),
   encoding: 'utf8',
-  env: { ...process.env, HOME },
+  env: { ...process.env, HOME, ANVI_SILENCE_BINDING: '' },
 });
 // It must still DO its job: resolve, decline, explain. Degraded to per-process is
 // the correct degradation; dying is not.

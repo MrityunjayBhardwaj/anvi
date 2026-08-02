@@ -174,6 +174,28 @@ allowed to be silent in production must be loud in a test, or it has no witness.
 - **Falsify, don't assert.** Break the thing each case guards and confirm it goes
   red. An integration test that has never failed is a claim, not a witness.
 
+**A hook is a process per event, and that cuts both ways.** Anything a hook
+deduplicates in a module-level variable is deduplicated against nothing: the
+variable is reconstructed on every `Write`, every `Edit`, every prompt. The
+resolver's own explanations — the split-brain warning and the binding decline —
+hit this, and repeated their full text on every tool call in an unbound project.
+So **every hook that requires `anvi-paths.js` must call `adoptSession(data.session_id)`
+right after parsing its payload**, which scopes those explanations to the session
+instead. `test/hook-session-scope.test.js` derives that door set from the code
+rather than listing it, so a new hook that resolves and forgets fails the suite.
+The CLI must **not** adopt: one invocation is one process, its per-process dedupe
+is already correct, and sharing a session marker would let a hook silence a
+command the user ran on purpose — the test asserts that direction too.
+
+**Call a newly-added export defensively.** The same blanket catch that keeps a
+hook from blocking will swallow a `TypeError` from calling an export the installed
+resolver does not have yet — a partial install, a half-finished upgrade — and the
+hook exits 0 having done nothing. That is the failure this whole section is about,
+reached from the other side. Guard the call (`if (adoptSession) adoptSession(…)`)
+so version skew degrades to the older behaviour instead of to silence, and test it
+by stripping the export from a copied tree — asserting it is genuinely absent
+first, so a pass cannot mean the skew never happened.
+
 ## Registered In
 
 `~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`):
