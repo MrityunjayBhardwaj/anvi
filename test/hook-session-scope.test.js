@@ -160,5 +160,37 @@ const inProcessLines = (inProcess.stderr || '').split('\n').filter(l => l.includ
 ok(inProcessLines === 1, `three calls in one process still emit one line (${inProcessLines})`);
 
 console.log('');
+console.log('version skew: a resolver without the export must not disable a hook');
+
+// The doors call adoptSession from inside a try/catch that exits 0. So on a tree
+// where the resolver is older than the hooks — a partial install, a half-finished
+// upgrade — an unguarded call throws and the hook dies looking exactly like a hook
+// with nothing to say. Silent, exit 0, no witness. That is why every call is
+// guarded, and this is what proves the guard rather than asserting it.
+const SKEW = path.join(TMP, 'skew');
+fs.mkdirSync(SKEW, { recursive: true });
+for (const f of fs.readdirSync(HOOKS)) {
+  if (f.endsWith('.js')) fs.copyFileSync(path.join(HOOKS, f), path.join(SKEW, f));
+}
+const skewPaths = path.join(SKEW, 'anvi-paths.js');
+fs.writeFileSync(skewPaths, fs.readFileSync(skewPaths, 'utf8').replace(/\n\s*adoptSession,/, ''));
+
+// Assert the skew is REAL before asserting behaviour on it. If the export is
+// still there, every case below passes while testing nothing.
+ok(typeof require(skewPaths).adoptSession === 'undefined',
+   'the skewed copy genuinely lacks the export');
+
+const skewRun = spawnSync(process.execPath, [path.join(SKEW, 'ground-truth-session-start.js')], {
+  input: JSON.stringify({ cwd: ALPHA, session_id: 'skew-sess' }),
+  encoding: 'utf8',
+  env: { ...process.env, HOME },
+});
+// It must still DO its job: resolve, decline, explain. Degraded to per-process is
+// the correct degradation; dying is not.
+const skewDeclines = (skewRun.stderr || '').split('\n').filter(l => l.includes('declining to serve')).length;
+ok(skewRun.status === 0, `the hook still exits 0 on a skewed install (${skewRun.status})`);
+ok(skewDeclines === 1, `and still explains itself rather than dying silently (${skewDeclines})`);
+
+console.log('');
 console.log(`${pass + fail} assertions: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
