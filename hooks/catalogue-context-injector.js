@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { projectRootFor, resolveDirForFile } = require('./anvi-paths.js');
+const { projectRootFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
 const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
@@ -163,6 +163,7 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    adoptSession(data.session_id); // a hook is a process per event — scope the resolver's explanations to the session
     const toolInput = data.tool_input || {};
     const filePath = toolInput.file_path || '';
 

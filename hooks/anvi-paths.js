@@ -31,6 +31,48 @@ const IDENTITY = loadIdentity();
 const realSafe = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
 const storeProjectsRoot = () => path.join(os.homedir(), '.anvideck', 'projects');
 
+// --- saying a thing once ----------------------------------------------------
+//
+// Two mechanisms in this file explain themselves on stderr: the split-brain
+// warning and the binding decline. Both were deduplicated with a module-level
+// Set, which is exactly right for the CLI — one invocation is one process, and
+// resolution is on a hot path — and is NO deduplication at all inside a hook,
+// because a hook is a fresh process per event. On an unbound project every
+// Write and every Edit re-emitted the whole explanation.
+//
+// Volume is not cosmetic for these two. A line that appears on every tool call
+// is a line people learn to skip, and these are the lines that say WHY nothing
+// is being served — the failure this whole arc exists to make legible.
+//
+// So the process Set stays (it is the CLI's guarantee and it is free), and a
+// session marker is layered under it. The session is not sniffed: a hook TELLS
+// us, via adoptSession, after it has parsed its payload. Sniffing would make the
+// CLI share the marker, and an interactive command going quiet because a hook
+// said the line an hour ago is worse than the repetition being fixed here.
+let _session = null;
+function adoptSession(id) { _session = (typeof id === 'string' && id) ? id : null; }
+
+const _saidThisProcess = new Set();
+function firstTime(key) {
+  if (_saidThisProcess.has(key)) return false;
+  _saidThisProcess.add(key);
+  // No session adopted → the CLI, or a hook that predates this. Per-process,
+  // exactly as before: this layer is additive and removes no existing speech.
+  if (!_session) return true;
+  const marker = path.join(os.tmpdir(), `anvi-said-${_session}`);
+  const line = key.replace(/\n/g, ' '); // the file is line-delimited; a path may not be
+  try {
+    const seen = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8').split('\n') : [];
+    if (seen.includes(line)) return false;
+    fs.appendFileSync(marker, line + '\n');
+    return true;
+  } catch {
+    // Unwritable marker → speak. A duplicate explanation is noise; a missing one
+    // is silence that reads as "there was nothing to say", which is the bug.
+    return true;
+  }
+}
+
 // kind: '.anvi' | 'ref' | 'investigations'
 function candidates(cwd, kind) {
   const name = path.basename(cwd);
@@ -67,16 +109,14 @@ function existingDirs(cwd, kind) {
 
 // Split-brain detection. When more than one candidate exists for a kind, the
 // resolver silently serves the first and shadows the rest — and the copies
-// diverge (H6). Warn ONCE per process to stderr (never stdout: hook stdout is
+// diverge (H6). Warn ONCE per condition to stderr (never stdout: hook stdout is
 // parsed), naming the winner and the shadowed copies. Detection only: never
 // changes resolution, output, or exit code. Silence with ANVI_SILENCE_SPLITBRAIN=1.
-const _warned = new Set();
 function warnIfSplitBrain(kind, existing) {
   if (process.env.ANVI_SILENCE_SPLITBRAIN) return;
   if (!existing || existing.length < 2) return;
-  const key = kind + '\0' + existing.join('\0');
-  if (_warned.has(key)) return;
-  _warned.add(key);
+  const key = 'splitbrain\0' + kind + '\0' + existing.join('\0');
+  if (!firstTime(key)) return;
   const [winner, ...shadowed] = existing;
   process.stderr.write(
     `⚠ anvi: ${existing.length} copies of '${kind}' resolve for this project — ` +
@@ -220,15 +260,18 @@ function remedyFor(state, cwd, storeProject) {
   }
 }
 
-// Say it once per (directory, kind, state) per process, to stderr — never stdout,
-// which is parsed. Same discipline as the split-brain warning: a hot path must
-// not be able to turn one condition into hundreds of identical lines.
-const _said = new Set();
+// Say it once per (directory, kind, state), to stderr — never stdout, which is
+// parsed. Same discipline as the split-brain warning, and now the same mechanism:
+// a hot path must not be able to turn one condition into hundreds of identical
+// lines, and neither must a hook that runs once per tool call.
+//
+// The STATE is part of the key on purpose, so a condition that changes speaks
+// again — UNBOUND becoming MISMATCH is news, and suppressing it would hide a
+// real event behind a dedupe meant only for repetition.
 function sayOnce(prefix, cwd, kind, v) {
   if (process.env.ANVI_SILENCE_BINDING) return;
   const key = `${prefix}\0${cwd}\0${kind}\0${v.state}`;
-  if (_said.has(key)) return;
-  _said.add(key);
+  if (!firstTime(key)) return;
   process.stderr.write(
     `⚠ anvi: ${prefix} '${kind}' for ${cwd} — ${v.state}. ${v.reason}. ` +
     `${remedyFor(v.state, cwd, v.storeProject)} ` +
@@ -329,6 +372,15 @@ function resolveDirForFile(filePath, kind) {
 
 module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, resolveDirForFile,
+  // Every hook that resolves through this module must call this once, right after
+  // it parses its payload — a hook is a process per event, so without it the
+  // explanations below are deduplicated against a Set that is always empty and
+  // repeat on every tool call. The CLI does NOT call it and must not: its
+  // per-process guarantee is correct, and sharing a session marker would let a
+  // hook silence an interactive command. `test/hook-session-scope.test.js`
+  // derives the door set from the code rather than listing it, so a new hook
+  // that resolves and forgets this fails the suite.
+  adoptSession,
   // Enforcement. `existingDirs` stays deliberately UNGATED: it answers "what
   // exists", which is the question an auditor asks, and the conformance report
   // must be able to name an unbound project rather than go blind on exactly the

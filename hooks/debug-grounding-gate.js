@@ -16,7 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDir } = require('./anvi-paths.js');
+const { resolveDir, adoptSession } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -27,6 +27,7 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    adoptSession(data.session_id); // a hook is a process per event — scope the resolver's explanations to the session
     const cwd = data.cwd || process.cwd();
     // `prompt` is the field the harness actually sends on UserPromptSubmit. This
     // read used to name only `user_message`/`message` — fields no payload carries —
