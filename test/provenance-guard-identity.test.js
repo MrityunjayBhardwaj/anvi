@@ -189,6 +189,57 @@ console.log('\na symlink inside the working directory cannot launder a store pat
      'and the project still reads its own catalogue through its own .anvi link silently');
 }
 
+// ── a session working INSIDE the store owns what it is standing in ──────────
+// Ownership has two routes and only one was implemented. A `.anvi` beneath cwd
+// proves it — but so does standing in the directory. At `<store>/projects/<p>/.anvi`
+// there is no `.anvi` beneath cwd, so ownership read as unprovable, the over-warn
+// policy fired, and the project's own catalogue was announced as a stranger's in
+// the one place that knowledge actually lives. At the store root the guard also
+// had no project to name and used the basename of a directory that is not a
+// project.
+//
+// The regression came from moving the resolved store question ahead of the
+// textual in-envelope tests — the right order, but those tests had been
+// incidentally covering this case. The fix is a resolved containment test that
+// can only GRANT silence, so it cannot give the laundering hole back; the two
+// assertions at the end of this block are what hold that line.
+console.log('\na session working inside the store is not a stranger to it');
+{
+  const STORE_ROOT = path.join(HOME, '.anvideck');
+  const ALPHA_PROJ = path.join(HOME, '.anvideck', 'projects', 'alpha');
+  const ALPHA_ANVI = storeOf('alpha');
+
+  // Assert the hazard is genuinely present. If `.anvi/.anvi` happened to exist,
+  // ownership would be provable the old way and every case below would pass
+  // while testing nothing.
+  ok(!fs.existsSync(path.join(ALPHA_ANVI, '.anvi')),
+     'the catalogue directory genuinely has no .anvi beneath it — ownership is unprovable the old way');
+  ok(fs.realpathSync(ALPHA_CAT).startsWith(fs.realpathSync(ALPHA_ANVI) + path.sep),
+     'and the catalogue really does live inside that directory');
+
+  ok(!fired(ALPHA_ANVI, ALPHA_CAT),
+     'a session sitting in the catalogue directory reads its own catalogue silently');
+  ok(!fired(ALPHA_PROJ, ALPHA_CAT),
+     'and so does one sitting at the store project root');
+  ok(!fired(STORE_ROOT, ALPHA_CAT),
+     'at the store root there is no project to be outside of — silent, not "belongs to .anvideck"');
+  ok(!fired(STORE_ROOT, BETA_CAT),
+     'and the same for any other project physically inside that working directory');
+
+  // Standing above everything is not a licence to silence everything: a path
+  // that is genuinely outside the working directory is still classified.
+  ok(fired(STORE_ROOT, path.join(OWNER, 'README.md')),
+     'while a path outside the store root is still reported from it');
+
+  // The line this fix must not cross. Both were bought by running the resolved
+  // store question first, and a containment test that granted silence too early
+  // would hand them straight back.
+  ok(fired(OWNER, BETA_CAT),
+     'a genuinely foreign store read from an ordinary working copy still fires');
+  ok(fired(OWNER, path.join(OWNER, 'borrowed', 'hetvabhasa.md')),
+     'and a symlink inside the repo still cannot launder a store path');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

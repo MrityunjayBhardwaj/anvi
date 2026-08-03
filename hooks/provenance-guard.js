@@ -40,8 +40,9 @@ const os = require('os');
 // defensively for the same reason every other guard does: an install predating
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
-let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null;
-try { ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath } = require('./anvi-paths.js')); } catch { /* older install */ }
+let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
+  isInside = null;
+try { ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside } = require('./anvi-paths.js')); } catch { /* older install */ }
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -92,6 +93,32 @@ function foreignProjectOf(absPath, cwd) {
   // reason to fall back to the name — it is the reason not to.
   const ownStore = ownStoreProject ? ownStoreProject(cwd) : null;
 
+  // Physical containment, decided on RESOLVED paths, asked before anything else.
+  // A file that genuinely lives inside this working directory cannot coherently
+  // belong to "another project than cwd's", whichever tree it sits in.
+  //
+  // Ownership has TWO routes and only one was implemented: a `.anvi` beneath cwd
+  // proves it, but so does STANDING in the directory. At
+  // `<store>/projects/<p>/.anvi` there is no `.anvi` beneath cwd, so ownership
+  // read as unprovable and the over-warn policy announced the project's own
+  // catalogue as a stranger's — in the one place that knowledge actually lives.
+  // At the store root it additionally had no project to name and said
+  // `'.anvideck'`, the basename of a directory that is not a project.
+  //
+  // This can only GRANT silence, never add a warning, so it cannot reopen the
+  // laundering hole the ordering below closes: a symlink inside cwd pointing at
+  // another project's store RESOLVES out of cwd, fails this test, and still
+  // reaches the resolved store question. That is also why it must compare
+  // resolved paths — the textual in-envelope tests further down are the ones a
+  // symlink can forge, which is precisely why they run last and only after the
+  // store question has said no.
+  //
+  // Same predicate the access check uses for the same asymmetry (a caller
+  // reaching its own directory has nothing to prove), taken from the shared
+  // resolver rather than rebuilt here — a second copy of a containment test is
+  // how this hook's last three holes were made.
+  if (isInside && isInside(cwd, absPath)) return null;
+
   // (b) another project's centralized store — asked FIRST, and on resolved paths.
   //
   // Order matters here, and it is the fix for a second forgery. The in-envelope
@@ -103,15 +130,6 @@ function foreignProjectOf(absPath, cwd) {
   // into another project's store is foreign however it is spelled, and one that
   // resolves anywhere else is still in-envelope. So the resolved question runs
   // first and the textual ones keep their cheap, permissive job.
-  //
-  // BOTH halves of it go to the shared resolver, by realpath. Asking it only
-  // WHICH project a path lands in, while deciding WHETHER it is in the store at
-  // all with a string prefix against a root this file assembled, left the inner
-  // question forgery-proof and the gate into it forgeable: with the store root
-  // behind a symlink, the same foreign catalogue fired via the `~/.anvideck`
-  // spelling and was silent via its canonical route. The failure direction is
-  // the wrong one — an absent warning is indistinguishable from a read that was
-  // fine.
   //
   // BOTH questions go to the shared resolver, by realpath. Asking it only WHICH
   // project a path lands in, while deciding WHETHER it is in the store at all
