@@ -53,20 +53,23 @@ fs.mkdirSync(RENAMED, { recursive: true });
 fs.symlinkSync(storeOf('alpha'), path.join(RENAMED, '.anvi'));
 
 let probeN = 0;
-function fired(cwd, filePath) {
+function firedIn(home, cwd, filePath, session) {
   const payload = JSON.stringify({
     tool_name: 'Read',
     tool_input: { file_path: filePath },
     cwd,
-    session_id: `prov-test-${process.pid}-${probeN++}`, // unique: the hook dedupes per session
+    // Unique per probe: the hook dedupes per session, so a shared id would make
+    // every repeat go silent and read as "did not fire".
+    session_id: session || `prov-test-${process.pid}-${probeN++}`,
   });
   const r = spawnSync(process.execPath, [HOOK], {
     input: payload,
     encoding: 'utf8',
-    env: { ...process.env, HOME },
+    env: { ...process.env, HOME: home },
   });
   return (r.stdout || '').trim().length > 0;
 }
+const fired = (cwd, filePath) => firedIn(HOME, cwd, filePath);
 
 const ALPHA_CAT = path.join(storeOf('alpha'), 'hetvabhasa.md');
 const BETA_CAT = path.join(storeOf('beta'), 'hetvabhasa.md');
@@ -97,6 +100,94 @@ ok(fired(OWNER, BETA_CAT),
    'alpha reading beta\'s catalogue is still flagged');
 ok(!fired(OWNER, path.join(OWNER, 'README.md')),
    'and a file inside the working directory is never flagged');
+
+// ── containment is decided on resolved paths, not on the spelling ───────────
+// The guard asked WHICH project a path lands in through the resolver, by
+// realpath, and asked WHETHER it was in the store at all with a string prefix
+// against a root it assembled itself. So the inner question was forgery-proof
+// and the gate into it was not: a store reached by any route other than the
+// literal `~/.anvideck/...` spelling never entered the branch, and the guard
+// stayed silent on exactly the cross-project read it exists to catch.
+//
+// This fixture puts the store root behind a symlink, which is what makes the two
+// routes differ. On a machine where `~/.anvideck` is a real directory the routes
+// coincide and the defect is invisible — which is why it survived until now, and
+// why the assertion has to construct the condition rather than wait for it.
+console.log('\ncontainment on resolved paths, not on the spelling');
+{
+  const HOME2 = path.join(TMP, 'home2');
+  const REAL = path.join(HOME2, 'store-real', 'projects');
+  const catOf = n => path.join(REAL, n, '.anvi');
+  for (const n of ['alpha', 'beta']) {
+    fs.mkdirSync(catOf(n), { recursive: true });
+    fs.writeFileSync(path.join(catOf(n), 'hetvabhasa.md'), `# ${n}\n`);
+  }
+  fs.mkdirSync(path.join(HOME2, '.anvideck'), { recursive: true });
+  fs.symlinkSync(path.join(HOME2, 'store-real', 'projects'), path.join(HOME2, '.anvideck', 'projects'));
+
+  const OWNER2 = path.join(HOME2, 'work', 'alpha');
+  fs.mkdirSync(OWNER2, { recursive: true });
+  fs.symlinkSync(catOf('alpha'), path.join(OWNER2, '.anvi'));
+
+  // Two spellings of one file. Assert they really are two spellings of one file
+  // before trusting anything below — if the symlink had failed, every case here
+  // would pass by testing the same route twice.
+  const viaName = path.join(HOME2, '.anvideck', 'projects', 'beta', '.anvi', 'hetvabhasa.md');
+  const viaReal = path.join(catOf('beta'), 'hetvabhasa.md');
+  ok(viaName !== viaReal, 'the two routes to beta\'s catalogue are different strings');
+  ok(fs.realpathSync(viaName) === fs.realpathSync(viaReal), 'and they resolve to the same file');
+
+  ok(firedIn(HOME2, OWNER2, viaName), 'alpha reading beta via the ~/.anvideck spelling is flagged');
+  ok(firedIn(HOME2, OWNER2, viaReal), 'and via the canonical route — the same read, previously silent');
+
+  // Over-warning on our own knowledge would be the other failure, and a fix that
+  // flagged everything would satisfy the two assertions above.
+  ok(!firedIn(HOME2, OWNER2, path.join(catOf('alpha'), 'hetvabhasa.md')),
+     'while alpha reading its OWN catalogue by the canonical route stays silent');
+
+  // A path that does not exist yet. realpath fails on a missing leaf, so the
+  // resolver answered "not in the store" for precisely the paths a tool is about
+  // to create — and a write is the unrecoverable direction.
+  ok(firedIn(HOME2, OWNER2, path.join(catOf('beta'), 'not-yet-written.md')),
+     'a file that does not exist yet, under beta, is still placed in beta');
+
+  // The dedupe is apparatus, and apparatus needs a control: if repeats did not
+  // go silent, "fired" above could mean the hook simply says everything always.
+  const key = `prov-dedupe-${process.pid}`;
+  const first = firedIn(HOME2, OWNER2, viaReal, key);
+  const again = firedIn(HOME2, OWNER2, viaReal, key);
+  ok(first && !again, 'and the same read repeated in one session speaks once, then stays quiet');
+}
+
+// ── a symlink inside the working directory must not launder a store path ────
+// "Inside cwd → never foreign" was decided on path STRINGS, so a link inside the
+// working directory pointing at another project's store passed as in-envelope
+// and the guard went silent. Resolving the in-envelope tests would have been the
+// noisy fix — links inside a repository are ordinary — so the resolved store
+// question runs FIRST instead: a path that lands in another project's store is
+// foreign however it is spelled, and one that lands anywhere else is still
+// in-envelope. Both halves need a case, or a fix that simply flags every symlink
+// would satisfy the first.
+console.log('\na symlink inside the working directory cannot launder a store path');
+{
+  const borrowed = path.join(OWNER, 'borrowed');
+  fs.symlinkSync(storeOf('beta'), borrowed);
+  ok(fs.realpathSync(path.join(borrowed, 'hetvabhasa.md')) === fs.realpathSync(BETA_CAT),
+     'the in-repo link really does reach beta\'s catalogue');
+  ok(fired(OWNER, path.join(borrowed, 'hetvabhasa.md')),
+     'reading beta\'s catalogue through a link inside the repo is flagged');
+
+  // The other half: the common case must stay quiet, or the fix is a noise
+  // generator that happens to catch the bug.
+  const outside = path.join(HOME, 'shared-pkg');
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, 'index.js'), '//\n');
+  fs.symlinkSync(outside, path.join(OWNER, 'packages'));
+  ok(!fired(OWNER, path.join(OWNER, 'packages', 'index.js')),
+     'while an ordinary link to a non-store directory stays in-envelope');
+  ok(!fired(OWNER, path.join(OWNER, '.anvi', 'hetvabhasa.md')),
+     'and the project still reads its own catalogue through its own .anvi link silently');
+}
 
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);

@@ -244,6 +244,30 @@ console.log('\ngrant — scoped, present, and belonging to THIS project');
   has(c.detail, 'other-project', 'names the foreign envelope');
 }
 {
+  // The same foreign grant, written with a path that reaches the store through a
+  // symlink. This is what the report used to miss: containment was decided with
+  // `path.resolve`, which normalizes text and does not follow links, under a
+  // comment claiming it compared resolved paths. So the one check whose job is to
+  // notice a grant reaching another project's knowledge went silent whenever the
+  // grant was spelled any other way — and settings entries are hand-written, so
+  // an unusual spelling is exactly what you would expect there.
+  storeProject('shadowed');
+  const alias = path.join(HOME, 'alias-projects');
+  if (!fs.existsSync(alias)) fs.symlinkSync(PROJECTS, alias);
+  const viaAlias = path.join(alias, 'shadowed');
+  // Assert the route is genuinely a different spelling of the same directory
+  // first: if the symlink had not been created, the case below would pass by
+  // testing the ordinary route a second time.
+  ok(viaAlias !== path.join(PROJECTS, 'shadowed'), 'the aliased grant is a different string');
+  eq(fs.realpathSync(viaAlias), fs.realpathSync(path.join(PROJECTS, 'shadowed')),
+     'and it resolves to the same store project');
+
+  const d = project('foreign-via-alias', { settings: { permissions: { additionalDirectories: [path.join(PROJECTS, 'granted'), viaAlias] } } });
+  const c = classifyGrant(d, path.join(PROJECTS, 'granted'));
+  eq(c.state, 'FOREIGN_GRANT', 'a foreign envelope reached through a symlink is still a foreign grant');
+  has(c.detail, 'shadowed', 'and it is named, rather than passing unmentioned');
+}
+{
   // Mirrors the granting script's refusal, and its precedence: it checks tracked
   // BEFORE parsing, so a tracked file wins over anything inside it.
   const d = project('tracked-settings', { repo: true, gitignore: '.anvi\n', settings: grantFor('granted') });

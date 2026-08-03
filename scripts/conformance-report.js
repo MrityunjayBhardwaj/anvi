@@ -61,7 +61,24 @@ function loadFromCandidates(name) {
 // Path resolution goes through the ONE shared resolver — never a hand-rolled
 // candidate list. Two consumers each with their own list eventually disagree
 // about where a project's catalogues live, and the disagreement is invisible.
-const { existingDirs } = loadFromCandidates('anvi-paths.js');
+// `isInside` and `storeProjectForPath` come from the resolver for the reason
+// stated directly above, which this file had asserted while hand-rolling both
+// twelve lines later. The local copies decided containment with `path.resolve`
+// — lexical normalization, which does not follow symlinks — under a comment
+// claiming they compared resolved paths. So a granted directory reaching another
+// project's store through a symlink was invisible to the FOREIGN_GRANT check,
+// the one check whose job is to notice exactly that.
+//
+// Destructured without a fallback ON PURPOSE. An auditor that quietly degrades
+// to a weaker predicate reports the same ✓ as one that checked properly, and a
+// missing finding is indistinguishable from a clean project.
+const { existingDirs, isInside, storeProjectForPath } = loadFromCandidates('anvi-paths.js');
+for (const [n, f] of [['isInside', isInside], ['storeProjectForPath', storeProjectForPath]]) {
+  if (typeof f !== 'function') {
+    throw new Error(`anvi-paths.js does not export ${n} — this install predates it. ` +
+      'Refusing to audit with a weaker containment test than the one being audited.');
+  }
+}
 // Identity — what makes a directory THIS project rather than one sharing its
 // name. Same shared-module rule: computed in one place so the report and the
 // binding tool can never disagree about who a store project belongs to.
@@ -120,22 +137,15 @@ function gitIn(cwd) {
 }
 const isRepo = (dir) => gitIn(dir)(['rev-parse', '--git-dir']).ok;
 
-// Is `child` strictly inside `parent`? Compared on resolved paths with a
-// separator, so `/a/bc` is never read as living inside `/a/b`.
-function isInside(parent, child) {
-  const p = path.resolve(parent), c = path.resolve(child);
-  return c !== p && c.startsWith(p.endsWith(path.sep) ? p : p + path.sep);
-}
-
-// Which store project does this resolved path belong to? Answered from the
-// path's SHAPE (<store>/projects/<X>/…), never from the audited project's own
-// name — that is what makes an alias-named store copy visible instead of
-// invisible.
-function storeProjectOf(resolved) {
-  if (!resolved) return null;
-  const projects = realSafe(storeProjects()) || storeProjects();
-  if (!isInside(projects, resolved)) return null;
-  return path.relative(projects, resolved).split(path.sep)[0] || null;
+// Which store project does this path belong to? Answered by the shared resolver
+// from where the path actually LANDS, never from the audited project's own name
+// — that is what makes an alias-named store copy visible instead of invisible —
+// and on resolved paths, so a store reached through a symlink is not invisible
+// either. The resolver returns the project's root path; this report names
+// projects, so it takes the basename.
+function storeProjectOf(p) {
+  const landed = p ? storeProjectForPath(p) : null;
+  return landed ? path.basename(landed) : null;
 }
 
 // --- check: LINK ------------------------------------------------------------

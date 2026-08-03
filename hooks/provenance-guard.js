@@ -40,8 +40,8 @@ const os = require('os');
 // defensively for the same reason every other guard does: an install predating
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
-let storeProjectOf = null, ownStoreProject = null, adoptSession = null;
-try { ({ storeProjectOf, ownStoreProject, adoptSession } = require('./anvi-paths.js')); } catch { /* older install */ }
+let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null;
+try { ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath } = require('./anvi-paths.js')); } catch { /* older install */ }
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -92,7 +92,50 @@ function foreignProjectOf(absPath, cwd) {
   // reason to fall back to the name — it is the reason not to.
   const ownStore = ownStoreProject ? ownStoreProject(cwd) : null;
 
-  // In-envelope → never foreign.
+  // (b) another project's centralized store — asked FIRST, and on resolved paths.
+  //
+  // Order matters here, and it is the fix for a second forgery. The in-envelope
+  // tests below compare path strings, so a symlink inside the working directory
+  // pointing at another project's store is "inside cwd" as text: the read passed
+  // as in-envelope and the guard stayed silent on exactly what it exists to
+  // catch. Resolving the in-envelope tests instead would have been noisy —
+  // symlinks within a repository are ordinary — whereas a path that RESOLVES
+  // into another project's store is foreign however it is spelled, and one that
+  // resolves anywhere else is still in-envelope. So the resolved question runs
+  // first and the textual ones keep their cheap, permissive job.
+  //
+  // BOTH halves of it go to the shared resolver, by realpath. Asking it only
+  // WHICH project a path lands in, while deciding WHETHER it is in the store at
+  // all with a string prefix against a root this file assembled, left the inner
+  // question forgery-proof and the gate into it forgeable: with the store root
+  // behind a symlink, the same foreign catalogue fired via the `~/.anvideck`
+  // spelling and was silent via its canonical route. The failure direction is
+  // the wrong one — an absent warning is indistinguishable from a read that was
+  // fine.
+  //
+  // BOTH questions go to the shared resolver, by realpath. Asking it only WHICH
+  // project a path lands in, while deciding WHETHER it is in the store at all
+  // with a string prefix against a root this file assembled, left the inner
+  // question forgery-proof and the gate into it forgeable: with the store root
+  // behind a symlink, the same foreign catalogue fired via the `~/.anvideck`
+  // spelling and was silent via its canonical route. The failure direction is
+  // the wrong one — an absent warning is indistinguishable from a read that was
+  // fine.
+  //
+  // `storeProjectForPath` rather than `storeProjectOf` because tool input need
+  // not exist: realpath fails on a missing leaf, so the older call answered "not
+  // in the store" for precisely the paths a tool is about to create.
+  const landed = storeProjectForPath ? storeProjectForPath(absPath)
+    : storeProjectOf ? storeProjectOf(absPath)
+      : null;
+  if (landed) {
+    if (ownStore && landed === ownStore) return null; // our own knowledge
+    return path.basename(landed);
+  }
+
+  // In-envelope → never foreign. Reached only once the resolved store question
+  // has said no, so a symlink cannot use these textual tests to launder a store
+  // path into the working directory.
   if (isUnder(absPath, cwd)) return null;
   if (ownStore && isUnder(absPath, ownStore)) return null;
   if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
@@ -105,20 +148,13 @@ function foreignProjectOf(absPath, cwd) {
     if (sibling && sibling !== name && sibling !== '..') return sibling;
   }
 
-  // (b) another project's centralized store. Which project a path LANDS in is
-  // asked of the shared resolver, by realpath, so a symlink cannot dress one
-  // project's store as another's — a comparison on path strings is forgeable.
+  // The resolver is unavailable (a partial install), or the path resolves
+  // nowhere at all. The literal spelling is still worth checking: it is the only
+  // route left, and ownership is unproven either way. The asymmetry is
+  // deliberate — a spurious EXTERNAL note is noise, a missing one is the
+  // cross-project read this hook exists to catch. Over-warn.
   const anvideckRoot = path.join(home, '.anvideck', 'projects');
   if (isUnder(absPath, anvideckRoot)) {
-    const landed = storeProjectOf ? storeProjectOf(absPath) : null;
-    if (landed) {
-      if (ownStore && landed === ownStore) return null; // our own, proven above
-      return path.basename(landed);
-    }
-    // The resolver is unavailable (a partial install), or the path is under the
-    // store root but resolves nowhere. Ownership is unproven either way, and the
-    // asymmetry is deliberate: a spurious EXTERNAL note is noise, a missing one
-    // is the cross-project read this hook exists to catch. Over-warn.
     const other = path.relative(anvideckRoot, absPath).split(path.sep)[0];
     if (other) return other;
   }
