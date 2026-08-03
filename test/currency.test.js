@@ -5,6 +5,7 @@ const {
   computeCurrency, extractRefFiles, parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges,
   extractFileSpecs, specExists, lintEntry, lineAnchoredRefs, LINT,
   classifySpec, extensionsFrom, FILE_EXT, makeRefResolver,
+  fieldAll, newestValidated,
 } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -786,6 +787,57 @@ ext = extensionsFrom(() => { throw new Error('not a repo'); });
 eq(ext.source, FILE_EXT.source, 'git unavailable → falls back to the compiled default');
 ext = extensionsFrom(lsGitExt([]));
 eq(ext.source, FILE_EXT.source, 'empty repo → compiled default, never an empty matcher');
+
+// --- VALIDATED is a history: the NEWEST stamp answers, not the first ---
+// Stamps are appended, so reading the first graded every re-validated entry
+// against the state it was in when someone first looked. Re-validation was
+// inert, and the only stamping that worked was editing a stamp in place —
+// which destroys the history the append convention exists to keep.
+console.log('newestValidated — stamps are a history, newest wins');
+const stamp = (sha, date, note) => `**VALIDATED:** ${sha} ${date} — ${note}`;
+const TWO = [stamp('9b78fd5', '2026-07-25', 'first look'),
+             stamp('2510a65', '2026-08-02', 're-mapped')].join('\n');
+eq(fieldAll(TWO, 'VALIDATED').length, 2, 'both stamps are found, not just the first');
+ok(/2510a65/.test(newestValidated(TWO)), 'the newer stamp is chosen');
+ok(!/9b78fd5/.test(newestValidated(TWO)), 'and the superseded one is not');
+
+// Position must not be the whole rule. Appending in date order is a convention,
+// and a convention is not a guarantee — this is the case that keeps the fix from
+// silently regressing to "last line wins" the moment someone appends out of order.
+const REVERSED = [stamp('2510a65', '2026-08-02', 'appended out of order'),
+                  stamp('9b78fd5', '2026-07-25', 'older, but last in the file')].join('\n');
+ok(/2510a65/.test(newestValidated(REVERSED)), 'out-of-order append: the newest DATE still wins, not the last line');
+
+// Document order breaks ties and stands in where a stamp carries no date.
+const SAMEDAY = [stamp('aaaaaaa', '2026-08-02', 'morning'),
+                 stamp('bbbbbbb', '2026-08-02', 'evening')].join('\n');
+ok(/bbbbbbb/.test(newestValidated(SAMEDAY)), 'same date: later line wins');
+const UNDATED = ['**VALIDATED:** aaaaaaa — no date', '**VALIDATED:** bbbbbbb — also none'].join('\n');
+ok(/bbbbbbb/.test(newestValidated(UNDATED)), 'no dates at all: later line wins');
+
+const ONE = stamp('9b78fd5', '2026-07-25', 'only stamp');
+ok(/9b78fd5/.test(newestValidated(ONE)), 'a single stamp is returned unchanged');
+eq(newestValidated('no stamp here'), undefined, 'no stamp at all → undefined, as before');
+
+// The non-regression that matters most. This helper is shared, and REF is the
+// field that would have been quietly re-pointed: 40 entries fleet-wide carry more
+// than one, several inside spans of 600-900 lines whose entry boundary never
+// terminated, where first and last are equally arbitrary. REF, FIX and FILES are
+// declared values, not a log — first-match is correct for them and must stay.
+console.log('the other fields are declared values, not a history — first still wins');
+const MULTI_REF = ['**REF:** first/path.js', '**REF:** second/path.js'].join('\n');
+const parsedRef = parseEntries(`## H1: t\n${MULTI_REF}\n`)[0];
+eq(parsedRef.refField, 'first/path.js', 'REF still takes the FIRST occurrence');
+const MULTI_FIX = ['**FIX:** aaaaaaa first', '**FIX:** bbbbbbb second'].join('\n');
+eq(parseEntries(`## H2: t\n${MULTI_FIX}\n`)[0].fixField, 'aaaaaaa first', 'FIX still takes the FIRST occurrence');
+const MULTI_FILES = ['**FILES:** a.js', '**FILES:** b.js'].join('\n');
+eq(parseEntries(`## H3: t\n${MULTI_FILES}\n`)[0].filesField, 'a.js', 'FILES still takes the FIRST occurrence');
+
+// End to end through the parser, which is what the report actually calls.
+const STAMPED_ENTRY = `## B1: a boundary\n**REF:** ENFORCE.md\n${TWO}\n`;
+const parsedStamped = parseEntries(STAMPED_ENTRY)[0];
+ok(/2510a65/.test(parsedStamped.validatedField), 'parseEntries hands the report the NEWEST stamp');
+eq(parsedStamped.refField, 'ENFORCE.md', 'and the same entry\'s REF is untouched');
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

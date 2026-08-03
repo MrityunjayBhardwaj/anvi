@@ -286,6 +286,47 @@ function field(body, name) {
   return m ? m[1].trim() : undefined;
 }
 
+// Every occurrence of a field, in document order.
+function fieldAll(body, name) {
+  const re = new RegExp(`^\\s*(?:\\*\\*)?${name}:(?:\\*\\*)?\\s*(.+)`, 'gm');
+  return [...body.matchAll(re)].map((m) => m[1].trim());
+}
+
+// VALIDATED is the one field that is a HISTORY rather than a declared value, so
+// it is the one field where the answer is the newest occurrence and not the first.
+// Stamps are APPENDED — that is the documented way to re-validate, and it keeps
+// the record of when an entry was confirmed and on what evidence. Reading the
+// first one therefore graded every re-validated entry against the state it was in
+// when someone first looked, which made re-validation inert: a faithfully
+// re-confirmed entry was indistinguishable from a neglected one, and the only
+// stamping that actually worked was editing a stamp in place, destroying the very
+// history the append convention exists to keep.
+//
+// `field()` deliberately keeps first-match for REF, FIX and FILES. Measured before
+// changing anything, because this helper is shared: of 3459 entries fleet-wide, 2
+// carry more than one VALIDATED and 40 carry more than one REF — and several of
+// those REF cases sit inside spans of 600-900 lines whose entry boundary never
+// terminated, where "first" and "last" are equally arbitrary. Those fields are
+// declared values, not a log; moving them would re-point grounding nobody asked to
+// move, on entries whose real defect is the boundary.
+//
+// Newest is decided by the DATE the stamp carries, with document order breaking
+// ties and standing in where a stamp has none. Position alone would be enough for
+// every stamp that exists today (0 of 2 are out of date order, 0 are undated) —
+// the date is what keeps that true when someone appends out of order, which is
+// exactly the silent recurrence this entry class is prone to.
+function newestValidated(body) {
+  const all = fieldAll(body, 'VALIDATED');
+  if (all.length <= 1) return all[0];
+  const dateOf = (t) => (t.match(/\b(\d{4}-\d{2}-\d{2})\b/) || [])[1] || '';
+  let best = { text: all[0], d: dateOf(all[0]), i: 0 };
+  all.forEach((text, i) => {
+    const d = dateOf(text);
+    if (d > best.d || (d === best.d && i > best.i)) best = { text, d, i };
+  });
+  return best.text;
+}
+
 function parseEntries(md) {
   const entries = [];
   const re = new RegExp(ENTRY_RE.source, 'gm'); // fresh lastIndex per call
@@ -304,7 +345,8 @@ function parseEntries(md) {
       title: body.split('\n')[0].trim().slice(0, 70),
       refField: field(body, 'REF'),
       fixField: field(body, 'FIX'),
-      validatedField: field(body, 'VALIDATED'),
+      // Newest, not first — stamps are a history. See newestValidated().
+      validatedField: newestValidated(body),
       filesField: field(body, 'FILES'),
       lineStart,
       lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
@@ -936,4 +978,8 @@ module.exports = {
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
   lintEntry, lineAnchoredRefs, LINT,
+  // Exported so the stamp-selection rule can be asserted directly rather than
+  // only through a parsed catalogue — the defect it fixes was invisible at the
+  // report level for weeks precisely because nothing tested the selection.
+  fieldAll, newestValidated,
 };
