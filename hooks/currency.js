@@ -390,10 +390,17 @@ function committedEntries(storeGit, cataloguePath) {
   if (!byPath) { byPath = new Map(); committedCatalogueCache.set(storeGit, byPath); }
   if (byPath.has(cataloguePath)) return byPath.get(cataloguePath);
 
-  let entries = null; // null = HEAD cannot answer; distinct from [] = answered, empty
+  // The catch covers the git call ONLY, and only one expected outcome: this path is
+  // not in HEAD (a catalogue created this session, or a store with no commits yet).
+  // Parsing sits OUTSIDE it deliberately — wrapping both would let a real parser bug
+  // read as "HEAD cannot answer", which is the shape that turns a broken instrument
+  // into a quiet one (H12). parseEntries is a regex sweep over a string and has no
+  // failure of its own, so letting it throw costs nothing and hides nothing.
+  let text = null;
   try {
-    entries = parseEntries(storeGit(`show HEAD:${JSON.stringify(cataloguePath)}`));
-  } catch { entries = null; }
+    text = storeGit(`show HEAD:${JSON.stringify(cataloguePath)}`);
+  } catch { /* not in HEAD — there is no committed text to date */ }
+  const entries = text === null ? null : parseEntries(text);
   byPath.set(cataloguePath, entries);
   return entries;
 }
@@ -428,6 +435,10 @@ function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level }) {
 
   // Match on id AND level: an `### H45` addendum shares its id with the `## H45` it
   // amends, and pairing the wrong one would date the parent by its addendum (#79/#85).
+  // With no level given the first match in document order wins, which is the primary
+  // in every catalogue that places an addendum after the entry it amends. The only
+  // production caller passes a level, so that path is a courtesy to direct callers —
+  // not a case this relies on.
   const committed = committedEntries(storeGit, cataloguePath);
   if (!committed) return null;
   const self = committed.find((e) => e.id === id && (level === undefined || e.level === level));
