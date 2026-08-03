@@ -11,7 +11,15 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDir, adoptSession } = require('./anvi-paths.js');
+const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
+
+// One writer for this hook's only output channel, so the refusal path and the
+// status path cannot drift into different shapes.
+function emit(message) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: message },
+  }));
+}
 
 // Size-triggered compaction threshold. When a catalogue passes this many lines,
 // the session-start message flags it so growth doesn't stay silent across
@@ -36,8 +44,17 @@ process.stdin.on('end', () => {
     const cwd = data.cwd || process.cwd();
 
     // Find .anvi/ directory — shared resolver spans both layouts
-    const anviDir = resolveDir(cwd, '.anvi');
-    if (!anviDir) process.exit(0); // Not an anvi project
+    const anvi = resolveDirForRead(cwd, '.anvi');
+    const anviDir = anvi.dir;
+    if (!anviDir) {
+      // Exiting silently is right for "not an anvi project" and WRONG for a
+      // refusal. Both used to arrive as the same null, so a project whose
+      // knowledge is being withheld looked, in the transcript, exactly like a
+      // project that never had any — and the one signal that would prompt
+      // someone to fix the binding was the signal that disappeared.
+      if (anvi.refused) emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}`);
+      process.exit(0);
+    }
 
     // Count grounded vs ungrounded entries across all catalogues
     let grounded = 0;
@@ -75,8 +92,12 @@ process.stdin.on('end', () => {
     const total = grounded + ungrounded;
     if (total === 0) process.exit(0); // No project-specific entries yet
 
-    // Find Ground Truth docs — shared resolver spans both layouts
-    const refDir = resolveDir(cwd, 'ref');
+    // Find Ground Truth docs — shared resolver spans both layouts.
+    // Reachable while the catalogues above ARE served: a project-local `.anvi`
+    // resolves without touching the store, and its reference area still lands
+    // there. So this kind gets its own verdict, not the previous one's.
+    const ref = resolveDirForRead(cwd, 'ref');
+    const refDir = ref.dir;
     let gtDocs = [];
     if (refDir) {
       gtDocs = fs.readdirSync(refDir)
@@ -108,6 +129,12 @@ process.stdin.on('end', () => {
 
     if (gtDocs.length > 0) {
       message += ` | GT docs: ${gtDocs.map(d => `${d.name.replace('GROUND_TRUTH_', '').replace('.md', '')}${d.ageDays > 7 ? ' ('+d.ageDays+'d old)' : ''}`).join(', ')}`;
+    } else if (ref.refused) {
+      // NOT "none found". /anvi:ground creates ref/sources/ under the store
+      // project addressed by this directory's name — the exact write this
+      // refusal exists to prevent. Naming it as a remedy here would route the
+      // reader around the guard.
+      message += ` | Ground Truth docs NOT SERVED — ${ref.notice}`;
     } else {
       message += ' | NO Ground Truth docs — consider /anvi:ground';
     }
@@ -126,13 +153,7 @@ process.stdin.on('end', () => {
       message += ` | ${ungrounded} ungrounded entries`;
     }
 
-    const output = {
-      hookSpecificOutput: {
-        hookEventName: 'SessionStart',
-        additionalContext: message
-      }
-    };
-    process.stdout.write(JSON.stringify(output));
+    emit(message);
   } catch (e) {
     process.exit(0);
   }

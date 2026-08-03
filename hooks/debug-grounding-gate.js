@@ -16,7 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDir, adoptSession } = require('./anvi-paths.js');
+const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -54,10 +54,12 @@ process.stdin.on('end', () => {
     if (!isDebugging) process.exit(0);
 
     // Find project catalogues — shared resolver spans both layouts
-    const anviDir = resolveDir(cwd, '.anvi');
+    const anvi = resolveDirForRead(cwd, '.anvi');
+    const anviDir = anvi.dir;
 
     // Find Ground Truth docs — shared resolver spans both layouts
-    const refDir = resolveDir(cwd, 'ref');
+    const ref = resolveDirForRead(cwd, 'ref');
+    const refDir = ref.dir;
     let gtDocs = [];
     if (refDir) {
       gtDocs = fs.readdirSync(refDir)
@@ -127,8 +129,46 @@ process.stdin.on('end', () => {
       for (const doc of gtDocs) {
         message += `\n  - ${doc}`;
       }
+    } else if (ref.refused || anvi.refused) {
+      // Emphatically NOT "none found, run /anvi:ground". That command creates
+      // ref/sources/ under the store project this directory's NAME selects —
+      // the write the refusal exists to stop. Advising it here would walk the
+      // reader around the guard while sounding helpful, and this is the channel
+      // the reader acts on: the true reason goes to stderr, which nothing reads.
+      //
+      // Keyed on ANY refusal, not on `ref` alone. The danger is not whether a
+      // reference directory happens to exist — it is whether this caller may
+      // write to that store project at all, and a refusal on any kind already
+      // answers that no. Observed against the real store, where the project has
+      // catalogues and no ref/ yet: the narrower test read NONE for `ref`, took
+      // the honest-absence branch, and printed the advice verbatim to a caller
+      // that had just been refused. A more precise condition that answers on a
+      // smaller domain is a regression everywhere the coarse one reached, and
+      // the lost cases land on the permissive side.
+      message += ref.refused
+        ? `\n\nGround Truth docs are NOT BEING SERVED here — ${ref.notice}`
+        : '\n\nNo Ground Truth docs are readable here, and whether any exist is UNKNOWN — ' +
+          'this directory was refused the store project its name selects.';
+      message += '\nDo NOT run /anvi:ground to resolve this: it writes into the store project ' +
+        'this directory just failed to prove it owns. Fix the binding first.';
     } else {
       message += '\n\nNO Ground Truth docs found. Consider running /anvi:ground first.';
+    }
+
+    if (anvi.refused) {
+      // Same distinction one kind over: no boundary block below could mean the
+      // project has no dharana, or that it has one and is being refused it.
+      //
+      // Both kinds address the store project selected by the SAME basename and
+      // are judged against the same caller, so when both are refused the reason
+      // and the remedy are identical and only the quoted kind differs. Printing
+      // the full sentence twice costs ~350 characters of injected context to say
+      // one thing — so state the second kind and point at the reason already
+      // given. Guarded on the states actually matching rather than on the
+      // reasoning above being true forever.
+      message += (ref.refused && ref.state === anvi.state)
+        ? '\n\nProject boundaries are NOT BEING SERVED here either — same refusal, same remedy.'
+        : `\n\nProject boundaries are NOT BEING SERVED here — ${anvi.notice}`;
     }
 
     message += boundaryContext;

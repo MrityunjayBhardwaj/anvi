@@ -15,7 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDir, adoptSession } = require('./anvi-paths.js');
+const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -53,7 +53,8 @@ process.stdin.on('end', () => {
     if (!isDiagnostic) process.exit(0);
 
     // Check for experiment protocol files — shared resolver spans both layouts
-    const investigationsDir = resolveDir(cwd, 'investigations');
+    const inv = resolveDirForRead(cwd, 'investigations');
+    const investigationsDir = inv.dir;
     let protocols = [];
     if (investigationsDir) {
       protocols = fs.readdirSync(investigationsDir)
@@ -87,18 +88,28 @@ process.stdin.on('end', () => {
 
     if (latestProtocol) {
       message += ` Latest protocol (${latestProtocol}) is missing hypothesis or predicted outcome.`;
+    } else if (inv.refused) {
+      // "None found" would be a claim this hook is in no position to make: the
+      // directory was withheld, not read. Saying it anyway turns a refusal into
+      // an instruction to create a protocol that may already exist — landing a
+      // duplicate somewhere its author never named.
+      message += ` Whether one already exists is UNKNOWN — this project's investigations are not being served here: ${inv.notice}`;
     } else {
       message += ' No experiment protocol found in the project\'s investigations/ dir.';
     }
 
     message += '\n\nBefore running experiments:';
-    message += '\n1. Create investigations/exp-NNN.md (use EXPERIMENT_TEMPLATE.md)';
+    message += inv.refused
+      ? '\n1. Fix the binding above FIRST — until then this project\'s investigations dir cannot be read or written'
+      : '\n1. Create investigations/exp-NNN.md (use EXPERIMENT_TEMPLATE.md)';
     message += '\n2. Write the HYPOTHESIS with file:line citation from Ground Truth';
     message += '\n3. Write the PREDICTED OUTCOME before running';
     message += '\n4. THEN run the diagnostic tool';
 
-    // Find Ground Truth docs for context — shared resolver spans both layouts
-    const refDir = resolveDir(cwd, 'ref');
+    // Find Ground Truth docs for context — shared resolver spans both layouts.
+    // Only ever ADDS a line when docs are found, so a refusal here needs no
+    // counter-claim: there is no absence assertion to correct.
+    const refDir = resolveDirForRead(cwd, 'ref').dir;
     if (refDir) {
       const gtDocs = fs.readdirSync(refDir)
         .filter(f => f.startsWith('GROUND_TRUTH_') && f.endsWith('.md'));
