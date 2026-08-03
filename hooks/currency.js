@@ -26,8 +26,13 @@
 //   3. FIX: ... #N ...           → the squash-merge commit whose subject ends "(#N)"
 //   4. time-based (universal)    → the store's last commit touching THIS entry's
 //                                  text → the project's HEAD as of that timestamp.
-//                                  Every entry has a history, so this rung always
-//                                  applies — but a store commit may be a bulk
+//                                  "This entry's text" is located in the COMMITTED
+//                                  catalogue, never in the working tree: the range
+//                                  and the history it is read against must come from
+//                                  one snapshot (#162).
+//                                  Every entry has a history, so this rung MOSTLY
+//                                  applies — an entry not yet committed has none —
+//                                  but a store commit may be a bulk
 //                                  compaction rather than a real re-validation, so
 //                                  its verdicts are marked `provisional` and must
 //                                  never read as confident.
@@ -414,6 +419,11 @@ function committedEntries(storeGit, cataloguePath) {
 // invisible from the outside: a borrowed date is indistinguishable from a real one
 // (V19 — converging failure modes must each fail closed on their own).
 function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level }) {
+  // `!id` is an EARLY EXIT, not a safety guard: with no key to look up, the lookup
+  // below finds nothing and returns null anyway, so breaking this line alone turns
+  // nothing red. It is here to skip a `git show` + parse that cannot succeed. Stated
+  // because a guard whose removal is silent is the one a later reader deletes as
+  // dead — the pair is only witnessed when both are broken together.
   if (!storeGit || !cataloguePath || !id) return null;
 
   // Match on id AND level: an `### H45` addendum shares its id with the `## H45` it
