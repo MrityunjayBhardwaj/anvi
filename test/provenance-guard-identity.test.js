@@ -226,6 +226,28 @@ console.log('\na session working inside the store is not a stranger to it');
   ok(!fired(STORE_ROOT, BETA_CAT),
      'and the same for any other project physically inside that working directory');
 
+  // The boundary case, and the reason ownership is also asserted directly rather
+  // than left to containment alone. Grep and Glob are handed a DIRECTORY, which
+  // may be cwd itself, and "is X inside Y" is false for a path equal to the root
+  // it is measured against — so globbing the directory you are sitting in fired
+  // while reading a file in it was silent. Assert the asymmetry is real before
+  // asserting it is fixed.
+  ok(!fired(ALPHA_ANVI, path.join(ALPHA_ANVI, 'hetvabhasa.md')),
+     'reading a file in the directory you are sitting in is silent');
+  for (const tool of ['Read', 'Grep', 'Glob']) {
+    const payload = JSON.stringify({
+      tool_name: tool,
+      tool_input: { path: ALPHA_ANVI, file_path: ALPHA_ANVI },
+      cwd: ALPHA_ANVI,
+      session_id: `prov-self-${tool}-${process.pid}-${probeN++}`,
+    });
+    const r = spawnSync(process.execPath, [HOOK], {
+      input: payload, encoding: 'utf8', env: { ...process.env, HOME },
+    });
+    ok((r.stdout || '').trim().length === 0,
+       `and ${tool} targeting that directory itself is too — not "it belongs to someone else"`);
+  }
+
   // Standing above everything is not a licence to silence everything: a path
   // that is genuinely outside the working directory is still classified.
   ok(fired(STORE_ROOT, path.join(OWNER, 'README.md')),

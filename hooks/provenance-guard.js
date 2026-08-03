@@ -148,6 +148,23 @@ function foreignProjectOf(absPath, cwd) {
       : null;
   if (landed) {
     if (ownStore && landed === ownStore) return null; // our own knowledge
+
+    // The same ownership-by-standing-in-it, stated directly rather than left to
+    // the containment test above. That test covers the common shape — the target
+    // sits BELOW cwd — but not the boundary one: Grep and Glob are handed a
+    // DIRECTORY, which may be cwd itself, and "is X inside Y" is false for a path
+    // equal to the root it is measured against. So a session sitting in a store
+    // project, globbing its own directory, was still told it belonged to someone
+    // else while reading a file in it was silent.
+    //
+    // Fixed here rather than by widening `isInside`, which would be the tempting
+    // one-character change: that predicate also decides LOCAL in the access check
+    // and is what the auditor grades with, and "a directory is not inside itself"
+    // is the correct reading of its name. The envelope question is a different
+    // one — inside OR at — and it belongs to the caller asking it.
+    const cwdStore = storeProjectForPath ? storeProjectForPath(cwd) : null;
+    if (cwdStore && landed === cwdStore) return null; // we are standing in it
+
     return path.basename(landed);
   }
 
