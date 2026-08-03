@@ -310,6 +310,17 @@ function remedyFor(state, cwd, storeProject) {
   }
 }
 
+// The one sentence that describes a decline: what happened, why, and the remedy
+// that will actually work. Built ONCE and rendered to two channels, because the
+// defect this closes was the two channels disagreeing — the true reason went to
+// stderr, where nothing acts on it, while the consumer told its reader the
+// knowledge was simply absent. A shared builder makes that divergence a thing
+// someone has to do on purpose rather than a thing that happens by default.
+function declineText(prefix, cwd, kind, v) {
+  return `anvi: ${prefix} '${kind}' for ${cwd} — ${v.state}. ${v.reason}. ` +
+    `${remedyFor(v.state, cwd, v.storeProject)}`;
+}
+
 // Say it once per (directory, kind, state), to stderr — never stdout, which is
 // parsed. Same discipline as the split-brain warning, and now the same mechanism:
 // a hot path must not be able to turn one condition into hundreds of identical
@@ -322,11 +333,7 @@ function sayOnce(prefix, cwd, kind, v) {
   if (process.env.ANVI_SILENCE_BINDING) return;
   const key = `${prefix}\0${cwd}\0${kind}\0${v.state}`;
   if (!firstTime(key)) return;
-  process.stderr.write(
-    `⚠ anvi: ${prefix} '${kind}' for ${cwd} — ${v.state}. ${v.reason}. ` +
-    `${remedyFor(v.state, cwd, v.storeProject)} ` +
-    `(silence: ANVI_SILENCE_BINDING=1)\n`
-  );
+  process.stderr.write(`⚠ ${declineText(prefix, cwd, kind, v)} (silence: ANVI_SILENCE_BINDING=1)\n`);
 }
 
 // The full picture: which directory would be served, and whether it may be.
@@ -340,24 +347,51 @@ function resolveDirVerdict(cwd, kind) {
   return { dir, ...checkAccess(cwd, dir) };
 }
 
+// The READ path, for a consumer that REPORTS what it found.
+//
+// `resolveDir` answers with a directory or null, and null carries two meanings
+// that a reporting consumer must not merge: "there is nothing here" and "there
+// is something and you may not have it". Every hook that resolved through the
+// plain wrapper merged them — and then told its reader the knowledge was
+// missing, offering, as the remedy for missing knowledge, to create some. That
+// advice points a write at the very store project the caller just failed to
+// prove it owns, which is the original defect reached through a different door.
+//
+// So the distinction is returned as a VALUE, not left on stderr. Writing the
+// reason somewhere nothing reads had no effect on what the consumer said, and a
+// true message nobody acts on is indistinguishable from silence.
+//
+//   { dir, refused: false, notice: null }   served, or genuinely nothing here
+//   { dir: null, refused: true, notice }    withheld — `notice` says why, and
+//                                           names the remedy that will work
+//
+// `notice` is the same sentence the stderr line carries, from the same builder,
+// so the two channels cannot drift apart again.
+function resolveDirForRead(cwd, kind) {
+  const v = resolveDirVerdict(cwd, kind);
+  // NONE — nothing exists for this kind. An absence, and honestly so.
+  if (!v.dir) return { dir: null, refused: false, state: v.state, notice: null };
+  if (READ_OK.has(v.state)) {
+    if (v.state === 'UNVERIFIABLE') sayOnce('serving unverified', cwd, kind, v);
+    return { dir: v.dir, refused: false, state: v.state, notice: null };
+  }
+  sayOnce('declining to serve', cwd, kind, v);
+  return {
+    dir: null, refused: true, state: v.state,
+    notice: declineText('declining to serve', cwd, kind, v),
+  };
+}
+
 // Returns the first existing directory for `kind`, or null if none exist OR the
 // caller cannot prove the directory is its own. First existing candidate wins →
 // project-local overrides centralized.
 //
-// This is the READ path. Null already meant "nothing to serve" and every caller
-// already answers it by staying silent, which is exactly right for a decline
-// too — but the reason is written to stderr, because serving nothing silently is
-// indistinguishable from there being nothing, and that ambiguity is what let the
-// wrong project's knowledge look authoritative in the first place.
+// A thin wrapper over the read path above, so the decline is decided and spoken
+// in exactly ONE place. Consumers that only need somewhere to look keep using
+// this; consumers that SAY something about what they found must use
+// `resolveDirForRead`, or they will report a refusal as an absence.
 function resolveDir(cwd, kind) {
-  const v = resolveDirVerdict(cwd, kind);
-  if (!v.dir) return null;
-  if (READ_OK.has(v.state)) {
-    if (v.state === 'UNVERIFIABLE') sayOnce('serving unverified', cwd, kind, v);
-    return v.dir;
-  }
-  sayOnce('declining to serve', cwd, kind, v);
-  return null;
+  return resolveDirForRead(cwd, kind).dir;
 }
 
 // The WRITE path. Three outcomes, and they must stay distinguishable:
@@ -436,6 +470,12 @@ module.exports = {
   // must be able to name an unbound project rather than go blind on exactly the
   // projects it exists to report.
   resolveDirVerdict, requireDirForWrite, storeProjectOf, ownStoreProject, checkAccess,
+  // The read path for consumers that REPORT what they found. A hook that says
+  // "none found" on a refusal, and then advises creating one, aims a write at
+  // the store project the caller could not prove it owns. `test/hook-refusal-
+  // reporting.test.js` derives the hook set from the code, so a new hook that
+  // resolves through the plain wrapper and makes an absence claim fails there.
+  resolveDirForRead,
   // The same containment question for a path that need not exist yet. Exported
   // beside storeProjectOf rather than folded into it because their existence
   // policies differ on purpose: the access verdict should not reason about paths

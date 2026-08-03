@@ -83,12 +83,20 @@ const BETA = path.join(HOME, 'work', 'beta');
 fs.mkdirSync(ALPHA, { recursive: true });
 fs.mkdirSync(BETA, { recursive: true });
 
-// A SessionStart hook is the cleanest door: it resolves, and on a decline it has
-// nothing to say of its own, so anything on stderr came from the resolver.
+// A SessionStart hook is the cleanest door: it resolves, and the resolver is the
+// only thing that writes a decline line to stderr, so a count there is a count of
+// the resolver speaking.
+//
+// It DOES now say something of its own on a decline — a refusal reported as an
+// absence is what let a withheld project read as a project that never had any, so
+// the hook names the refusal in its injected context. That is a separate channel
+// from the one this file measures. What must still hold of stdout is that it stays
+// PARSEABLE — it is consumed as JSON by the harness — and that the stderr line's
+// own decoration never bleeds into it.
 const HOOK = path.join(HOOKS, 'ground-truth-session-start.js');
 
-// Returns how many decline lines this ONE process emitted, and what it put on
-// stdout — which is parsed by the harness and must stay empty.
+// Returns how many decline lines this ONE process emitted, and whether stdout is
+// still something the harness can parse.
 function runHook(cwd, sessionId) {
   const payload = JSON.stringify(sessionId === null ? { cwd } : { cwd, session_id: sessionId });
   const r = spawnSync(process.execPath, [HOOK], {
@@ -97,7 +105,12 @@ function runHook(cwd, sessionId) {
     env: { ...process.env, HOME, ANVI_SILENCE_BINDING: '' },
   });
   const declines = (r.stderr || '').split('\n').filter(l => l.includes('declining to serve')).length;
-  return { declines, stdout: r.stdout || '' };
+  const stdout = r.stdout || '';
+  let parseable = stdout === '';
+  if (!parseable) {
+    try { parseable = !!JSON.parse(stdout).hookSpecificOutput; } catch { parseable = false; }
+  }
+  return { declines, stdout, parseable };
 }
 
 console.log('');
@@ -107,7 +120,9 @@ console.log('behaviour: said once per session, across processes');
 // below passes for the wrong reason.
 const first = runHook(ALPHA, 'sess-A');
 ok(first.declines === 1, `the fixture genuinely declines (first process said it ${first.declines}×)`);
-ok(first.stdout === '', 'and says it on stderr, never on stdout');
+ok(first.parseable, 'and stdout stays parseable by the harness');
+ok(!/⚠|silence: ANVI_SILENCE_BINDING/.test(first.stdout),
+  'the stderr line itself never bleeds onto stdout');
 
 const second = runHook(ALPHA, 'sess-A');
 const third = runHook(ALPHA, 'sess-A');

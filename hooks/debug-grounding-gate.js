@@ -16,7 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { resolveDir, adoptSession } = require('./anvi-paths.js');
+const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -54,10 +54,12 @@ process.stdin.on('end', () => {
     if (!isDebugging) process.exit(0);
 
     // Find project catalogues — shared resolver spans both layouts
-    const anviDir = resolveDir(cwd, '.anvi');
+    const anvi = resolveDirForRead(cwd, '.anvi');
+    const anviDir = anvi.dir;
 
     // Find Ground Truth docs — shared resolver spans both layouts
-    const refDir = resolveDir(cwd, 'ref');
+    const ref = resolveDirForRead(cwd, 'ref');
+    const refDir = ref.dir;
     let gtDocs = [];
     if (refDir) {
       gtDocs = fs.readdirSync(refDir)
@@ -127,8 +129,24 @@ process.stdin.on('end', () => {
       for (const doc of gtDocs) {
         message += `\n  - ${doc}`;
       }
+    } else if (ref.refused) {
+      // Emphatically NOT "none found, run /anvi:ground". That command creates
+      // ref/sources/ under the store project this directory's NAME selects —
+      // which is the write the refusal exists to stop. Advising it here would
+      // walk the reader around the guard while sounding helpful, and this is
+      // the channel the reader actually acts on: the true reason goes to
+      // stderr, where nothing reads it.
+      message += `\n\nGround Truth docs are NOT BEING SERVED here — ${ref.notice}`;
+      message += '\nDo NOT run /anvi:ground to resolve this: it writes into the store project ' +
+        'this directory just failed to prove it owns. Fix the binding first.';
     } else {
       message += '\n\nNO Ground Truth docs found. Consider running /anvi:ground first.';
+    }
+
+    if (anvi.refused) {
+      // Same distinction one kind over: no boundary block below could mean the
+      // project has no dharana, or that it has one and is being refused it.
+      message += `\n\nProject boundaries are NOT BEING SERVED here — ${anvi.notice}`;
     }
 
     message += boundaryContext;
