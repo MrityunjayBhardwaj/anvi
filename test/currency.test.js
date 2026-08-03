@@ -302,11 +302,6 @@ function ladderGit({ live = [], logMap = {}, revList = null } = {}) {
     return '';
   };
 }
-const storeGitOK = (ts) => (args) => {
-  if (/^log -1 --format=%cI -L \d+,\d+:/.test(args)) return `${ts}\ncommit blah\n@@ -1 +1 @@\n`;
-  throw new Error('unexpected');
-};
-
 console.log('anchor ladder');
 // NB: fixture shas must be REAL hex — a fake like "live123" never matches the sha
 // regex, so the ladder would fall through for the wrong reason and the test would
@@ -338,31 +333,127 @@ v = computeCurrency({ validatedField: `${DEAD} 2026-01-01`, fixField: LIVE, refF
 });
 eq(v.anchor.source, 'FIX-sha', 'dead VALIDATED falls through to live FIX');
 
-// rung 4: nothing anchors, but the store knows when the entry last changed
-v = computeCurrency({ fixField: 'n/a — design decision', refField: 'a.js', lineStart: 3, lineEnd: 7 }, {
+// Rung 4 reads its line span from the COMMITTED catalogue, never from the working
+// tree (#162). `log -L a,b:file` evaluates its range against history, so a
+// working-tree span compares two different snapshots: while a catalogue is dirty,
+// every entry below an edit is graded through a window that has slid off it.
+//
+// In this committed fixture H1 spans lines 1-3 and H2 spans 4-6. The entries handed
+// to computeCurrency carry deliberately WRONG working-tree spans, so any assertion
+// below that passes could only have come from the committed copy.
+const COMMITTED_CAT = [
+  '## H1: first entry',   // 1
+  '**REF:** a.js',        // 2
+  '',                     // 3
+  '## H2: second entry',  // 4
+  '**REF:** b.js',        // 5
+  '',                     // 6
+].join('\n');
+
+// Records every range actually requested, so the test asserts on what the code ASKED
+// git for — not merely on the verdict, which several different bugs could produce.
+const storeGitSpy = (ts, text) => {
+  const seen = [];
+  const fn = (args) => {
+    if (/^show HEAD:/.test(args)) {
+      if (text === null) throw new Error('no such path in HEAD');
+      return text;
+    }
+    const m = args.match(/^log -1 --format=%cI -L (\d+),(\d+):/);
+    if (m) { seen.push(`${m[1]},${m[2]}`); return `${ts}\ncommit blah\n@@ -1 +1 @@\n`; }
+    throw new Error('unexpected');
+  };
+  fn.seen = seen;
+  return fn;
+};
+
+// The committed span is what gets asked about, and the bogus working-tree span never
+// reaches git. This is the regression assertion for #162.
+let spy = storeGitSpy('2026-07-08T10:00:00+05:30', COMMITTED_CAT);
+v = computeCurrency({
+  id: 'H1', level: 2, fixField: 'n/a — design decision', refField: 'a.js',
+  lineStart: 99, lineEnd: 120, // the working tree has drifted far from HEAD
+}, {
   git: ladderGit({ revList: 'timesha1', logMap: { 'timesha1:a.js': 'h1\n' } }),
   fileExists: exists(['a.js']),
-  storeGit: storeGitOK('2026-07-08T10:00:00+05:30'),
+  storeGit: spy,
   cataloguePath: '.anvi/hetvabhasa.md',
 });
 eq(v.status, 'YELLOW', 'time rung produces a verdict where A gave GRAY');
 eq(v.anchor.source, 'TIME', 'anchor source = TIME');
 ok(v.anchor.provisional === true, 'time-anchored verdict is marked provisional');
 eq(v.anchor.ts, '2026-07-08', 'carries the last-edited date');
+eq(spy.seen.join('|'), '1,3', 'the range asked of git is the COMMITTED span, not the working one');
 
-// rung 4 needs a line range — without one it must not guess
-v = computeCurrency({ fixField: 'n/a', refField: 'a.js' }, {
+// The window must stop before the next entry's heading. One line of overrun is enough
+// to inherit a neighbour's commit date, which is how the slide hid drift.
+const spans = parseEntries(COMMITTED_CAT);
+eq(`${spans[0].lineStart},${spans[0].lineEnd}`, '1,3', 'first entry span');
+ok(spans[0].lineEnd < spans[1].lineStart, "an entry's span ends before the next heading");
+
+// An entry that exists only in the working tree has no committed text to date. The
+// lines it currently occupies belong to something else in history, so the honest
+// answer is GRAY — never a date borrowed from whatever sits there in HEAD.
+spy = storeGitSpy('2026-07-08T10:00:00+05:30', COMMITTED_CAT);
+v = computeCurrency({
+  id: 'H9', level: 2, fixField: 'n/a', refField: 'a.js', lineStart: 1, lineEnd: 3,
+}, {
   git: ladderGit({ revList: 'timesha1' }), fileExists: exists(['a.js']),
-  storeGit: storeGitOK('2026-07-08T10:00:00Z'), cataloguePath: '.anvi/hetvabhasa.md',
+  storeGit: spy, cataloguePath: '.anvi/hetvabhasa.md',
 });
-eq(v.status, 'GRAY', 'no line range → no time anchor → GRAY');
+eq(v.status, 'GRAY', 'entry absent from HEAD → no time anchor → GRAY');
+eq(spy.seen.length, 0, 'and no range is asked about at all — it does not fall back to the working span');
 
-// store not a repo → ladder degrades to GRAY, never throws
-v = computeCurrency({ fixField: 'n/a', refField: 'a.js', lineStart: 3, lineEnd: 7 }, {
+// An id is required to locate the committed entry; without one there is nothing to
+// look up, and guessing from the working span is the bug itself.
+spy = storeGitSpy('2026-07-08T10:00:00+05:30', COMMITTED_CAT);
+v = computeCurrency({ fixField: 'n/a', refField: 'a.js', lineStart: 1, lineEnd: 3 }, {
+  git: ladderGit({ revList: 'timesha1' }), fileExists: exists(['a.js']),
+  storeGit: spy, cataloguePath: '.anvi/hetvabhasa.md',
+});
+eq(v.status, 'GRAY', 'no id → no time anchor → GRAY');
+eq(spy.seen.length, 0, 'and no range is asked about');
+
+// A `### H1` addendum shares its id with the `## H1` it amends. Selecting on id alone
+// would date one by the other; the level discriminates them.
+const AMENDED_CAT = [
+  '## H1: parent entry',  // 1
+  '**REF:** a.js',        // 2
+  '',                     // 3
+  '### H1: an addendum',  // 4
+  'more text',            // 5
+  '',                     // 6
+].join('\n');
+spy = storeGitSpy('2026-07-08T10:00:00+05:30', AMENDED_CAT);
+v = computeCurrency({ id: 'H1', level: 3, fixField: 'n/a', refField: 'a.js' }, {
+  git: ladderGit({ revList: 'timesha1', logMap: { 'timesha1:a.js': 'h1\n' } }),
+  fileExists: exists(['a.js']), storeGit: spy, cataloguePath: '.anvi/hetvabhasa.md',
+});
+eq(spy.seen.join('|'), '4,5', 'the addendum is dated by its OWN span, not its parent\'s');
+
+// store not a repo → ladder degrades to GRAY, never throws. The id is present and
+// real, so this GRAY is attributable to the failure under test rather than to a
+// missing lookup key — a control that passes for the wrong reason proves nothing.
+v = computeCurrency({ id: 'H1', level: 2, fixField: 'n/a', refField: 'a.js', lineStart: 3, lineEnd: 7 }, {
   git: ladderGit({}), fileExists: exists(['a.js']),
   storeGit: () => { throw new Error('not a git repo'); }, cataloguePath: '.anvi/hetvabhasa.md',
 });
 eq(v.status, 'GRAY', 'store git failure → GRAY, no throw');
+
+// Two stores can hold the same relative path. The cache is keyed on the store
+// accessor, not the path, so one repo's entries are never served for another's.
+const spyA = storeGitSpy('2026-07-08T10:00:00+05:30', COMMITTED_CAT);
+const spyB = storeGitSpy('2026-07-08T10:00:00+05:30', AMENDED_CAT);
+computeCurrency({ id: 'H1', level: 2, fixField: 'n/a', refField: 'a.js' }, {
+  git: ladderGit({ revList: 'timesha1', logMap: { 'timesha1:a.js': 'h1\n' } }),
+  fileExists: exists(['a.js']), storeGit: spyA, cataloguePath: '.anvi/hetvabhasa.md',
+});
+computeCurrency({ id: 'H1', level: 3, fixField: 'n/a', refField: 'a.js' }, {
+  git: ladderGit({ revList: 'timesha1', logMap: { 'timesha1:a.js': 'h1\n' } }),
+  fileExists: exists(['a.js']), storeGit: spyB, cataloguePath: '.anvi/hetvabhasa.md',
+});
+eq(spyA.seen.join('|'), '1,3', 'store A answered from its own catalogue');
+eq(spyB.seen.join('|'), '4,5', 'store B answered from its own, despite the identical path');
 
 // --- class sensitivity + nudges ---------------------------------------------
 console.log('sensitivity + nudges');

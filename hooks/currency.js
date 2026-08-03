@@ -372,13 +372,62 @@ function isReachable(git, sha) {
   try { git(`cat-file -e ${sha}^{commit}`); return true; } catch { return false; }
 }
 
+// The committed copy of a catalogue, parsed once per (store repo, path).
+//
+// Keyed on the storeGit FUNCTION rather than on the path: one process may consult
+// more than one store, and two stores can hold the same relative path. A path-keyed
+// cache would then serve one repo's entries for another's — the basename-as-identity
+// mistake (V17), one layer in. Same function ⇒ same repo, by construction.
+const committedCatalogueCache = new WeakMap();
+
+function committedEntries(storeGit, cataloguePath) {
+  let byPath = committedCatalogueCache.get(storeGit);
+  if (!byPath) { byPath = new Map(); committedCatalogueCache.set(storeGit, byPath); }
+  if (byPath.has(cataloguePath)) return byPath.get(cataloguePath);
+
+  let entries = null; // null = HEAD cannot answer; distinct from [] = answered, empty
+  try {
+    entries = parseEntries(storeGit(`show HEAD:${JSON.stringify(cataloguePath)}`));
+  } catch { entries = null; }
+  byPath.set(cataloguePath, entries);
+  return entries;
+}
+
 // Ladder rung 4 — the universal fallback. Ask the STORE repo when this entry's own
 // text last changed, then take the PROJECT repo's HEAD as of that moment. Weak by
 // construction (a store commit may be a bulk compaction, not a re-validation), so
 // callers mark the result provisional. Returns { sha, source, provisional, ts } or
 // null when the store history can't answer.
-function resolveTimeAnchor({ git, storeGit, cataloguePath, lineStart, lineEnd }) {
-  if (!storeGit || !cataloguePath || !lineStart || !lineEnd) return null;
+//
+// The line span is taken from the COMMITTED catalogue, never from the working tree.
+// `log -L a,b:file` reads its range against history, so feeding it working-tree line
+// numbers compares two different snapshots: while a catalogue is dirty, every entry
+// below an edit is graded through a window that has slid off it, and one line of
+// slide is enough to reach a neighbour's heading and inherit that neighbour's date.
+// The slide lands on the FRESH side whenever the neighbour is newer, which is the
+// common case for an appended entry — so the failure hides drift, and it does so
+// exactly while a catalogue session is deciding what still needs re-validating (#162).
+// There is deliberately NO fallback to a working-tree span. Every way of failing to
+// locate the committed entry returns null — an honest "unknown" — because the one
+// alternative on offer is the very span that produces the wrong date. A fallback here
+// would reinstate the bug on exactly the paths where the lookup failed, and those are
+// invisible from the outside: a borrowed date is indistinguishable from a real one
+// (V19 — converging failure modes must each fail closed on their own).
+function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level }) {
+  if (!storeGit || !cataloguePath || !id) return null;
+
+  // Match on id AND level: an `### H45` addendum shares its id with the `## H45` it
+  // amends, and pairing the wrong one would date the parent by its addendum (#79/#85).
+  const committed = committedEntries(storeGit, cataloguePath);
+  if (!committed) return null;
+  const self = committed.find((e) => e.id === id && (level === undefined || e.level === level));
+  // Absent from HEAD: an entry that exists only in the working tree. There is no
+  // committed text to date, and the lines it currently occupies belong to something
+  // else in history — so answer "unknown" rather than borrow that neighbour's date.
+  if (!self) return null;
+  const { lineStart, lineEnd } = self;
+  if (!lineStart || !lineEnd) return null;
+
   let ts;
   try {
     const out = storeGit(`log -1 --format=%cI -L ${lineStart},${lineEnd}:${JSON.stringify(cataloguePath)}`);
@@ -883,7 +932,9 @@ function computeCurrency(entry, opts) {
     git,
     timeAnchor: () => resolveTimeAnchor({
       git, storeGit, cataloguePath,
-      lineStart: entry.lineStart, lineEnd: entry.lineEnd,
+      // id + level select the entry in the COMMITTED catalogue, which is where its
+      // line span is then read from. The working-tree span is deliberately not passed.
+      id: entry.id, level: entry.level,
     }),
   });
 
