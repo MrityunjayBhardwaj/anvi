@@ -102,6 +102,26 @@ const spU = storeProject('unboundproj');
 fs.rmSync(path.join(spU, IDENT.PROVENANCE), { force: true });
 const unbound = repo(path.join(TMP, 'nowhere', 'unboundproj'), null);
 
+// A fourth caller, and the one a whole-project view misses: resolution is
+// PER KIND. This repo owns a real `.anvi` of its own, so its catalogues resolve
+// locally and are served — while `ref` and `investigations` have no local copy
+// and fall through to a store project it cannot prove it owns. Served and
+// refused, in one directory, at the same moment.
+//
+// It exists because removing the ref-refusal branch changed nothing when only
+// wholly-refused callers were tested: a wholly-refused caller never reaches that
+// branch, so the assertion covering it could never fail. A guard whose removal
+// costs nothing is not covered.
+const spS = storeProject('splitproj');
+IDENT.writeProvenance(spS, IDENT.identityOf(repo(path.join(TMP, 'owner', 'splitproj'), 'git@github.com:acme/splitproj.git')));
+const split = repo(path.join(TMP, 'split', 'splitproj'), 'git@github.com:mallory/split.git');
+fs.mkdirSync(path.join(split, '.anvi'), { recursive: true });
+fs.writeFileSync(path.join(split, '.anvi', 'dharana.md'),
+  '# Dharana\n### B1: LOCALSPLIT engine boundary\nFILES: src/engine.js\n' +
+  '**REF:** ref/GROUND_TRUTH_RUNTIME.md#stage-2\nSilent failure modes: LOCALSPLIT\nPatterns: H1\n');
+fs.writeFileSync(path.join(split, '.anvi', 'hetvabhasa.md'),
+  '# Hetvabhasa\n## H1: LOCALSPLIT — a local entry\n**REF:** src/engine.js\n**FIX:** n/a\n');
+
 // --- the door set, DERIVED --------------------------------------------------
 // Anything in hooks/ that resolves through the shared resolver is a door. Listing
 // them instead would let a new hook skip this file in silence, which is the exact
@@ -222,6 +242,56 @@ for (const [label, dir, state] of [['MISMATCH', mismatch, 'MISMATCH'], ['UNBOUND
     // remedy there is the record's path. Either way a reader gets a next action.
     ok(/bind-store\.js|PROVENANCE\.json/.test(ctx), `${label}: ${hook} carries an actionable remedy`);
   }
+}
+
+// Resolution is per KIND, so a caller can be served one and refused another. The
+// served kind must not launder the refused one into silence.
+console.log('\nbehaviour: served for one kind, refused for another — both reported honestly');
+{
+  const ss = contextOf(fire('ground-truth-session-start.js', split));
+  ok(/GROUNDING: \d+\/\d+/.test(ss), 'session-start still reports the catalogues it legitimately owns');
+  ok(!/NO Ground Truth docs — consider/.test(ss),
+    'session-start does not call the refused reference area empty');
+  ok(/NOT SERVED/.test(ss) && /MISMATCH/.test(ss),
+    'session-start names the refusal of the kind it was actually refused');
+  ok(/bind-store\.js|PROVENANCE\.json/.test(ss), 'and carries the remedy for it');
+
+  const dg = contextOf(fire('debug-grounding-gate.js', split));
+  ok(dg.includes('LOCALSPLIT'), 'debug gate still serves the local boundary it owns');
+  ok(!/NO Ground Truth docs found/.test(dg), 'debug gate does not call the refused docs missing');
+  ok(/Do NOT run \/anvi:ground/.test(dg), 'debug gate still warns against the writing command');
+
+  const eg = contextOf(fire('experiment-protocol-guard.js', split));
+  ok(!/No experiment protocol found/.test(eg), 'experiment guard does not call refused investigations empty');
+  ok(/MISMATCH/.test(eg), 'experiment guard names the refusal');
+
+  const leaked = Object.values(MARKERS).filter(s =>
+    fire('ground-truth-session-start.js', split).out.includes(s) ||
+    fire('debug-grounding-gate.js', split).out.includes(s));
+  ok(leaked.length === 0, `nothing from the store project leaks to the split caller${leaked.length ? ' — LEAKED ' + leaked.join(',') : ''}`);
+}
+
+// The case the first version of this file MISSED, found by running the real hooks
+// against the real store instead of only against a fixture built to be complete.
+//
+// A store project may hold catalogues and no `ref/` — most do. Then the reference
+// kind resolves to NONE rather than to a refusal, so a guard keyed on "was `ref`
+// refused?" takes the honest-absence branch and prints the advice verbatim to a
+// caller that was just refused. Existence of a directory is the wrong question;
+// whether this caller may write to that store project is the right one.
+console.log('\nbehaviour: refused, and the store project simply has no reference dir');
+{
+  const spBare = storeProject('bareproj');
+  fs.rmSync(path.join(spBare, 'ref'), { recursive: true, force: true });
+  fs.rmSync(path.join(spBare, IDENT.PROVENANCE), { force: true }); // → UNBOUND
+  const caller = repo(path.join(TMP, 'bareside', 'bareproj'), null);
+
+  const dg = contextOf(fire('debug-grounding-gate.js', caller));
+  ok(!/NO Ground Truth docs found/.test(dg),
+    'no honest-absence claim when the caller was refused, even with no ref/ to refuse');
+  ok(/Do NOT run \/anvi:ground/.test(dg),
+    'and the writing command is still warned against');
+  ok(/UNBOUND/.test(dg), 'the state is still named');
 }
 
 // The specifically harmful advice, checked by name in the one hook that gave it.

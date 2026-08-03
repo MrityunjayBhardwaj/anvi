@@ -129,14 +129,26 @@ process.stdin.on('end', () => {
       for (const doc of gtDocs) {
         message += `\n  - ${doc}`;
       }
-    } else if (ref.refused) {
+    } else if (ref.refused || anvi.refused) {
       // Emphatically NOT "none found, run /anvi:ground". That command creates
       // ref/sources/ under the store project this directory's NAME selects —
-      // which is the write the refusal exists to stop. Advising it here would
-      // walk the reader around the guard while sounding helpful, and this is
-      // the channel the reader actually acts on: the true reason goes to
-      // stderr, where nothing reads it.
-      message += `\n\nGround Truth docs are NOT BEING SERVED here — ${ref.notice}`;
+      // the write the refusal exists to stop. Advising it here would walk the
+      // reader around the guard while sounding helpful, and this is the channel
+      // the reader acts on: the true reason goes to stderr, which nothing reads.
+      //
+      // Keyed on ANY refusal, not on `ref` alone. The danger is not whether a
+      // reference directory happens to exist — it is whether this caller may
+      // write to that store project at all, and a refusal on any kind already
+      // answers that no. Observed against the real store, where the project has
+      // catalogues and no ref/ yet: the narrower test read NONE for `ref`, took
+      // the honest-absence branch, and printed the advice verbatim to a caller
+      // that had just been refused. A more precise condition that answers on a
+      // smaller domain is a regression everywhere the coarse one reached, and
+      // the lost cases land on the permissive side.
+      message += ref.refused
+        ? `\n\nGround Truth docs are NOT BEING SERVED here — ${ref.notice}`
+        : '\n\nNo Ground Truth docs are readable here, and whether any exist is UNKNOWN — ' +
+          'this directory was refused the store project its name selects.';
       message += '\nDo NOT run /anvi:ground to resolve this: it writes into the store project ' +
         'this directory just failed to prove it owns. Fix the binding first.';
     } else {
