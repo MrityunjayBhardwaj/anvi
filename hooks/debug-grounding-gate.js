@@ -158,7 +158,17 @@ process.stdin.on('end', () => {
     if (anvi.refused) {
       // Same distinction one kind over: no boundary block below could mean the
       // project has no dharana, or that it has one and is being refused it.
-      message += `\n\nProject boundaries are NOT BEING SERVED here — ${anvi.notice}`;
+      //
+      // Both kinds address the store project selected by the SAME basename and
+      // are judged against the same caller, so when both are refused the reason
+      // and the remedy are identical and only the quoted kind differs. Printing
+      // the full sentence twice costs ~350 characters of injected context to say
+      // one thing — so state the second kind and point at the reason already
+      // given. Guarded on the states actually matching rather than on the
+      // reasoning above being true forever.
+      message += (ref.refused && ref.state === anvi.state)
+        ? '\n\nProject boundaries are NOT BEING SERVED here either — same refusal, same remedy.'
+        : `\n\nProject boundaries are NOT BEING SERVED here — ${anvi.notice}`;
     }
 
     message += boundaryContext;

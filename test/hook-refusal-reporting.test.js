@@ -294,6 +294,20 @@ console.log('\nbehaviour: refused, and the store project simply has no reference
   ok(/UNBOUND/.test(dg), 'the state is still named');
 }
 
+// Both kinds refused at once — the common case, and the one where honest
+// per-kind reporting turns into the same 350-character sentence printed twice.
+// The dedupe must shorten the message without dropping either kind: a kind that
+// vanishes to save space has been laundered back into an absence.
+console.log('\nbehaviour: both kinds refused — said once, but both still named');
+{
+  const dg = contextOf(fire('debug-grounding-gate.js', mismatch));
+  ok(/Ground Truth docs are NOT BEING SERVED/.test(dg), 'the reference kind is still named');
+  ok(/Project boundaries are NOT BEING SERVED/.test(dg), 'the catalogue kind is still named');
+  ok(/MISMATCH/.test(dg) && /PROVENANCE\.json/.test(dg), 'the state and remedy are still present');
+  const explanations = (dg.match(/declining to serve/g) || []).length;
+  ok(explanations === 1, `the shared explanation is given once, not per kind (found ${explanations})`);
+}
+
 // The specifically harmful advice, checked by name in the one hook that gave it.
 console.log('\nbehaviour: the refused caller is not sent to a command that writes');
 {
