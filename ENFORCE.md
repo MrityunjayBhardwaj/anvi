@@ -119,6 +119,41 @@ catalogues unflagged while a renamed working copy saw its own reported as foreig
 Null from `ownStoreProject` means nothing proves ownership, which is a reason to
 treat store paths as external, never a reason to fall back to the name.
 
+**"Where is this file STORED" and "what repository are its CONTENTS about" are a
+third pair of different questions, and only some artifacts separate them.**
+`projectRootFor(filePath)` walks up to the nearest directory holding `.git` or
+`.anvi` and answers the first — which is what relativising a path and matching
+`FILES:` need, because those compare against where the file actually sits. For
+nearly every file the second question has the same answer, since a source file is
+stored in the repo it talks about. A **catalogue is the exception**: it lives in
+the central store and its `REF:` paths name files in the project's working tree.
+Walking up from one stops inside the store, a repository that has never contained
+any of those paths, so every reference classifies as "outside this repo", every
+entry falls through to unanchored, and a freshness report reads uniformly blank —
+while still inviting the reader to stamp the entries as re-validated. Blank at
+exactly the moment it steers the work, because a re-validation pass *is* an edit
+to a catalogue. Both spellings land there: a repo-local `.anvi` is a symlink into
+the store and the walk resolves through realpath first.
+
+So anything asking a question ABOUT a file's contents — drift above all — resolves
+through `subjectRepoFor(filePath, sessionCwd)`, which returns `{ repo, reason }`.
+Outside the store it is the same walk, so ordinary files are untouched. Inside it,
+the answer comes from the store project's **provenance record**, the same record
+the binding gate reads, so the two can never disagree about which working tree a
+store project belongs to — the record decides, the store directory's name never
+does. Where a record lists several worktrees the session's directory picks which
+checkout to ask; it can never pick a different project, so this is not the ambient
+anchor returning through a side door.
+
+It answers on a **smaller domain** than the walk — it declines where the walk
+always produced something — so the gap is handed back as a stated `reason` rather
+than left to fall to the permissive side. A consumer that cannot determine the
+repository must say freshness was **not assessed**, name why, and **not invite a
+stamp**: a stamp asserts an entry was re-confirmed, and soliciting one there asks
+for a confirmation at the one moment nothing could be checked. An entry that WAS
+looked at and simply has nothing diffable keeps its invitation — "I could not
+look" and "I looked and found nothing to diff" are different sentences.
+
 **A consumer that REPORTS what it found must not use the plain resolver.**
 `resolveDir` answers with a directory or `null`, and `null` carries two meanings a
 reporting consumer must keep apart: *there is nothing here* and *there is something
