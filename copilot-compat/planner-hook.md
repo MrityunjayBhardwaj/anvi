@@ -15,12 +15,15 @@ instead of UX-first (per-pattern opt-in, method chaining).
 
 ### Identify invariants for this phase:
 What structural regularities must the implementation respect?
-List vyāptis from the project catalogue. For each: does the plan respect it?
+List vyāptis from `.anvi/vyapti.md` in the project root — the SAME file
+Claude Code's native `anvi-planner` agent reads, so invariants either tool
+has previously validated apply here too. For each: does the plan respect it?
 If the plan violates a known vyāpti, it will produce bugs.
 
 ### Map the lifecycle:
 What's the execution order of the system this phase touches?
 Which operations are sync vs async? What runs before/after framework init?
+Check `.anvi/krama.md` for lifecycles already documented for this project.
 Plans that don't account for lifecycle ordering produce timing bugs.
 
 ## During Planning (Per Task)
@@ -47,9 +50,11 @@ technical assumption works? If no experiment is identified, the plan is
 built on unverified assumptions.
 
 ### Hetvābhāsa scan:
-Check each plan against the project's error catalogue. Does any task
-replicate a pattern that previously caused bugs? If yes, the task must
-include specific mitigation (not just "be careful").
+Check each plan against `.anvi/hetvabhasa.md` — the same error-pattern
+catalogue Claude Code's native `anvi-planner` reads, so a pattern caught in
+either tool is caught here too. Does any task replicate a pattern that
+previously caused bugs? If yes, the task must include specific mitigation
+(not just "be careful").
 
 ### Observation-testability:
 Every acceptance criterion must be verifiable by direct observation
