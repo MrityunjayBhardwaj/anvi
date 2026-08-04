@@ -227,28 +227,6 @@ resolves it.
   entry below an uncommitted edit is attributed to the wrong history. Nothing errors and
   the answers are well-formed and wrong.
 
-## [2.1.0] — 2026-07-26
-
-### Added
-- **Copilot compatibility layer** (`copilot-compat/`) — same shape as `gsd-compat/`:
-  four hook files (executor, planner, checker, debugger) carrying the cognitive
-  discipline, plus a README documenting the three ways to load them into VS Code
-  Copilot Chat, which has no hook mechanism of its own: a `.github/copilot-instructions.md`
-  directive (auto-attached every request), injection into a `.github/prompts/*.prompt.md`
-  file, or a fork into a `.github/agents/*.agent.md` custom agent definition.
-- `install.sh` now copies `copilot-compat/` into `~/.claude/anvi/` alongside `gsd-compat/`.
-- `copilot-compat/templates/.github/` — copy-in-ready `copilot-instructions.md`,
-  four `.prompt.md` files, and four self-contained `.agent.md` forks, so a
-  project can adopt the Copilot side without hand-authoring anything.
-- `SKILL.md` gained a "Copilot Integration" section mirroring "GSD Integration",
-  pointing at the four installed hook files.
-- **`install.sh --only=<list>`** and an interactive picker — choose any
-  combination of `claude` (native agents/skills/hooks), `gsd`, and `copilot`
-  instead of always installing all three. Selection is additive-only: leaving
-  one out on a later run doesn't remove a previously-installed integration.
-  Default (blank input, or no `--only`) still installs all three, unchanged
-  from prior behavior.
-
 ## [2.0.0] — 2026-07-23
 **MIGRATION REQUIRED** — catalogues move into the store; an install from 1.1.0 or earlier keeps them in a local `.anvi/`
 
