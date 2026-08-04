@@ -34,6 +34,14 @@
 ```
 ### B[N]: [Our Module] <-> [Their Module]
 FILES: [comma-separated list of source files at this boundary — used by hook for deterministic matching]
+KINDS: [optional — comma-separated globs matched against the repo-relative path, ORed with FILES:.
+        Use when an entry governs what a file IS rather than where it sits: verification
+        artefacts sit at no boundary, so only this field can reach them.
+        e.g. **/__tests__/**, *.test.ts, examples/_probe-*
+        A pattern with a slash matches the full relative path; one without matches the basename.]
+CHECKS: [optional — a block of "- " lines, emitted verbatim at the top of the injection.
+         The compressed, checkable form of what this entry has learned. Everything else in an
+         entry is reference material; this is the part that must survive being skimmed.]
 ORIGIN: [What observation or failure created this entry — be specific]
 WHY: [What class of problems would be invisible without tracking this boundary]
 HOW: [What observation targets / checks this boundary entry enables]
