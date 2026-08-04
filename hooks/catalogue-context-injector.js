@@ -153,6 +153,73 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
   return out;
 }
 
+// --- KINDS: — selecting an entry by what a file IS, not where it sits ---------
+// FILES: and the text fallback both answer "where does this file live". Verification
+// artefacts — tests, probes, diagnostics, gate scripts — live nowhere in particular: a
+// probe belongs to whatever it is probing this week, so it is at no catalogued boundary
+// and matches nothing. That leaves the files whose authoring most needs a project's
+// verification discipline as exactly the files that receive none of it.
+//
+// KINDS: is the second predicate. A pattern containing '/' is matched against the
+// repo-relative path; one without is matched against the basename, so `*.test.ts`
+// works at any depth without the author writing `**/` every time.
+//
+// Purely additive: an entry with no KINDS: contributes nothing, so a catalogue that
+// has never heard of the field behaves byte-for-byte as before. The match is an OR
+// with FILES:, never a filter on it — a narrowing here would drop cases on the
+// permissive side, which is the failure mode this hook can least afford.
+function globToRe(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        // '**/' spans zero or more directories, so `**/__tests__/**` matches a
+        // __tests__ at the repo root as well as one nested six deep.
+        if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else {
+      re += c.replace(/[.+^${}()|[\]\\]/, '\\$&');
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+function matchesKind(kindsField, relPath) {
+  const base = path.basename(relPath);
+  return kindsField.split(',').map(k => k.trim()).filter(Boolean).some(k => {
+    try { return globToRe(k).test(k.includes('/') ? relPath : base); } catch { return false; }
+  });
+}
+
+// CHECKS: — the actionable half. Selecting the right entry is not enough on its own:
+// the message below is assembled from a fixed set of named fields (silent-failure
+// modes, "Observe THEIR side", hetvabhasa headlines, REFs) and never carries an
+// entry's own prose. So a probe could match a boundary and still receive a header
+// with no checklist in it. CHECKS: is a block of '- ' lines emitted verbatim,
+// terminated by the first line that is not one — the compressed, checkable form of
+// what the entry has learned, delivered at the moment of authoring.
+//
+// It lives in the project's catalogue rather than in this hook on purpose: a
+// hardcoded list would ship one project's hard-won lessons to every other project,
+// which is the wrong-project-knowledge failure the ownership test already guards.
+function extractChecks(content) {
+  const m = content.match(/^CHECKS:[ \t]*$/m);
+  if (!m) return [];
+  const rest = content.slice(m.index + m[0].length).split('\n').slice(1);
+  const out = [];
+  for (const line of rest) {
+    const item = line.match(/^[ \t]*-[ \t]+(.+?)[ \t]*$/);
+    if (!item) break;
+    out.push(item[1]);
+  }
+  return out;
+}
+
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -224,6 +291,14 @@ process.stdin.on('end', () => {
         // Deterministic match: check if relPath matches any entry in FILES: list
         const boundaryFiles = filesMatch[1].split(',').map(f => f.trim());
         isRelevant = boundaryFiles.some(bf => relPath === bf || relPath.endsWith(bf));
+      }
+
+      // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
+      // file IS. Runs before the text fallback for the same reason FILES: does: an
+      // explicit declaration by the catalogue's author beats guessing from a filename.
+      const kindsMatch = boundaryContent.match(/^KINDS:\s*(.+)$/m);
+      if (!isRelevant && kindsMatch) {
+        isRelevant = matchesKind(kindsMatch[1], relPath);
       }
 
       if (!isRelevant) {
@@ -337,6 +412,13 @@ process.stdin.on('end', () => {
         message += ` Verify: ${observeMatch[1].trim()}.`;
       }
     }
+
+    // CHECKS: first, ahead of the catalogue digests. What an entry asks you to DO is
+    // the part that has to survive being skimmed, and everything below it is
+    // reference material that can run to tens of kilobytes.
+    const checks = [];
+    for (const m of matches) for (const c of extractChecks(m.content)) if (!checks.includes(c)) checks.push(c);
+    if (checks.length) message += '\nChecks before you write this file:\n  - ' + checks.join('\n  - ');
 
     message += errorPatterns;
     message += invariantWarnings;
