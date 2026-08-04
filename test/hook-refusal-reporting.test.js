@@ -65,17 +65,18 @@ function storeProject(name) {
     '**REF:** ref/GROUND_TRUTH_RUNTIME.md#stage-2\n' +
     `Silent failure modes: ${MARKERS.boundary} swallows an unknown parameter\nPatterns: H1\n`);
   // `H1`/`V1` are collision-shaped (one letter, one digit — "V8 engine"), so the
-  // leak guard deliberately never flags them on their own. `H21`/`V14` are the
+  // leak guard deliberately never flags them on their own. `H91`/`V77` are the
   // shape it DOES flag, and the pair is what makes a bound-vs-refused comparison
-  // of the bare detector possible at all.
+  // of the bare detector possible at all. Both are chosen to be ids this project
+  // does not itself hold, so a fixture entry can never be mistaken for a real one.
   fs.writeFileSync(path.join(d, '.anvi', 'hetvabhasa.md'),
     `# Hetvabhasa\n## H1: ${MARKERS.pattern} — a parameter renamed on one side\n` +
     '**REF:** src/engine.js\n**FIX:** n/a\n' +
-    `## H21: ${MARKERS.pattern}-LATE — a rate read before it is set\n` +
+    `## H91: ${MARKERS.pattern}-LATE — a rate read before it is set\n` +
     '**REF:** src/engine.js\n**FIX:** n/a\n');
   fs.writeFileSync(path.join(d, '.anvi', 'vyapti.md'),
     `# Vyapti\n## V1: ${MARKERS.invariant} — one resolver\n**REF:** src/engine.js\n` +
-    `## V14: ${MARKERS.invariant}-TWO — a refusal is not an absence\n**REF:** src/engine.js\n`);
+    `## V77: ${MARKERS.invariant}-TWO — the sample rate is set once\n**REF:** src/engine.js\n`);
   fs.writeFileSync(path.join(d, '.anvi', 'krama.md'), '# Krama\n');
   fs.writeFileSync(path.join(d, 'ref', 'GROUND_TRUTH_RUNTIME.md'),
     `# GT\n## stage-2\n${MARKERS.gt}\n`);
@@ -152,7 +153,7 @@ const payloadFor = (hook, dir) => {
     case 'experiment-protocol-guard.js':
       return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'node tools/diagnose-rate.js' } };
     case 'catalogue-id-leak-guard.js':
-      return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: "git commit -m 'fix H21 and V14'" } };
+      return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: "git commit -m 'fix H91 and V77'" } };
     case 'provenance-guard.js':
       return { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: path.join(sp, '.anvi', 'hetvabhasa.md') } };
     default:
@@ -342,13 +343,13 @@ console.log('\nbehaviour: the leak guard says when a refusal narrowed it');
   const bound = contextOf(fire('catalogue-id-leak-guard.js', served));
   ok(/references internal catalogue keys|an internal catalogue key/.test(bound),
     'bound caller: the ordinary leak finding still fires');
-  ok(/`H21`/.test(bound) && /`V14`/.test(bound), 'bound caller: both real identifiers are named');
+  ok(/`H91`/.test(bound) && /`V77`/.test(bound), 'bound caller: both real identifiers are named');
   ok(!/REDUCED COVERAGE/.test(bound), 'bound caller: no coverage notice, because nothing was lost');
 
   for (const [label, dir, state] of [['MISMATCH', mismatch, 'MISMATCH'], ['UNBOUND', unbound, 'UNBOUND']]) {
     const ctx = contextOf(fire('catalogue-id-leak-guard.js', dir));
     ok(/REDUCED COVERAGE/.test(ctx), `${label}: the leak guard reports that it was narrowed`);
-    ok(/`H21`/.test(ctx) && /`V14`/.test(ctx), `${label}: it names the tokens it could not check`);
+    ok(/`H91`/.test(ctx) && /`V77`/.test(ctx), `${label}: it names the tokens it could not check`);
     ok(/neither confirm nor clear/.test(ctx), `${label}: it does not claim they are — or are not — IDs`);
     ok(ctx.includes(state), `${label}: it names the state`);
     ok(/bind-store\.js|PROVENANCE\.json/.test(ctx), `${label}: it carries an actionable remedy`);
@@ -371,12 +372,27 @@ console.log('\nbehaviour: the leak guard says when a refusal narrowed it');
   ok(/run of \d+ ID-shaped tokens/.test(dense), 'the density detector still fires for a refused caller');
   ok(/REDUCED COVERAGE/.test(dense), 'and the coverage notice accompanies it rather than replacing it');
 
+  // The split caller: its OWN catalogue resolves locally and is served, while
+  // other kinds fall through to a store project it cannot prove it owns. The
+  // cross-referencing checks ran against the catalogue that actually governs this
+  // directory, so coverage is full and there is nothing to report. A guard that
+  // asked "was this project refused ANYTHING?" instead of "was the catalogue
+  // refused?" would nag here for no reason — resolution is per kind.
+  const splitCtx = contextOf(fire('catalogue-id-leak-guard.js', split, null, {
+    hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: "git commit -m 'fix H91 and V77'" },
+  }));
+  ok(!/REDUCED COVERAGE/.test(splitCtx),
+    'a caller served its OWN catalogue is at full coverage, even while refused another kind');
+  ok(splitCtx.length === 0,
+    'and it stays silent, because neither token is an entry in the catalogue that governs it');
+
   // A project with no catalogue at ALL is not degraded — it has no own IDs to
   // verify against, so the silence there is honest and must stay silent.
   const noCat = repo(path.join(TMP, 'nocat', 'nocatproj'), null);
   const nc = fire('catalogue-id-leak-guard.js', noCat, null, {
     hook_event_name: 'PreToolUse', tool_name: 'Bash',
-    tool_input: { command: "git commit -m 'fix H21 and V14'" },
+    tool_input: { command: "git commit -m 'fix H91 and V77'" },
   });
   ok(!/REDUCED COVERAGE/.test(contextOf(nc)),
     'a project with no catalogue at all is an absence, not a refusal — no notice');
