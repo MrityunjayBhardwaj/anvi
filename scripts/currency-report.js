@@ -24,7 +24,18 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver } = loadFromCandidates('currency.js');
-const { resolveDir } = loadFromCandidates('anvi-paths.js');
+const anviPaths = loadFromCandidates('anvi-paths.js');
+const { resolveDir } = anviPaths;
+
+// This tool REPORTS, so it must keep a refusal apart from an absence: `resolveDir`
+// returns null for both, and an auditor that merges them tells its reader the
+// catalogues are missing when they were withheld. Guarded by typeof — the two
+// install trees are not guaranteed to be the same version, and an older resolver
+// cannot answer the question at all.
+function readDir(dir, kind) {
+  if (typeof anviPaths.resolveDirForRead === 'function') return anviPaths.resolveDirForRead(dir, kind);
+  return { dir: resolveDir(dir, kind), refused: false, state: null, notice: null };
+}
 
 // --- args -------------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -33,7 +44,19 @@ const lintOnly = args.includes('--lint');
 const target = args.filter(a => !a.startsWith('--'))[0] || process.cwd();
 const cwd = path.resolve(target);
 
-const anviDir = resolveDir(cwd, '.anvi');
+// Two outcomes, two exit codes, deliberately not the same one: absence keeps 2,
+// a refusal gets 3. A reader who cannot tell them apart draws opposite
+// conclusions from the same line — "this project has no catalogues" invites
+// creating some, which writes into the store project the caller just failed to
+// prove it owns.
+const anviRead = readDir(cwd, '.anvi');
+if (anviRead.refused) {
+  console.error(`catalogues WITHHELD for ${cwd} — ${anviRead.notice}`);
+  console.error('Nothing was read, so nothing is known about what this project holds. This is NOT');
+  console.error('a report that the catalogues are missing. Repair the binding, then re-run.');
+  process.exit(3);
+}
+const anviDir = anviRead.dir;
 if (!anviDir) { console.error(`no .anvi catalogues for ${cwd}`); process.exit(2); }
 
 const CATALOGUES = ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md'];
