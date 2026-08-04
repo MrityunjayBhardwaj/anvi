@@ -146,6 +146,17 @@ verbatim to a caller that was just refused. `test/hook-refusal-reporting.test.js
 derives the door set from the code and drives real hook processes through every
 refusal state, so a new hook that resolves and mis-reports fails the suite.
 
+**A consumer whose own COVERAGE depends on the read must say when it was narrowed.**
+Not every consumer serves knowledge — the catalogue-id leak guard grades outward text
+against the catalogue, and two of its four checks cross-reference real entries. A
+refusal empties the set they gate on, both go dark, and the output stays identical to
+a clean run, on the one path where content becomes public. Declining to guess is
+right: without the catalogue there is nothing to tell a real entry id from `MD5`. The
+narrowing is what must be reported — which tokens went unverified, why, and the remedy
+— stated as coverage rather than as a finding, since the check decided nothing about
+them. Silence would leave a degraded guard indistinguishable from a guard that looked
+and found nothing.
+
 Rationale: before this was unified, the three hooks each checked a different subset of
 locations and silently failed on the layout they didn't handle (e.g. the injector
 no-op'd on projects using `artifacts/.anvi`; session-start reported "no GT docs" on

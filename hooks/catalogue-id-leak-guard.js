@@ -32,6 +32,11 @@
 //   - Reads not just tool_input.command but also the file behind `--body-file`,
 //     `-F`, and `-m <file>`, so a body authored via heredoc/editor/file (which the
 //     command-string scan never saw — the #417 leak) is covered.
+//   - When the catalogue cannot be read because the resolver REFUSED this directory,
+//     the two cross-referencing detectors cannot run. Their caution is right — without
+//     the catalogue there is no way to tell `H21` from `MD5` — but the narrowing is
+//     REPORTED rather than silent, because a guard that quietly covers less than it did
+//     is indistinguishable from one that looked and found nothing (#167).
 
 const path = require('path');
 const os = require('os');
@@ -41,8 +46,8 @@ const fs = require('fs');
 // sibling require resolves in-repo and installed alike (V7). parseEntries is the ONE
 // catalogue parser (V7 again); a second ID scanner here would be a second chance to
 // disagree about what an entry IS.
-let resolveDir, parseEntries, adoptSession;
-try { ({ resolveDir, adoptSession } = require('./anvi-paths.js')); } catch { resolveDir = null; }
+let resolveDirForRead, parseEntries, adoptSession;
+try { ({ resolveDirForRead, adoptSession } = require('./anvi-paths.js')); } catch { resolveDirForRead = null; }
 try { ({ parseEntries } = require('./currency.js')); } catch { parseEntries = null; }
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -51,19 +56,28 @@ const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 // be a leak. Resolve via the shared resolver (V1); read every catalogue; collect ids.
 // Any failure (no catalogues, unreadable, resolver absent) → empty set, so bare-ID
 // detection simply goes quiet rather than erroring: detector 1 still runs.
-function projectEntryIds(cwd) {
+//
+// `refused` comes back as a VALUE, and it is not the same thing as an empty set. An
+// empty set from a project with no catalogue means there are no own-IDs to leak; an
+// empty set from a REFUSED read means the identifiers in this publish are unverified
+// and the guard is covering less than it advertises. Resolving through the plain
+// wrapper merged the two, and the merge was invisible — the output of a degraded run
+// was byte-identical to a clean one (V14, #167).
+function projectCatalogue(cwd) {
   const ids = new Set();
-  if (!resolveDir || !parseEntries) return ids;
-  let anviDir;
-  try { anviDir = resolveDir(cwd, '.anvi'); } catch { anviDir = null; }
-  if (!anviDir) return ids;
+  if (!resolveDirForRead || !parseEntries) return { ids, refused: false, notice: null };
+  let r;
+  try { r = resolveDirForRead(cwd, '.anvi'); } catch { r = null; }
+  if (!r || !r.dir) {
+    return { ids, refused: !!(r && r.refused), notice: (r && r.notice) || null };
+  }
   for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md']) {
     try {
-      const md = fs.readFileSync(path.join(anviDir, cat), 'utf8');
+      const md = fs.readFileSync(path.join(r.dir, cat), 'utf8');
       for (const e of parseEntries(md)) ids.add(e.id);
     } catch { /* missing/unreadable catalogue → contributes nothing */ }
   }
-  return ids;
+  return { ids, refused: false, notice: null };
 }
 
 // Pull the text of any file referenced by --body-file / -F / --body-file=… / -m FILE,
@@ -139,7 +153,7 @@ process.stdin.on('end', () => {
       const prefixLen = m[1].length, num = parseInt(m[2], 10);
       return prefixLen >= 2 || num >= 10; // multi-letter prefix OR 2+ digit number
     };
-    const ids = projectEntryIds(cwd);
+    const { ids, refused: catalogueRefused, notice } = projectCatalogue(cwd);
     // Every DISTINCT id-shaped token in the outward text, computed once and reused by
     // the bare-id, cluster, and density detectors below.
     const idTokens = [...new Set([...scanned.matchAll(/\b([A-Z]{1,3}\d{1,4})\b/g)].map(m => m[1]))];
@@ -170,7 +184,25 @@ process.stdin.on('end', () => {
     const DENSITY_MIN = 5;
     const denseHits = idTokens.length >= DENSITY_MIN ? idTokens : [];
 
-    if (!keyHit && !bareHits.length && !clusterHits.length && !denseHits.length) process.exit(0);
+    // COVERAGE — what detectors 2 and 3 would have examined but could not, because the
+    // catalogue read was REFUSED rather than empty. Derived from those two detectors'
+    // own conditions, so it names exactly the tokens they lost and never more: the
+    // shapes the bare detector would have cross-referenced, plus every token if the
+    // run was long enough for the cluster detector to have had an opinion.
+    //
+    // Keyed on the REFUSAL, not on the set being empty. A project with no catalogue at
+    // all also yields an empty set, and there the silence is honest — it has no own IDs
+    // to leak, and detectors 1 and 4 (both catalogue-free) still cover the rest.
+    const blindTokens = catalogueRefused
+      ? [...new Set([
+          ...idTokens.filter(flaggableIdShape),
+          ...(idTokens.length >= CLUSTER_MIN ? idTokens : []),
+        ])]
+      : [];
+
+    if (!keyHit && !bareHits.length && !clusterHits.length && !denseHits.length && !blindTokens.length) {
+      process.exit(0);
+    }
 
     const surface = isGh ? 'this GitHub issue/PR' : 'this commit message';
     // Union the tokens every detector matched, in a stable order, deduped.
@@ -184,13 +216,34 @@ process.stdin.on('end', () => {
       ? `\nThat is a run of ${tokenSet.size} ID-shaped tokens — the shape of pasted catalogue or currency-report output. ` +
         `If these are catalogue IDs, they do not belong in public content; if they are not (e.g. codec/hash names), ignore this.`
       : '';
-    const message =
-      `CATALOGUE-ID LEAK CHECK: ${surface} references ${plural ? 'internal catalogue keys' : 'an internal catalogue key'} ` +
-      `(matched ${matched}). Catalogue IDs are private index keys — meaningless to ` +
-      `outside readers and a leak of the framework into public content.${clusterNote}\n` +
-      `→ State the FINDING in plain language instead. The ID→PR link lives only in ` +
-      `the private catalogue's FIX: field (private → public), never in the public ` +
-      `artifact. If this genuinely belongs in ~/.anvideck, run the command in that repo.`;
+    const fired = Boolean(keyHit) || bareHits.length > 0 || clusterHits.length > 0 || denseHits.length > 0;
+
+    const finding = fired
+      ? `CATALOGUE-ID LEAK CHECK: ${surface} references ${plural ? 'internal catalogue keys' : 'an internal catalogue key'} ` +
+        `(matched ${matched}). Catalogue IDs are private index keys — meaningless to ` +
+        `outside readers and a leak of the framework into public content.${clusterNote}\n` +
+        `→ State the FINDING in plain language instead. The ID→PR link lives only in ` +
+        `the private catalogue's FIX: field (private → public), never in the public ` +
+        `artifact. If this genuinely belongs in ~/.anvideck, run the command in that repo.`
+      : '';
+
+    // The degradation, stated. Not a finding and never phrased as one: the check did
+    // not decide these tokens are IDs, it could not decide either way, and saying so
+    // is the whole point. It carries the resolver's own sentence — same builder as the
+    // stderr line — so the state and a remedy that works travel on the channel the
+    // reader acts on rather than on the one nothing consumes.
+    const coverage = blindTokens.length
+      ? `CATALOGUE-ID LEAK CHECK — REDUCED COVERAGE: this project's catalogue could not be ` +
+        `read, so the two checks that verify a token against real entries did not run. ` +
+        `${surface} carries ${blindTokens.map(id => `\`${id}\``).join(', ')} — ` +
+        `${blindTokens.length > 1 ? 'identifier shapes' : 'an identifier shape'} this check ` +
+        `could neither confirm nor clear.\n${notice || 'anvi: the store project this directory selects declined to serve its catalogue.'}\n` +
+        `→ Until that is resolved, confirm by hand that ${surface} names no catalogue ` +
+        `entries; state the FINDING in plain language instead. (The shape-only checks — ` +
+        `explicit index keys, and dense runs of ID-shaped tokens — did run.)`
+      : '';
+
+    const message = [finding, coverage].filter(Boolean).join('\n\n');
 
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: message }
