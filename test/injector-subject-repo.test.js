@@ -193,8 +193,16 @@ for (const [label, r] of [['no record', noRec], ['malformed record', badRec], ['
 
 // Absent and corrupt must not collapse into one message: a record that cannot be
 // parsed is a broken binding, not a first contact, and the remedies differ.
-ok(noRec.ctx !== badRec.ctx, 'a missing record and an unparseable one do not produce the same sentence');
+//
+// NOT asserted as `noRec.ctx !== badRec.ctx`. These are two different fixture
+// projects, so their messages carry different project names and would differ
+// whatever the code did — an inequality satisfied by a part of the output that
+// has nothing to do with the distinction under test. Assert the distinguishing
+// WORDS instead, in both directions, so collapsing the two states reds.
 ok(/could not be parsed/.test(badRec.ctx), 'the malformed case names parsing as the reason');
+ok(!/could not be parsed/.test(noRec.ctx), 'the never-bound case does NOT claim a parse failure');
+ok(/no provenance record/.test(noRec.ctx), 'the never-bound case names the record as absent');
+ok(!/no provenance record/.test(badRec.ctx), 'and the corrupt case is not reported as never bound');
 
 // And the bound case must NOT carry the not-assessed sentence — without this the
 // wording assertions above are satisfied by a hook that says it everywhere.
