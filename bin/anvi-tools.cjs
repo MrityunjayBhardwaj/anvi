@@ -67,16 +67,42 @@ function loadAnviPaths() {
 }
 const anviPaths = loadAnviPaths();
 
-function findAnviDir(cwd) {
+// The READ path, for a command that REPORTS what it found. `findAnviDir` answers
+// with a directory or null, and null means both "there is nothing here" and
+// "there is something and you may not have it". A command that merges them tells
+// its reader the catalogues are MISSING — three existing files reported as `not
+// found`, at exit 0, which is the shape of a healthy run. The remedy a reader
+// infers for missing catalogues is to create some, which writes into the store
+// project this directory just failed to prove it owns.
+//
+// Guarded by typeof because the two install trees are not guaranteed to be the
+// same version. An older resolver cannot answer the question at all, so it
+// degrades to a directory-or-null answer — the distinction is UNAVAILABLE there,
+// which is not the same as false, and no caller may claim absence from it.
+function anviDirRead(cwd) {
+  if (anviPaths && typeof anviPaths.resolveDirForRead === 'function') {
+    return anviPaths.resolveDirForRead(cwd, '.anvi');
+  }
+  return { dir: legacyFindAnviDir(cwd), refused: false, state: null, notice: null };
+}
+
+function legacyFindAnviDir(cwd) {
   if (anviPaths) return anviPaths.resolveDir(cwd, '.anvi');
   // Last resort only if the shared resolver can't be located (unexpected layout):
   // preserve prior cwd-only behavior rather than crash. Warn once — never silent.
-  if (!findAnviDir._warned) {
+  if (!legacyFindAnviDir._warned) {
     process.stderr.write('anvi-tools: shared path resolver not found; using cwd-only .anvi lookup.\n');
-    findAnviDir._warned = true;
+    legacyFindAnviDir._warned = true;
   }
   const anviDir = path.join(cwd, '.anvi');
   return fs.existsSync(anviDir) ? anviDir : null;
+}
+
+// A thin wrapper, so the decline is decided in exactly ONE place. Commands that
+// only need somewhere to look keep using this; commands that SAY something about
+// what they found must use `anviDirRead`, or they report a refusal as an absence.
+function findAnviDir(cwd) {
+  return anviDirRead(cwd).dir;
 }
 
 function readCatalogue(cwd, name) {
@@ -273,6 +299,27 @@ ${entry.lifecycle || '1. (unknown)'}
 function cmdCatalogueReview(cwd, raw) {
   const catalogues = ['hetvabhasa', 'vyapti', 'krama'];
   const stats = {};
+
+  // Ask ONCE, up front, whether the catalogues may be read at all. Without this,
+  // every per-catalogue answer below is `not found` — and this command's whole
+  // output is those answers, so a withheld project renders as an initialized one
+  // with three missing files, at exit 0. Exit 3 is the code the write path
+  // already uses for a refusal; absence keeps exit 0, so the two outcomes never
+  // share an observable.
+  const read = anviDirRead(cwd);
+  if (read.refused) {
+    if (raw) {
+      console.log(JSON.stringify({
+        refused: true, state: read.state || null, notice: read.notice || null, catalogues: null,
+      }));
+    } else {
+      console.log('Catalogue Status: WITHHELD');
+      console.log(`  ${read.notice}`);
+      console.log('  This is not a claim that catalogues are missing here — nothing was read, so');
+      console.log('  nothing is known about what this project holds. Repair the binding first.');
+    }
+    process.exit(3);
+  }
 
   for (const name of catalogues) {
     const content = readCatalogue(cwd, name);
