@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { projectRootFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
+const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
 const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
@@ -403,10 +403,34 @@ process.stdin.on('end', () => {
       // investigations gets the 🔵 reference-grounded verdict instead of a false gray.
       const refDir = resolveDirForFile(filePath, 'ref');
       const invDir = resolveDirForFile(filePath, 'investigations');
-      const nudges = currencyNudges(projectRoot, anviDir, wanted, refDir, invDir);
-      if (nudges.length) {
-        message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
-          + capNudges(nudges).join('\n  ');
+
+      // Drift is asked of the repo the REFs are written RELATIVE TO, which is not
+      // always the repo that STORES the edited file. For a catalogue those differ:
+      // it lives in the store and names paths in the working tree. Asking the
+      // storage repo answers confidently about files it has never contained —
+      // every ref reads "outside this repo" and the whole boundary reports blank
+      // (#164). projectRoot stays the storage answer above, because relPath and the
+      // FILES: matching compare against where the file actually sits; only the
+      // drift question moves.
+      // The session's directory comes from the PAYLOAD the harness sends, falling
+      // back to this process's cwd. It never selects the project — the provenance
+      // record does that — and only picks which checkout of that same project to
+      // ask when a record lists more than one.
+      const subject = subjectRepoFor(filePath, data.cwd || process.cwd());
+      if (subject.repo) {
+        const nudges = currencyNudges(subject.repo, anviDir, wanted, refDir, invDir);
+        if (nudges.length) {
+          message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
+            + capNudges(nudges).join('\n  ');
+        }
+      } else if (wanted.length) {
+        // Could not look — which is NOT the same as looked and found nothing, and
+        // must never close by inviting a stamp. A stamp asserts the entry was
+        // re-confirmed; soliciting one here would ask for a confirmation at the one
+        // moment the tool cannot tell whether any is warranted (V14).
+        message += `\nCurrency: not assessed — ${subject.reason}. `
+          + 'Freshness was NOT checked for these entries, so treat none of them as confirmed; '
+          + 'run `node scripts/currency-report.js <project-dir>` from the working tree to grade them.';
       }
     } catch (_) { /* never blocks */ }
 

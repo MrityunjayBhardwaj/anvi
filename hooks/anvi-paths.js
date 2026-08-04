@@ -454,8 +454,85 @@ function resolveDirForFile(filePath, kind) {
   return resolveDir(root, kind);
 }
 
+// Which REPOSITORY are this file's CONTENTS written relative to?
+//
+// A different question from projectRootFor above, and the difference is invisible
+// for almost every file — a source file is stored in the repo it talks about, so
+// the walk answers both at once. A CATALOGUE is the exception the walk cannot see:
+// it lives in the central store and its REF paths name files in the project's
+// working tree. Walking up from one stops at `<store>/projects/<name>/`, inside
+// the STORE's git repo, which has never contained any of those paths. Every ref
+// then classifies as "outside this repo", every entry falls through to unanchored,
+// and the freshness block reads uniformly blank at exactly the moment it is meant
+// to steer a re-validation pass — which IS an edit to the catalogue.
+//
+// Both spellings land there: a repo-local `.anvi` is a symlink into the store and
+// the walk resolves through realpath first.
+//
+// The store project's PROVENANCE record already holds the answer — it lists the
+// worktrees bound to that project. Reading it HERE means the drift question and
+// the binding gate consult the SAME record, so the two can never disagree about
+// which working tree a store project belongs to. The record decides; the store
+// directory's NAME never does (V17).
+//
+// Returns `{ repo, reason }` and never a bare null: "I could not work out which
+// repository to ask" and "there is nothing here" must arrive as different values
+// at the point the caller acts (V14). This resolver answers on a SMALLER domain
+// than projectRootFor — it can decline where the walk always produced something —
+// so the gap is handed to the caller as a stated reason rather than left to fall
+// to the permissive side, where it would read as a clean verdict (H67).
+function subjectRepoFor(filePath, sessionCwd) {
+  if (!filePath) return { repo: null, reason: 'no file path' };
+
+  const storeProject = storeProjectForPath(filePath);
+  // Not store-resident: storage and subject coincide. The ordinary case, and the
+  // one that must keep behaving exactly as it did.
+  if (!storeProject) {
+    const root = projectRootFor(filePath);
+    return root
+      ? { repo: root, reason: null }
+      : { repo: null, reason: 'the file belongs to no project' };
+  }
+
+  const name = path.basename(storeProject);
+  if (!IDENTITY || typeof IDENTITY.readProvenance !== 'function') {
+    return { repo: null, reason: `cannot read the provenance record for ${name}` };
+  }
+  const rec = IDENTITY.readProvenance(storeProject);
+  // Absent and corrupt are deliberately different: absent means never bound,
+  // corrupt means the binding cannot be trusted. Neither may be graded, and
+  // neither may be reported as the other.
+  if (!rec) {
+    return { repo: null, reason: `no provenance record for ${name} — nothing records which working tree these references name` };
+  }
+  if (rec.malformed) {
+    return { repo: null, reason: `the provenance record for ${name} could not be parsed` };
+  }
+  const live = rec.worktrees.filter((w) => { try { return fs.existsSync(w); } catch { return false; } });
+  if (!live.length) {
+    return {
+      repo: null,
+      reason: rec.worktrees.length
+        ? `every working tree recorded for ${name} is missing from this machine`
+        : `the provenance record for ${name} lists no working tree`,
+    };
+  }
+
+  // Two checkouts of ONE repository can sit at different commits, so which one is
+  // asked matters. The record has already chosen the PROJECT; the session only
+  // picks which checkout of that same project — cwd can never select a different
+  // project here, so this is not the ambient anchor returning through a side door.
+  const here = sessionCwd ? (realSafe(sessionCwd) || path.resolve(sessionCwd)) : null;
+  const match = here && live.find((w) => {
+    const r = realSafe(w) || path.resolve(w);
+    return here === r || here.startsWith(r + path.sep);
+  });
+  return { repo: match || live[0], reason: null };
+}
+
 module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, resolveDirForFile,
+  subjectRepoFor,
   // Every hook that resolves through this module must call this once, right after
   // it parses its payload — a hook is a process per event, so without it the
   // explanations below are deduplicated against a Set that is always empty and
