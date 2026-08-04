@@ -3,6 +3,16 @@
 > Injected into Copilot Chat's agent-mode execution loop. Adds cognitive
 > checks at natural execution points without changing the task flow.
 
+## Before Starting
+
+### Load project catalogues:
+Check `.anvi/` in the project root for `hetvabhasa.md`, `vyapti.md`, and
+`krama.md` — the SAME files Claude Code's native `anvi-executor` agent reads
+and writes. These carry forward error patterns, invariants, and lifecycle
+knowledge from every previous session on this project, regardless of
+whether that session ran through Copilot or Claude Code. Load them before
+starting the first task.
+
 ## Before Each Task
 
 ### Krama check:

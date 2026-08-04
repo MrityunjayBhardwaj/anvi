@@ -81,3 +81,26 @@ skills (`skills/anvi-*`) and agents (`agents/anvi-*.md`) already carry this
 discipline. This layer exists only to bring the same discipline into
 sessions run through VS Code Copilot Chat, which has no subagent-spawning
 or hook mechanism of its own.
+
+## Shared State Across Tools
+
+There is only ONE installed framework (`~/.claude/anvi/`) and only ONE set
+of per-project catalogues (`.anvi/hetvabhasa.md`, `vyapti.md`, `krama.md`,
+`dharana.md`, committed in the project's own repo) — Copilot and Claude
+Code are two front-ends reading and writing the same underlying files, not
+two separate installations with separate state.
+
+This only works if every hook and agent definition names the SAME concrete
+path. All four hooks in this directory read from and write to `.anvi/` in
+the project root — the identical path Claude Code's native `agents/anvi-*.md`
+use — so a pattern caught, an invariant confirmed, or a lifecycle mapped
+during a Copilot session is immediately available the next time you switch
+to Claude Code on the same project, and vice versa. If you fork any of
+these hooks (per Option C above), keep that path intact — pointing a fork
+at a different location (e.g. a `references/` folder, or a copilot-only
+catalogue) silently breaks the continuity this whole layer exists for.
+
+What is NOT shared, by design: Claude Code's own per-session "memory"
+(`~/.claude/projects/<project>/memory/`) is harness infrastructure specific
+to Claude Code, with no Copilot equivalent to mirror it into. Project
+catalogues are the portable, cross-tool state; session memory is not.

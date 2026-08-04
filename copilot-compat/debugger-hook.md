@@ -16,10 +16,10 @@ The Anvi approach subsumes the default approach:
 
 ### Before Investigation
 
-**Load project-specific references:**
-1. `references/hetvabhasa.md` — known error patterns. Check each against the current symptoms. If a pattern matches, the investigation can shortcut directly to proving/disproving that pattern.
-2. `references/vyapti.md` — known invariants. The bug might be a vyāpti violation.
-3. `references/krama-patterns.md` — known lifecycle sequences. Timing bugs are immediately classifiable.
+**Load project catalogues** — these live at `.anvi/` in the project root (NOT under `references/`), and are the SAME files Claude Code's native `anvi-debugger` agent reads and writes. Reading/writing the same path is what lets a Copilot session and a Claude Code session on the same project carry forward each other's findings — check these before starting:
+1. `.anvi/hetvabhasa.md` — known error patterns. Check each against the current symptoms. If a pattern matches, the investigation can shortcut directly to proving/disproving that pattern.
+2. `.anvi/vyapti.md` — known invariants. The bug might be a vyāpti violation.
+3. `.anvi/krama.md` — known lifecycle sequences. Timing bugs are immediately classifiable.
 
 ### Investigation Flow
 
@@ -103,13 +103,13 @@ new_pattern: [yes/no — if yes, add to catalogue after resolution]
 
 After the bug is fixed:
 
-1. **Hetvābhāsa check:** Was this a new reasoning error pattern? If yes, add to `references/hetvabhasa.md` with: pattern name, how it manifested, how it looked before diagnosis, detection method.
+1. **Hetvābhāsa check:** Was this a new reasoning error pattern? If yes, add to `.anvi/hetvabhasa.md` with: pattern name, how it manifested, how it looked before diagnosis, detection method.
 
-2. **Vyāpti check:** Did this bug reveal a new structural regularity? If yes, add to `references/vyapti.md` with: statement, scope, breaks-when, confirmation.
+2. **Vyāpti check:** Did this bug reveal a new structural regularity? If yes, add to `.anvi/vyapti.md` with: statement, scope, breaks-when, confirmation.
 
-3. **Krama check:** Did this bug involve a lifecycle ordering issue? If yes, add to `references/krama-patterns.md` with: sequence, sync/async, common violation.
+3. **Krama check:** Did this bug involve a lifecycle ordering issue? If yes, add to `.anvi/krama.md` with: sequence, sync/async, common violation.
 
-These updates happen automatically after successful resolution. The catalogues grow, and the same errors become cheaper to diagnose in future sessions.
+These updates happen automatically after successful resolution, written to the SAME `.anvi/` files Claude Code writes to — the catalogues grow regardless of which tool found the bug, and the same errors become cheaper to diagnose in future sessions in either tool.
 
 ## Integration Point
 
