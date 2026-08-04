@@ -375,7 +375,12 @@ if [ "$MODE" = "interactive" ] && [ -z "$ONLY_ARG" ]; then
   echo ""
   echo "  Pick any combination (e.g. '1,3' or '1 3'). Leave blank to install all three."
   echo -n "  Install: "
-  read -r PICKS
+  # `read` returns non-zero at EOF, and this script runs under `set -e`, so an
+  # unguarded read KILLS a non-interactive install right here — piped from curl,
+  # in CI, in a Docker build, or with stdin redirected. It dies after printing the
+  # prompt and before installing anything, which looks like a run that happened.
+  # EOF is treated as blank, which the prompt above already promises means "all".
+  read -r PICKS || PICKS=""
   if [ -n "$PICKS" ]; then
     INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
     for pick in $(echo "$PICKS" | tr ',' ' '); do
