@@ -45,6 +45,11 @@ function storeProject(name) {
   fs.writeFileSync(path.join(d, '.anvi', 'krama.md'),
     '# Krama\n## K1: READREP-LIFECYCLE — bind before serving\n**REF:** src/engine.js\n');
   fs.writeFileSync(path.join(d, '.anvi', 'dharana.md'), '# Dharana\n');
+  // A reference area that EXISTS. Without it the kind resolves to "nothing here"
+  // rather than to a refusal, and the withheld case below could never arise — the
+  // fixture would be tidier than the world and the guard would go untested.
+  fs.mkdirSync(path.join(d, 'ref'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'ref', 'GROUND_TRUTH_RUNTIME.md'), '# GT\n## stage-2\nREADREP-GROUNDTRUTH\n');
   return d;
 }
 
@@ -143,6 +148,108 @@ console.log('\ncurrency report: a withheld catalogue is not a missing one');
 
   ok(/no \.anvi catalogues/.test(e.err), 'a project that genuinely has none still gets the plain message');
   ok(e.code === 2, `and keeps its existing exit code (got ${e.code})`);
+}
+
+// -------------------------------------------- per kind: withheld ≠ unknown ---
+// The case a whole-project view of the refusal misses entirely. Resolution is PER
+// KIND, so a project can own its catalogues — served, report runs, verdicts print
+// — while the reference area beside them is refused. A pointer into that area then
+// indexes as empty, exactly like an absent one, and lands in the unknown bucket
+// with the wording reserved for entries that never had a followable pointer.
+//
+// That is the bucket routinely explained away as unknown-by-construction, so a
+// refusal absorbed into it is one nobody re-examines.
+console.log('\ncurrency report: a pointer into a WITHHELD area is not an unresolvable one');
+{
+  const mkSplit = (name, storeName) => {
+    const d = path.join(TMP, name, storeName);
+    fs.mkdirSync(path.join(d, '.anvi'), { recursive: true });
+    repo(d, 'git@github.com:mallory/split.git');
+    // Four shapes, differing in what the grader can and cannot reach. The fourth is
+    // the one a status-only guard misses: it has evidence that DOES grade, so it
+    // earns a verdict — over evidence that is partly unreadable.
+    fs.writeFileSync(path.join(d, '.anvi', 'hetvabhasa.md'),
+      '# Hetvabhasa\n## H1: an entry pointing at code\n**REF:** src/engine.js\n**FIX:** n/a\n\n' +
+      '## H2: an entry pointing into the reference area\n**REF:** ref/GROUND_TRUTH_RUNTIME.md\n**FIX:** n/a\n\n' +
+      '## H3: an entry pointing at nothing followable\n**REF:** the design discussion, section 4\n**FIX:** n/a\n\n' +
+      '## H4: an entry pointing at BOTH code and the reference area\n' +
+      '**REF:** `src/engine.js`; `ref/GROUND_TRUTH_RUNTIME.md`\n**FIX:** n/a\n' +
+      '**VALIDATED:** HEADSHA 2026-08-04 — checked\n');
+    for (const f of ['vyapti', 'krama', 'dharana']) fs.writeFileSync(path.join(d, '.anvi', `${f}.md`), '# x\n');
+    execFileSync('git', ['add', '-A'], { cwd: d, stdio: 'ignore' });
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: d, stdio: 'ignore' });
+    // The stamp must name a real commit or the entry has no anchor and falls back to
+    // the unknown verdict — which would quietly turn the partial case into the
+    // withheld one and prove nothing about the branch under test.
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: d, encoding: 'utf8' }).trim();
+    const hp = path.join(d, '.anvi', 'hetvabhasa.md');
+    fs.writeFileSync(hp, fs.readFileSync(hp, 'utf8').replaceAll('HEADSHA', sha));
+    return d;
+  };
+
+  // REFUSED for `ref`: a store project of this name exists and is bound elsewhere.
+  storeProject('splitproj');
+  IDENT.writeProvenance(path.join(TMP, '.anvideck', 'projects', 'splitproj'),
+    IDENT.identityOf(repo(path.join(TMP, 'owner', 'splitproj'), 'git@github.com:acme/splitproj.git')));
+  const split = mkSplit('split', 'splitproj');
+
+  // The CONTROL for this section: same catalogue, same pointers, but no store
+  // project answers to the name — so `ref` is genuinely absent rather than
+  // withheld. Without it, "the withheld one is marked" says nothing about
+  // whether the mark tracks the refusal or just the pointer's shape.
+  const absent = mkSplit('absent', 'nostoreproject');
+
+  const rs = run([REPORT], split);
+  const ra = run([REPORT], absent);
+
+  ok(rs.code === 0, `the split caller still gets a report (exit ${rs.code}) — its catalogues are its own`);
+  ok(/REFERENCE AREAS WITHHELD/.test(rs.out), 'and is told, before the verdicts, that an area was withheld');
+  ok(/MISMATCH/.test(rs.all), 'with the state named');
+  ok(/🚫/.test(rs.out) && /withheld/.test(rs.out), 'the pointer into that area is marked withheld');
+  ok(/NOT followed/.test(rs.out), 'and described as not followed, rather than as unresolvable');
+  // Match the tally TOKEN, not the word: "withheld" also appears in the partial
+  // note, so a looser test passes even when the counter is gone entirely — which is
+  // exactly what removing the counter proved.
+  const tallyLine = (rs.out.match(/── .*/) || [''])[0];
+  const tallied = Number((tallyLine.match(/🚫 (\d+) withheld/u) || [0, 0])[1]);
+  const marked = rs.out.split('\n').filter(l => /^ {2}🚫 /u.test(l)).length;
+  ok(tallied > 0 && tallied === marked,
+    `the tally counts withheld apart from unknown, and its number matches the rows (tally ${tallied}, rows ${marked})`);
+
+  // The comparison that carries the section: the same entry, in the same shape of
+  // project, must be reported DIFFERENTLY when the area is absent rather than
+  // withheld — and identically for the entry that points at neither.
+  ok(!/REFERENCE AREAS WITHHELD/.test(ra.out), 'the absent-area caller gets no withheld banner');
+  ok(!/🚫/.test(ra.out), 'and no withheld verdict');
+  ok(/⚪/.test(ra.out), 'its unfollowable pointer is still an honest unknown');
+  // Compare the VERDICTS, not the whole text — the two fixtures sit at different
+  // paths, so any byte comparison differs for a reason that proves nothing.
+  // Entry ROWS only. The footer prints every symbol as a legend, so scanning the
+  // whole text would compare the tally line and pass for the wrong reason.
+  const symbolsOf = (o) => [...new Set(o.split('\n')
+    .filter(l => /^ {2}[🟢🟡🔴⚪🔵🚫] /u.test(l))
+    .map(l => [...l.trim()][0]))].sort().join('');  // spread: these are surrogate pairs
+  ok(symbolsOf(rs.out) !== symbolsOf(ra.out),
+    `withheld and absent reach different verdicts (withheld ${symbolsOf(rs.out)}, absent ${symbolsOf(ra.out)})`);
+
+  // Denominator honesty: a tally that hides a category understates what it did not check.
+  const totalOf = (o) => { const m = o.match(/── (\d+) entries/); return m ? Number(m[1]) : -1; };
+  ok(totalOf(rs.out) === totalOf(ra.out) && totalOf(rs.out) === 4,
+    `both report all 4 entries in the denominator (split ${totalOf(rs.out)}, absent ${totalOf(ra.out)})`);
+
+  // THE CASE A STATUS-ONLY GUARD MISSES, and the one this section exists for.
+  // An entry with evidence that DOES grade earns a verdict — over evidence that was
+  // partly withheld. Marking only the unknown ones leaves this reading as fully
+  // verified, which is a stronger false claim than an honest unknown.
+  const h4 = rs.out.split('\n').find(l => / H4 /.test(l)) || '';
+  ok(/PARTIAL/.test(h4), `an entry graded over partly-withheld evidence is marked partial — ${h4.trim().slice(0, 60)}`);
+  ok(!/unresolved: ref\//.test(h4), 'and its withheld pointer is NOT called unresolved');
+  ok(/withheld: .*GROUND_TRUTH/.test(h4), 'the withheld pointer is named');
+  ok(/PARTIAL verdicts/.test(rs.out), 'and the tally says how many verdicts were partial');
+
+  const h4a = ra.out.split('\n').find(l => / H4 /.test(l)) || '';
+  ok(!/PARTIAL/.test(h4a), 'the same entry is NOT marked partial when the area is merely absent');
+  ok(/unresolved/.test(h4a), 'there the pointer genuinely is unresolved, and still says so');
 }
 
 // ------------------------------------------------------------------ scope ---

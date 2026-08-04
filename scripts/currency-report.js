@@ -148,18 +148,45 @@ const storeGit = storeRoot
 // project repo. The matching logic is shared (makeRefResolver in currency.js) so the
 // report and the injector classify identically; here we just name the store areas via
 // the SAME resolver every artifact-kind lookup uses (V1), and inject readdir.
-const refResolver = makeRefResolver([
-  { area: 'ref/sources', dir: resolveDir(cwd, 'ref'), sub: 'sources/', strip: /^ref\// },
-  { area: 'ref', dir: resolveDir(cwd, 'ref'), strip: /^ref\// },
-  { area: 'investigations', dir: resolveDir(cwd, 'investigations'), strip: /^(artifacts\/)?investigations\// },
-], { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+//
+// The areas are named ONCE, and three things derive from that list: the resolver's
+// index, which kinds were withheld, and the shapes that tell a pointer INTO a
+// withheld area apart from one that genuinely resolves nowhere. Restating any of
+// them separately is a second place for them to disagree.
+const AREA_SPECS = [
+  { area: 'ref/sources', kind: 'ref', sub: 'sources/', strip: /^ref\// },
+  { area: 'ref', kind: 'ref', strip: /^ref\// },
+  { area: 'investigations', kind: 'investigations', strip: /^(artifacts\/)?investigations\// },
+];
+// Resolution is PER KIND, so a project can own its catalogues and still be refused
+// the reference area beside them — served and withheld in one directory, at the
+// same moment. Ask each kind once, through the read path.
+const kindRead = { ref: readDir(cwd, 'ref'), investigations: readDir(cwd, 'investigations') };
+const refResolver = makeRefResolver(
+  AREA_SPECS.map(a => ({ area: a.area, dir: kindRead[a.kind].dir, sub: a.sub, strip: a.strip })),
+  { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+
+// A withheld area indexes as empty, exactly like an absent one — so a REF pointing
+// into it is dropped before classification and lands in the unknown bucket with the
+// wording reserved for entries that never had a followable pointer. That bucket is
+// the one routinely dismissed as unknown-by-construction, so a refusal absorbed into
+// it is a refusal nobody re-examines.
+//
+// The "mentions" test is built from each area's OWN strip pattern, with the
+// start-anchor traded for a token boundary, so the shape that identifies a pointer
+// and the shape that strips it cannot drift apart.
+const withheldKinds = [...new Set(AREA_SPECS.filter(a => kindRead[a.kind].refused).map(a => a.kind))];
+const withheldShapes = AREA_SPECS
+  .filter(a => kindRead[a.kind].refused)
+  .map(a => ({ kind: a.kind, re: new RegExp('(?:^|[\\s`(\'"])' + a.strip.source.replace(/^\^/, '')) }));
+const withheldNotice = withheldKinds.map(k => kindRead[k].notice).filter(Boolean);
 
 // readVendor — read a VENDOR.json manifest's TEXT from the store, given its path
 // relative to the `ref` dir (e.g. "sources/desktop-sp/VENDOR.json"). This is the fs
 // half of the vendored-source freshness read (#61); the parse/validate lives in
 // currency.js (fs-agnostic, V1/V7). Returns null if there is no ref dir or the file
 // is unreadable → the core treats it as an absent manifest (plain 🔵, no regression).
-const refDir = resolveDir(cwd, 'ref');
+const refDir = kindRead.ref.dir;
 const readVendor = refDir
   ? (rel) => { try { return fs.readFileSync(path.join(refDir, rel), 'utf8'); } catch { return null; } }
   : null;
@@ -170,11 +197,22 @@ const readVendor = refDir
 // before they can be classified. Derived once, reused for every entry.
 const fileExt = extensionsFrom(git, refResolver ? refResolver.files : []);
 
-const SYMBOL = { GREEN: '🟢', YELLOW: '🟡', RED: '🔴', GRAY: '⚪', REFERENCE: '🔵' };
-const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0, REFERENCE: 0 };
+const SYMBOL = { GREEN: '🟢', YELLOW: '🟡', RED: '🔴', GRAY: '⚪', REFERENCE: '🔵', WITHHELD: '🚫' };
+const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0, REFERENCE: 0, WITHHELD: 0 };
 let shown = 0;
+let partialCount = 0;
 
 console.log(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
+// Say it before the verdicts, not after: every unknown below is read in the light
+// of whether the report could look everywhere it was asked to.
+if (withheldKinds.length) {
+  console.log(`⚠ REFERENCE AREAS WITHHELD: ${withheldKinds.join(', ')} — these were not read, so`);
+  console.log('  pointers into them could not be followed. Verdicts below are computed over less');
+  console.log('  than this project holds, and the file kinds those areas contribute are missing');
+  console.log('  from classification, which can affect entries that do not point there at all.');
+  for (const n of withheldNotice) console.log(`  ${n}`);
+  console.log('');
+}
 for (const cat of CATALOGUES) {
   const p = path.join(anviDir, cat);
   if (!fs.existsSync(p)) continue;
@@ -186,7 +224,27 @@ for (const cat of CATALOGUES) {
       git, fileExists, storeGit, fileExt, refResolver, readVendor,
       cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
     });
-    counts[v.status]++;
+    // Which of this entry's pointers name an area that was WITHHELD — computed from
+    // the specs the grader actually considered, and from the entry's raw REF text for
+    // the case where nothing registered as a file at all (a withheld area contributes
+    // no extensions, so its own pointers can fail to be recognised as files).
+    //
+    // Keyed on the area being REFUSED, never on it being empty: a project with no
+    // reference area yields the same empty index, and there every verdict is honest.
+    const unresolvedAll = v.files.filter(f => f.exists === false && !f.reference).map(f => f.file);
+    const heldParts = unresolvedAll.filter(f => withheldShapes.some(s => s.re.test(f)));
+    const heldArea = withheldShapes.find(s => s.re.test(e.refField || ''));
+    const gone = unresolvedAll.filter(f => !heldParts.includes(f)).join(', ');
+    // Two different facts, and collapsing them is how the first version of this
+    // missed the worse one. If setting the withheld pointers aside leaves nothing to
+    // grade, the entry was SKIPPED, not assessed. If something else did grade, the
+    // verdict stands — but it is PARTIAL, and a verdict that reads as complete over
+    // evidence nobody looked at is a stronger false claim than an honest unknown.
+    const nothingGradeable = v.status === 'GRAY' || (v.status === 'RED' && !gone);
+    const withheld = heldArea && nothingGradeable ? heldArea : null;
+    const partial = Boolean(heldArea) && !withheld;
+    if (withheld) counts.WITHHELD++; else counts[v.status]++;
+    if (partial) partialCount++;
     // --stale is the deliberate "what should I re-verify?" worklist. It normally
     // hides GREEN (nothing to do) and REFERENCE (settled — drifts only on an upstream
     // refresh this repo can't see). EXCEPTION (#61, option A): a source that OPTED IN
@@ -198,9 +256,9 @@ for (const cat of CATALOGUES) {
     const hiddenByDefault = v.status === 'GREEN' || v.status === 'REFERENCE';
     if (staleOnly && hiddenByDefault && !v.vendor) continue;
     const drift = v.files.filter(f => f.changedCommits > 0).map(f => `${f.file}(+${f.changedCommits})`).join(', ');
-    // A store-grounded ref resolved fine — it is not "unresolved". Only a file that
-    // matched nowhere (external/prose) belongs in the unresolved note.
-    const gone = v.files.filter(f => f.exists === false && !f.reference).map(f => f.file).join(', ');
+    // `gone` is computed above, with the withheld pointers already set aside: a
+    // pointer nobody followed is not a file that matched nowhere, and calling it
+    // "unresolved" is the same absence claim this whole change removes.
     // Detail follows the verdict — only RED leads with "gone"; on GREEN/YELLOW a
     // missing file is a cross-repo/prose ref, shown quietly as "unresolved".
     let detail = v.status === 'RED' ? `gone: ${gone}`
@@ -226,15 +284,33 @@ for (const cat of CATALOGUES) {
     // alignment cross-ref of the same id (#79 — the double-count that once got
     // misread as duplicate ids). The id is legitimately shared; kind disambiguates.
     const kind = entryKind(cat, e);
-    lines.push(`  ${SYMBOL[v.status]} ${e.id.padEnd(6)} ${kind.padEnd(10)} [${anchor}]  ${detail}`);
+    if (withheld) {
+      detail = `REF names the withheld '${withheld.kind}' area — the pointer was NOT followed. ` +
+        'This is not a claim that it resolves nowhere; that question was never asked.';
+    } else if (partial) {
+      detail += ` (PARTIAL — withheld: ${heldParts.length ? heldParts.join(', ') : `the '${heldArea.kind}' area`}; ` +
+        'this verdict is over the evidence that could be read)';
+    }
+    lines.push(`  ${SYMBOL[withheld ? 'WITHHELD' : v.status]} ${e.id.padEnd(6)} ${kind.padEnd(10)} [${anchor}]  ${detail}`);
     shown++;
   }
   if (lines.length) { console.log(`${cat}`); console.log(lines.join('\n')); console.log(''); }
 }
 
-const total = counts.GREEN + counts.YELLOW + counts.RED + counts.GRAY + counts.REFERENCE;
+const total = counts.GREEN + counts.YELLOW + counts.RED + counts.GRAY + counts.REFERENCE + counts.WITHHELD;
 // REFERENCE gets its own tally — it is the whole point of #57. Folding it back into
 // "unknown" would restore the exact confusion this fixes: a well-grounded project
 // (many 🔵) reading identical to an ungrounded one (many ⚪).
-console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ${SYMBOL.RED} ${counts.RED} dangling  ${SYMBOL.REFERENCE} ${counts.REFERENCE} reference-grounded  ${SYMBOL.GRAY} ${counts.GRAY} unknown`);
+// WITHHELD is tallied apart from unknown for the same reason REFERENCE is tallied
+// apart: folding it in restores the confusion the split exists to remove — a
+// project whose pointers were refused would read exactly like one whose entries
+// never had a followable pointer.
+const withheldTally = counts.WITHHELD ? `  ${SYMBOL.WITHHELD} ${counts.WITHHELD} withheld` : '';
+// A verdict computed over part of the evidence is not the same claim as one computed
+// over all of it. Counting them is what keeps the fresh tally from overstating.
+const partialTally = partialCount ? `
+   ${partialCount} of these were graded with a withheld area set aside — PARTIAL verdicts.` : '';
+console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ` +
+  `${SYMBOL.RED} ${counts.RED} dangling  ${SYMBOL.REFERENCE} ${counts.REFERENCE} reference-grounded  ` +
+  `${SYMBOL.GRAY} ${counts.GRAY} unknown${withheldTally}${partialTally}`);
 if (staleOnly && shown === 0) console.log('(no stale entries — all fresh)');
