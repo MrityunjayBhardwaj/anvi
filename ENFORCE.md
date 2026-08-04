@@ -93,7 +93,8 @@ The catalogue-context-injector uses two matching strategies:
    KINDS: **/__tests__/**, *.test.ts, examples/_probe-*, examples/_diag-*
    ```
    A pattern containing `/` matches the full relative path; one without matches the
-   basename, so `*.test.ts` works at any depth.
+   basename, so `*.test.ts` works at any depth. Indented continuation lines fold into
+   the field, so a long list may wrap; a line at column zero begins something else.
 
    `FILES:` asks *where a file sits*. `KINDS:` asks *what a file is*, and that is a
    question some entries can only answer that way. Verification artefacts — tests,
@@ -121,6 +122,17 @@ CHECKS:
 - print the subject count outside the loop that consumes it
 - show the check RED on the unfixed arm before believing it GREEN
 ```
+
+An item may also sit on the field's own line (`CHECKS: - print the subject count …`),
+which is what an author writes when replacing the template's placeholder in place.
+Content there that is *not* a list item is never promoted to a check — an unreplaced
+placeholder must not become advice the entry never gave. When the field is present but
+yields no items, the injection says so rather than passing over it: a field that could
+not be read has to be distinguishable from a field nobody wrote, which is the same
+requirement §Currency makes of an unknown verdict versus a clean one. That report is
+only possible for `CHECKS:`, because the entry carrying it was selected and there is an
+injection to say it in; a `KINDS:` nobody could read means no entry was selected and no
+message exists, so the remedy there is tolerance in the parser.
 
 Keep it short and checkable. What an entry asks you to *do* is the part that has to
 survive being skimmed, and everything below it is reference material that can run to
@@ -256,6 +268,7 @@ centralized projects). See issue #5.
 | 11 | A maintenance instruction still premised on a claim that has since gone stale | `test/vendored-doc-contract.test.js` — `bin/lib/VENDORED.md`'s patched/pristine table is derived from git history on every run, so a wholesale re-vendor can never stay advised for a module carrying anvi work |
 | 12 | A withheld project reported as one that never had knowledge — and advised to create some | `test/hook-refusal-reporting.test.js` — real hook processes against a hermetic store, in every refusal state, asserting no hook claims absence or names a remedy that writes |
 | 13 | A test, probe or gate script belonging to no boundary, so the verification discipline it most needs never arrives | `test/injector-kind-match.test.js` — `KINDS:` selects on what a file IS and `CHECKS:` delivers the entry's actionable half; asserted against a file matching no kind, so the glob is proven to exclude |
+| 14 | A matching field written in a shape its parser does not read, dropped without a word — so an author who wrote the field and an author who wrote nothing get the same silence | `test/injector-kind-match.test.js` — the wrapped `KINDS:` and the inline `CHECKS:` are each asserted against the well-formed form as a control, and a `CHECKS:` read as empty must SAY so |
 
 ## Liveness — a quiet hook and a dead hook look identical
 

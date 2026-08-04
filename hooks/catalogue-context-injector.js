@@ -196,6 +196,30 @@ function matchesKind(kindsField, relPath) {
   });
 }
 
+// A field may run past its own line. An author writing more globs than fit comfortably
+// wraps them, and a single-line read would take the first and drop the rest — silently,
+// because a field that yielded no glob and a file that matched no glob are the same
+// non-event from the outside. There is no injection in which to complain either: an
+// entry that failed to match is an entry that was never selected, so tolerance here is
+// the only remedy the hook has, and the author gets total silence without it.
+//
+// A continuation is an indented line, which is how the template writes one. A line at
+// column zero begins something else — the next field, a heading, prose. Continuations
+// join with a comma so that both wrapping styles work: the author who ended the
+// previous line with a separator gets an empty item (dropped below), and the author who
+// forgot one still gets two globs rather than one nonsensical joined string.
+function fieldWithContinuations(content, name) {
+  const lines = content.split('\n');
+  const head = lines.findIndex(l => l.startsWith(`${name}:`));
+  if (head === -1) return null;
+  let value = lines[head].slice(name.length + 1);
+  for (let i = head + 1; i < lines.length; i++) {
+    if (!/^[ \t]+\S/.test(lines[i])) break;
+    value += `,${lines[i].trim()}`;
+  }
+  return value;
+}
+
 // CHECKS: — the actionable half. Selecting the right entry is not enough on its own:
 // the message below is assembled from a fixed set of named fields (silent-failure
 // modes, "Observe THEIR side", hetvabhasa headlines, REFs) and never carries an
@@ -207,17 +231,29 @@ function matchesKind(kindsField, relPath) {
 // It lives in the project's catalogue rather than in this hook on purpose: a
 // hardcoded list would ship one project's hard-won lessons to every other project,
 // which is the wrong-project-knowledge failure the ownership test already guards.
+//
+// Returns presence separately from items, because the two are different answers and
+// the caller has to be able to tell them apart. An entry declaring no checks and an
+// entry whose checks could not be read both produce an empty list, and only the first
+// of those is a non-event — reporting them the same way is the failure this whole
+// injection exists to prevent, committed by the code that does the preventing.
+const CHECK_ITEM = /^[ \t]*-[ \t]+(.+?)[ \t]*$/;
 function extractChecks(content) {
-  const m = content.match(/^CHECKS:[ \t]*$/m);
-  if (!m) return [];
+  const m = content.match(/^CHECKS:[ \t]*(.*)$/m);
+  if (!m) return { present: false, items: [] };
+  const items = [];
+  // An author replacing the template's placeholder in place writes the first item on
+  // the field's own line. Accept it — but only when it IS a list item, so an
+  // unreplaced placeholder is never promoted to a check the entry never made.
+  const inline = m[1].match(CHECK_ITEM);
+  if (inline) items.push(inline[1]);
   const rest = content.slice(m.index + m[0].length).split('\n').slice(1);
-  const out = [];
   for (const line of rest) {
-    const item = line.match(/^[ \t]*-[ \t]+(.+?)[ \t]*$/);
+    const item = line.match(CHECK_ITEM);
     if (!item) break;
-    out.push(item[1]);
+    items.push(item[1]);
   }
-  return out;
+  return { present: true, items };
 }
 
 // Timeout guard: exit if stdin doesn't close in 5s
@@ -296,9 +332,9 @@ process.stdin.on('end', () => {
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
       // file IS. Runs before the text fallback for the same reason FILES: does: an
       // explicit declaration by the catalogue's author beats guessing from a filename.
-      const kindsMatch = boundaryContent.match(/^KINDS:\s*(.+)$/m);
-      if (!isRelevant && kindsMatch) {
-        isRelevant = matchesKind(kindsMatch[1], relPath);
+      const kindsField = fieldWithContinuations(boundaryContent, 'KINDS');
+      if (!isRelevant && kindsField !== null) {
+        isRelevant = matchesKind(kindsField, relPath);
       }
 
       if (!isRelevant) {
@@ -417,8 +453,21 @@ process.stdin.on('end', () => {
     // the part that has to survive being skimmed, and everything below it is
     // reference material that can run to tens of kilobytes.
     const checks = [];
-    for (const m of matches) for (const c of extractChecks(m.content)) if (!checks.includes(c)) checks.push(c);
+    let unreadable = 0;
+    for (const m of matches) {
+      const { present, items } = extractChecks(m.content);
+      for (const c of items) if (!checks.includes(c)) checks.push(c);
+      if (present && items.length === 0) unreadable++;
+    }
     if (checks.length) message += '\nChecks before you write this file:\n  - ' + checks.join('\n  - ');
+    // A field that was read and yielded nothing must not look like a field nobody
+    // wrote. This is the only malformed-field case the hook is in a position to
+    // report: the entry was selected, so there is an injection to say it in. A
+    // KINDS: nobody could read means the entry was never selected at all, and
+    // silence there is answered by tolerance in the parser, not by a message.
+    if (unreadable) {
+      message += `\nNote: ${unreadable} matched ${unreadable === 1 ? 'entry declares' : 'entries declare'} CHECKS: with no list items under it — read as empty, which is not the same as declaring none.`;
+    }
 
     message += errorPatterns;
     message += invariantWarnings;

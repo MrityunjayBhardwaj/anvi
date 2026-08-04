@@ -34,14 +34,8 @@
 ```
 ### B[N]: [Our Module] <-> [Their Module]
 FILES: [comma-separated list of source files at this boundary — used by hook for deterministic matching]
-KINDS: [optional — comma-separated globs matched against the repo-relative path, ORed with FILES:.
-        Use when an entry governs what a file IS rather than where it sits: verification
-        artefacts sit at no boundary, so only this field can reach them.
-        e.g. **/__tests__/**, *.test.ts, examples/_probe-*
-        A pattern with a slash matches the full relative path; one without matches the basename.]
-CHECKS: [optional — a block of "- " lines, emitted verbatim at the top of the injection.
-         The compressed, checkable form of what this entry has learned. Everything else in an
-         entry is reference material; this is the part that must survive being skimmed.]
+KINDS: [optional — comma-separated globs; see "Selecting on what a file IS" below]
+CHECKS: [optional — replace this with "- " list items, one per check; see below]
 ORIGIN: [What observation or failure created this entry — be specific]
 WHY: [What class of problems would be invisible without tracking this boundary]
 HOW: [What observation targets / checks this boundary entry enables]
@@ -61,6 +55,38 @@ HOW: [What observation targets / checks this boundary entry enables]
 _(Add boundaries as discovered. A boundary with 3+ hetvabhasa patterns_
 _clustering at it is an organizational fatality signal — the boundary_
 _itself may be drawn wrong.)_
+
+### Selecting on what a file IS — `KINDS:` and `CHECKS:`
+
+`FILES:` asks where a file sits. `KINDS:` asks what it is, and some entries can only be
+reached that way: verification artefacts — tests, probes, diagnostics, gate scripts —
+sit nowhere in particular, because a probe belongs to whatever it is probing this week.
+They are therefore at no catalogued boundary, and the files whose authoring most needs a
+project's verification discipline are exactly the ones that would otherwise receive none
+of it.
+
+```
+KINDS: **/__tests__/**, *.test.ts, examples/_probe-*, examples/_diag-*
+CHECKS:
+- print the subject count outside the loop that consumes it
+- show the check RED on the unfixed arm before believing it GREEN
+```
+
+- A glob containing `/` is matched against the repo-relative path; one without is
+  matched against the basename, so `*.test.ts` works at any depth. `KINDS:` is ORed
+  with `FILES:` — it can only widen what an entry selects, never narrow it.
+- `CHECKS:` items are emitted verbatim, ahead of everything else in the injection. What
+  an entry asks you to *do* is the part that has to survive being skimmed; the catalogue
+  digests below it can run to tens of kilobytes. Keep each line short and checkable.
+- Both fields tolerate the shapes people actually write. `CHECKS: - do the thing` reads
+  as one item, and `KINDS:` folds indented continuation lines, so a long glob list may
+  wrap. A line at column zero ends the field.
+- A `CHECKS:` that is present but yields no list items — an unreplaced placeholder, say
+  — is reported in the injection as read-and-empty rather than passed over. A field that
+  could not be read must not look like a field nobody wrote.
+
+Both fields are optional and purely additive: an entry carrying neither produces exactly
+the injection it produced before they existed.
 
 ### B1: [Example — Your Code] <-> [Example — External System]
 ORIGIN: hetvabhasa entries H_, H_, H_ all cluster at this boundary

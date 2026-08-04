@@ -47,6 +47,12 @@ function initRepo(dir) {
 const CHECK_A = 'ZZQ-print the subject count outside the loop that consumes it';
 const CHECK_B = 'ZZQ-show the check RED on the unfixed arm before believing it GREEN';
 
+// The two strings the new code can add to an injection. Assertions about additivity
+// have to name these, not the field names an author writes — the hook never emits
+// 'KINDS' or 'CHECKS', so asserting their absence is true of every implementation.
+const CHECKS_HEADER = 'Checks before you write this file';
+const UNREADABLE_NOTE = 'read as empty, which is not the same as declaring none';
+
 const PROJ = path.join(tmp, 'proj');
 fs.mkdirSync(path.join(PROJ, '.anvi'), { recursive: true });
 for (const d of ['src', 'pkg/inner/__tests__', 'examples', 'other']) {
@@ -128,9 +134,13 @@ ok(engine.includes('B2'), 'FILES:-matched boundary still selected');
 ok(!engine.includes(CHECK_A) && !engine.includes(CHECK_B),
    'B2 carries no CHECKS of its own and inherits none from B1');
 
-console.log('\nA catalogue that never heard of the fields is byte-identical to today');
-// The strongest additivity statement available: same fixture, same subject, with the
-// two new fields stripped. Any difference is a behaviour change to existing installs.
+console.log('\nA catalogue that never heard of the fields gets no trace of them');
+// This assertion must name what the hook EMITS, not what the author WRITES. An earlier
+// cut asserted the absence of the strings 'KINDS' and 'CHECKS'; the hook never writes
+// either into an injection, so both negatives held however the code behaved, and the
+// case they were meant to catch — a checks section leaking into a project that
+// declares none — passed them green. Assert the header below and the note beside it,
+// which are the only two things the new code can add to an existing injection.
 const PLAIN = path.join(tmp, 'plain');
 fs.mkdirSync(path.join(PLAIN, '.anvi'), { recursive: true });
 fs.mkdirSync(path.join(PLAIN, 'src'), { recursive: true });
@@ -146,8 +156,81 @@ const plainPayload = JSON.stringify({
   tool_input: { file_path: path.join(PLAIN, 'src', 'engine.js') },
 });
 const plainOut = spawnSync('node', [HOOK], { input: plainPayload, encoding: 'utf8' }).stdout || '';
-ok(plainOut.includes('B2') && !plainOut.includes('KINDS') && !plainOut.includes('CHECKS'),
-   'a KINDS/CHECKS-free catalogue produces the pre-existing injection, with neither field leaking into it');
+// Magnitude before comparison: an assertion about what an empty string does not
+// contain is satisfied by every implementation, including one that says nothing.
+ok(plainOut.length > 0, `the fields-free fixture produces an injection at all (${plainOut.length} bytes)`);
+ok(plainOut.includes('B2'), 'its FILES:-matched boundary is still selected');
+ok(!plainOut.includes(CHECKS_HEADER),
+   'no checks section is emitted into a catalogue that declares none');
+ok(!plainOut.includes(UNREADABLE_NOTE),
+   'and no unreadable-field note either — the fields are absent, not malformed');
+
+// --- The shapes the template invites, which used to be dropped without a word ------
+// Both are the same failure in opposite directions: CHECKS: read one way delivers a
+// header with nothing under it, KINDS: read one way delivers nothing at all. Each case
+// is paired with the well-formed form as a control, so a probe that has stopped being
+// able to say yes cannot pass by saying no everywhere.
+function fixture(name, dharanaBody, subjectRel) {
+  const dir = path.join(tmp, name);
+  fs.mkdirSync(path.join(dir, '.anvi'), { recursive: true });
+  fs.mkdirSync(path.join(dir, path.dirname(subjectRel)), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.anvi', 'dharana.md'), dharanaBody);
+  fs.writeFileSync(path.join(dir, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
+  fs.writeFileSync(path.join(dir, subjectRel), '// fixture\n');
+  initRepo(dir);
+  const payload = JSON.stringify({
+    session_id: 'kind-test', cwd: dir, tool_input: { file_path: path.join(dir, subjectRel) },
+  });
+  const r = spawnSync('node', [HOOK], { input: payload, encoding: 'utf8' });
+  if (!r.stdout || !r.stdout.trim()) return '';
+  try { return JSON.parse(r.stdout).hookSpecificOutput.additionalContext || ''; }
+  catch { return ''; }
+}
+const SUBJECT = 'src/qqwidget.test.ts';
+
+console.log('\nCHECKS: written on its own line, the way an author replaces a placeholder');
+const inlineChecks = fixture('inline', [
+  '# Dharana', '', '### B1: Verification surface', 'KINDS: *.test.ts',
+  `CHECKS: - ${CHECK_A}`, `- ${CHECK_B}`, 'ORIGIN: gates written green that verified nothing', '',
+].join('\n'), SUBJECT);
+ok(inlineChecks.includes('B1'), 'control: the entry is selected (it always was — only its checks went missing)');
+ok(inlineChecks.includes(CHECK_A), 'an inline first item is read as a check');
+ok(inlineChecks.includes(CHECK_B), 'and the items beneath it still follow');
+
+console.log('\nCHECKS: left as an unreplaced placeholder — read, empty, and SAID to be');
+const emptyChecks = fixture('empty', [
+  '# Dharana', '', '### B1: Verification surface', 'KINDS: *.test.ts',
+  'CHECKS: [optional — a block of "- " lines, emitted verbatim]',
+  'ORIGIN: gates written green that verified nothing', '',
+].join('\n'), SUBJECT);
+ok(emptyChecks.includes('B1'), 'control: the entry is still selected');
+ok(!emptyChecks.includes('optional —'),
+   'prose that is not a list item is never promoted to a check the entry never made');
+ok(emptyChecks.includes(UNREADABLE_NOTE),
+   'a field read as empty says so — the one malformed case the hook is selected in time to report');
+
+console.log('\nKINDS: wrapped onto a continuation line, the way more globs than fit are written');
+const wrappedKinds = fixture('wrapped', [
+  '# Dharana', '', '### B1: Verification surface',
+  'KINDS: examples/_probe-*,', '       *.test.ts',
+  'CHECKS:', `- ${CHECK_A}`, 'ORIGIN: gates written green that verified nothing', '',
+].join('\n'), SUBJECT);
+ok(wrappedKinds.includes('B1'), 'a glob on the continuation line still selects the entry');
+ok(wrappedKinds.includes(CHECK_A), 'and its checks arrive with it');
+// The continuation must not swallow the rest of the entry: a line at column zero
+// begins something else, and folding it in would turn ORIGIN prose into globs.
+// The prose below is written so that folding it WOULD select this subject — it ends
+// with a comma and a bare glob, so the fold produces `*.test.ts` as a clean token. A
+// first cut ended the line mid-sentence instead, which folds into a token carrying
+// spaces that matches nothing, so the assertion held whether the boundary was
+// respected or not and reported a guard that wasn't there.
+const overreach = fixture('overreach', [
+  '# Dharana', '', '### B1: Verification surface',
+  'KINDS: examples/_probe-*,', '       examples/_diag-*',
+  'ORIGIN: the kind of file this was written for, *.test.ts', '',
+].join('\n'), SUBJECT);
+ok(!overreach.includes('B1'),
+   'an unindented line ends the field — a glob named in following prose does not select');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
