@@ -34,7 +34,7 @@ User message
   ↓
 ⑥ PreToolUse:Read — catalogue-context-injector.js
    Fires when READING code at catalogued boundaries.
-   Matches via FILES: field (deterministic) or text fallback.
+   Matches via FILES: or KINDS: (both deterministic) or text fallback.
    Injects boundary context + Ground Truth REFs before you form opinions.
 
   ↓
@@ -86,9 +86,63 @@ The catalogue-context-injector uses two matching strategies:
    ```
    The hook checks if the tool's file_path matches any entry in the FILES: list.
 
-2. **Text fallback** — if no FILES: field, matches filename/CamelCase parts against boundary content.
+2. **KINDS: field (deterministic)** — comma-separated globs matched against the
+   repo-relative path, ORed with `FILES:`:
+   ```
+   ### B7: Verification surface
+   KINDS: **/__tests__/**, *.test.ts, examples/_probe-*, examples/_diag-*
+   ```
+   A pattern containing `/` matches the full relative path; one without matches the
+   basename, so `*.test.ts` works at any depth. Indented continuation lines fold into
+   the field, so a long list may wrap; a line at column zero begins something else.
 
-FILES: is preferred — it's deterministic and doesn't rely on boundary descriptions mentioning module names.
+   `FILES:` asks *where a file sits*. `KINDS:` asks *what a file is*, and that is a
+   question some entries can only answer that way. Verification artefacts — tests,
+   probes, diagnostics, gate scripts — sit nowhere in particular: a probe belongs to
+   whatever it is probing this week. They are therefore at no catalogued boundary,
+   and the files whose authoring most needs a project's verification discipline are
+   exactly the files that would otherwise receive none of it.
+
+3. **Text fallback** — if neither field matches, matches filename/CamelCase parts against boundary content.
+
+`FILES:` and `KINDS:` are preferred — both are deterministic and don't rely on boundary descriptions mentioning module names.
+
+### CHECKS: — the actionable half
+
+Selecting the right entry is not sufficient on its own. The injected message is
+assembled from a fixed set of named fields (silent-failure modes, "Observe THEIR
+side", hetvabhasa headlines, vyapti headlines, REFs) and never carries an entry's own
+prose — so an entry can be matched and still deliver a header with no checklist in it.
+
+`CHECKS:` is a block of list items, terminated by the first line that is not one,
+emitted verbatim and placed ahead of the catalogue digests:
+
+```
+CHECKS:
+- print the subject count outside the loop that consumes it
+- show the check RED on the unfixed arm before believing it GREEN
+```
+
+An item may also sit on the field's own line (`CHECKS: - print the subject count …`),
+which is what an author writes when replacing the template's placeholder in place.
+Content there that is *not* a list item is never promoted to a check — an unreplaced
+placeholder must not become advice the entry never gave. When the field is present but
+yields no items, the injection says so rather than passing over it: a field that could
+not be read has to be distinguishable from a field nobody wrote, which is the same
+requirement §Currency makes of an unknown verdict versus a clean one. That report is
+only possible for `CHECKS:`, because the entry carrying it was selected and there is an
+injection to say it in; a `KINDS:` nobody could read means no entry was selected and no
+message exists, so the remedy there is tolerance in the parser.
+
+Keep it short and checkable. What an entry asks you to *do* is the part that has to
+survive being skimmed, and everything below it is reference material that can run to
+tens of kilobytes. The text lives in the project's catalogue rather than in the hook
+on purpose: a hardcoded list would ship one project's hard-won lessons to every other
+project, which is the wrong-project-knowledge failure `test/injector-ownership.test.js`
+already guards against.
+
+Both fields are optional and purely additive — a catalogue that has never heard of
+them produces the same injection as before.
 
 ## Catalogue & Artifact Path Resolution (single source of truth)
 
@@ -213,6 +267,8 @@ centralized projects). See issue #5.
 | 10 | A version offered by `--version-list` that cannot actually be installed | `test/changelog-tag-parity.test.sh` — every advertised version has a tag, every tag an entry; only the unreleased newest is exempt |
 | 11 | A maintenance instruction still premised on a claim that has since gone stale | `test/vendored-doc-contract.test.js` — `bin/lib/VENDORED.md`'s patched/pristine table is derived from git history on every run, so a wholesale re-vendor can never stay advised for a module carrying anvi work |
 | 12 | A withheld project reported as one that never had knowledge — and advised to create some | `test/hook-refusal-reporting.test.js` — real hook processes against a hermetic store, in every refusal state, asserting no hook claims absence or names a remedy that writes |
+| 13 | A test, probe or gate script belonging to no boundary, so the verification discipline it most needs never arrives | `test/injector-kind-match.test.js` — `KINDS:` selects on what a file IS and `CHECKS:` delivers the entry's actionable half; asserted against a file matching no kind, so the glob is proven to exclude |
+| 14 | A matching field written in a shape its parser does not read, dropped without a word — so an author who wrote the field and an author who wrote nothing get the same silence | `test/injector-kind-match.test.js` — the wrapped `KINDS:` and the inline `CHECKS:` are each asserted against the well-formed form as a control, and a `CHECKS:` read as empty must SAY so |
 
 ## Liveness — a quiet hook and a dead hook look identical
 
