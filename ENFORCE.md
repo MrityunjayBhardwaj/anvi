@@ -269,6 +269,7 @@ centralized projects). See issue #5.
 | 12 | A withheld project reported as one that never had knowledge — and advised to create some | `test/hook-refusal-reporting.test.js` — real hook processes against a hermetic store, in every refusal state, asserting no hook claims absence or names a remedy that writes |
 | 13 | A test, probe or gate script belonging to no boundary, so the verification discipline it most needs never arrives | `test/injector-kind-match.test.js` — `KINDS:` selects on what a file IS and `CHECKS:` delivers the entry's actionable half; asserted against a file matching no kind, so the glob is proven to exclude |
 | 14 | A matching field written in a shape its parser does not read, dropped without a word — so an author who wrote the field and an author who wrote nothing get the same silence | `test/injector-kind-match.test.js` — the wrapped `KINDS:` and the inline `CHECKS:` are each asserted against the well-formed form as a control, and a `CHECKS:` read as empty must SAY so |
+| 15 | A test that exists and is never run — covered only by whoever remembers to type its name | `scripts/run-tests.js` — derives the list from the filesystem, prints the discovered count beside the pass count, and fails on an untracked test file |
 
 ## Liveness — a quiet hook and a dead hook look identical
 
@@ -326,6 +327,30 @@ reached from the other side. Guard the call (`if (adoptSession) adoptSession(…
 so version skew degrades to the older behaviour instead of to silence, and test it
 by stripping the export from a copied tree — asserting it is genuinely absent
 first, so a pass cannot mean the skew never happened.
+
+### Running them all — an unrun test and an absent test look identical
+
+`node scripts/run-tests.js` runs every `test/*.test.js` and `test/*.test.sh`.
+`-v` shows output for passing files too; a bare word filters by filename.
+
+The list is **derived from the filesystem and never written down** — the same rule
+this section applies to hooks, applied to the tests themselves. A hardcoded array
+would move the defect up one layer: the runner would go green over a domain that had
+quietly stopped matching the repo, and a green over a shrinking domain is the most
+reassuring output a runner can produce. That is why the **discovered count is printed
+on every run**, not just on failure; the pass count means nothing without it.
+
+Two things it checks that a plain loop would not:
+
+- **A test file that is not tracked by git fails the run.** The count is cross-checked
+  against `git ls-files`, which reads the index rather than the directory and so
+  answers a question `readdir` cannot. An untracked test passes locally and does not
+  exist for anybody else — green here, absent everywhere else.
+- **A suite that reports failures and exits 0 fails the run.** The exit code is the
+  verdict, because the suites print their tallies in several different shapes and
+  parsing prose to decide pass/fail would make the runner depend on wording. The
+  tally is still read, but only to catch the case the exit code cannot express: a
+  harness that has lost the ability to fail.
 
 ## Registered In
 
