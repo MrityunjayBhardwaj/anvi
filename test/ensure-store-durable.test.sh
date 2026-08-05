@@ -13,6 +13,26 @@ ok(){ if eval "$1"; then echo "  ✓ $2"; PASS=$((PASS+1)); else echo "  ✗ $2"
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
+# Hermetic identity. The script's commits used to inherit whatever git identity the
+# machine happened to have, so these assertions passed on a developer laptop and
+# failed on a fresh runner — where git can resolve no identity, the commit fails,
+# and `rev-list --count` returns EMPTY rather than 0, which is what made `[ "" -ge 1 ]`
+# complain instead of simply saying false. Pin an identity so the suite tests the
+# script rather than the machine; the no-identity case is asserted deliberately below.
+export GIT_AUTHOR_NAME=anvi-test GIT_AUTHOR_EMAIL=anvi-test@example.invalid
+export GIT_COMMITTER_NAME=anvi-test GIT_COMMITTER_EMAIL=anvi-test@example.invalid
+
+# Strip every route to an identity — the exported pair above, the global and system
+# config files, and git's fallback of synthesising one from the OS (which is why
+# macOS never saw this and Linux did).
+no_identity() {
+  env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+      -u EMAIL -u GIT_AUTHOR_DATE \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+      GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.useConfigOnly GIT_CONFIG_VALUE_0=true \
+      "$@"
+}
+
 # A stub `gh` that records its argv and simulates success (wires a fake remote so
 # the script's success path completes). Selected per-test via ANVI_GH_BIN (the
 # script's test seam) — no PATH surgery, so env/bash/git stay reachable.
@@ -45,6 +65,22 @@ OUT="$("$SH" --apply "$P" 2>&1)"
 ok 'git -C "$P" rev-parse --git-dir >/dev/null 2>&1'         'now a git repo'
 ok '[ "$(git -C "$P" rev-list --count HEAD 2>/dev/null)" -ge 1 ]' 'made an initial commit'
 ok 'echo "$OUT" | grep -qi "no git remote"'                 'reports no remote after init'
+
+echo "NO_REPO --apply with NO usable git identity — must fail loudly, never report ✓"
+# The defect this covers: both commit sites read `commit … 2>/dev/null || true`, so a
+# commit that could not run was indistinguishable from one that did, and the next line
+# printed a checkmark beside "(0 commit(s))". The store was preserved nowhere and the
+# output said otherwise.
+PNI="$ROOT/noident"; mkdir -p "$PNI/projects/x/.anvi"; echo hi > "$PNI/projects/x/.anvi/hetvabhasa.md"
+OUT="$(no_identity "$SH" --apply "$PNI" 2>&1)"; RC_NI=$?
+# Control first: the fixture must genuinely be unable to commit, or every assertion
+# below is vacuous — it would be asserting failure of a thing that succeeded.
+ok '[ -z "$(no_identity git -C "$PNI" rev-list --count HEAD 2>/dev/null)" ]' \
+   'control: the fixture genuinely cannot commit (no identity available)'
+ok '[ "$RC_NI" -ne 0 ]'                                      'exits non-zero rather than claiming success'
+ok 'echo "$OUT" | grep -qi "preserved NOWHERE"'              'says the catalogues are preserved nowhere'
+ok '! echo "$OUT" | grep -q "✓ git init done ("'             'no ✓ beside a commit that never happened'
+ok 'echo "$OUT" | grep -qi "user.email"'                     'names the likeliest cause and its remedy'
 
 echo "NO_REMOTE --apply WITHOUT --create-remote — must NOT create anything (consent gate)"
 GH_CALLS="$ROOT/calls1"; : > "$GH_CALLS"

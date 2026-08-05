@@ -46,6 +46,29 @@ while [ $# -gt 0 ]; do
 done
 STORE="${STORE:-$HOME/.anvideck}"
 
+# --- committing, without letting a failure pass as success -------------------
+# Both commit sites below used to read `commit -q … 2>/dev/null || true`, which
+# discarded the reason and then the status, leaving a commit that COULD NOT RUN
+# indistinguishable from one that did — and the line after it printed a checkmark
+# either way. A durability tool that reports success it did not achieve is worse
+# than no tool at all, because the reassurance is the thing that stops anyone
+# checking. The commonest cause is git having no identity to commit with, which
+# is invisible on a developer machine and universal on a fresh runner or container.
+commit_store() {
+  local err
+  if err="$(git -C "$STORE" commit -q -m "📦 Initialize anvi_artifacts store" 2>&1)"; then
+    return 0
+  fi
+  {
+    echo "  ✗ the store could not be committed — your catalogues are preserved NOWHERE."
+    [ -n "$err" ] && printf '%s\n' "$err" | sed 's/^/      /'
+    echo "      If git has no identity to commit with, give it one:"
+    echo "        git config --global user.email you@example.com"
+    echo "        git config --global user.name  'Your Name'"
+  } >&2
+  return 1
+}
+
 # --- detect state -----------------------------------------------------------
 if   [ ! -d "$STORE" ];                                              then STATE="NO_DIR"
 elif ! git -C "$STORE" rev-parse --git-dir >/dev/null 2>&1;         then STATE="NO_REPO"
@@ -98,10 +121,15 @@ case "$STATE" in
     else
       git -C "$STORE" init -q
       git -C "$STORE" add -A 2>/dev/null || true
-      if ! git -C "$STORE" diff --cached --quiet 2>/dev/null; then
-        git -C "$STORE" commit -q -m "📦 Initialize anvi_artifacts store" 2>/dev/null || true
+      # The status word follows the count rather than preceding it. A ✓ printed
+      # next to "(0 commit(s))" is two opposite outcomes sharing one word, and the
+      # honest number is the half a reader skims past.
+      if git -C "$STORE" diff --cached --quiet 2>/dev/null; then
+        echo "  ✓ git init done — the store is empty, so there is nothing to commit yet."
+      else
+        commit_store || exit 1
+        echo "  ✓ git init done ($(git -C "$STORE" rev-list --count HEAD) commit(s))."
       fi
-      echo "  ✓ git init done ($(git -C "$STORE" rev-list --count HEAD 2>/dev/null || echo 0) commit(s))."
       # re-detect: a fresh init has no remote
       STATE="NO_REMOTE"
     fi ;;
@@ -148,10 +176,14 @@ if [ "$STATE" = "NO_REMOTE" ]; then
     echo "  ✗ gh is not authenticated. Run 'gh auth login', then re-run with --create-remote." >&2
     exit 1
   fi
-  # gh needs at least one commit to push; make one if the repo is empty.
+  # gh needs at least one commit to push; make one if the repo is empty. Failing
+  # here has to stop the run: pushing is the whole point, and a push of nothing
+  # would report a durable store containing none of the knowledge.
   if ! git -C "$STORE" rev-parse HEAD >/dev/null 2>&1; then
     git -C "$STORE" add -A 2>/dev/null || true
-    git -C "$STORE" commit -q -m "📦 Initialize anvi_artifacts store" 2>/dev/null || true
+    if ! git -C "$STORE" diff --cached --quiet 2>/dev/null; then
+      commit_store || exit 1
+    fi
   fi
 
   echo "  → creating GitHub repo '$REPO_NAME' ($VIS) and pushing $STORE ..."

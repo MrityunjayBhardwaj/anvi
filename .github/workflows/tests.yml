@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      # Report both platforms every time. Cancelling the second job the moment the
+      # first goes red would hide whether a failure is a real defect or a portability
+      # difference — which is the only question a second platform is here to answer.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags, NOT the default shallow fetch. Two suites derive
+          # their expectations from the repository itself rather than from fixtures:
+          # the vendored-module contract is computed from git history on every run,
+          # and the changelog/tag parity check enumerates real tags. Under a depth-1
+          # checkout both would fail for a reason that has nothing to do with the
+          # code, which is the most expensive kind of red.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run the suite
+        # The runner discovers its own list and fails on an untracked test file, so
+        # nothing here needs updating when a test is added.
+        run: node scripts/run-tests.js
