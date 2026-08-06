@@ -235,6 +235,61 @@ function fieldWithContinuations(content, name) {
   return value;
 }
 
+// --- What the text fallback is allowed to read --------------------------------
+// The fallback asks "does this filename appear in the entry?" and takes yes for a
+// claim that the entry governs the file. That question is only meaningful over
+// prose that is ABOUT the entry's subject. Two regions inside an entry are not:
+//
+//   **REF:** — a bibliography. It exists to list many paths: sources, sister
+//   entries, planning docs, the site of an unrelated example. A path is there
+//   because someone READ it, which is the opposite of a claim that the entry
+//   governs it. Left in the span, the longest and most path-dense line of every
+//   entry is also its widest net, so the better-documented an entry is the more
+//   files it wrongly claims.
+//
+//   Fenced blocks — quoted material. A sample payload, a directory listing, a
+//   stack trace. The entry is showing it, not asserting anything about it.
+//
+// But a bibliography is not worthless — it is worthless FOR THE HEURISTICS. The
+// three search terms are a filename, its CamelCase parts, and the full path, and
+// only the last of those means the same thing in both regions:
+//
+//   In prose a bare name is how a person refers to a module — "the font resolver",
+//   "the layer panel" — so a bare-name hit there is a reference to the thing.
+//   In a bibliography every item is already a path, so a bare-name hit is a
+//   collision with a DIFFERENT file that shares a basename, or with an ordinary
+//   English word: "until the package is rebuilt" claims every package.json in the
+//   repo, and "S1.1 scaffold" claims scaffold.ts.
+//   A FULL PATH is identity in either region. An entry whose REF reads
+//   "Source: packages/…/font-resolver.ts" is naming its own subject, and dropping
+//   that is a real loss — silent, which is the side this hook can least afford.
+//
+// So the bibliography is not removed from the search, it is restricted to the one
+// term that cannot collide. Measured on a consuming project (155 files sampled
+// from 1849), this removes 10 of 274 deliveries and keeps both of the entries that
+// named their own source file by path.
+//
+// `content` stays whole either way: REF lines are read further down to surface
+// Ground Truth pointers, and an entry that matched still hands over its full body.
+// This changes WHICH entries are selected, never what a selected entry says.
+//
+// An unterminated fence is left alone rather than stripped to the end. Boundary
+// content is already cut at the next divider, so a fence can lose its closer to
+// that cut with real prose after it; treating the remainder as quoted would drop
+// the entry's own words and lose a match that should have happened. Erring toward
+// the wider span keeps a lost case visible as noise rather than as silence.
+const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
+const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
+const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
+function fallbackSpans(content) {
+  const noFences = content.replace(FENCED, '');
+  const biblio = (noFences.match(REF_STARRED) || [])
+    .concat(noFences.match(REF_PLAIN) || [])
+    .join('\n');
+  const prose = noFences.replace(REF_STARRED, '').replace(REF_PLAIN, '');
+  return { prose, biblio };
+}
+
 // CHECKS: — the actionable half. Selecting the right entry is not enough on its own:
 // the message below is assembled from a fixed set of named fields (silent-failure
 // modes, "Observe THEIR side", hetvabhasa headlines, REFs) and never carries an
@@ -360,18 +415,32 @@ process.stdin.on('end', () => {
       }
 
       if (!isRelevant) {
-        // Fallback: text-based match on filename/CamelCase parts
+        // Fallback: text-based match on filename/CamelCase parts over the entry's
+        // own prose, plus a full-path-only match over its bibliography — see
+        // fallbackSpans for which region admits which term, and why.
+        const { prose, biblio } = fallbackSpans(boundaryContent);
         const searchTerms = [
           fileName,
           relPath,
           ...fileName.replace(/([A-Z])/g, ' $1').trim().split(/\s+/).filter(s => s.length >= 4),
         ];
 
-        isRelevant = searchTerms.some(term => {
-          const termLower = term.toLowerCase();
-          const pattern = new RegExp(`(?:^|[^a-z0-9])${termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`, 'i');
-          return pattern.test(boundaryContent);
-        });
+        const esc = t => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const appearsIn = (term, region) =>
+          new RegExp(`(?:^|[^a-z0-9])${esc(term)}(?:$|[^a-z0-9])`, 'i').test(region);
+
+        // Identity, not suffix. The prose test above admits any non-alphanumeric
+        // before the term, and `/` is one — so `src/foo.js` matches
+        // `packages/elsewhere/src/foo.js`, which is a DIFFERENT file and exactly the
+        // collision this whole narrowing exists to remove. The bibliography's whole
+        // value is that its items are full paths, so the path must begin where the
+        // item begins: nothing pathlike may precede it. A trailing '.' is still
+        // allowed, since a REF item is usually followed by one.
+        const isPathIdentity = (term, region) =>
+          new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_-])`, 'i').test(region);
+
+        isRelevant = searchTerms.some(term => appearsIn(term, prose))
+          || isPathIdentity(relPath, biblio);
         if (isRelevant) via = 'text';
       }
 
