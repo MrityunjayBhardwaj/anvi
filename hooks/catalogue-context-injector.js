@@ -235,6 +235,74 @@ function fieldWithContinuations(content, name) {
   return value;
 }
 
+// --- What the text fallback is allowed to read --------------------------------
+// The fallback asks "does this filename appear in the entry?" and takes yes for a
+// claim that the entry governs the file. That question is only meaningful over
+// prose that is ABOUT the entry's subject. Three regions inside an entry are not:
+//
+//   **REF:** — a bibliography. It exists to list many paths: sources, sister
+//   entries, planning docs, the site of an unrelated example. A path is there
+//   because someone READ it, which is the opposite of a claim that the entry
+//   governs it. Left in the span, the longest and most path-dense line of every
+//   entry is also its widest net, so the better-documented an entry is the more
+//   files it wrongly claims.
+//
+//   Fenced blocks — quoted material. A sample payload, a directory listing, a
+//   stack trace. The entry is showing it, not asserting anything about it.
+//
+//   **VALIDATED:** — a freshness stamp. The currency gate writes it, and what it
+//   names is the set of files that CHANGED since the entry was last re-confirmed.
+//   Membership is evidence of drift, not of subject. A stamp reading "the drift is
+//   line movement in hooks/anvi-paths.js and hooks/catalogue-context-injector.js"
+//   handed the install-time boundary's checks to every hook that happened to move —
+//   observed doing exactly that, on this file, while this was being written.
+//
+// But a bibliography is not worthless — it is worthless FOR THE HEURISTICS. The
+// three search terms are a filename, its CamelCase parts, and the full path, and
+// only the last of those means the same thing in both regions:
+//
+//   In prose a bare name is how a person refers to a module — "the font resolver",
+//   "the layer panel" — so a bare-name hit there is a reference to the thing.
+//   In a bibliography every item is already a path, so a bare-name hit is a
+//   collision with a DIFFERENT file that shares a basename, or with an ordinary
+//   English word: "until the package is rebuilt" claims every package.json in the
+//   repo, and "S1.1 scaffold" claims scaffold.ts.
+//   A FULL PATH is identity in either region. An entry whose REF reads
+//   "Source: packages/…/font-resolver.ts" is naming its own subject, and dropping
+//   that is a real loss — silent, which is the side this hook can least afford.
+//
+// So the bibliography is not removed from the search, it is restricted to the one
+// term that cannot collide. A stamp gets no such reprieve and is dropped from both
+// halves: a REF at least cites what the entry READ, and can therefore name its own
+// subject, whereas a stamp cites what went stale underneath it.
+//
+// Measured on a consuming project (155 files sampled from 1849): 274 deliveries
+// before, 264 after, every removal a bare-word collision, and both entries that
+// named their own source file by path kept. On this repo (240 files, the only
+// catalogue carrying stamps): 42 guessed deliveries before, 30 after.
+//
+// `content` stays whole either way: REF lines are read further down to surface
+// Ground Truth pointers, and an entry that matched still hands over its full body.
+// This changes WHICH entries are selected, never what a selected entry says.
+//
+// An unterminated fence is left alone rather than stripped to the end. Boundary
+// content is already cut at the next divider, so a fence can lose its closer to
+// that cut with real prose after it; treating the remainder as quoted would drop
+// the entry's own words and lose a match that should have happened. Erring toward
+// the wider span keeps a lost case visible as noise rather than as silence.
+const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
+const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
+const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
+const VALIDATED = /\*\*VALIDATED\b[^\n]*?:\*\*[^\n]*/g;
+function fallbackSpans(content) {
+  const body = content.replace(FENCED, '').replace(VALIDATED, '');
+  const biblio = (body.match(REF_STARRED) || [])
+    .concat(body.match(REF_PLAIN) || [])
+    .join('\n');
+  const prose = body.replace(REF_STARRED, '').replace(REF_PLAIN, '');
+  return { prose, biblio };
+}
+
 // CHECKS: — the actionable half. Selecting the right entry is not enough on its own:
 // the message below is assembled from a fixed set of named fields (silent-failure
 // modes, "Observe THEIR side", hetvabhasa headlines, REFs) and never carries an
@@ -347,24 +415,53 @@ process.stdin.on('end', () => {
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
       // file IS. Runs before the text fallback for the same reason FILES: does: an
       // explicit declaration by the catalogue's author beats guessing from a filename.
+      // How the match was reached, not merely that it was. A declared match and a
+      // coincidental one are indistinguishable in the output today, which is why a
+      // boundary handing its checks to an unrelated file went unnoticed: the reader
+      // has no way to tell an authoritative delivery from an accidental one.
+      let via = isRelevant ? 'FILES' : null;
+
       const kindsField = fieldWithContinuations(boundaryContent, 'KINDS');
       if (!isRelevant && kindsField !== null) {
         isRelevant = matchesKind(kindsField, relPath);
+        if (isRelevant) via = 'KINDS';
       }
 
       if (!isRelevant) {
-        // Fallback: text-based match on filename/CamelCase parts
+        // Fallback: text-based match on filename/CamelCase parts over the entry's
+        // own prose, plus a full-path-only match over its bibliography — see
+        // fallbackSpans for which region admits which term, and why.
+        const { prose, biblio } = fallbackSpans(boundaryContent);
         const searchTerms = [
           fileName,
           relPath,
           ...fileName.replace(/([A-Z])/g, ' $1').trim().split(/\s+/).filter(s => s.length >= 4),
         ];
 
-        isRelevant = searchTerms.some(term => {
-          const termLower = term.toLowerCase();
-          const pattern = new RegExp(`(?:^|[^a-z0-9])${termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`, 'i');
-          return pattern.test(boundaryContent);
-        });
+        const esc = t => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const appearsIn = (term, region) =>
+          new RegExp(`(?:^|[^a-z0-9])${esc(term)}(?:$|[^a-z0-9])`, 'i').test(region);
+
+        // Identity, not suffix — at BOTH ends, since a path can be extended in
+        // either direction and each extension names a different file.
+        //
+        // Leading: the prose test above admits any non-alphanumeric before the term,
+        // and `/` is one — so `src/foo.js` matches `packages/elsewhere/src/foo.js`.
+        // Nothing pathlike may precede: the path must begin where the item begins.
+        //
+        // Trailing: a '.' has to be admitted, because a REF item is usually followed
+        // by a sentence period — but admitting it unconditionally makes `LICENSE`
+        // match `LICENSE.md` and `Makefile` match `Makefile.old`, so every
+        // extensionless file is claimed by anything that extends it. The two cases
+        // are told apart by what follows the dot: an extension continues into
+        // alphanumerics, a sentence does not.
+        const isPathIdentity = (term, region) =>
+          new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_./-]|\\.(?![a-z0-9]))`, 'i')
+            .test(region);
+
+        isRelevant = searchTerms.some(term => appearsIn(term, prose))
+          || isPathIdentity(relPath, biblio);
+        if (isRelevant) via = 'text';
       }
 
       if (isRelevant) {
@@ -374,6 +471,7 @@ process.stdin.on('end', () => {
         matches.push({
           id: boundaryId,
           label: boundaryLabel(boundaryId, boundaryContent),
+          via,
           content: boundaryContent.trim(),
         });
       }
@@ -455,6 +553,20 @@ process.stdin.on('end', () => {
     // Build injection message
     const boundaryNames = matches.map(m => m.label).join(', ');
     let message = `DHYANA: editing ${relPath} touches catalogue boundary ${boundaryNames}.`;
+
+    // Say which of these were reached by guessing. A declared match (FILES:/KINDS:)
+    // and a coincidental one — the filename happening to appear somewhere in the
+    // entry's prose — arrive looking identical and equally authoritative, so a reader
+    // shown an irrelevant checklist cannot tell a wrong delivery from a right one,
+    // and learns to skim all of them. Naming the guessed ones puts the doubt where it
+    // belongs and says what would remove it.
+    const guessed = matches.filter(m => m.via === 'text').map(m => m.label);
+    if (guessed.length) {
+      message += `\nMatched by NAME, not by declaration: ${guessed.join('; ')}`
+        + ' — the filename appears somewhere in the entry. If these checks look'
+        + ' unrelated to this file, that is why; give the entry a FILES: or KINDS:'
+        + ' to make it deterministic.';
+    }
 
     // Add the most critical info from dharana
     for (const m of matches) {
