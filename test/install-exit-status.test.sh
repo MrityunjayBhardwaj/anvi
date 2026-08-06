@@ -27,8 +27,15 @@ fresh() { HOMEDIR="$(mktemp -d)"; CWD="$(mktemp -d)"; }
 # the caller pipes in; the default is nothing at all, which is the case under test.
 # Output goes to $OUT, the status to $RC — both read separately, because a run that
 # exits 2 still has output worth asserting on.
+#
+# Answers arrive through a pipe, never a here-string: `<<<` appends a newline of
+# its own, so it cannot express a final line that has none — and that case is one
+# of the ones under test. Written as a here-string it passed whatever the code
+# did, which is an assertion with no way to fail.
 OUT=""; RC=0
 run() { OUT="$(cd "$CWD" && HOME="$HOMEDIR" bash "$INSTALL" "$@" 2>&1)"; RC=$?; }
+answer() { local in="$1"; shift
+  OUT="$(cd "$CWD" && printf '%s' "$in" | HOME="$HOMEDIR" bash "$INSTALL" "$@" 2>&1)"; RC=$?; }
 
 echo "a fresh install with no terminal on stdin"
 fresh
@@ -40,6 +47,14 @@ ok '[ -d "$HOMEDIR/.claude/anvi" ]'               'and the framework landed'
 ok '[ "$(ls "$HOMEDIR/.claude/skills" | wc -l)" -gt 0 ]' 'and skills landed'
 ok '[ "$(ls "$HOMEDIR/.claude/agents" | wc -l)" -gt 0 ]' 'and agents landed'
 ok '[ "$(ls "$HOMEDIR/.claude/hooks" | wc -l)" -gt 0 ]'  'and hooks landed'
+
+echo "the successful path states its status rather than inheriting it"
+# Asserted on the source, not the behaviour, and deliberately so: while the last
+# line is an `echo` there is no run that exits non-zero, so nothing behavioural
+# can fail. The shape this guards against is a trailing `[ -d x ] && cp …` whose
+# false test decides the status — which is what the last line used to be one edit
+# away from, and would become again without a word said.
+ok 'tail -5 "$INSTALL" | grep -qx "exit 0"' 'install.sh ends with an explicit exit 0'
 
 echo "an unanswerable optional prompt takes its documented default, and says so"
 ok '[ ! -d "$CWD/.anvi" ]' 'the [y/N] catalogue prompt defaults to N — no .anvi/ in the working directory'
@@ -62,27 +77,29 @@ ok '! echo "$OUT" | grep -q "^Done\."'            'and does not claim to be done
 
 echo "the same prompts, answered"
 fresh
-run <<< "$(printf 'y\nn\n')"                      # catalogues: y, memory: n
+answer $'y\nn\n'                                  # catalogues: y, memory: n
 ok '[ "$RC" = 0 ]'          'a fresh interactive install exits 0'
 ok '[ -d "$CWD/.anvi" ]'    'and y to the catalogue prompt still creates .anvi/'
 ok '[ -f "$HOMEDIR/.claude/anvi-config.json" ]' 'and an answered consent question is recorded'
-run <<< "$(printf 'n\n')"                         # overwrite: n
+answer $'n\n'                                     # overwrite: n
 ok '[ "$RC" = 0 ]'                    'declining the overwrite is a choice, not a failure — exits 0'
 ok 'echo "$OUT" | grep -q "Aborted"'  'and says it aborted'
-run <<< "$(printf 'y\nn\nn\n')"                   # overwrite: y
+answer $'y\nn\nn\n'                               # overwrite: y
 ok '[ "$RC" = 0 ]'                        'accepting the overwrite exits 0'
 ok 'echo "$OUT" | grep -q "^Done\."'      'and runs to the end'
 
 echo "a final line with no newline is an answer, not silence"
-# `printf 'y'` reaches the prompt in full; only an empty read means nobody was
-# there. Treating a newline-less last line as EOF would refuse a real answer.
+# A bare `y` with nothing after it reaches the prompt in full; only an EMPTY read
+# means nobody was there. Refusing it would turn a real answer into silence, and
+# on the overwrite gate that is the difference between installing and exiting 2.
 fresh
-run <<< "$(printf 'y')"
+answer 'y'
 ok '[ "$RC" = 0 ]'                                    'exits 0'
 ok 'echo "$OUT" | grep -q "Installing framework"'     'and installs'
-run <<< "$(printf 'y')"                               # now an upgrade: y with no newline
+answer 'y'                                            # now an upgrade: y, still no newline
 ok '[ "$RC" = 0 ]'                          'the overwrite gate accepts it too'
 ok '! echo "$OUT" | grep -qi "no answer"'   'and does not report it as unanswered'
+ok 'echo "$OUT" | grep -q "Installing framework"' 'and overwrites rather than refusing'
 
 echo "the non-interactive modes"
 fresh
