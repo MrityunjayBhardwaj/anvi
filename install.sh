@@ -53,7 +53,10 @@ ANSWER=""
 ask() {
   ANSWER=""
   printf '%s' "$1"
-  IFS= read -r ANSWER && return 0
+  # Plain `read`, default IFS: a single variable is trimmed of surrounding
+  # whitespace, so a typed " y " still matches ^[Yy]$ the way it always has.
+  # Preserving it with IFS= would turn an answered yes into a silent no.
+  read -r ANSWER && return 0
   printf '\n'                    # the prompt carried no newline of its own
   # End of input. A last line with no trailing newline still arrived, and that is
   # an answer; only an empty read means nobody was on the other end.

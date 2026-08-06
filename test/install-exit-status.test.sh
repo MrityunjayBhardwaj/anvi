@@ -20,8 +20,11 @@ INSTALL="$REPO/install.sh"
 PASS=0; FAIL=0
 ok(){ if eval "$1"; then echo "  ✓ $2"; PASS=$((PASS+1)); else echo "  ✗ $2"; FAIL=$((FAIL+1)); fi; }
 
-HOMEDIR=""; CWD=""
-fresh() { HOMEDIR="$(mktemp -d)"; CWD="$(mktemp -d)"; }
+HOMEDIR=""; CWD=""; SCRATCH=()
+fresh() { HOMEDIR="$(mktemp -d)"; CWD="$(mktemp -d)"; SCRATCH+=("$HOMEDIR" "$CWD"); }
+# Each case installs a full framework tree, so leaving them behind grows the disk
+# by several copies on every run.
+trap 'for d in "${SCRATCH[@]:-}"; do [ -n "$d" ] && rm -rf "$d"; done' EXIT
 
 # Run the installer with a throwaway HOME from a throwaway cwd. Stdin is whatever
 # the caller pipes in; the default is nothing at all, which is the case under test.
@@ -100,6 +103,18 @@ answer 'y'                                            # now an upgrade: y, still
 ok '[ "$RC" = 0 ]'                          'the overwrite gate accepts it too'
 ok '! echo "$OUT" | grep -qi "no answer"'   'and does not report it as unanswered'
 ok 'echo "$OUT" | grep -q "Installing framework"' 'and overwrites rather than refusing'
+
+echo "an answer is still trimmed of the spaces around it"
+# `read` into a single variable strips surrounding whitespace under the default
+# IFS, and always has. Preserving it instead — by reading with IFS= — turns a
+# typed " y " into a silent no, which looks exactly like a deliberate decline.
+fresh
+answer $' y \n'
+ok '[ "$RC" = 0 ]'                                'exits 0'
+ok 'echo "$OUT" | grep -q "Installing framework"' 'and installs'
+answer $' y \n'                                   # now the overwrite gate
+ok 'echo "$OUT" | grep -q "Installing framework"' 'and " y " is a yes at the overwrite gate too'
+ok '! echo "$OUT" | grep -q "Aborted"'            'not a decline'
 
 echo "the non-interactive modes"
 fresh
