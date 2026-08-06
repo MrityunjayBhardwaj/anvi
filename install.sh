@@ -540,8 +540,9 @@ if [ "$MODE" = "interactive" ]; then
   echo " Optional: Initialize project catalogues"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  ask "Create .anvi/ catalogues in current directory? [y/N] " \
-    || echo "  Skipped — no terminal to answer. Run /anvi:init in any project to create them."
+  # Three outcomes, not two: created, declined, and never asked. Reporting the
+  # last two together would say "skipped" twice for the same prompt.
+  UNASKED=0; ask "Create .anvi/ catalogues in current directory? [y/N] " || UNASKED=1
   if [[ "$ANSWER" =~ ^[Yy]$ ]]; then
     PROJ_DIR=".anvi"
     mkdir -p "$PROJ_DIR"
@@ -555,6 +556,8 @@ if [ "$MODE" = "interactive" ]; then
     done
 
     echo "  ✓ Project catalogues created in ${PROJ_DIR}/"
+  elif [ "$UNASKED" = 1 ]; then
+    echo "  Skipped — no terminal to answer. Run /anvi:init in any project to create them."
   else
     echo "  Skipped. Run /anvi:init in any project to create them."
   fi

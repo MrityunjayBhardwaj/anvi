@@ -62,6 +62,10 @@ ok 'tail -5 "$INSTALL" | grep -qx "exit 0"' 'install.sh ends with an explicit ex
 echo "an unanswerable optional prompt takes its documented default, and says so"
 ok '[ ! -d "$CWD/.anvi" ]' 'the [y/N] catalogue prompt defaults to N — no .anvi/ in the working directory'
 ok 'echo "$OUT" | grep -q "Skipped — no terminal to answer.*anvi:init"' 'and says the catalogue prompt was skipped'
+# Counted, not merely present. Never-asked and declined are different outcomes,
+# and reporting them through the same branch said "skipped" twice for one prompt
+# — which a "does it appear" assertion is perfectly happy with.
+ok '[ "$(echo "$OUT" | grep -c "Skipped.*anvi:init")" = 1 ]' 'exactly once — a prompt has one outcome'
 ok 'echo "$OUT" | grep -q "Skipped — no terminal to answer.*Memory backup unchanged"' \
    'and says the memory prompt was skipped'
 # Silence is not consent, in either direction: an unanswered consent question
