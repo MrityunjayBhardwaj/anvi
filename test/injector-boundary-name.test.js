@@ -116,13 +116,23 @@ const both = inject('src/both.js');
 ok(!header(both).includes('COMPLETE'), 'an em-dash status annotation is not carried into the name');
 
 console.log('\nTwo unnumbered entries matching at once are distinguishable');
-ok(both.includes(TITLE_A) && both.includes(TITLE_B),
-   'both titles appear when both boundaries match the same file');
-// The load-bearing one: the defect produced N copies of one string, so a test that
-// only checked "a name is present" passed throughout.
-const names = header(both).replace(/^.*touches catalogue boundary /, '').replace(/\.$/, '').split(', ');
-ok(new Set(names).size === names.length,
-   `no two matched boundaries share a name (${names.length} names, ${new Set(names).size} distinct)`);
+// Scoped to the header. The whole message also contains each boundary's BODY, and a
+// body opens with the heading text — so asserting the titles appear "in the message"
+// is satisfied by the unfixed code, which is how this read green under mutation.
+ok(header(both).includes(TITLE_A) && header(both).includes(TITLE_B),
+   'both titles appear in the header when both boundaries match the same file');
+
+// The name list ends at the first sentence stop: the header continues into the
+// boundaries' silent-failure prose on the same line. Splitting the whole line on ", "
+// swept that prose in as an extra "name", which differed from the first by accident
+// and made the distinctness check below pass over "Boundary, Boundary".
+const listed = header(both).match(/touches catalogue boundary (.+?)\.(?:\s|$)/);
+const names = listed ? listed[1].split(', ') : [];
+// Magnitude before comparison: with no injection at all the extraction yields one
+// empty string, and one empty name is trivially distinct from itself.
+ok(names.length === 2, `exactly 2 boundaries are named (got ${names.length}: ${JSON.stringify(names)})`);
+ok(names.length === 2 && new Set(names).size === 2,
+   `and the two names differ (${new Set(names).size} distinct)`);
 
 console.log('\nAn entry that cannot be graded says so');
 ok(alpha.includes(NOT_GRADED), 'an unnumbered boundary is reported as not graded');
