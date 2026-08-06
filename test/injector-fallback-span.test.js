@@ -110,13 +110,24 @@ const DHARANA = [
   'Silent failure modes: a gate written green that verified nothing',
   '**REF:** `packages/camel/src/index.ts`; `packages/pane/src/index.ts`.',
   '',
+  '---',
+  '',
+  // A freshness stamp names the files that CHANGED since the entry was last
+  // re-confirmed. Its paths are evidence of drift, not of subject — so unlike a
+  // REF, a full path in a stamp does NOT select. The subject here is written by
+  // its full path precisely to prove that.
+  '### B8: A freshness stamp names this file as having drifted',
+  'Silent failure modes: an auditor subject to the guard it audits',
+  '**VALIDATED:** abc1234 2026-08-06 — re-confirmed at trunk; the drift is line'
+    + ' movement in `src/wwstamp.js`, not a semantic break.',
+  '',
 ].join('\n');
 fs.writeFileSync(path.join(PROJ, '.anvi', 'dharana.md'), DHARANA);
 fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
 
 const SUBJECTS = [
   'src/wwprose.js', 'src/wwbiblio.js', 'src/wwplain.js', 'src/deep/wwexact.js',
-  'src/wwfenced.js', 'src/wwtorn.js', 'src/WwCamelPane.js',
+  'src/wwfenced.js', 'src/wwtorn.js', 'src/WwCamelPane.js', 'src/wwstamp.js',
 ];
 for (const rel of SUBJECTS) fs.writeFileSync(path.join(PROJ, rel), '// fixture\n');
 
@@ -147,13 +158,20 @@ console.log('\nThe fixture delivers each case (without this, every assertion bel
 // DELIVERED. A mis-spelled field name or a token that silently occurs nowhere makes
 // a "does not match" assertion pass for the wrong reason, forever.
 for (const [tok, entry] of [['wwprose', 'B1'], ['wwbiblio', 'B2'], ['wwplain', 'B3'],
-  ['wwexact', 'B4'], ['wwfenced', 'B5'], ['wwtorn', 'B6'], ['camel', 'B7']]) {
+  ['wwexact', 'B4'], ['wwfenced', 'B5'], ['wwtorn', 'B6'], ['camel', 'B7'],
+  ['wwstamp', 'B8']]) {
   const hits = DHARANA.split(/^### /m).filter(s => s.includes(tok));
   ok(hits.length === 1 && hits[0].startsWith(entry),
      `"${tok}" occurs in exactly one entry, and it is ${entry} (found in ${hits.length})`);
 }
 ok(/^\*\*REF:\*\* /m.test(DHARANA), 'the fixture contains a starred REF line');
 ok(/^REF: /m.test(DHARANA), 'the fixture contains an unstarred REF line');
+ok(/^\*\*VALIDATED:\*\* /m.test(DHARANA), 'the fixture contains a freshness stamp');
+// The stamp case is only meaningful if the subject is named there the way the REF
+// case names its own subject — by FULL PATH. A stamp mentioning only the basename
+// would be excluded by the bibliography rule anyway and would prove nothing extra.
+ok(DHARANA.includes('`src/wwstamp.js`'),
+   'and the stamp names the subject by full path, so it is the stamp rule being tested');
 
 console.log('\nControls — the fallback still selects, and the anchor still anchors');
 const prose = inject('src/wwprose.js');
@@ -185,6 +203,14 @@ ok(selected(exact, 'B4'),
    'an entry whose REF names this file by full path still reaches it');
 ok(exact.includes('Matched by NAME, not by declaration'),
    'and that match is still reported as a guess, not as a declaration');
+
+console.log('\nA freshness stamp names what drifted, which is not what the entry governs');
+// The asymmetry with B4 above, and the reason a stamp is dropped from BOTH regions
+// rather than joining the bibliography: identical evidence — the subject written by
+// full path — must select in a REF and must NOT select in a stamp.
+const stamp = inject('src/wwstamp.js');
+ok(selected(stamp, 'B0') && !selected(stamp, 'B8'),
+   'a full path in a freshness stamp does not select, though the same path in a REF does');
 
 console.log('\nQuoted blocks are shown, not asserted');
 const fenced = inject('src/wwfenced.js');

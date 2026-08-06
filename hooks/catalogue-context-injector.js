@@ -278,15 +278,26 @@ function fieldWithContinuations(content, name) {
 // that cut with real prose after it; treating the remainder as quoted would drop
 // the entry's own words and lose a match that should have happened. Erring toward
 // the wider span keeps a lost case visible as noise rather than as silence.
+// A VALIDATED stamp is dropped from BOTH regions rather than joining the
+// bibliography, because its paths mean the opposite of a REF's. The freshness gate
+// writes the stamp, and what it names there is the set of files that CHANGED since
+// the entry was last re-confirmed. Membership is evidence of drift, not of subject:
+// a stamp reading "the drift is line movement in hooks/anvi-paths.js and
+// hooks/catalogue-context-injector.js" is a note about the entry's own freshness,
+// and letting it lend those paths hands the install-time boundary's checks to every
+// hook that happened to move. Observed doing exactly that, on this file, while this
+// was being written. A REF at least cites what the entry read; a stamp cites what
+// went stale underneath it.
 const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
 const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
 const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
+const VALIDATED = /\*\*VALIDATED\b[^\n]*?:\*\*[^\n]*/g;
 function fallbackSpans(content) {
-  const noFences = content.replace(FENCED, '');
-  const biblio = (noFences.match(REF_STARRED) || [])
-    .concat(noFences.match(REF_PLAIN) || [])
+  const body = content.replace(FENCED, '').replace(VALIDATED, '');
+  const biblio = (body.match(REF_STARRED) || [])
+    .concat(body.match(REF_PLAIN) || [])
     .join('\n');
-  const prose = noFences.replace(REF_STARRED, '').replace(REF_PLAIN, '');
+  const prose = body.replace(REF_STARRED, '').replace(REF_PLAIN, '');
   return { prose, biblio };
 }
 
