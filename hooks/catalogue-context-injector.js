@@ -347,9 +347,16 @@ process.stdin.on('end', () => {
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
       // file IS. Runs before the text fallback for the same reason FILES: does: an
       // explicit declaration by the catalogue's author beats guessing from a filename.
+      // How the match was reached, not merely that it was. A declared match and a
+      // coincidental one are indistinguishable in the output today, which is why a
+      // boundary handing its checks to an unrelated file went unnoticed: the reader
+      // has no way to tell an authoritative delivery from an accidental one.
+      let via = isRelevant ? 'FILES' : null;
+
       const kindsField = fieldWithContinuations(boundaryContent, 'KINDS');
       if (!isRelevant && kindsField !== null) {
         isRelevant = matchesKind(kindsField, relPath);
+        if (isRelevant) via = 'KINDS';
       }
 
       if (!isRelevant) {
@@ -365,6 +372,7 @@ process.stdin.on('end', () => {
           const pattern = new RegExp(`(?:^|[^a-z0-9])${termLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9])`, 'i');
           return pattern.test(boundaryContent);
         });
+        if (isRelevant) via = 'text';
       }
 
       if (isRelevant) {
@@ -374,6 +382,7 @@ process.stdin.on('end', () => {
         matches.push({
           id: boundaryId,
           label: boundaryLabel(boundaryId, boundaryContent),
+          via,
           content: boundaryContent.trim(),
         });
       }
@@ -455,6 +464,20 @@ process.stdin.on('end', () => {
     // Build injection message
     const boundaryNames = matches.map(m => m.label).join(', ');
     let message = `DHYANA: editing ${relPath} touches catalogue boundary ${boundaryNames}.`;
+
+    // Say which of these were reached by guessing. A declared match (FILES:/KINDS:)
+    // and a coincidental one — the filename happening to appear somewhere in the
+    // entry's prose — arrive looking identical and equally authoritative, so a reader
+    // shown an irrelevant checklist cannot tell a wrong delivery from a right one,
+    // and learns to skim all of them. Naming the guessed ones puts the doubt where it
+    // belongs and says what would remove it.
+    const guessed = matches.filter(m => m.via === 'text').map(m => m.label);
+    if (guessed.length) {
+      message += `\nMatched by NAME, not by declaration: ${guessed.join('; ')}`
+        + ' — the filename appears somewhere in the entry. If these checks look'
+        + ' unrelated to this file, that is why; give the entry a FILES: or KINDS:'
+        + ' to make it deterministic.';
+    }
 
     // Add the most critical info from dharana
     for (const m of matches) {
