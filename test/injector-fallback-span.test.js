@@ -60,7 +60,10 @@ const DHARANA = [
   '# Dharana',
   '',
   '### B0: Anchor, reached by kind alone',
-  'KINDS: *.js',
+  // src/* covers the extensionless subject too — an anchor that cannot reach a
+  // subject leaves that subject's negative assertion vacuous, which is the one
+  // thing this entry exists to prevent.
+  'KINDS: *.js, src/*',
   'Silent failure modes: an anchor that stopped anchoring',
   '',
   '---',
@@ -121,6 +124,15 @@ const DHARANA = [
   '**VALIDATED:** abc1234 2026-08-06 — re-confirmed at trunk; the drift is line'
     + ' movement in `src/wwstamp.js`, not a semantic break.',
   '',
+  '---',
+  '',
+  // Identity has two ends. An extensionless file — LICENSE, Makefile, VERSION —
+  // is a prefix of anything that extends it, so a bibliography item naming a
+  // DIFFERENT file would claim it unless the trailing edge is anchored too.
+  '### B9: Bibliography names a longer file that starts with the subject',
+  'Silent failure modes: a claim that survived its own evidence',
+  '**REF:** `src/wwlicense.md`; issue #3.',
+  '',
 ].join('\n');
 fs.writeFileSync(path.join(PROJ, '.anvi', 'dharana.md'), DHARANA);
 fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
@@ -128,6 +140,7 @@ fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
 const SUBJECTS = [
   'src/wwprose.js', 'src/wwbiblio.js', 'src/wwplain.js', 'src/deep/wwexact.js',
   'src/wwfenced.js', 'src/wwtorn.js', 'src/WwCamelPane.js', 'src/wwstamp.js',
+  'src/wwlicense',
 ];
 for (const rel of SUBJECTS) fs.writeFileSync(path.join(PROJ, rel), '// fixture\n');
 
@@ -159,7 +172,7 @@ console.log('\nThe fixture delivers each case (without this, every assertion bel
 // a "does not match" assertion pass for the wrong reason, forever.
 for (const [tok, entry] of [['wwprose', 'B1'], ['wwbiblio', 'B2'], ['wwplain', 'B3'],
   ['wwexact', 'B4'], ['wwfenced', 'B5'], ['wwtorn', 'B6'], ['camel', 'B7'],
-  ['wwstamp', 'B8']]) {
+  ['wwstamp', 'B8'], ['wwlicense', 'B9']]) {
   const hits = DHARANA.split(/^### /m).filter(s => s.includes(tok));
   ok(hits.length === 1 && hits[0].startsWith(entry),
      `"${tok}" occurs in exactly one entry, and it is ${entry} (found in ${hits.length})`);
@@ -203,6 +216,13 @@ ok(selected(exact, 'B4'),
    'an entry whose REF names this file by full path still reaches it');
 ok(exact.includes('Matched by NAME, not by declaration'),
    'and that match is still reported as a guess, not as a declaration');
+// Identity has two ends, and the trailing one has to admit a '.' (a REF item is
+// usually followed by a sentence period) without admitting an extension. Without
+// that distinction every extensionless file in the repo — LICENSE, Makefile,
+// VERSION — is claimed by any bibliography item that merely extends its name.
+const lic = inject('src/wwlicense');
+ok(selected(lic, 'B0') && !selected(lic, 'B9'),
+   'an extensionless file is not claimed by a longer path that starts with its name');
 
 console.log('\nA freshness stamp names what drifted, which is not what the entry governs');
 // The asymmetry with B4 above, and the reason a stamp is dropped from BOTH regions

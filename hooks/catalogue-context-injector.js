@@ -238,7 +238,7 @@ function fieldWithContinuations(content, name) {
 // --- What the text fallback is allowed to read --------------------------------
 // The fallback asks "does this filename appear in the entry?" and takes yes for a
 // claim that the entry governs the file. That question is only meaningful over
-// prose that is ABOUT the entry's subject. Two regions inside an entry are not:
+// prose that is ABOUT the entry's subject. Three regions inside an entry are not:
 //
 //   **REF:** — a bibliography. It exists to list many paths: sources, sister
 //   entries, planning docs, the site of an unrelated example. A path is there
@@ -249,6 +249,13 @@ function fieldWithContinuations(content, name) {
 //
 //   Fenced blocks — quoted material. A sample payload, a directory listing, a
 //   stack trace. The entry is showing it, not asserting anything about it.
+//
+//   **VALIDATED:** — a freshness stamp. The currency gate writes it, and what it
+//   names is the set of files that CHANGED since the entry was last re-confirmed.
+//   Membership is evidence of drift, not of subject. A stamp reading "the drift is
+//   line movement in hooks/anvi-paths.js and hooks/catalogue-context-injector.js"
+//   handed the install-time boundary's checks to every hook that happened to move —
+//   observed doing exactly that, on this file, while this was being written.
 //
 // But a bibliography is not worthless — it is worthless FOR THE HEURISTICS. The
 // three search terms are a filename, its CamelCase parts, and the full path, and
@@ -265,9 +272,14 @@ function fieldWithContinuations(content, name) {
 //   that is a real loss — silent, which is the side this hook can least afford.
 //
 // So the bibliography is not removed from the search, it is restricted to the one
-// term that cannot collide. Measured on a consuming project (155 files sampled
-// from 1849), this removes 10 of 274 deliveries and keeps both of the entries that
-// named their own source file by path.
+// term that cannot collide. A stamp gets no such reprieve and is dropped from both
+// halves: a REF at least cites what the entry READ, and can therefore name its own
+// subject, whereas a stamp cites what went stale underneath it.
+//
+// Measured on a consuming project (155 files sampled from 1849): 274 deliveries
+// before, 264 after, every removal a bare-word collision, and both entries that
+// named their own source file by path kept. On this repo (240 files, the only
+// catalogue carrying stamps): 42 guessed deliveries before, 30 after.
 //
 // `content` stays whole either way: REF lines are read further down to surface
 // Ground Truth pointers, and an entry that matched still hands over its full body.
@@ -278,16 +290,6 @@ function fieldWithContinuations(content, name) {
 // that cut with real prose after it; treating the remainder as quoted would drop
 // the entry's own words and lose a match that should have happened. Erring toward
 // the wider span keeps a lost case visible as noise rather than as silence.
-// A VALIDATED stamp is dropped from BOTH regions rather than joining the
-// bibliography, because its paths mean the opposite of a REF's. The freshness gate
-// writes the stamp, and what it names there is the set of files that CHANGED since
-// the entry was last re-confirmed. Membership is evidence of drift, not of subject:
-// a stamp reading "the drift is line movement in hooks/anvi-paths.js and
-// hooks/catalogue-context-injector.js" is a note about the entry's own freshness,
-// and letting it lend those paths hands the install-time boundary's checks to every
-// hook that happened to move. Observed doing exactly that, on this file, while this
-// was being written. A REF at least cites what the entry read; a stamp cites what
-// went stale underneath it.
 const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
 const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
 const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
@@ -440,15 +442,22 @@ process.stdin.on('end', () => {
         const appearsIn = (term, region) =>
           new RegExp(`(?:^|[^a-z0-9])${esc(term)}(?:$|[^a-z0-9])`, 'i').test(region);
 
-        // Identity, not suffix. The prose test above admits any non-alphanumeric
-        // before the term, and `/` is one — so `src/foo.js` matches
-        // `packages/elsewhere/src/foo.js`, which is a DIFFERENT file and exactly the
-        // collision this whole narrowing exists to remove. The bibliography's whole
-        // value is that its items are full paths, so the path must begin where the
-        // item begins: nothing pathlike may precede it. A trailing '.' is still
-        // allowed, since a REF item is usually followed by one.
+        // Identity, not suffix — at BOTH ends, since a path can be extended in
+        // either direction and each extension names a different file.
+        //
+        // Leading: the prose test above admits any non-alphanumeric before the term,
+        // and `/` is one — so `src/foo.js` matches `packages/elsewhere/src/foo.js`.
+        // Nothing pathlike may precede: the path must begin where the item begins.
+        //
+        // Trailing: a '.' has to be admitted, because a REF item is usually followed
+        // by a sentence period — but admitting it unconditionally makes `LICENSE`
+        // match `LICENSE.md` and `Makefile` match `Makefile.old`, so every
+        // extensionless file is claimed by anything that extends it. The two cases
+        // are told apart by what follows the dot: an extension continues into
+        // alphanumerics, a sentence does not.
         const isPathIdentity = (term, region) =>
-          new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_-])`, 'i').test(region);
+          new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_./-]|\\.(?![a-z0-9]))`, 'i')
+            .test(region);
 
         isRelevant = searchTerms.some(term => appearsIn(term, prose))
           || isPathIdentity(relPath, biblio);
