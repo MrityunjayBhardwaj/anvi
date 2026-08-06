@@ -189,6 +189,21 @@ function globToRe(glob) {
   return new RegExp(`^${re}$`);
 }
 
+// Name a boundary for the reader. The text captured from the heading is an ID
+// only when it is numbered; every unnumbered entry captures the literal word
+// "Boundary", which names nothing and renders as the same word repeated when
+// several match at once. Such an entry still has a name — its own title — so use
+// that. Cut at the first em-dash or bracketed aside, since both begin status and
+// date annotations rather than the name, and cap the length so a header stays
+// readable. Returns the id unchanged for the numbered form.
+function boundaryLabel(id, content) {
+  if (/^[A-Z]{1,3}\d+$/.test(id)) return id;
+  const first = (content.split('\n')[0] || '').replace(/^:\s*/, '');
+  const title = first.split(/—| \(/)[0].trim();
+  if (!title) return id;
+  return title.length > 60 ? title.slice(0, 59).trimEnd() + '…' : title;
+}
+
 function matchesKind(kindsField, relPath) {
   const base = path.basename(relPath);
   return kindsField.split(',').map(k => k.trim()).filter(Boolean).some(k => {
@@ -353,7 +368,14 @@ process.stdin.on('end', () => {
       }
 
       if (isRelevant) {
-        matches.push({ id: boundaryId, content: boundaryContent.trim() });
+        // id is what the gate can key on — only the numbered form has one. label is
+        // what the reader is shown. Keeping them separate is the point: an entry
+        // without an id is still an entry with a name.
+        matches.push({
+          id: boundaryId,
+          label: boundaryLabel(boundaryId, boundaryContent),
+          content: boundaryContent.trim(),
+        });
       }
     }
 
@@ -431,7 +453,7 @@ process.stdin.on('end', () => {
     }
 
     // Build injection message
-    const boundaryNames = matches.map(m => m.id).join(', ');
+    const boundaryNames = matches.map(m => m.label).join(', ');
     let message = `DHYANA: editing ${relPath} touches catalogue boundary ${boundaryNames}.`;
 
     // Add the most critical info from dharana
@@ -519,9 +541,16 @@ process.stdin.on('end', () => {
       // Cover every entry the message above surfaces — a boundary whose freshness is
       // annotated beside two of three catalogues teaches that silence means fresh,
       // which is exactly the false confidence this gate exists to kill.
-      // Boundary sections split on "B\d+|Boundary"; only the numbered ones are entries.
+      // Boundary sections split on "B\d+|Boundary". Only the numbered ones can be
+      // GRADED — a verdict has to be keyed to something stable, and a title is not
+      // that. The unnumbered ones are still entries, and are reported below rather
+      // than dropped: an ungraded entry shown beside graded ones with nothing said
+      // about it is read as fresh, which is the false confidence this gate exists
+      // to kill (V14).
+      const ungraded = [];
       for (const m of matches) {
         if (/^[A-Z]{1,3}\d+$/.test(m.id)) wanted.push({ catalogue: 'dharana.md', id: m.id });
+        else ungraded.push(m.label);
       }
       for (const m of matches) {
         const ids = m.content.match(/SP\d+|H\d+|P\d+/g) || [];
@@ -550,11 +579,20 @@ process.stdin.on('end', () => {
       const subject = subjectRepoFor(filePath, data.cwd || process.cwd());
       if (subject.repo) {
         const nudges = currencyNudges(subject.repo, anviDir, wanted, refDir, invDir);
-        if (nudges.length) {
-          message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
-            + capNudges(nudges).join('\n  ');
+        // Capped first, then the ungraded notice is appended — it is a statement
+        // about what the gate could not reach, not another verdict competing for
+        // the cap, and dropping it is the silence this whole block exists to end.
+        const lines = capNudges(nudges);
+        if (ungraded.length) {
+          lines.push(`⚪ ${ungraded.join('; ')} — NOT graded: this boundary has no id, so no `
+            + 'freshness verdict can be keyed to it. Nothing here says it is current. '
+            + 'Give it one (`### B<n>: …`) to bring it under the gate.');
         }
-      } else if (wanted.length) {
+        if (lines.length) {
+          message += '\nCurrency (is this entry STILL real? — the hook flags, you decide):\n  '
+            + lines.join('\n  ');
+        }
+      } else if (wanted.length || ungraded.length) {
         // Could not look — which is NOT the same as looked and found nothing, and
         // must never close by inviting a stamp. A stamp asserts the entry was
         // re-confirmed; soliciting one here would ask for a confirmation at the one
@@ -621,7 +659,10 @@ process.stdin.on('end', () => {
         ts: new Date().toISOString(),
         sid: sessionId,
         file: relPath,
-        boundaries: matches.map(m => m.id),
+        // The label, not the raw capture: a log in which every unnumbered boundary
+        // reads "Boundary" cannot say which one fired, which is the whole question
+        // a log of what fired is kept to answer.
+        boundaries: matches.map(m => m.label),
         fatality: matches.some(m => m.content.includes('FATALITY')),
         patterns: [...new Set(patternIds)],
         invariants: [...new Set(invariantIds)]
