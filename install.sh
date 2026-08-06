@@ -33,6 +33,26 @@ HOOKS_DIR="$HOME/.claude/hooks"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
 
+# Ask a question and put the answer in ANSWER. Returns 0 if someone answered,
+# 1 if nothing was there to answer.
+#
+# A bare `read` returns 1 at end-of-input, and under `set -euo pipefail` that
+# return code ends the script. So an install with no terminal on stdin did not
+# finish and report a failure — it STOPPED at the first prompt, part-way, and the
+# 1 it exited with was the unanswered question rather than anything that went
+# wrong. An unanswerable prompt is a fact for the caller to act on, not an error:
+# ANSWER is left empty and each prompt decides what silence means for it.
+ANSWER=""
+ask() {
+  ANSWER=""
+  printf '%s' "$1"
+  IFS= read -r ANSWER && return 0
+  printf '\n'                    # the prompt carried no newline of its own
+  # End of input. A last line with no trailing newline still arrived, and that is
+  # an answer; only an empty read means nobody was on the other end.
+  [ -n "$ANSWER" ]
+}
+
 MODE="interactive"
 PROJECTS=()          # positional args = project dirs to migrate (--migrate only)
 TARGET_VERSION=""    # --version <v>: pin to a specific release (upgrade-only)
@@ -318,9 +338,16 @@ if [ -d "$ANVI_DIR" ]; then
   EXISTING_VERSION=$(cat "$ANVI_DIR/VERSION" 2>/dev/null || echo "unknown")
   if [ "$MODE" = "interactive" ]; then
     echo "Existing installation found: v${EXISTING_VERSION}"
-    echo -n "Overwrite with v${VERSION}? [y/N] "
-    read -r REPLY
-    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+    # Silence here is not a decline. An unanswered overwrite gate installs
+    # nothing, and a caller that reads 0 would carry on believing it upgraded —
+    # so this exits with a status of its own, and names the flag that does the
+    # same job without asking.
+    if ! ask "Overwrite with v${VERSION}? [y/N] "; then
+      echo "  ✗ No answer — stdin is not a terminal, so nothing was installed."
+      echo "    Re-run with --sync to upgrade without prompting."
+      exit 2
+    fi
+    if [[ ! "$ANSWER" =~ ^[Yy]$ ]]; then
       echo "Aborted."
       exit 0
     fi
@@ -503,9 +530,9 @@ if [ "$MODE" = "interactive" ]; then
   echo " Optional: Initialize project catalogues"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo -n "Create .anvi/ catalogues in current directory? [y/N] "
-  read -r REPLY
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+  ask "Create .anvi/ catalogues in current directory? [y/N] " \
+    || echo "  Skipped — no terminal to answer. Run /anvi:init in any project to create them."
+  if [[ "$ANSWER" =~ ^[Yy]$ ]]; then
     PROJ_DIR=".anvi"
     mkdir -p "$PROJ_DIR"
     PROJ_NAME=$(basename "$(pwd)")
@@ -549,20 +576,25 @@ if [ "$MODE" = "interactive" ]; then
   echo "  this any time by editing ~/.claude/anvi-config.json (\"memorySync\": true|false)."
   echo ""
   CURRENT_MEMSYNC=$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.env.HOME+"/.claude/anvi-config.json","utf8")).memorySync===true))}catch{process.stdout.write("false")}' 2>/dev/null || echo false)
-  echo -n "  Back up project memory to your anvi_artifacts remote? [y/N] (currently: ${CURRENT_MEMSYNC}) "
-  read -r REPLY
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then MEMSYNC=true; else MEMSYNC=false; fi
-  CFG="$HOME/.claude/anvi-config.json" MEMSYNC="$MEMSYNC" node -e '
-    const fs=require("fs"), f=process.env.CFG;
-    let o={}; try{const r=fs.readFileSync(f,"utf8").trim(); if(r) o=JSON.parse(r);}catch{}
-    if(typeof o!=="object"||o===null||Array.isArray(o)) o={};
-    o.memorySync = process.env.MEMSYNC==="true";
-    fs.writeFileSync(f, JSON.stringify(o,null,2)+"\n");
-  '
-  if [ "$MEMSYNC" = true ]; then
-    echo "  ✓ Memory backup ON — each project mirrors to ~/.anvideck as its next session ends."
+  if ask "  Back up project memory to your anvi_artifacts remote? [y/N] (currently: ${CURRENT_MEMSYNC}) "; then
+    if [[ "$ANSWER" =~ ^[Yy]$ ]]; then MEMSYNC=true; else MEMSYNC=false; fi
+    CFG="$HOME/.claude/anvi-config.json" MEMSYNC="$MEMSYNC" node -e '
+      const fs=require("fs"), f=process.env.CFG;
+      let o={}; try{const r=fs.readFileSync(f,"utf8").trim(); if(r) o=JSON.parse(r);}catch{}
+      if(typeof o!=="object"||o===null||Array.isArray(o)) o={};
+      o.memorySync = process.env.MEMSYNC==="true";
+      fs.writeFileSync(f, JSON.stringify(o,null,2)+"\n");
+    '
+    if [ "$MEMSYNC" = true ]; then
+      echo "  ✓ Memory backup ON — each project mirrors to ~/.anvideck as its next session ends."
+    else
+      echo "  Memory backup OFF. Enable later in ~/.claude/anvi-config.json."
+    fi
   else
-    echo "  Memory backup OFF. Enable later in ~/.claude/anvi-config.json."
+    # Nobody answered, so nothing is written. Defaulting to false here would
+    # turn an existing "yes" off without anyone having said so — a consent
+    # question is the last place to answer on the user's behalf.
+    echo "  Skipped — no terminal to answer. Memory backup unchanged (currently: ${CURRENT_MEMSYNC})."
   fi
   echo ""
 fi
@@ -584,3 +616,7 @@ if [ -d "$HOME/.claude/get-shit-done" ]; then
 fi
 
 echo "Done."
+# State the status instead of inheriting whatever the last line happened to leave.
+# A trailing `[ -d x ] && cp …` whose test is false returns 1, and a complete
+# install would report a failure for a directory that was merely absent.
+exit 0
