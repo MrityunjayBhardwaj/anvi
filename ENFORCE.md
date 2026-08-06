@@ -270,6 +270,7 @@ centralized projects). See issue #5.
 | 13 | A test, probe or gate script belonging to no boundary, so the verification discipline it most needs never arrives | `test/injector-kind-match.test.js` — `KINDS:` selects on what a file IS and `CHECKS:` delivers the entry's actionable half; asserted against a file matching no kind, so the glob is proven to exclude |
 | 14 | A matching field written in a shape its parser does not read, dropped without a word — so an author who wrote the field and an author who wrote nothing get the same silence | `test/injector-kind-match.test.js` — the wrapped `KINDS:` and the inline `CHECKS:` are each asserted against the well-formed form as a control, and a `CHECKS:` read as empty must SAY so |
 | 15 | A test that exists and is never run — covered only by whoever remembers to type its name | `scripts/run-tests.js` — derives the list from the filesystem, prints the discovered count beside the pass count, and fails on an untracked test file |
+| 16 | An install that finished and an install that did nothing reporting the same status, so no caller can tell either from a real failure | `test/install-exit-status.test.sh` — 0 only for a run that both completed and landed, 2 for a prompt nothing could answer; every success case also asserts the install arrived, since "exits 0" alone is met by an installer that exits 0 having done nothing |
 
 ## Liveness — a quiet hook and a dead hook look identical
 

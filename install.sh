@@ -25,6 +25,13 @@ set -euo pipefail
 #                             this clone's tree; an older tagged version is taken
 #                             from `git archive <tag>` into a temp dir (your clone
 #                             is never checked out or mutated).
+#
+# Exit status — the only thing an automated caller can read, so each outcome has
+# its own:
+#   0  installed, or a choice the user made deliberately (declining an overwrite)
+#   2  refused before installing anything: a bad flag, a version that cannot be
+#      installed, or a prompt with no terminal to answer it (use --sync)
+#   *  an underlying command failed, and its status is passed through unchanged
 
 ANVI_DIR="$HOME/.claude/anvi"
 AGENTS_DIR="$HOME/.claude/agents"
