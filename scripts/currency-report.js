@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -153,7 +153,11 @@ if (lintOnly) {
           // missing capability into a finding against a declaration that is probably
           // fine, which is the shape where a reporting consumer reads a refusal as an
           // absence (H87's second instance, V14).
-          try { return git(`ls-files -- ${JSON.stringify(spec)}`).trim() ? 'present' : 'empty-directory'; }
+          // Asked through the shared predicate, not a git pathspec — the third and last
+          // site where git rather than the engine decided what a spec reaches (#207).
+          // For a literal directory the two readings agree, so this is a consolidation
+          // rather than a fix; it is here so no site is left to drift on its own.
+          try { return matchedTracked(spec, git).length ? 'present' : 'empty-directory'; }
           catch { return 'present'; }
         }
       } catch { /* not a directory */ }

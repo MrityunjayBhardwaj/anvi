@@ -309,12 +309,31 @@ function trackedFiles(git) {
 function globWidthGap(spec, git) {
   const s = String(spec);
   if (!s.includes('*') || s.includes('**')) return null;
-  const files = trackedFiles(git);
-  if (!files.length) return null;
+  if (!trackedFiles(git).length) return null;
   const suggest = s.replace(/\*/g, '**/*');
-  const selected = files.filter(p => matchesDeclaredFile(s, p)).length;
-  const wider = files.filter(p => matchesDeclaredFile(suggest, p)).length;
+  const selected = matchedTracked(s, git).length;
+  const wider = matchedTracked(suggest, git).length;
   return wider > selected ? { selected, wider, suggest } : null;
+}
+
+// Which tracked files does this spec select? THE question — every caller that needs to
+// know what a spec reaches asks it here, so none of them can answer it differently.
+//
+// This replaced the last place that answered it with a git pathspec: the shorthand
+// branch of classifySpec resolved a bare name or partial path with
+// `git ls-files -- '*/<spec>'`. That agreed with the engine on every spec in the corpus
+// and was already latent on one shape — a shorthand naming a DIRECTORY, where the engine
+// selects the tree beneath it (#193 made a declaration do that) and the pathspec form,
+// having no such clause, selects nothing. Same relation, two homes, and #188's audit had
+// already found five sites answering it with four guarded and one not: **a relation
+// re-derived N times will be correct N-1 times, and the exception will be in the
+// highest-trust position** (#207).
+//
+// An empty list means git could not answer. Every caller must read that as "cannot
+// tell", never as "selects nothing" (V14) — so this returns [] for both and the callers
+// check `trackedFiles(git).length` separately when the difference matters.
+function matchedTracked(spec, git) {
+  return trackedFiles(git).filter(p => matchesDeclaredFile(spec, p));
 }
 
 // --- lint: the entry's FORM, not the code's state ---------------------------
@@ -1075,16 +1094,15 @@ function classifySpec(f, fileExists, git, refResolver) {
   // `engine/App.ts` doesn't sweep in `reengine/App.ts`. Only an UNAMBIGUOUS match
   // counts — two files fitting the shorthand mean it doesn't identify one, and
   // guessing would diff the wrong file while looking right.
+  // Resolved through the SAME predicate a pattern is, and for the same reason a pattern
+  // now is: a bare name and a partial path are the degenerate patterns, and the
+  // trailing-segment rule they need is the rule `matchesDeclaredFile` already states.
+  // This used to be a git pathspec (`*/<spec>`), which is a second expression of that
+  // rule — see matchedTracked for the shape and for what it was already latent on.
   if (!isGlob && !f.startsWith('/')) {
-    try {
-      const pathspecs = f.includes('/')
-        ? [JSON.stringify('*/' + f)]                 // partial path: trailing segment only
-        : [JSON.stringify('*/' + f), JSON.stringify(f)]; // bare name: basename or repo-root file
-      const hits = git(`ls-files -- ${pathspecs.join(' ')}`)
-        .split('\n').map(x => x.trim()).filter(Boolean);
-      if (hits.length === 1) return { kind: 'present', path: hits[0], resolvedFrom: f };
-      if (hits.length > 1) return { kind: 'ambiguous', path: f, candidates: hits.length };
-    } catch { /* fall through */ }
+    const hits = matchedTracked(f, git);
+    if (hits.length === 1) return { kind: 'present', path: hits[0], resolvedFrom: f };
+    if (hits.length > 1) return { kind: 'ambiguous', path: f, candidates: hits.length };
   }
 
   // Not the project's file. Before asking history "was it ever ours?", ask WHERE it
@@ -1432,7 +1450,7 @@ function computeCurrency(entry, opts) {
 module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
-  extractFileSpecs, specExists, classifySpec, extensionsFrom,
+  extractFileSpecs, specExists, classifySpec, extensionsFrom, matchedTracked,
   // The one glob engine and the one declaration predicate. The injector imports these
   // rather than defining its own, which is what makes "how wide is a declared `*`" a
   // question with a single answer instead of one answer per consumer (#195).
