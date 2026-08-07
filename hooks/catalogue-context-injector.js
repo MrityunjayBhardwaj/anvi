@@ -168,7 +168,12 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
 // has never heard of the field behaves byte-for-byte as before. The match is an OR
 // with FILES:, never a filter on it — a narrowing here would drop cases on the
 // permissive side, which is the failure mode this hook can least afford.
-function globToRe(glob) {
+// The glob SYNTAX, with no opinion about what it is anchored to. Both fields that
+// accept a glob compile it here — KINDS: anchors the result to the whole path or the
+// basename, FILES: anchors it as a path suffix — so the two can differ in what they
+// REACH without ever differing in what they ACCEPT. One engine is the point: an author
+// who learns `**/` in one field must not discover the other field is stricter.
+function globBody(glob) {
   let re = '';
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
@@ -186,7 +191,11 @@ function globToRe(glob) {
       re += c.replace(/[.+^${}()|[\]\\]/, '\\$&');
     }
   }
-  return new RegExp(`^${re}$`);
+  return re;
+}
+
+function globToRe(glob) {
+  return new RegExp(`^${globBody(glob)}$`);
 }
 
 // Name a boundary for the reader. The text captured from the heading is an ID
@@ -202,6 +211,33 @@ function boundaryLabel(id, content) {
   const title = first.split(/—| \(/)[0].trim();
   if (!title) return id;
   return title.length > 60 ? title.slice(0, 59).trimEnd() + '…' : title;
+}
+
+// --- FILES: — does relPath name a file this boundary declares? ----------------
+// A declaration is matched as a path SUFFIX landing on a segment boundary. The suffix
+// half is deliberate: an author declaring `lib/x.cjs` means that module wherever it
+// sits. The segment guard is what stops the suffix reaching a coincidence — a raw
+// string suffix begins at an arbitrary character offset, so `cd.ts` claimed `a/bcd.ts`.
+//
+// A glob is anchored the same way, because a literal is the degenerate glob:
+// `FILES: lib/*.cjs` reaches `pkg/lib/a.cjs` for exactly the reason `FILES: lib/x.cjs`
+// reaches `pkg/lib/x.cjs`. One predicate for both, so the field has one rule rather
+// than one rule per syntax. Before this, FILES: had no glob engine at all, so
+// `FILES: bin/lib/*.cjs` — in this repo's own dharana — matched nothing: not rejected,
+// not warned about, not obeyed. The text fallback then delivered the file anyway, so
+// nothing looked broken, and the injection advised the author to add the declaration
+// they had already written.
+//
+// The syntax comes from globBody — the KINDS: engine — so the two fields cannot drift
+// in what they ACCEPT, only in what they anchor to. If a pattern will not compile,
+// fall back to the plain string form: the declaration keeps doing its literal job
+// rather than disappearing, which is the failure mode this whole function is about.
+function matchesDeclaredFile(decl, relPath) {
+  try {
+    return new RegExp(`^(?:.*/)?${globBody(decl)}$`).test(relPath);
+  } catch {
+    return relPath === decl || relPath.endsWith('/' + decl);
+  }
 }
 
 function matchesKind(kindsField, relPath) {
@@ -407,22 +443,17 @@ process.stdin.on('end', () => {
       let isRelevant = false;
 
       if (filesMatch) {
-        // Deterministic match: does relPath name one of the declared files?
-        //
-        // The suffix half is deliberate — an author may declare `lib/x.cjs` and mean it
-        // wherever that module sits — but it has to land on a path SEPARATOR. A raw
-        // string suffix begins at an arbitrary character offset, so `cd.ts` claimed
-        // `a/bcd.ts` and `config.json` claimed `src/my-config.json`, and unlike a
-        // fallback match those arrive labelled as declarations, with no notice inviting
-        // doubt. A declaration is the most authoritative thing this hook says, so it is
-        // the last place a coincidence should be able to reach.
+        // Deterministic match: does relPath name one of the declared files? Literal or
+        // glob, both anchored as a segment-aligned path suffix — see matchesDeclaredFile
+        // for why the suffix is deliberate, why it must land on a separator, and why a
+        // glob is anchored the same way a literal is.
         //
         // Same relation, same guarded form, as `hooks/anvi-paths.js` (`here === r ||
         // here.startsWith(r + path.sep)`) and `hooks/currency.js` (`r.endsWith('/' +
         // want)`). Four sites answer this question and this was the one that answered it
         // without the guard — the relation has no home, so each site re-derives it.
-        const boundaryFiles = filesMatch[1].split(',').map(f => f.trim());
-        isRelevant = boundaryFiles.some(bf => relPath === bf || relPath.endsWith('/' + bf));
+        const boundaryFiles = filesMatch[1].split(',').map(f => f.trim()).filter(Boolean);
+        isRelevant = boundaryFiles.some(bf => matchesDeclaredFile(bf, relPath));
       }
 
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
