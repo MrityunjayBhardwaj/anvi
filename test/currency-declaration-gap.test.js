@@ -153,6 +153,23 @@ ok(/1 of 1 boundary declares FILES: or KINDS:\./.test(cleanOut),
 ok(/1 of 1 boundary declares/.test(cleanOut) && !/declare neither/.test(cleanOut),
   'and says nothing about a gap that does not exist');
 
+console.log('\ndeclaration gap — still answerable with no project repo');
+// The lint's defining property is that it runs ANYWHERE, including over a catalogue
+// whose project is not checked out, and one finding already had to be made opt-in to
+// keep it. This summary needs no repo by construction — "did the author write a
+// declaration?" is a question about the TEXT, unlike "does the declaration select a
+// file?" — and that is worth pinning, because the failure mode of losing it is not an
+// error but a section that quietly stops printing on exactly the runs that know least.
+const NOREPO = path.join(tmp, 'norepo');
+fs.mkdirSync(path.join(NOREPO, '.anvi'), { recursive: true });
+fs.writeFileSync(path.join(NOREPO, '.anvi', 'dharana.md'), DHARANA);
+const noRepoOut = spawnSync('node', [REPORT, '--lint', NOREPO],
+  { cwd: NOREPO, encoding: 'utf8', env: { ...process.env, ANVI_CATALOGUE_DIR: path.join(NOREPO, '.anvi') } }).stdout || '';
+ok(/no project repo here/.test(noRepoOut),
+  'control — this really is the no-repo path (the report says so itself)');
+ok(/2 of 5 boundaries declare FILES: or KINDS:/.test(noRepoOut),
+  'the declaration gap is reported with no repo present — it is a question about the text');
+
 console.log('\ndeclaration gap — one answer, not two');
 // Property 3, the load-bearing one. The report counts a boundary as declaring; the
 // injector decides which ADVICE to print from the same question ("add a declaration"

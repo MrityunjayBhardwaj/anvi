@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, splitBoundaries, boundaryLabel, boundaryDeclares } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -233,9 +233,17 @@ if (lintOnly) {
   // answer" error the boundary questions have already produced three times.
   //
   // Counted for boundary maps only. The other catalogues carry no boundaries, and a
-  // "0 of 0 declare" line against hetvabhasa is a number about nothing, which is worse
-  // than no line: it invites the reader to act on it.
-  for (const cat of ['dharana.md', 'dhyana.md']) {
+  // "0 of 0 declare" line against an error-pattern catalogue is a number about nothing,
+  // which is worse than no line: it invites the reader to act on it.
+  //
+  // DERIVED, not listed. "Which catalogues are the code map" is already answered in
+  // currency.js — it is what grades a missing anchor as a live hazard rather than
+  // hygiene — and writing the names again here would be a second list that agrees today
+  // and drifts later, silently: a boundary map added there but not here would simply
+  // not be counted, and the report would look complete while omitting it. That is the
+  // same shape as every other defect this family has produced, one level up: not two
+  // readers of a field, but two lists of what to read.
+  for (const cat of CATALOGUES.filter(c => sensitivityFor(c) === 'high')) {
     const p = path.join(anviDir, cat);
     if (!fs.existsSync(p)) continue;
     const boundaries = splitBoundaries(fs.readFileSync(p, 'utf8'));
