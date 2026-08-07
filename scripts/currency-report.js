@@ -180,10 +180,38 @@ if (lintOnly) {
   const byCode = {};
   let total = 0;
 
+  // Every id that appears more than once in a catalogue, collected as the lint walks
+  // them so the file is read once. Printed after the findings, below.
+  const continuations = [];
+
   for (const cat of CATALOGUES) {
     const p = path.join(anviDir, cat);
     if (!fs.existsSync(p)) continue;
     const entries = parseEntries(fs.readFileSync(p, 'utf8'));
+
+    // The absorption made visible. A later occurrence of an id is now read as a
+    // continuation of the first, which is what 391 records in the fleet actually are —
+    // but the rule cannot tell that from a genuine ACCIDENTAL re-use of an id, and it
+    // absorbs both. One live instance is known: a catalogue where a third `H81`
+    // describes a completely unrelated failure.
+    //
+    // So the rule does not get to be silent. Reported as a COUNT PER ID rather than as
+    // a finding per record, on two grounds. A finding per record is 391 lines fleet-wide
+    // of which essentially all are legitimate, and a worklist that is mostly noise
+    // teaches its reader to skip it — the failure this lint's own design note warns
+    // about. And the actionable signal is not the individual record but the SHAPE of the
+    // count: an id you did not expect to have continuations at all, or one with far more
+    // than its neighbours, is where a re-use hides.
+    //
+    // Deliberately NOT filtered by whether the heading says "amendment". 265 of the 391
+    // announce themselves and 126 do not while still plainly being follow-ups — a
+    // recurrence, a third occurrence, a status flip, an entry retired as falsified. A
+    // keyword filter would present those 126 as suspects and the real re-use would sit
+    // among them, indistinguishable. A fixed vocabulary meeting an open one, in the
+    // reporting layer this time.
+    const perId = new Map();
+    for (const e of entries) if (e.amends) perId.set(e.id, (perId.get(e.id) || 0) + 1);
+    if (perId.size) continuations.push({ cat, perId });
 
     // Group by finding, not by entry. On a real corpus a single code can hit
     // hundreds of entries, and printing the same sentence 341 times is a wall, not
@@ -216,6 +244,25 @@ if (lintOnly) {
       if (g.refs.length) for (const r of g.refs) console.log(`      ${r}`);
       else console.log(`      ${g.ids.join(', ')}`);
     }
+    console.log('');
+  }
+
+  // --- continuations absorbed by the identity rule ----------------------------
+  for (const { cat, perId } of continuations) {
+    const records = [...perId.values()].reduce((a, n) => a + n, 0);
+    console.log(`${cat} — repeated identifiers`);
+    console.log(`  ${records} later ${records === 1 ? 'occurrence was' : 'occurrences were'} read as a continuation`
+      + ` of an earlier entry with the same identifier, across ${perId.size}`
+      + ` ${perId.size === 1 ? 'identifier' : 'identifiers'}:`);
+    // Sorted by count, because the signal is the outlier. Uncapped: a truncated list
+    // would read as the whole picture, and the one entry that matters is as likely to
+    // be at the bottom as the top.
+    for (const [id, n] of [...perId.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`      ${id} ×${n + 1}`);
+    }
+    console.log('  Each is treated as an addendum to the FIRST entry with that identifier,'
+      + ' and shares its verdict. If any of these is not a follow-up but a different'
+      + ' subject that reused an identifier, it is being silently merged — give it its own.');
     console.log('');
   }
 
