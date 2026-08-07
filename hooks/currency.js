@@ -806,6 +806,97 @@ function parseEntries(md) {
   return entries;
 }
 
+// --- The GUESS: does a boundary's text name this file, absent a declaration? ------
+//
+// The last of the boundary-matching questions to get a home here, and it moved for the
+// same reason as the others: it acquired a second asker. The hook runs it FORWARDS — for
+// the file being edited, which boundaries does its text reach? — and the proposer runs
+// the identical relation BACKWARDS — for a boundary, which files does its text reach? —
+// to draft the declaration that would make the guessing unnecessary. A proposer built on
+// its own copy would draft declarations for a relation the hook does not actually
+// implement, and the mismatch would be invisible: every proposal would look reasonable,
+// and the boundary would keep guessing afterwards exactly as before (V21).
+//
+// Which region admits which term is the substance, and it is not symmetric. An entry
+// ASSERTS in prose, CITES in `REF:`, QUOTES in fenced blocks, and RECORDS HISTORY in the
+// stamps the freshness gate writes. A flat text search read all four alike, so a path
+// present because someone READ it became a claim the entry GOVERNS it — and because the
+// bibliography is the longest, most path-dense line of a well-kept entry, the better
+// documented an entry was the more files it wrongly claimed. Diligence widened the net.
+//
+//   prose        all three terms   a bare name is how a person refers to a module
+//   REF:         full path only    every item there is already a path, so a bare name is
+//                                  a collision with another file or an ordinary word
+//   VALIDATED:   nothing           its paths are what CHANGED — evidence of drift, not
+//                                  of subject, and they mean the opposite of a REF's
+//   fenced block nothing           quoted material; the entry is showing it, not
+//                                  asserting it
+//
+// An unterminated fence is left searchable. Boundary content is already cut at the next
+// divider, so a fence can lose its closer to that cut with real prose after it, and
+// swallowing the remainder would lose a real match silently. Erring wide keeps a lost
+// case visible as noise rather than as silence.
+const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
+const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
+const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
+const VALIDATED_LINE = /\*\*VALIDATED\b[^\n]*?:\*\*[^\n]*/g;
+
+function fallbackSpans(content) {
+  const body = String(content).replace(FENCED, '').replace(VALIDATED_LINE, '');
+  const biblio = (body.match(REF_STARRED) || [])
+    .concat(body.match(REF_PLAIN) || [])
+    .join('\n');
+  const prose = body.replace(REF_STARRED, '').replace(REF_PLAIN, '');
+  return { prose, biblio };
+}
+
+// The file's basename WITHOUT its extension, matching `path.basename(f, path.extname(f))`
+// exactly — including that a leading dot is not an extension, so `.eslintrc` keeps its
+// whole name. Open-coded because this module deliberately requires nothing; re-deriving
+// it in the caller is what would put the rule back in two places.
+function fileStem(relPath) {
+  const seg = String(relPath).split('/').pop() || '';
+  const dot = seg.lastIndexOf('.');
+  return dot > 0 ? seg.slice(0, dot) : seg;
+}
+
+function guessTerms(relPath) {
+  const stem = fileStem(relPath);
+  return [
+    stem,
+    relPath,
+    // CamelCase parts, so `GlyphPathResolver` is reachable from prose that says
+    // "resolver". Short fragments are dropped: a three-letter word matches everywhere.
+    ...stem.replace(/([A-Z])/g, ' $1').trim().split(/\s+/).filter((s) => s.length >= 4),
+  ];
+}
+
+// Does this boundary's own text name this file? The fallback, and only the fallback —
+// a declared match is a different question, answered by matchesDeclaredFile.
+function guessMatchesFile(content, relPath) {
+  const { prose, biblio } = fallbackSpans(content);
+  const esc = (t) => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const appearsIn = (term, region) =>
+    new RegExp(`(?:^|[^a-z0-9])${esc(term)}(?:$|[^a-z0-9])`, 'i').test(region);
+  // Identity, not suffix — at BOTH ends, since a path can be extended in either
+  // direction and each extension names a different file.
+  //
+  // Leading: the prose test admits any non-alphanumeric before the term, and `/` is one,
+  // so `src/foo.js` would otherwise match `packages/elsewhere/src/foo.js`. Nothing
+  // pathlike may precede: the path must begin where the item begins.
+  //
+  // Trailing: a '.' has to be admitted, because a bibliography item is usually followed
+  // by a sentence period — but admitting it unconditionally makes `LICENSE` match
+  // `LICENSE.md` and `Makefile` match `Makefile.old`, so every extensionless file is
+  // claimed by anything extending it. The two are told apart by what follows the dot: an
+  // extension continues into alphanumerics, a sentence does not.
+  const isPathIdentity = (term, region) =>
+    new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_./-]|\\.(?![a-z0-9]))`, 'i')
+      .test(region);
+  return guessTerms(relPath).some((term) => appearsIn(term, prose))
+    || isPathIdentity(relPath, biblio);
+}
+
 // --- The boundary split, for the one consumer that needs boundaries specifically ---
 // The injector asks a NARROWER question than parseEntries: not "is this an entry" but
 // "is this a BOUNDARY", because a dharana also carries invariant cross-refs, lifecycle
@@ -1615,6 +1706,12 @@ module.exports = {
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers
   // to either question is a disagreement no per-consumer test can fail (V21).
   boundaryLabel, boundaryDeclares,
+  // The guess, and the regions it is allowed to read. Exported because the relation now
+  // runs in both directions — the hook asks which boundaries a file reaches, the
+  // proposer asks which files a boundary reaches — and a proposer drafting declarations
+  // from its own copy of this rule would draft them for a relation the hook does not
+  // implement, with every proposal looking perfectly reasonable (V21).
+  guessMatchesFile, fallbackSpans, guessTerms,
   // Exported so the stamp-selection rule can be asserted directly rather than
   // only through a parsed catalogue — the defect it fixes was invisible at the
   // report level for weeks precisely because nothing tested the selection.
