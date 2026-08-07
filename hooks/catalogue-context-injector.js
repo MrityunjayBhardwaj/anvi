@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -271,18 +271,14 @@ function matchesKind(kindsField, relPath) {
 // that cut with real prose after it; treating the remainder as quoted would drop
 // the entry's own words and lose a match that should have happened. Erring toward
 // the wider span keeps a lost case visible as noise rather than as silence.
-const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
-const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
-const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
-const VALIDATED = /\*\*VALIDATED\b[^\n]*?:\*\*[^\n]*/g;
-function fallbackSpans(content) {
-  const body = content.replace(FENCED, '').replace(VALIDATED, '');
-  const biblio = (body.match(REF_STARRED) || [])
-    .concat(body.match(REF_PLAIN) || [])
-    .join('\n');
-  const prose = body.replace(REF_STARRED, '').replace(REF_PLAIN, '');
-  return { prose, biblio };
-}
+// `fallbackSpans` and the guess itself live in currency.js and are imported above. They
+// used to live here, and moved when the relation acquired a second asker: this hook runs
+// it forwards (which boundaries does this file reach?) and the declaration proposer runs
+// it backwards (which files does this boundary reach?), to draft the declaration that
+// makes the guessing unnecessary. A proposer with its own copy would draft declarations
+// for a relation this hook does not implement, and every proposal would look fine. Which
+// region admits which term, and why the bibliography admits only full paths, is
+// documented at the definition.
 
 // CHECKS: — the actionable half. Selecting the right entry is not enough on its own:
 // the message below is assembled from a fixed set of named fields (silent-failure
@@ -440,36 +436,7 @@ process.stdin.on('end', () => {
         // Fallback: text-based match on filename/CamelCase parts over the entry's
         // own prose, plus a full-path-only match over its bibliography — see
         // fallbackSpans for which region admits which term, and why.
-        const { prose, biblio } = fallbackSpans(boundaryContent);
-        const searchTerms = [
-          fileName,
-          relPath,
-          ...fileName.replace(/([A-Z])/g, ' $1').trim().split(/\s+/).filter(s => s.length >= 4),
-        ];
-
-        const esc = t => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const appearsIn = (term, region) =>
-          new RegExp(`(?:^|[^a-z0-9])${esc(term)}(?:$|[^a-z0-9])`, 'i').test(region);
-
-        // Identity, not suffix — at BOTH ends, since a path can be extended in
-        // either direction and each extension names a different file.
-        //
-        // Leading: the prose test above admits any non-alphanumeric before the term,
-        // and `/` is one — so `src/foo.js` matches `packages/elsewhere/src/foo.js`.
-        // Nothing pathlike may precede: the path must begin where the item begins.
-        //
-        // Trailing: a '.' has to be admitted, because a REF item is usually followed
-        // by a sentence period — but admitting it unconditionally makes `LICENSE`
-        // match `LICENSE.md` and `Makefile` match `Makefile.old`, so every
-        // extensionless file is claimed by anything that extends it. The two cases
-        // are told apart by what follows the dot: an extension continues into
-        // alphanumerics, a sentence does not.
-        const isPathIdentity = (term, region) =>
-          new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_./-]|\\.(?![a-z0-9]))`, 'i')
-            .test(region);
-
-        isRelevant = searchTerms.some(term => appearsIn(term, prose))
-          || isPathIdentity(relPath, biblio);
+        isRelevant = guessMatchesFile(boundaryContent, relPath);
         if (isRelevant) via = 'text';
       }
 
