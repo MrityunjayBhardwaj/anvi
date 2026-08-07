@@ -72,6 +72,15 @@ const DHARANA = [
   '',
   '---',
   '',
+  // The template skeleton, copied and not filled in. It LOOKS like a declaration and is
+  // not one: telling this author their declaration failed to select the file points at
+  // nothing, and the advice they need is the one for an empty entry.
+  '### B5: Carries the template placeholder, not a declaration',
+  'FILES: [comma-separated list of source files at this boundary — used by hook for deterministic matching]',
+  'Silent failure modes: a boundary skeleton mentioning qqsubject.ts before anyone filled it in',
+  '',
+  '---',
+  '',
   // The control: reached BY its declaration, so no notice should mention it at all.
   '### B4: Declares the subject outright',
   'FILES: src/qqcontrol.ts',
@@ -158,12 +167,20 @@ ok(clause(notice, ALREADY).includes('B2') && clause(notice, ALREADY).includes('B
 ok(!clause(notice, ALREADY).includes('B1'),
    'but not the undeclared one — it has nothing to check');
 
+console.log('\nAn unfilled template placeholder is not a declaration');
+ok(selected(sub, 'B5'), '  (the placeholder entry is delivered, by name)');
+ok(clause(notice, ADD_ONE).includes('B5'),
+   'B5, whose FILES: holds only the template placeholder, is told to add a real one');
+ok(!clause(notice, ALREADY).includes('B5'),
+   '  ... and is NOT told its declaration failed to select the file — there is no declaration to check');
+
 console.log('\nAnd the advice DISAPPEARS when every guessed boundary already declares');
-// Delete the only undeclared entry, leaving B2/B3 as the whole guessed population.
-const trimmed = DHARANA.split('### B1:')[0]
-  + DHARANA.slice(DHARANA.indexOf('### B2:'));
+// Drop BOTH entries that lack a real declaration — the empty one and the placeholder —
+// leaving the declaring boundaries as the whole guessed population.
+const trimmed = DHARANA.split('\n---\n').filter(s => !/### B1:|### B5:/.test(s)).join('\n---\n');
 fs.writeFileSync(path.join(PROJ, '.anvi', 'dharana.md'), trimmed);
-ok(!trimmed.includes('### B1:'), '  (fixture really dropped B1)');
+ok(!trimmed.includes('### B1:') && !trimmed.includes('### B5:') && trimmed.includes('### B2:'),
+   '  (fixture really dropped both non-declaring entries and kept the rest)');
 const only = inject('src/qqsubject.ts');
 const onlyNotice = noticeOf(only);
 ok(onlyNotice !== '' && onlyNotice.includes('B2'),

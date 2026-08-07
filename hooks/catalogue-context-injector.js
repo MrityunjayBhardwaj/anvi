@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -520,7 +520,16 @@ process.stdin.on('end', () => {
           // whether the declaration selected this file. The guess notice needs it: its
           // advice ("give the entry a FILES: or KINDS:") is written for an entry that
           // has neither, and is backwards at one that does.
-          declares: Boolean(filesMatch) || kindsField !== null,
+          //
+          // A field holding only the template's own placeholder is NOT a declaration.
+          // The author copied the skeleton and has not filled it in, so "your
+          // declaration did not select this file" points at nothing, and the advice
+          // they actually need is the one for an empty entry. extractFileSpecs already
+          // encodes that rule for FILES: — it yields nothing for `[comma-separated list
+          // …]` — so KINDS: is held to the same test rather than to a second opinion
+          // about what a placeholder looks like.
+          declares: (filesMatch !== null && extractFileSpecs(filesMatch[1]).length > 0)
+            || (kindsField !== null && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim()))),
           content: boundaryContent.trim(),
         });
       }
