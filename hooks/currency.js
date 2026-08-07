@@ -764,6 +764,65 @@ function splitBoundaries(md) {
   return out;
 }
 
+// What the reader is SHOWN for a boundary, as distinct from what the gate keys on.
+// The text captured from the heading is an ID only when it is numbered; every
+// unnumbered entry captures the literal word "Boundary", which names nothing and
+// renders as the same word repeated when several are listed at once. Such an entry
+// still has a name — its own title — so use that. Cut at the first em-dash or
+// bracketed aside, since both begin status and date annotations rather than the name,
+// and cap the length so a header stays readable. Returns the id unchanged for the
+// numbered form.
+//
+// Not a nicety: 78 boundaries in the fleet are unnumbered, and in two projects nearly
+// every boundary is, so a surface that can only name numbered ones says nothing at all
+// exactly where it is needed most.
+//
+// Lives here rather than in the hook because the hook is no longer the only thing
+// that names a boundary: the lint's declaration-gap summary names them too, and a
+// boundary called one thing in an injection and another in the report is a boundary
+// the reader cannot look up. This is a relocation, not a change — same rule, same
+// output, one address.
+function boundaryLabel(id, content) {
+  if (/^[A-Z]{1,3}\d+$/.test(id)) return id;
+  const first = (String(content).split('\n')[0] || '').replace(/^:\s*/, '');
+  const title = first.split(/—| \(/)[0].trim();
+  if (!title) return id;
+  return title.length > 60 ? title.slice(0, 59).trimEnd() + '…' : title;
+}
+
+// Does this boundary DECLARE what it governs — a `FILES:` or a `KINDS:` with
+// something real in it — or is it left to the text fallback to guess?
+//
+// One home, for the same reason the split, the field reader and the width rule have
+// one. Two consumers ask this. The hook asks it to choose which advice to print: an
+// entry with no declaration is told to add one, and an entry that HAS one is pointed
+// at the declaration it already wrote — opposite instructions, so answering
+// differently from the counter would not merely miscount, it would misadvise. The
+// lint asks it to size the gap. Two copies of a question this cheap is exactly how
+// the consumers of the other boundary questions came to disagree, and the
+// disagreement is invisible per consumer because each answers confidently.
+//
+// A field holding only the template's own placeholder is NOT a declaration. The
+// author copied the skeleton and has not filled it in, so the hook's "your
+// declaration did not select this file" would point at nothing, and the lint would
+// report a gap as closed where nothing was ever declared — the count reading healthiest
+// on the catalogues that had been touched least. `extractFileSpecs` already encodes
+// that rule for `FILES:` (it yields nothing for `[comma-separated list …]`), so
+// `KINDS:` is held to the same TEST rather than to a second opinion about what a
+// placeholder looks like.
+//
+// Asked of the CONTENT, deliberately, rather than of two field values a caller
+// already holds. Callers must agree about what TEXT they read, not merely about the
+// rule applied to it — a signature taking pre-read fields leaves the reading to each
+// caller, and where the field starts and ends is the half of this that has already
+// gone wrong twice.
+function boundaryDeclares(content) {
+  const filesField = readField(content, 'FILES');
+  const kindsField = readField(content, 'KINDS');
+  return extractFileSpecs(filesField).length > 0
+    || (!!kindsField && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim())));
+}
+
 // Is this sha an actual commit in the repo `git` runs in? A FIX: sha can be dead
 // (squash/rebase dropped it) or foreign (an anvi_artifacts / sibling-repo sha).
 // Trusting one unverified yields a verdict computed against a commit that isn't
@@ -1458,6 +1517,11 @@ module.exports = {
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
   lintEntry, lineAnchoredRefs, LINT, splitBoundaries,
+  // The boundary questions the hook no longer answers alone: what a boundary is
+  // CALLED, and whether it DECLARES what it governs. Exported for the same reason
+  // splitBoundaries is — the lint counts what the hook guesses about, and two answers
+  // to either question is a disagreement no per-consumer test can fail (V21).
+  boundaryLabel, boundaryDeclares,
   // Exported so the stamp-selection rule can be asserted directly rather than
   // only through a parsed catalogue — the defect it fixes was invisible at the
   // report level for weeks precisely because nothing tested the selection.
