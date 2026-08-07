@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -60,68 +60,6 @@ const anviDir = anviRead.dir;
 if (!anviDir) { console.error(`no .anvi catalogues for ${cwd}`); process.exit(2); }
 
 const CATALOGUES = ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md'];
-
-// --- lint mode --------------------------------------------------------------
-// A different question from the report's: not "what drifted?" but "which entries
-// can't be checked at all, and which pointers promise more than they can keep?"
-// That is a pure function of the catalogue text — no git, no repo, no HEAD — so it
-// runs anywhere, including over a checkout whose project repo isn't present.
-//
-// The output is a WORKLIST, not errors. Nothing here is a failure; every line is an
-// entry whose grounding is incomplete, which is the gate's own note that "an
-// unanchored entry is also a grounding-completeness gap", made enumerable.
-if (lintOnly) {
-  console.log(`Currency lint — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
-  const counts = { high: 0, low: 0 };
-  const byCode = {};
-  let total = 0;
-
-  for (const cat of CATALOGUES) {
-    const p = path.join(anviDir, cat);
-    if (!fs.existsSync(p)) continue;
-    const entries = parseEntries(fs.readFileSync(p, 'utf8'));
-
-    // Group by finding, not by entry. On a real corpus a single code can hit
-    // hundreds of entries, and printing the same sentence 341 times is a wall, not
-    // a worklist — the reader stops at the third line and learns nothing. The
-    // explanation belongs to the CODE (say it once); the entries are the payload
-    // (list them compactly). High-severity findings are few by construction, so
-    // they keep their own line and their pointer.
-    const groups = {};
-    for (const e of entries) {
-      total++;
-      for (const f of lintEntry(e, { catalogue: cat })) {
-        counts[f.severity]++;
-        byCode[f.code] = (byCode[f.code] || 0) + 1;
-        const g = (groups[f.code] = groups[f.code] || { severity: f.severity, detail: f.detail, ids: [], refs: [] });
-        if (f.severity === 'high') g.severity = 'high';
-        g.ids.push(e.id);
-        if (f.refs) g.refs.push(`${e.id} → ${f.refs.join(', ')}`);
-      }
-    }
-
-    const codes = Object.keys(groups);
-    if (!codes.length) continue;
-    console.log(cat);
-    for (const code of codes) {
-      const g = groups[code];
-      console.log(`  ${g.severity === 'high' ? '⚠' : '·'} ${code} (${g.ids.length})  ${g.detail}`);
-      // When a finding carries pointers, those lines already name their entries —
-      // printing the ID list too would say everything twice. Otherwise the IDs ARE
-      // the payload.
-      if (g.refs.length) for (const r of g.refs) console.log(`      ${r}`);
-      else console.log(`      ${g.ids.join(', ')}`);
-    }
-    console.log('');
-  }
-
-  const codeSummary = Object.entries(byCode).map(([c, n]) => `${c}: ${n}`).join('  ');
-  console.log(`── ${total} entries scanned  ⚠ ${counts.high} high  · ${counts.low} low${codeSummary ? `\n   ${codeSummary}` : ''}`);
-  // Exit 0 regardless. This is a worklist to act on, not a gate to fail: a lint that
-  // breaks a build teaches people to stop running it, and every finding here needs a
-  // human judgement (re-point the REF? or is the pattern itself too concrete?).
-  process.exit(0);
-}
 
 // git runs in the PROJECT repo (REF files + FIX shas are project-repo history).
 const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -165,6 +103,100 @@ const kindRead = { ref: readDir(cwd, 'ref'), investigations: readDir(cwd, 'inves
 const refResolver = makeRefResolver(
   AREA_SPECS.map(a => ({ area: a.area, dir: kindRead[a.kind].dir, sub: a.sub, strip: a.strip })),
   { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+
+// --- lint mode --------------------------------------------------------------
+// A different question from the report's: not "what drifted?" but "which entries
+// can't be checked at all, and which pointers promise more than they can keep?"
+// Almost all of it is a pure function of the catalogue text — no git, no repo, no
+// HEAD — so it runs anywhere, including over a checkout whose project repo isn't
+// present. One finding is not: "does this declared path select any file?" can only be
+// answered by asking the repo, so it is supplied as an opt-in resolver and is simply
+// absent when there is no repo to ask. That preserves the run-anywhere property
+// exactly, rather than trading it for a finding.
+//
+// The output is a WORKLIST, not errors. Nothing here is a failure; every line is an
+// entry whose grounding is incomplete, which is the gate's own note that "an
+// unanchored entry is also a grounding-completeness gap", made enumerable.
+if (lintOnly) {
+  // Only when the project repo is genuinely here. classifySpec falls through to
+  // "external" whenever git cannot answer, so handing it a resolver over an absent
+  // repo would report EVERY declaration in the catalogue as dead — the loudest
+  // possible way to break the one property this mode has. Probe first; a resolver
+  // that cannot tell must not be offered, because the caller cannot tell either.
+  //
+  // Built from the same classifySpec, fileExists and refResolver the full report uses,
+  // not a second copy: two classifiers for one question is how two consumers come to
+  // disagree about what a declaration covers.
+  let resolveSpec = null;
+  try {
+    execSync('git rev-parse --show-toplevel', { cwd, stdio: 'ignore' });
+    resolveSpec = (spec) => {
+      // A directory is the one case where "the path exists" and "the declaration
+      // selects something" come apart. classifySpec answers `present`, because
+      // fs.existsSync is true for a directory — correct for a REF, where the question
+      // really is whether the path is there, and wrong here, where the matcher
+      // compares FILE paths and reaches nothing. Two different questions, so this one
+      // is asked here rather than by widening classifySpec: changing what that returns
+      // would move existing currency verdicts, and this finding must add without
+      // altering anything (V10).
+      try { if (fs.statSync(path.join(cwd, spec)).isDirectory()) return 'directory'; } catch { /* not a directory */ }
+      return classifySpec(spec, fileExists, git, refResolver).kind;
+    };
+  } catch { resolveSpec = null; }
+
+  console.log(`Currency lint — ${path.basename(cwd)}  (catalogues: ${anviDir})`
+    + (resolveSpec ? '' : '\n  (no project repo here — declarations were not resolved, so an inert one cannot be reported)')
+    + '\n');
+  const counts = { high: 0, low: 0 };
+  const byCode = {};
+  let total = 0;
+
+  for (const cat of CATALOGUES) {
+    const p = path.join(anviDir, cat);
+    if (!fs.existsSync(p)) continue;
+    const entries = parseEntries(fs.readFileSync(p, 'utf8'));
+
+    // Group by finding, not by entry. On a real corpus a single code can hit
+    // hundreds of entries, and printing the same sentence 341 times is a wall, not
+    // a worklist — the reader stops at the third line and learns nothing. The
+    // explanation belongs to the CODE (say it once); the entries are the payload
+    // (list them compactly). High-severity findings are few by construction, so
+    // they keep their own line and their pointer.
+    const groups = {};
+    for (const e of entries) {
+      total++;
+      for (const f of lintEntry(e, { catalogue: cat, resolveSpec })) {
+        counts[f.severity]++;
+        byCode[f.code] = (byCode[f.code] || 0) + 1;
+        const g = (groups[f.code] = groups[f.code] || { severity: f.severity, detail: f.detail, ids: [], refs: [] });
+        if (f.severity === 'high') g.severity = 'high';
+        g.ids.push(e.id);
+        if (f.refs) g.refs.push(`${e.id} → ${f.refs.join(', ')}`);
+      }
+    }
+
+    const codes = Object.keys(groups);
+    if (!codes.length) continue;
+    console.log(cat);
+    for (const code of codes) {
+      const g = groups[code];
+      console.log(`  ${g.severity === 'high' ? '⚠' : '·'} ${code} (${g.ids.length})  ${g.detail}`);
+      // When a finding carries pointers, those lines already name their entries —
+      // printing the ID list too would say everything twice. Otherwise the IDs ARE
+      // the payload.
+      if (g.refs.length) for (const r of g.refs) console.log(`      ${r}`);
+      else console.log(`      ${g.ids.join(', ')}`);
+    }
+    console.log('');
+  }
+
+  const codeSummary = Object.entries(byCode).map(([c, n]) => `${c}: ${n}`).join('  ');
+  console.log(`── ${total} entries scanned  ⚠ ${counts.high} high  · ${counts.low} low${codeSummary ? `\n   ${codeSummary}` : ''}`);
+  // Exit 0 regardless. This is a worklist to act on, not a gate to fail: a lint that
+  // breaks a build teaches people to stop running it, and every finding here needs a
+  // human judgement (re-point the REF? or is the pattern itself too concrete?).
+  process.exit(0);
+}
 
 // A withheld area indexes as empty, exactly like an absent one — so a REF pointing
 // into it is dropped before classification and lands in the unknown bucket with the

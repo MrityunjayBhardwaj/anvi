@@ -516,6 +516,11 @@ process.stdin.on('end', () => {
           id: boundaryId,
           label: boundaryLabel(boundaryId, boundaryContent),
           via,
+          // Whether the entry declares ANYTHING, which is a different question from
+          // whether the declaration selected this file. The guess notice needs it: its
+          // advice ("give the entry a FILES: or KINDS:") is written for an entry that
+          // has neither, and is backwards at one that does.
+          declares: Boolean(filesMatch) || kindsField !== null,
           content: boundaryContent.trim(),
         });
       }
@@ -604,12 +609,33 @@ process.stdin.on('end', () => {
     // shown an irrelevant checklist cannot tell a wrong delivery from a right one,
     // and learns to skim all of them. Naming the guessed ones puts the doubt where it
     // belongs and says what would remove it.
-    const guessed = matches.filter(m => m.via === 'text').map(m => m.label);
-    if (guessed.length) {
-      message += `\nMatched by NAME, not by declaration: ${guessed.join('; ')}`
+    //
+    // The doubt is the same for every guessed boundary; the REMEDY is not, and the two
+    // populations need different sentences. "Give the entry a FILES: or KINDS:" is
+    // written for an entry that has neither. Printed at an entry that HAS one, it is
+    // worse than unhelpful — the author did exactly that, the field failed to select
+    // this file, and the tool's advice is to do it again. That misdirection is how a
+    // glob in FILES: that matched nothing survived unnoticed: every injection carrying
+    // the defect also carried a sentence pointing away from it.
+    const guessedMatches = matches.filter(m => m.via === 'text');
+    if (guessedMatches.length) {
+      const undeclared = guessedMatches.filter(m => !m.declares).map(m => m.label);
+      const declaring = guessedMatches.filter(m => m.declares).map(m => m.label);
+      message += `\nMatched by NAME, not by declaration: ${guessedMatches.map(m => m.label).join('; ')}`
         + ' — the filename appears somewhere in the entry. If these checks look'
-        + ' unrelated to this file, that is why; give the entry a FILES: or KINDS:'
-        + ' to make it deterministic.';
+        + ' unrelated to this file, that is why.';
+      if (undeclared.length) {
+        message += ` Give ${undeclared.join('; ')} a FILES: or KINDS: to make it deterministic.`;
+      }
+      if (declaring.length) {
+        // Deliberately does not claim the declaration is broken — this hook knows only
+        // that it did not select THIS file, which is also what a correct declaration
+        // does for a file it does not cover. It points at the field and names the tool
+        // that can tell the two apart.
+        message += ` ${declaring.join('; ')} already declares a FILES: or KINDS: that did not`
+          + ' select this file — check that declaration rather than adding one'
+          + ' (`currency-report.js --lint` lists declarations that select nothing).';
+      }
     }
 
     // Add the most critical info from dharana

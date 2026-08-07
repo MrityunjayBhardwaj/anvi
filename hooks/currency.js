@@ -175,6 +175,7 @@ const LINT = {
   LINE_ANCHORED_REF: 'line-anchored-ref',
   NO_VALIDATED: 'no-validated',
   NO_COMPUTABLE_REF: 'no-computable-ref',
+  INERT_DECLARATION: 'inert-declaration',
 };
 
 // A REF token of the form `path/to/file.ext:540`, with an optional `-560` range.
@@ -214,7 +215,13 @@ function lineAnchoredRefs(refField) {
 // split the nudges use: dharana/dhyana ARE the code map, so an unanchored one is a
 // live hazard (its drift is what silently misfires the injector); elsewhere a
 // missing anchor is hygiene. Returns [{ code, severity, detail }].
-function lintEntry(entry, { catalogue } = {}) {
+// `resolveSpec` is an OPT-IN enrichment: `(spec) => classifySpec kind`. Everything else
+// here judges the entry's FORM and needs no repo, which is what lets the lint run over a
+// catalogue whose project is not checked out. "Does this declared path select any file?"
+// cannot be answered from the text, so it is offered rather than required — and when it
+// is absent NOTHING changes, not one existing finding (V10). An enrichment that alters a
+// verdict when switched on is a different tool wearing the same name.
+function lintEntry(entry, { catalogue, resolveSpec } = {}) {
   const findings = [];
   const high = sensitivityFor(catalogue) === 'high';
 
@@ -250,6 +257,45 @@ function lintEntry(entry, { catalogue } = {}) {
         ? 'no VALIDATED stamp on a boundary entry — its freshness falls to a weaker rung (a creation-time FIX, or the provisional "when the text was last edited"). Boundary maps rot silently and are the entries that most deserve an explicit stamp.'
         : 'no VALIDATED stamp — freshness falls back to the FIX sha or the provisional time rung. Stamp it the next time you confirm this entry.',
     });
+  }
+
+  // A declaration that selects no file. Distinct from every finding above, which are
+  // about a pointer being ABSENT or FRAGILE — this one is a pointer that is PRESENT,
+  // well-formed, and false. Nothing rejects it, nothing warns, and the injector's text
+  // fallback usually delivers the file anyway, so the entry reads healthy from every
+  // angle. That is how a glob in FILES: matching none of the sixteen modules it named
+  // survived for months.
+  //
+  // Only `external` and `deleted` count. `present` and `ambiguous` both select files —
+  // ambiguity means SEVERAL, which is the opposite of inert and a perfectly good thing
+  // for a declaration to do — and `reference` resolves into the store's reference area.
+  // Flagging any of those would report working declarations as broken, and a lint that
+  // cries wolf on its first run is a lint nobody runs twice.
+  //
+  // FILES: only. REF: is a bibliography of things someone READ; a REF that no longer
+  // resolves is already the gate's dangling verdict, and judging it here would report
+  // the best-cited entries in the corpus as defective.
+  if (resolveSpec) {
+    const dead = [];
+    for (const spec of extractFileSpecs(entry.filesField)) {
+      let kind = null;
+      // A resolver that fails is saying "cannot tell", which is not "selects nothing".
+      // Treating a git error as inert would invent findings on the first machine where
+      // git is slow or absent — the failure mode has to be silence, not accusation.
+      try { kind = resolveSpec(spec); } catch { kind = null; }
+      if (kind === 'external') dead.push(`${spec} (never tracked here)`);
+      else if (kind === 'deleted') dead.push(`${spec} (tracked once, since deleted)`);
+      // A directory is the case where the path plainly EXISTS and the declaration still
+      // selects nothing, because the matcher compares file paths. It is also the one a
+      // reader is most likely to argue with, so the finding says which it is.
+      else if (kind === 'directory') dead.push(`${spec} (a directory — declarations select files)`);
+    }
+    if (dead.length) {
+      findings.push({
+        code: LINT.INERT_DECLARATION, severity: high ? 'high' : 'low', refs: dead,
+        detail: 'a declared path selects no file — the entry maps nothing through it, and the injector falls back to guessing from the filename, so nothing looks wrong. Usually a typo, a directory where a file was meant, a file that moved, or a glob narrower than intended.',
+      });
+    }
   }
 
   return findings;
