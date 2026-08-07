@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs, readField, declaredItems, globBody, matchesDeclaredFile } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -378,15 +378,17 @@ process.stdin.on('end', () => {
     const relPath = path.relative(projectRoot, realFile);
     const fileName = path.basename(realFile, path.extname(realFile));
 
-    // Match against dharana boundaries — split by ### B headers, then match
-    // This is more robust than a single regex for multi-line content
+    // Match against dharana boundaries. The split comes from currency.js, which also
+    // owns the entry parser the freshness gate uses — the two accept different TOKENS
+    // on purpose (an entry is any `[A-Z]{1,3}\d+`; a boundary is `B<n>` or the literal
+    // word `Boundary`) but take the accepted heading DEPTH from one place. They used to
+    // disagree about depth, and a boundary written `## B7:` was therefore parsed by the
+    // gate, given a verdict, counted in the lint, and never seen here — its checks
+    // arriving nowhere while its entry read healthy from every angle (#206).
     const matches = [];
-    const boundarySections = dharana.split(/^### (B\d+|Boundary)/m);
-    // boundarySections: ['...preamble...', 'B1', ': title\ncontent...', 'B2', ': title\ncontent...', ...]
-    for (let i = 1; i < boundarySections.length; i += 2) {
-      const boundaryId = boundarySections[i];
-      // Content is everything up to the next section divider (--- on its own line or ## N.)
-      let boundaryContent = (boundarySections[i + 1] || '').split(/\n---\n|\n## \d/)[0];
+    for (const section of splitBoundaries(dharana)) {
+      const boundaryId = section.id;
+      let boundaryContent = section.content;
 
       // Check if this boundary's FILES: field lists the file being edited/read
       // FILES: is the primary, deterministic match. Text matching is fallback.
@@ -583,8 +585,22 @@ process.stdin.on('end', () => {
       }
     }
 
-    // Build injection message
-    const boundaryNames = matches.map(m => m.label).join(', ');
+    // Build injection message.
+    //
+    // Labels are de-duplicated, order preserved. A boundary's entry and its later
+    // amendments are separate sections carrying DIFFERENT content — delivering all of
+    // them is right, since an amendment is part of that boundary's knowledge — but they
+    // share an id, so naming each one in the header printed the same token repeatedly
+    // and said nothing by doing so. Already true before the depth fix (one project's
+    // header named a boundary six times); accepting level-2 headings made it acute,
+    // because a catalogue that writes its amendments at level 2 turned twenty of them
+    // into twenty repetitions in a single line. The repetition is a display defect, not
+    // a matching one: nothing is dropped here, only said once.
+    //
+    // Not a fix for one heading naming several distinct boundaries the same thing — two
+    // different entries both titled `B-NEW` still collapse to one label, which is the
+    // catalogue's own id collision to resolve, not this line's.
+    const boundaryNames = [...new Set(matches.map(m => m.label))].join(', ');
     let message = `DHYANA: editing ${relPath} touches catalogue boundary ${boundaryNames}.`;
 
     // Say which of these were reached by guessing. A declared match (FILES:/KINDS:)
@@ -601,11 +617,22 @@ process.stdin.on('end', () => {
     // this file, and the tool's advice is to do it again. That misdirection is how a
     // glob in FILES: that matched nothing survived unnoticed: every injection carrying
     // the defect also carried a sentence pointing away from it.
+    //
+    // De-duplicated on the same grounds as the header, and with one extra care: whether
+    // a label DECLARES is asked of every section wearing it, not only of the guessed
+    // ones. An entry and its amendments share a label and typically only the first
+    // carries the `FILES:` line, so a later amendment matching by prose is a guess whose
+    // own section declares nothing — while the boundary plainly does. Asking only the
+    // guessed sections answers "no" and prints "give this entry a FILES:" to an author
+    // who wrote one, which is precisely the misdirection this split exists to end and
+    // which a fixture without a matching amendment cannot catch.
     const guessedMatches = matches.filter(m => m.via === 'text');
     if (guessedMatches.length) {
-      const undeclared = guessedMatches.filter(m => !m.declares).map(m => m.label);
-      const declaring = guessedMatches.filter(m => m.declares).map(m => m.label);
-      message += `\nMatched by NAME, not by declaration: ${guessedMatches.map(m => m.label).join('; ')}`
+      const guessedLabels = [...new Set(guessedMatches.map(m => m.label))];
+      const declaringLabels = new Set(matches.filter(m => m.declares).map(m => m.label));
+      const undeclared = guessedLabels.filter(l => !declaringLabels.has(l));
+      const declaring = guessedLabels.filter(l => declaringLabels.has(l));
+      message += `\nMatched by NAME, not by declaration: ${guessedLabels.join('; ')}`
         + ' — the filename appears somewhere in the entry. If these checks look'
         + ' unrelated to this file, that is why.';
       if (undeclared.length) {

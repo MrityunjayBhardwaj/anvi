@@ -508,7 +508,20 @@ function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth } = {}) {
 // purpose: accepting `/` would record only the first id and drop the second just as
 // silently as this bug did. One heading naming two entries needs a decision about
 // what it PRODUCES, not a wider character class (#89).
-const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+(?:\.\d+)*)\b[.:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
+// The heading DEPTHS a catalogue entry may be written at, as one source. Two readers ask
+// different and legitimately different questions of a heading — this file asks "is this
+// an ENTRY, in any catalogue?" and the injector's splitter asks "is this a BOUNDARY?",
+// so they accept different tokens on purpose. Neither has any reason to disagree about
+// the DEPTH, and they did: the splitter took `###` alone while this took `##` or `###`,
+// so a boundary authored at level 2 was parsed here, given a freshness verdict, counted
+// in the lint, and never delivered by the hook. Seven boundaries fleet-wide were dark
+// that way, including every boundary in one project's map (#206).
+//
+// A fragment rather than a compiled regex because the two uses anchor differently. Both
+// interpolate it; neither writes `#{2,3}` again.
+const ENTRY_DEPTH = '#{2,3}';
+
+const ENTRY_RE = new RegExp(`^${ENTRY_DEPTH}\\s+([A-Z]{1,3}\\d+(?:\\.\\d+)*)\\b[.:\\s]([\\s\\S]*?)(?=^${ENTRY_DEPTH}\\s+[A-Z]{1,3}\\d+\\b|^## Compaction Log|(?![\\s\\S]))`, 'gm');
 
 // --- One reader for where a catalogue field starts and where it ends ---------
 // Two questions have to be answered the same way by everyone who reads these
@@ -703,6 +716,33 @@ function parseEntries(md) {
   const primaries = new Set(entries.filter((e) => e.level === 2).map((e) => e.id));
   for (const e of entries) if (e.level === 3 && primaries.has(e.id)) e.amends = true;
   return entries;
+}
+
+// --- The boundary split, for the one consumer that needs boundaries specifically ---
+// The injector asks a NARROWER question than parseEntries: not "is this an entry" but
+// "is this a BOUNDARY", because a dharana also carries invariant cross-refs, lifecycle
+// notes and imported hetvabhasa entries, and delivering those as boundaries would be
+// wrong. So the token rule here is deliberately its own — `B<n>` or the literal word
+// `Boundary`, the latter being how 63 live entries in the fleet are still written, and
+// something parseEntries does not accept because an unnumbered heading has no id for a
+// catalogue-wide index to key on.
+//
+// What it does NOT get to decide for itself is the DEPTH. That is `ENTRY_DEPTH`, above,
+// shared with parseEntries — see the note there for what the divergence cost.
+//
+// Content runs to the next boundary heading (the split does that) or to the first
+// section divider, whichever comes first. The divider cut is load-bearing and predates
+// this: without it a heading that lost its `---` inherits the rest of the file as its
+// body, and a text fallback over a body containing everything always matches. Narrower
+// is the safe direction here — a boundary reaching too far delivers another boundary's
+// checks under this one's name.
+function splitBoundaries(md) {
+  const parts = String(md).split(new RegExp(`^${ENTRY_DEPTH} (B\\d+|Boundary)`, 'm'));
+  const out = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    out.push({ id: parts[i], content: (parts[i + 1] || '').split(/\n---\n|\n## \d/)[0] });
+  }
+  return out;
 }
 
 // Is this sha an actual commit in the repo `git` runs in? A FIX: sha can be dead
@@ -1399,7 +1439,7 @@ module.exports = {
   globBody, matchesDeclaredFile, globWidthGap,
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
-  lintEntry, lineAnchoredRefs, LINT,
+  lintEntry, lineAnchoredRefs, LINT, splitBoundaries,
   // Exported so the stamp-selection rule can be asserted directly rather than
   // only through a parsed catalogue — the defect it fixes was invisible at the
   // report level for weeks precisely because nothing tested the selection.
