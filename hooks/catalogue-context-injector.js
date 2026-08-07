@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs, readField, declaredItems } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -274,30 +274,14 @@ function matchesKind(kindsField, relPath) {
   });
 }
 
-// A field may run past its own line. An author writing more globs than fit comfortably
-// wraps them, and a single-line read would take the first and drop the rest — silently,
-// because a field that yielded no glob and a file that matched no glob are the same
-// non-event from the outside. There is no injection in which to complain either: an
-// entry that failed to match is an entry that was never selected, so tolerance here is
-// the only remedy the hook has, and the author gets total silence without it.
-//
-// A continuation is an indented line, which is how the template writes one. A line at
-// column zero begins something else — the next field, a heading, prose. Continuations
-// join with a comma so that both wrapping styles work: the author who ended the
-// previous line with a separator gets an empty item (dropped below), and the author who
-// forgot one still gets two globs rather than one nonsensical joined string.
-function fieldWithContinuations(content, name) {
-  const lines = content.split('\n');
-  const head = lines.findIndex(l => l.startsWith(`${name}:`));
-  if (head === -1) return null;
-  let value = lines[head].slice(name.length + 1);
-  for (let i = head + 1; i < lines.length; i++) {
-    if (!/^[ \t]+\S/.test(lines[i])) break;
-    value += `,${lines[i].trim()}`;
-  }
-  return value;
-}
-
+// This file used to carry its own field reader. It has none now: `readField` comes from
+// currency.js, which is where the gate reads these fields too, so the hook and the gate
+// answer "where does this field start, and where does it end" by CONSTRUCTION rather
+// than by two implementations happening to agree. They did not agree — this reader
+// required the marker bare at column zero while the gate accepted it indented and bold,
+// so a boundary declaring `**FILES:**` was parsed by one and invisible to the other, and
+// the author of nine correctly-declared paths was told to add a declaration. The reasons
+// the shared reader is shaped the way it is live beside it, in currency.js.
 // --- What the text fallback is allowed to read --------------------------------
 // The fallback asks "does this filename appear in the entry?" and takes yes for a
 // claim that the entry governs the file. That question is only meaningful over
@@ -467,23 +451,18 @@ process.stdin.on('end', () => {
       // Check if this boundary's FILES: field lists the file being edited/read
       // FILES: is the primary, deterministic match. Text matching is fallback.
       //
-      // Read with continuations, exactly as KINDS: is fifteen lines below. That helper
-      // was written for the glob field on the argument that an author with more items
-      // than fit comfortably wraps them and loses everything after line one — and FILES:
-      // is the field MORE likely to wrap, because it holds paths. The asymmetry was
-      // never deliberate; the two fields simply grew apart (#194).
-      //
-      // What the one-line read cost was not uniform, and neither half is the whole bug:
-      // a continuation naming a concrete path still ARRIVED, because the FILES: line is
-      // itself inside the prose the text fallback searches, so the path matched itself —
-      // and the entry was then labelled a guess and its author told the declaration
-      // "did not select this file", which was false. A continuation naming a glob
-      // arrived nowhere at all, since no filename search can match a pattern. One shape
-      // was mislabelled, the other silently lost.
-      const filesField = fieldWithContinuations(boundaryContent, 'FILES');
+      // Read by the SHARED reader, so this hook and the freshness gate agree about where
+      // the field starts and where it ends. What the one-line read cost was not uniform,
+      // and neither half was the whole bug: a continuation naming a concrete path still
+      // ARRIVED, because the FILES: line is itself inside the prose the text fallback
+      // searches, so the path matched itself — and the entry was then labelled a guess
+      // and its author told the declaration "did not select this file", which was false.
+      // A continuation naming a glob arrived nowhere at all, since no filename search can
+      // match a pattern. One shape was mislabelled, the other silently lost (#194, #200).
+      const filesField = readField(boundaryContent, 'FILES');
       let isRelevant = false;
 
-      if (filesField !== null) {
+      if (filesField !== undefined) {
         // Deterministic match: does relPath name one of the declared files? Literal or
         // glob, both anchored as a segment-aligned path suffix — see matchesDeclaredFile
         // for why the suffix is deliberate, why it must land on a separator, and why a
@@ -493,8 +472,14 @@ process.stdin.on('end', () => {
         // here.startsWith(r + path.sep)`) and `hooks/currency.js` (`r.endsWith('/' +
         // want)`). Four sites answer this question and this was the one that answered it
         // without the guard — the relation has no home, so each site re-derives it.
-        const boundaryFiles = filesField.split(',').map(f => f.trim()).filter(Boolean);
-        isRelevant = boundaryFiles.some(bf => matchesDeclaredFile(bf, relPath));
+        //
+        // Items come from `declaredItems`, the same grammar the reporter uses, rather
+        // than from a bare comma split. The split was the third way these two consumers
+        // disagreed: it left markdown wrappers attached, so a path written `` `x.py` ``
+        // was compared with its backticks still on and selected nothing — while the
+        // declaration COUNTED, because the count is computed from the stripped form. It
+        // also left parenthetical notes in, minting specs out of prose like a route list.
+        isRelevant = declaredItems(filesField).some(bf => matchesDeclaredFile(bf, relPath));
       }
 
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
@@ -506,8 +491,11 @@ process.stdin.on('end', () => {
       // has no way to tell an authoritative delivery from an accidental one.
       let via = isRelevant ? 'FILES' : null;
 
-      const kindsField = fieldWithContinuations(boundaryContent, 'KINDS');
-      if (!isRelevant && kindsField !== null) {
+      // Same reader, deliberately NOT the same item grammar: a KINDS: item is a pattern,
+      // where a bracket is syntax rather than markdown decoration, so the wrapper
+      // stripping that is right for a path would corrupt a character class.
+      const kindsField = readField(boundaryContent, 'KINDS');
+      if (!isRelevant && kindsField !== undefined) {
         isRelevant = matchesKind(kindsField, relPath);
         if (isRelevant) via = 'KINDS';
       }
@@ -569,8 +557,14 @@ process.stdin.on('end', () => {
           // encodes that rule for FILES: — it yields nothing for `[comma-separated list
           // …]` — so KINDS: is held to the same test rather than to a second opinion
           // about what a placeholder looks like.
-          declares: (filesField !== null && extractFileSpecs(filesField).length > 0)
-            || (kindsField !== null && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim()))),
+          // Tested for CONTENT, not for presence of the key. The shared reader reports an
+          // absent field and an empty one the same way (`undefined`), which is what these
+          // two questions actually want — an empty declaration is not a declaration — and
+          // guarding on `!== null` here would let `undefined` through, since undefined is
+          // not null: the KINDS: branch would then split it and throw inside this hook's
+          // own catch, turning a parse into silence (H12).
+          declares: extractFileSpecs(filesField).length > 0
+            || (!!kindsField && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim()))),
           content: boundaryContent.trim(),
         });
       }

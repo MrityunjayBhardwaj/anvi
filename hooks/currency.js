@@ -143,21 +143,47 @@ function extractRefFiles(refField, fileExt = FILE_EXT) {
 // file list, so a path is anything with a separator or an extension — otherwise real
 // entries (.glb, .patch, extension-less directories) get silently dropped, which is
 // the same half-read field this fixes.
-function extractFileSpecs(filesField) {
+// The items of a FILES: field, normalised and nothing more — no judgement about
+// whether an item looks like a path. Split out because the MATCHER and the REPORTER
+// both need the item list and were each deriving it: the reporter through the code
+// below, which strips markdown wrappers, and the hook through a bare comma split that
+// did not. So a path written the way markdown asks for it —
+//
+//   FILES: `src/module.py`
+//
+// at column zero, bare marker, everything else correct — selected nothing, because
+// the matcher compared a token with backticks in it against a path without them. And
+// it was COUNTED as a declaration, because the count came from here, where the
+// backticks are stripped. Worse than the marker case above rather than better: the
+// author was told to check the declaration with the lint, and the lint reads through
+// this function too, resolves the path, and reports the entry healthy. The message
+// pointed at the one tool that could not see the problem.
+//
+// Deliberately NOT shared with KINDS:. A FILES: item is a PATH, where a backtick or a
+// bracket is markdown decoration around the name; a KINDS: item is a PATTERN, where
+// the same characters are syntax — stripping `[` off a character class would corrupt
+// the glob it is part of. One reader for where a field begins and ends, and an item
+// grammar per field, because a path and a pattern are not the same kind of thing.
+function declaredItems(filesField) {
   if (!filesField) return [];
   const out = [];
+  // Parenthetical notes carry slashes ("route gates: /, /optimize/") and would mint
+  // junk specs, so they go before the split rather than after.
   const noNotes = String(filesField).replace(/\([^)]*\)/g, ' ');
   for (const chunk of expandBraces(noNotes).split(/[,;]+/)) {
     for (let tok of chunk.trim().split(/\s+/)) {
       tok = tok.replace(/^[`'"[(]+|[`'")\],.:+]+$/g, '');
-      if (!tok) continue;
-      if (tok.startsWith('/') || tok.startsWith('~')) continue; // outside the repo
-      if (/[<>]/.test(tok)) continue;                           // <placeholder>
-      if (!tok.includes('/') && !FILE_EXT.test(tok)) continue;  // prose, not a path
-      if (!out.includes(tok)) out.push(tok);
+      if (tok && !out.includes(tok)) out.push(tok);
     }
   }
   return out;
+}
+
+function extractFileSpecs(filesField) {
+  return declaredItems(filesField).filter((tok) =>
+    !tok.startsWith('/') && !tok.startsWith('~')       // outside the repo
+    && !/[<>]/.test(tok)                               // <placeholder>
+    && (tok.includes('/') || FILE_EXT.test(tok)));     // prose, not a path
 }
 
 // --- lint: the entry's FORM, not the code's state ---------------------------
@@ -333,17 +359,127 @@ function lintEntry(entry, { catalogue, resolveSpec } = {}) {
 // what it PRODUCES, not a wider character class (#89).
 const ENTRY_RE = /^#{2,3}\s+([A-Z]{1,3}\d+(?:\.\d+)*)\b[.:\s]([\s\S]*?)(?=^#{2,3}\s+[A-Z]{1,3}\d+\b|^## Compaction Log|(?![\s\S]))/gm;
 
-function field(body, name) {
-  // Anchor to line start + require the UPPERCASE field marker, so prose like
-  // "Root fix: …" or "The real fix: …" never masquerades as the **FIX:** field.
-  const m = body.match(new RegExp(`^\\s*(?:\\*\\*)?${name}:(?:\\*\\*)?\\s*(.+)`, 'm'));
-  return m ? m[1].trim() : undefined;
+// --- One reader for where a catalogue field starts and where it ends ---------
+// Two questions have to be answered the same way by everyone who reads these
+// fields, and until now they were answered twice, differently, by components that
+// could not see each other's answer:
+//
+//   WHERE IT STARTS. This reader accepts the marker indented and bold; the hook's
+//   reader required it bare at column zero. A live boundary writes `**FILES:**` and
+//   names nine paths: the gate parsed it, the injector could not see the field at
+//   all, and so told the author to add a declaration they had already written — the
+//   misdirection the declaration-reporting work exists to prevent, arriving through
+//   a door that work never looked at.
+//
+//   WHERE IT ENDS. Both readers stopped at the end of the marker's own line except
+//   one, written for the glob field on the argument that an author with more items
+//   than fit comfortably wraps them and silently loses everything after line one.
+//   That argument is not about globs. It is about fields, and it applies hardest to
+//   the field holding PATHS, which are the longest things anyone writes here.
+//
+// The rule this settles: when N components read one author-facing field, its grammar
+// is the union of what they accept, and the component implementing least is invisible
+// because the others keep answering. The correction that made this issue worth its own
+// change is that the least-implementing reader turned out to be the SHARED one — both
+// consumers delegated here, so comparing consumers found nothing. They agreed, and
+// were both wrong.
+//
+// Continuations join with a SPACE, and that single choice is what lets one reader
+// serve every field. A comma join would be right for a list and wrong for prose,
+// which would put a per-field rule back in the one place this is trying to remove it
+// from. A space is simply correct for prose — and it separates list items too,
+// because both item parsers below already split on whitespace as well as commas. So
+// no consumer needs to know which kind of field it asked for.
+//
+// What counts as a continuation had to be derived from the corpus rather than assumed,
+// and assuming it cost three verdicts on the first measurement. Two shapes are real:
+//
+//   INDENTED, which is how the template writes a wrapped field; and
+//   a BULLET LIST under an empty marker, which is how an author writes a field with
+//   several annotated items:
+//
+//       **REF:**
+//       - Subtype A: `src/engine/x.ts:1664` …
+//       - Subtype B: `src/app/version.ts:17` …
+//
+// The second shape was already being read, by accident. The old single-line regex put
+// `\s*` between the colon and its capture, and `\s` matches a NEWLINE — so it reached
+// onto the next line and captured the first bullet. Nobody wrote that intentionally;
+// requiring indentation dropped it, and two entries went from grounded to unanchored on
+// a fleet diff. That is the whole argument for diffing the fleet before believing a
+// refactor is behaviour-preserving: the incumbent's accidents are part of its contract.
+//
+// Reading only the FIRST bullet, as the accident did, would be this issue's own defect
+// wearing different clothes, so the whole list is taken.
+//
+// The value therefore ends at the first line that begins something else: a blank line, a
+// heading, or another field marker. That last stop is what keeps a multi-stamp history
+// intact — stamps are consecutive column-zero markers, so one can never swallow the next
+// — and it is why the marker test has to recognise a field GENERICALLY rather than by
+// the name being asked for.
+const FIELD_CONTINUATION = /^[ \t]+\S/;
+const LIST_ITEM = /^[-*+][ \t]+\S/;
+const HEADING = /^#{1,6}\s/;
+// An UPPERCASE label ending in a colon, bold or plain. Uppercase is the discriminator
+// that keeps ordinary prose ("Root fix: …", "Subtype A: …") from reading as a field —
+// the same guard the single-field reader has always relied on, generalised.
+const ANY_FIELD_MARKER = /^[ \t]*(?:\*\*)?[A-Z][A-Z0-9 _-]*(?:\*\*)?:/;
+const startsSomethingElse = (line) =>
+  !line.trim() || HEADING.test(line) || ANY_FIELD_MARKER.test(line);
+// The bullet is list SYNTAX, not part of the value. Left in, every wrapped list
+// contributes a bare `-` that every consumer then has to know to ignore — and the item
+// grammar below does not strip it, so it would survive as a spec that matches nothing.
+const stripBullet = (line) => line.trim().replace(/^[-*+][ \t]+/, '');
+
+// Accepts `NAME:`, `**NAME:**` and `**NAME**:`, indented or not. Still anchored to
+// line start and still requiring the UPPERCASE marker, so prose like "Root fix: …"
+// never masquerades as the FIX: field — that guard is what makes this readable at all.
+function fieldMarker(name) {
+  return new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?:\\*\\*)?:(?:\\*\\*)?[ \\t]*(.*)$`);
 }
 
-// Every occurrence of a field, in document order.
+// Every occurrence of a field, in document order, each joined with its continuations.
+function readFieldAll(body, name) {
+  const lines = String(body == null ? '' : body).split('\n');
+  const marker = fieldMarker(name);
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(marker);
+    if (!m) continue;
+    let value = m[1].trim();
+    let j = i + 1;
+    // Nothing after the marker means the value begins on the next line, whatever shape
+    // it has — a bullet, or plain prose. Taken unconditionally here (subject only to the
+    // stop tests) because the marker having no value is itself the signal; requiring the
+    // next line to look like a continuation is what dropped the bullet-list shape.
+    if (!value && j < lines.length && !startsSomethingElse(lines[j])) {
+      value = stripBullet(lines[j]);
+      j++;
+    }
+    for (; j < lines.length; j++) {
+      if (startsSomethingElse(lines[j])) break;
+      if (!FIELD_CONTINUATION.test(lines[j]) && !LIST_ITEM.test(lines[j])) break;
+      value += ' ' + stripBullet(lines[j]);
+    }
+    out.push(value.trim());
+  }
+  return out;
+}
+
+// The first occurrence. `undefined` for both "no such field" and "the field is empty",
+// deliberately: every caller tests it for truthiness, and an empty declaration is not a
+// declaration — telling the two apart here would invent a distinction nobody consumes.
+function readField(body, name) {
+  const all = readFieldAll(body, name);
+  return all.length && all[0] ? all[0] : undefined;
+}
+
+function field(body, name) {
+  return readField(body, name);
+}
+
 function fieldAll(body, name) {
-  const re = new RegExp(`^\\s*(?:\\*\\*)?${name}:(?:\\*\\*)?\\s*(.+)`, 'gm');
-  return [...body.matchAll(re)].map((m) => m[1].trim());
+  return readFieldAll(body, name).filter(Boolean);
 }
 
 // VALIDATED is the one field that is a HISTORY rather than a declared value, so
@@ -1103,4 +1239,9 @@ module.exports = {
   // only through a parsed catalogue — the defect it fixes was invisible at the
   // report level for weeks precisely because nothing tested the selection.
   fieldAll, newestValidated,
+  // The one reader, and the one item grammar for FILES:. Exported so the hook reads a
+  // field the same way the gate does BY CONSTRUCTION rather than by two implementations
+  // agreeing. Every time these two questions were answered twice, the answers diverged
+  // and the least-implementing reader was the silent one.
+  readField, readFieldAll, declaredItems,
 };
