@@ -59,14 +59,6 @@ Load project-specific catalogues if they exist (`.anvi/` in project root):
 - Output translates to user profile language or plain English
 - Framework terminology is NEVER exposed to the user
 
-## GSD Integration
-
-When used with GSD, load the compatibility hooks:
-- `~/.claude/anvi/gsd-compat/executor-hook.md`
-- `~/.claude/anvi/gsd-compat/planner-hook.md`
-- `~/.claude/anvi/gsd-compat/checker-hook.md`
-- `~/.claude/anvi/gsd-compat/debugger-hook.md`
-
 ## Project Initialization
 
 To create project-specific catalogues:

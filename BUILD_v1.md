@@ -410,7 +410,7 @@ Every task must include:
 
 ### anvi-checker agent — 6 cognitive dimensions
 
-Fork gsd-plan-checker. Add dimensions A through F from `gsd-compat/checker-hook.md`:
+Fork gsd-plan-checker. Add dimensions A through F:
 
 ```
 Existing GSD dimensions (1-9): keep all
