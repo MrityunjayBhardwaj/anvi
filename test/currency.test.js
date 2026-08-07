@@ -573,20 +573,38 @@ v = computeCurrency({ validatedField: 'abc1234', filesField: 'a.js' },
   { git: makeGit({ 'abc1234:a.js': 'h1\n' }), fileExists: exists(['a.js']) });
 eq(v.status, 'YELLOW', 'FILES:-only entry is computable (was GRAY — nothing to diff)');
 
-// --- specExists: only git can answer a glob ----------------------------------
+// --- specExists: the repo supplies the corpus, the engine supplies the rule ---
+// Before #195 this asked `git ls-files -- <spec>` and took git's pathspec semantics,
+// where a single `*` crosses a `/`. The injector matched the same declarations with the
+// KINDS: engine, where it does not — so `FILES: public/*.glb` resolved to six files for
+// the gate and one for the hook, each side confident. git now only LISTS; the engine
+// decides. The stub therefore answers a bare `ls-files`, which is the whole of the
+// interface this function still uses.
 console.log('specExists');
-const lsGit = (matches) => (args) => {
-  const m = args.match(/^ls-files -- "(.+)"$/);
-  if (m) return matches[m[1]] || '';
-  return '';
+const lsGit = (tracked) => (args) => {
+  if (args === 'ls-files') return tracked.join('\n');
+  return ''; // no per-spec pathspec query is made any more, and none must creep back
 };
-ok(specExists('a.js', exists(['a.js']), lsGit({})), 'literal file present → fs answers, no git call');
-ok(!specExists('gone.js', exists([]), lsGit({})), 'literal file absent → fs is the last word');
-ok(specExists('bin/lib/*.cjs', exists([]), lsGit({ 'bin/lib/*.cjs': 'bin/lib/core.cjs\n' })),
-   'glob fs cannot stat → git resolves it (else a live glob reads as dangling)');
-ok(!specExists('bin/nope/*.cjs', exists([]), lsGit({})), 'glob matching nothing → genuinely gone');
+ok(specExists('a.js', exists(['a.js']), lsGit([])), 'literal file present → fs answers, no git call');
+ok(!specExists('gone.js', exists([]), lsGit([])), 'literal file absent → fs is the last word');
+ok(specExists('bin/lib/*.cjs', exists([]), lsGit(['bin/lib/core.cjs'])),
+   'a pattern fs cannot stat → the repo resolves it (else a live pattern reads as dangling)');
+ok(!specExists('bin/nope/*.cjs', exists([]), lsGit(['bin/lib/core.cjs'])), 'pattern matching nothing → genuinely gone');
 ok(!specExists('x/*.js', exists([]), () => { throw new Error('not a repo'); }),
    'git unavailable → not exists, never throws');
+
+// The disagreement itself, in both directions, on the shape that produced it.
+ok(!specExists('public/*.glb', exists([]), lsGit(['public/levels/lvl_1/diorama.glb'])),
+   'one star is one segment wide — it does NOT reach into a subdirectory');
+ok(specExists('public/**/*.glb', exists([]), lsGit(['public/levels/lvl_1/diorama.glb'])),
+   '  ... and `**/` is what does, so the author can still say it');
+ok(specExists('lib/*.cjs', exists([]), lsGit(['pkg/lib/core.cjs'])),
+   'a pattern is a path SUFFIX, exactly as a literal declaration is');
+// git pathspec reads `[id]` as "one of i, d" and matches nothing. The engine escapes
+// the bracket, so it means the directory literally called `[id]` — which is what every
+// bracket in the live corpus actually is (a Next.js dynamic route segment).
+ok(specExists('app/[id]/route.ts', exists([]), lsGit(['app/[id]/route.ts'])),
+   'a bracket is a literal directory name, not a character class');
 
 // --- lineAnchoredRefs -------------------------------------------------------
 // The whole finding hinges on telling a line anchor from things that merely look

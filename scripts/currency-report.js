@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -161,6 +161,14 @@ if (lintOnly) {
     };
   } catch { resolveSpec = null; }
 
+  // The second opt-in, offered on exactly the same terms as the first: built only when
+  // the project repo is genuinely here, and absent means the finding simply does not
+  // appear. It asks a question no other check can — whether a pattern selects LESS than
+  // its author meant — and the reason it needs its own probe rather than a wider
+  // `resolveSpec` is that a narrow pattern still classifies `present`, so there is no
+  // kind for it to return (#195).
+  const resolveGlobWidth = resolveSpec ? (spec) => globWidthGap(spec, git) : null;
+
   console.log(`Currency lint — ${path.basename(cwd)}  (catalogues: ${anviDir})`
     + (resolveSpec ? '' : '\n  (no project repo here — declarations were not resolved, so an inert one cannot be reported)')
     + '\n');
@@ -182,7 +190,7 @@ if (lintOnly) {
     const groups = {};
     for (const e of entries) {
       total++;
-      for (const f of lintEntry(e, { catalogue: cat, resolveSpec })) {
+      for (const f of lintEntry(e, { catalogue: cat, resolveSpec, resolveGlobWidth })) {
         counts[f.severity]++;
         byCode[f.code] = (byCode[f.code] || 0) + 1;
         const g = (groups[f.code] = groups[f.code] || { severity: f.severity, detail: f.detail, ids: [], refs: [] });

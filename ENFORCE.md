@@ -96,6 +96,17 @@ The catalogue-context-injector uses two matching strategies:
    basename, so `*.test.ts` works at any depth. Indented continuation lines fold into
    the field, so a long list may wrap; a line at column zero begins something else.
 
+   **A single `*` is one path segment wide; `**/` spans zero or more directories.** Both
+   fields compile through the same engine (`globBody` in `hooks/currency.js`), so the
+   rule an author learns in one is the rule in the other. This differs from git's default
+   pathspec, where `*` crosses `/` — and until #195 the freshness gate took git's reading
+   while the injector took the engine's, so one live declaration mapped six files for one
+   consumer and one for the other. The engine is now the only reading; git supplies the
+   file list and no longer interprets it. A declaration that selects less than its author
+   meant is reported by `currency-report.js --lint` as `narrow-glob`, with the wider
+   pattern quoted, because the check that asks whether a declaration selects *anything*
+   cannot see a declaration that selects *some*.
+
    `FILES:` asks *where a file sits*. `KINDS:` asks *what a file is*, and that is a
    question some entries can only answer that way. Verification artefacts — tests,
    probes, diagnostics, gate scripts — sit nowhere in particular: a probe belongs to
@@ -271,6 +282,7 @@ centralized projects). See issue #5.
 | 14 | A matching field written in a shape its parser does not read, dropped without a word — so an author who wrote the field and an author who wrote nothing get the same silence | `test/injector-kind-match.test.js` — the wrapped `KINDS:` and the inline `CHECKS:` are each asserted against the well-formed form as a control, and a `CHECKS:` read as empty must SAY so |
 | 15 | A test that exists and is never run — covered only by whoever remembers to type its name | `scripts/run-tests.js` — derives the list from the filesystem, prints the discovered count beside the pass count, and fails on an untracked test file |
 | 16 | An install that finished and an install that did nothing reporting the same status, so no caller can tell either from a real failure | `test/install-exit-status.test.sh` — 0 only for a run that both completed and landed, 2 for a prompt nothing could answer; every success case also asserts the install arrived, since "exits 0" alone is met by an installer that exits 0 having done nothing |
+| 17 | A declaration that selects SOME of what its author meant — as silent as one that selects none, and invisible to a check that only asks whether anything was selected | `test/currency-narrow-glob.test.js` — the hook's count and the gate's count are asserted EQUAL rather than each asserted alone, since a per-consumer test passes over two self-consistent components that disagree; and the narrowing is reported with the wider pattern quoted |
 
 ## Liveness — a quiet hook and a dead hook look identical
 

@@ -75,6 +75,13 @@ CHECKS:
 - A glob containing `/` is matched against the repo-relative path; one without is
   matched against the basename, so `*.test.ts` works at any depth. `KINDS:` is ORed
   with `FILES:` — it can only widen what an entry selects, never narrow it.
+- **A single `*` is one path segment wide; `**/` is what spans directories.** This is
+  the one place the fields differ from shell and git habits, and it is worth saying
+  plainly because the mistake is silent: `FILES: public/*.glb` selects the `.glb` files
+  sitting directly in `public/`, and `FILES: public/**/*.glb` selects them anywhere
+  beneath it. `FILES:` and `KINDS:` compile patterns through the same engine, so
+  whichever you learn first is the rule in both. If a declaration selects fewer files
+  than you meant, `currency-report.js --lint` reports it and quotes the wider pattern.
 - `CHECKS:` items are emitted verbatim, ahead of everything else in the injection. What
   an entry asks you to *do* is the part that has to survive being skimmed; the catalogue
   digests below it can run to tens of kilobytes. Keep each line short and checkable.
