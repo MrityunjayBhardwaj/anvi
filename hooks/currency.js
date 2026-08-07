@@ -353,7 +353,147 @@ const LINT = {
   NO_COMPUTABLE_REF: 'no-computable-ref',
   INERT_DECLARATION: 'inert-declaration',
   NARROW_GLOB: 'narrow-glob',
+  REF_SYMBOL_GONE: 'ref-symbol-gone',
 };
+
+// Which names in a REF: are CITATIONS of code, as opposed to prose that happens to
+// wear backticks. Pure text — the repo question is asked elsewhere (see lintEntry's
+// `resolveSymbol`), because the grammar of a citation is a property of the field and
+// must have one reader, while "does this name still exist" is a property of a repo
+// that may not even be checked out (V21).
+//
+// The form recognised is the BIBLIOGRAPHIC one, and only it:
+//
+//   `path/to/file.ts` (`symbolA`, `symbolB` — what they do)
+//
+// a parenthetical hanging off a path. Measured against the live fleet, this is where
+// citations actually are: 705 of 2385 refs carry one, 1773 names in total.
+//
+// What it deliberately does NOT read, each because it produced wrong findings when it
+// did:
+//
+//   NARRATIVE   "Fix added `getIsPlaying()` to `LiveCodingRuntime`, threaded through
+//               StrudelEditorClient" — a name near a path in a sentence is not a claim
+//               that the name is IN that path. Refs tell stories as often as they cite.
+//   INVERTED    "`realizeChannel`/`precompRigPreservesReveal` (realize-channel.ts)" —
+//               the same two things in the other order. Reading it as the bibliographic
+//               form charges the names to whichever path came before.
+//   ASSERTED    "`turbo.json` (no `env` / `globalPassThroughEnv` declared)" — an entry
+//   ABSENCE     whose whole point is that the name is missing. A presence check calls
+//               it broken for being right, which is the worst finding a lint can emit.
+//
+// Each returned item keeps the path it was cited under. Not to attribute the symbol to
+// that file — the finding deliberately does not make that claim — but so the caller can
+// tell whether the citation is even about THIS repo. A ref citing a vendored library's
+// internals (`lottie.js` (`MultiDimensionalProperty`)) names a real symbol in a real
+// file that this repo has never contained.
+// An entry may cite a name in order to say it is GONE — "(no `env` declared)",
+// "(`OLD_TABLE` deleted rather than moved)". Those entries are correct precisely
+// because the repo no longer contains the name, and reporting them inverts the
+// finding: it tells the author to re-point a citation whose whole content is that
+// there is nothing to point at.
+//
+// Two properties learned from the corpus rather than assumed:
+//
+//   The word can sit on EITHER side of the name. "no `env` declared" negates
+//   forward; "`KEYFRAME_CHANNEL_TYPES` deleted" negates backward. A rule reading
+//   only the text before the name catches the first and reports the second.
+//
+//   The window is the CLAUSE, not the parenthetical. Notes run long and argue —
+//   "(the attribute that is NOT a discriminator, since `CurveLine` … all set it)"
+//   negates something else entirely, and scanning the whole note would suppress a
+//   real finding on the strength of an unrelated sentence.
+//
+// This is a vocabulary meeting an open language, so it will always have a residue,
+// and the residue is the right size to accept: it is the difference between a check
+// that is occasionally wrong and one that is wrong in the direction that gets it
+// switched off. Widen it when a case appears, not preemptively.
+const NEGATION = /\b(no|not|never|without|missing|absent|lacks?|lacking|gone|un(?:declared|set)|deleted|removed|retired|dropped|renamed|replaced)\b/i;
+
+function citedSymbols(refField) {
+  const s = String(refField || '');
+  if (!s) return [];
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '(') continue;
+    // The token immediately before the paren, skipping the separators a ref uses
+    // between a path and its note (spaces, an em-dash, a middot).
+    let j = i - 1;
+    while (j >= 0 && /[\s—·+]/.test(s[j])) j--;
+    const end = j + 1;
+    while (j >= 0 && !/\s/.test(s[j])) j--;
+    const file = refPathToken(s.slice(j + 1, end));
+    if (!file) continue;
+
+    // The parenthetical, balanced. An unterminated one runs to the end of the field
+    // rather than being dropped: the field is already cut at the entry boundary, so a
+    // note can genuinely lose its closer, and dropping it loses real citations silently.
+    let depth = 1, k = i + 1;
+    while (k < s.length && depth > 0) {
+      if (s[k] === '(') depth++;
+      else if (s[k] === ')') depth--;
+      k++;
+    }
+    const inner = s.slice(i + 1, depth > 0 ? s.length : k - 1);
+
+    for (const m of inner.matchAll(/`([^`]+)`/g)) {
+      const name = String(m[1]).trim().replace(/\(\)$/, '');
+      if (!isSymbolName(name)) continue;
+      if (NEGATION.test(clauseAround(inner, m.index, m[0].length))) continue;
+      const key = `${file} ${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ file, name });
+    }
+    i = k - 1;
+  }
+  return out;
+}
+
+// The path a parenthetical hangs off, or null. Same unwrapping as extractRefFiles —
+// and deliberately NOT the FILE_EXT whitelist, for the reason the line-anchor rule
+// gives: this token is not going to be diffed, only handed to a resolver that knows
+// what this repo tracks, so a closed extension list here would silently switch the
+// finding off for every language nobody listed.
+// The clause a cited name sits in — the text between the separators a note uses to
+// list things. Bounded so a negation elsewhere in a long argument cannot reach it.
+function clauseAround(inner, at, len) {
+  // Deliberately NOT `/`. A slash separates ALTERNATIVES that share whatever governs
+  // them — "no `env` / `globalPassThroughEnv` declared" is one negation over two
+  // names — so cutting there hands the second name a clause with the negation removed
+  // and reports the entry that was most explicit about the absence.
+  const SEP = /[,;·+]|—|\.\s/g;
+  let start = 0, end = inner.length;
+  for (const m of inner.matchAll(SEP)) {
+    if (m.index + m[0].length <= at) start = m.index + m[0].length;
+    else if (m.index >= at + len) { end = m.index; break; }
+  }
+  return inner.slice(start, end);
+}
+
+function refPathToken(tok) {
+  let t = String(tok || '').replace(/^[`'"([]+|[`'")\].,;:]+$/g, '').replace(/:\d+(-\d+)?$/, '');
+  if (!t || !/[^/]\.[A-Za-z0-9]{1,8}$/.test(t)) return null;
+  if (t.startsWith('/') || t.startsWith('~')) return null;   // outside the repo
+  if (/[<>*]/.test(t)) return null;                          // placeholder or glob
+  return t;
+}
+
+// A name worth resolving. The exclusions are not tidiness — each is a class that was
+// measured producing false findings at a rate that would have sunk the check:
+//   git shas      a ref cites commits as readily as symbols, and `4991800` is
+//                 name-shaped. Nearly HALF the first cut's findings were shas.
+//   diagnostics   `TS2322` is a compiler code, not something the repo defines.
+//   filenames     already covered by the ref's own file handling.
+function isSymbolName(name) {
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(name)) return false;
+  if (name.length < 3) return false;
+  if (/^[0-9a-f]{7,40}$/i.test(name)) return false;
+  if (/^[A-Z]{1,3}\d{3,5}$/.test(name)) return false;
+  if (FILE_EXT.test(name)) return false;
+  return true;
+}
 
 // A REF token of the form `path/to/file.ext:540`, with an optional `-560` range.
 //
@@ -398,7 +538,7 @@ function lineAnchoredRefs(refField) {
 // cannot be answered from the text, so it is offered rather than required — and when it
 // is absent NOTHING changes, not one existing finding (V10). An enrichment that alters a
 // verdict when switched on is a different tool wearing the same name.
-function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth } = {}) {
+function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth, resolveSymbol } = {}) {
   const findings = [];
   const high = sensitivityFor(catalogue) === 'high';
 
@@ -493,6 +633,44 @@ function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth } = {}) {
       findings.push({
         code: LINT.NARROW_GLOB, severity: high ? 'high' : 'low', refs: narrow,
         detail: 'a declared pattern selects fewer files than the same pattern would over the subtree. A single `*` is one path segment wide here; `**/` is what spans directories — the rule KINDS: has always had. If you meant the whole subtree, say so, because the files it currently misses are reached by guessing at the filename or not at all, and nothing else reports them.',
+      });
+    }
+  }
+
+  // A REF citing a symbol the repo no longer contains anywhere. The gap this closes is
+  // the one the freshness verdict cannot see: green says no cited FILE changed since
+  // the anchor, which is a claim about commits, not about whether the pointer still
+  // lands on anything. A symbol renamed BEFORE the stamp, or never checked at that
+  // depth, is vouched for indefinitely.
+  //
+  // The finding deliberately does NOT say "this symbol is not in that file", though
+  // that is the question the issue started from and the more useful answer when it is
+  // right. Measured on the fleet: asking it needs the name-to-path pairing to be
+  // correct, and every remaining false positive lives in that pairing — two paths
+  // sharing one parenthetical, a note that names its own file, prose about an API
+  // field. Asking only whether the name still exists ANYWHERE needs no pairing, and
+  // took precision from roughly a quarter to nine in ten on the same corpus.
+  //
+  // The cost is real and is the moved-symbol case: a name absent from the file that
+  // cites it but alive elsewhere is not reported. On the fleet that is ~61 rows of
+  // which about one in ten was genuine, so it buys ~90% precision for ~6 findings.
+  // A check that cries wolf is a check nobody runs twice, and this one is judged on
+  // the twenty it emits, not the sixty-six it could have.
+  //
+  // Opt-in on the same terms as resolveSpec: absent changes nothing (V10), and a
+  // resolver that throws or cannot answer is saying "cannot tell", which must produce
+  // silence rather than an accusation.
+  if (resolveSymbol) {
+    const gone = [];
+    for (const cited of citedSymbols(entry.refField)) {
+      let verdict = null;
+      try { verdict = resolveSymbol(cited); } catch { verdict = null; }
+      if (verdict === 'gone' && !gone.includes(cited.name)) gone.push(cited.name);
+    }
+    if (gone.length) {
+      findings.push({
+        code: LINT.REF_SYMBOL_GONE, severity: high ? 'high' : 'low', refs: gone,
+        detail: 'REF cites a symbol that no longer exists anywhere in this repo — renamed, removed, or never spelled that way. Currency cannot see this: it reports whether the cited FILE moved, and a file can sit unchanged for a year around a name that went away before the stamp was written. Re-point the citation, or drop it if the entry outlived it.',
       });
     }
   }
@@ -1701,6 +1879,11 @@ module.exports = {
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
   lintEntry, lineAnchoredRefs, LINT, splitBoundaries,
+  // What a REF CITES, as opposed to what it merely mentions. Exported for the same
+  // reason the field readers are: the report supplies the repo, but the grammar of a
+  // citation is one rule, and a second reader of it would judge a different corpus
+  // while reporting the same finding name.
+  citedSymbols,
   // The boundary questions the hook no longer answers alone: what a boundary is
   // CALLED, and whether it DECLARES what it governs. Exported for the same reason
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers

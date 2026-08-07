@@ -247,6 +247,62 @@ if (lintOnly) {
   // kind for it to return (#195).
   const resolveGlobWidth = resolveSpec ? (spec) => globWidthGap(spec, git) : null;
 
+  // The third opt-in, same terms again: does a name a REF cites still exist in this
+  // repo? Offered only when the repo is here, because the only other answer git can
+  // give — "no match" from a directory that is not a checkout — is indistinguishable
+  // from the finding, and would accuse every citation in the catalogue at once.
+  //
+  // Two steps, in this order for cost rather than meaning. Almost every cited name is
+  // in the file that cites it (1691 of 1773 on the fleet), and reading one file is far
+  // cheaper than searching the tree, so the repo-wide search runs only for the ~5% that
+  // fail the cheap test. Both steps answer the SAME question — does this name exist —
+  // and the finding is only ever emitted when the second one says no.
+  // Built from where the catalogues ACTUALLY are, not from the literal `.anvi`: a
+  // project may bind them anywhere, and a hardcoded name would exclude nothing on the
+  // one layout that needs it. Empty when they resolve outside the repo, which is the
+  // common case and needs no pathspec at all.
+  const anviRel = path.relative(cwd, anviDir);
+  const CATALOGUE_EXCLUDE = (anviRel && !anviRel.startsWith('..') && !path.isAbsolute(anviRel))
+    ? ` -- ${JSON.stringify(`:(exclude,glob)${anviRel}/**`)} ${JSON.stringify(`:(exclude)${anviRel}`)}`
+    : '';
+
+  const symbolCache = new Map();
+  const resolveSymbol = resolveSpec ? ({ file, name }) => {
+    // A citation whose path this repo does not track is not about this repo — a
+    // vendored library's internals, a reference-area source, a file from another
+    // project. Its symbols are real and simply live somewhere we cannot see, so the
+    // only honest answer is that we cannot tell.
+    const rel = matchedTracked(file, git)[0] || (fileExists(file) ? file : null);
+    if (!rel) return null;
+    const last = name.split('.').pop();
+    try {
+      const txt = fs.readFileSync(path.join(cwd, rel), 'utf8');
+      if (txt.includes(name) || new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(txt)) return 'present';
+    } catch { /* unreadable — fall through to the repo-wide question */ }
+    if (symbolCache.has(last)) return symbolCache.get(last);
+    let verdict;
+    try {
+      // The catalogues are excluded from the search, and this is load-bearing rather
+      // than tidy: the entry that CITES a name contains that name, so a repo tracking
+      // its own catalogues finds every citation alive in the document making the claim
+      // and reports nothing, forever. The failure is total and silent — a check that
+      // has been switched off looks exactly like a corpus with no defects.
+      //
+      // It does not show up in the fleet, where `.anvi` is a symlink into the store and
+      // git never walks it. That is precisely why it has to be excluded explicitly: the
+      // arrangement that hides it is a deployment detail, not a property of the check.
+      verdict = git(`grep -l -w -F -e ${JSON.stringify(last)}${CATALOGUE_EXCLUDE}`).trim() ? 'present' : 'gone';
+    } catch (e) {
+      // git grep exits 1 for "no match" — that IS the finding, and it arrives as a
+      // thrown error. Any other failure is git being unable to answer, and must stay
+      // silent: a broken index reported as a repo full of dead citations is the
+      // loudest possible way to be wrong.
+      verdict = e && e.status === 1 ? 'gone' : null;
+    }
+    symbolCache.set(last, verdict);
+    return verdict;
+  } : null;
+
   console.log(`Currency lint — ${path.basename(cwd)}  (catalogues: ${anviDir})`
     + (resolveSpec ? '' : '\n  (no project repo here — declarations were not resolved, so an inert one cannot be reported)')
     + '\n');
@@ -296,7 +352,7 @@ if (lintOnly) {
     const groups = {};
     for (const e of entries) {
       total++;
-      for (const f of lintEntry(e, { catalogue: cat, resolveSpec, resolveGlobWidth })) {
+      for (const f of lintEntry(e, { catalogue: cat, resolveSpec, resolveGlobWidth, resolveSymbol })) {
         counts[f.severity]++;
         byCode[f.code] = (byCode[f.code] || 0) + 1;
         const g = (groups[f.code] = groups[f.code] || { severity: f.severity, detail: f.detail, ids: [], refs: [] });
