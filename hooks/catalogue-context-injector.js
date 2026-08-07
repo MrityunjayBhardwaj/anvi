@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -184,20 +184,14 @@ function globToRe(glob) {
   return new RegExp(`^${globBody(glob)}$`);
 }
 
-// Name a boundary for the reader. The text captured from the heading is an ID
-// only when it is numbered; every unnumbered entry captures the literal word
-// "Boundary", which names nothing and renders as the same word repeated when
-// several match at once. Such an entry still has a name — its own title — so use
-// that. Cut at the first em-dash or bracketed aside, since both begin status and
-// date annotations rather than the name, and cap the length so a header stays
-// readable. Returns the id unchanged for the numbered form.
-function boundaryLabel(id, content) {
-  if (/^[A-Z]{1,3}\d+$/.test(id)) return id;
-  const first = (content.split('\n')[0] || '').replace(/^:\s*/, '');
-  const title = first.split(/—| \(/)[0].trim();
-  if (!title) return id;
-  return title.length > 60 ? title.slice(0, 59).trimEnd() + '…' : title;
-}
+// `boundaryLabel` and `boundaryDeclares` live in currency.js and are imported above.
+// They used to live here, and moving them is the same consolidation the split and the
+// field reader already had: this hook is no longer the only thing that names a boundary
+// or asks whether one declares. The lint's declaration-gap summary asks both. A
+// boundary named one thing in an injection and another in the report is a boundary the
+// reader cannot look up, and a declaration counted by one and not the other would let
+// the report call a gap closed while this hook still guesses. What they do and why
+// lives at the definitions.
 
 // --- FILES: — does relPath name a file this boundary declares? ----------------
 // `matchesDeclaredFile` lives in currency.js and is imported above. It used to live
@@ -492,21 +486,12 @@ process.stdin.on('end', () => {
           // advice ("give the entry a FILES: or KINDS:") is written for an entry that
           // has neither, and is backwards at one that does.
           //
-          // A field holding only the template's own placeholder is NOT a declaration.
-          // The author copied the skeleton and has not filled it in, so "your
-          // declaration did not select this file" points at nothing, and the advice
-          // they actually need is the one for an empty entry. extractFileSpecs already
-          // encodes that rule for FILES: — it yields nothing for `[comma-separated list
-          // …]` — so KINDS: is held to the same test rather than to a second opinion
-          // about what a placeholder looks like.
-          // Tested for CONTENT, not for presence of the key. The shared reader reports an
-          // absent field and an empty one the same way (`undefined`), which is what these
-          // two questions actually want — an empty declaration is not a declaration — and
-          // guarding on `!== null` here would let `undefined` through, since undefined is
-          // not null: the KINDS: branch would then split it and throw inside this hook's
-          // own catch, turning a parse into silence (H12).
-          declares: extractFileSpecs(filesField).length > 0
-            || (!!kindsField && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim()))),
+          // Asked through the shared predicate rather than inline, because the lint now
+          // asks the same question to size the declaration gap. The rule — including
+          // why a template placeholder is not a declaration, and why the fields are
+          // tested for CONTENT rather than for the presence of the key — lives at the
+          // definition in currency.js.
+          declares: boundaryDeclares(boundaryContent),
           content: boundaryContent.trim(),
         });
       }

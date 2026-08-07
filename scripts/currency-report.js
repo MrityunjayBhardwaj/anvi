@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -215,6 +215,63 @@ if (lintOnly) {
       // the payload.
       if (g.refs.length) for (const r of g.refs) console.log(`      ${r}`);
       else console.log(`      ${g.ids.join(', ')}`);
+    }
+    console.log('');
+  }
+
+  // --- the declaration gap ---------------------------------------------------
+  // Not a per-entry finding, deliberately, and not because it would be noisy. It
+  // cannot be one: findings are keyed on an entry id, and 78 boundaries in the fleet
+  // have no id — in two projects nearly every boundary is unnumbered. A finding-shaped
+  // report would omit exactly the population it exists to describe, and would look
+  // complete while doing it.
+  //
+  // The boundary population is also not the entry population. `parseEntries` requires a
+  // numbered id; `splitBoundaries` accepts the unnumbered form too. So this is counted
+  // over its own split rather than folded into the loop above, which would silently
+  // measure only the numbered subset — the same "the shape of the reader decided the
+  // answer" error the boundary questions have already produced three times.
+  //
+  // Counted for boundary maps only. The other catalogues carry no boundaries, and a
+  // "0 of 0 declare" line against an error-pattern catalogue is a number about nothing,
+  // which is worse than no line: it invites the reader to act on it.
+  //
+  // DERIVED, not listed. "Which catalogues are the code map" is already answered in
+  // currency.js — it is what grades a missing anchor as a live hazard rather than
+  // hygiene — and writing the names again here would be a second list that agrees today
+  // and drifts later, silently: a boundary map added there but not here would simply
+  // not be counted, and the report would look complete while omitting it. That is the
+  // same shape as every other defect this family has produced, one level up: not two
+  // readers of a field, but two lists of what to read.
+  for (const cat of CATALOGUES.filter(c => sensitivityFor(c) === 'high')) {
+    const p = path.join(anviDir, cat);
+    if (!fs.existsSync(p)) continue;
+    const boundaries = splitBoundaries(fs.readFileSync(p, 'utf8'));
+    if (!boundaries.length) continue;
+
+    const undeclared = boundaries.filter(b => !boundaryDeclares(b.content));
+    // Printed even at zero. The number IS the product here — the gap went unowned for
+    // as long as it did because nobody could name it — and a line that appears only
+    // when there is bad news cannot be used to confirm there is none. A catalogue that
+    // declares everything should be able to show that it does.
+    console.log(`${cat} — boundary declarations`);
+    console.log(`  ${boundaries.length - undeclared.length} of ${boundaries.length} `
+      + `${boundaries.length === 1 ? 'boundary declares' : 'boundaries declare'} FILES: or KINDS:`
+      + (undeclared.length
+        ? `; ${undeclared.length} ${undeclared.length === 1 ? 'declares' : 'declare'} neither`
+          + ` and ${undeclared.length === 1 ? 'is' : 'are'} reached only by guessing at the filename.`
+        : '.'));
+    if (undeclared.length) {
+      // Named, not just counted. "N of M" tells an author a gap exists; it does not
+      // tell them where, and the answer is not derivable from the catalogue by eye —
+      // the field can be absent, empty, or an unfilled template placeholder, and only
+      // the first of those is visible while skimming.
+      //
+      // Labelled through the same function the injection uses, so a boundary named
+      // here can be found by the name it was named with when its checks arrived.
+      for (const b of undeclared) console.log(`      ${boundaryLabel(b.id, b.content)}`);
+      console.log('  A boundary with neither field hands its checks to whatever file'
+        + ' happens to mention its name, and misses every file that does not.');
     }
     console.log('');
   }
