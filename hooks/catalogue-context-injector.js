@@ -407,9 +407,22 @@ process.stdin.on('end', () => {
       let isRelevant = false;
 
       if (filesMatch) {
-        // Deterministic match: check if relPath matches any entry in FILES: list
+        // Deterministic match: does relPath name one of the declared files?
+        //
+        // The suffix half is deliberate — an author may declare `lib/x.cjs` and mean it
+        // wherever that module sits — but it has to land on a path SEPARATOR. A raw
+        // string suffix begins at an arbitrary character offset, so `cd.ts` claimed
+        // `a/bcd.ts` and `config.json` claimed `src/my-config.json`, and unlike a
+        // fallback match those arrive labelled as declarations, with no notice inviting
+        // doubt. A declaration is the most authoritative thing this hook says, so it is
+        // the last place a coincidence should be able to reach.
+        //
+        // Same relation, same guarded form, as `hooks/anvi-paths.js` (`here === r ||
+        // here.startsWith(r + path.sep)`) and `hooks/currency.js` (`r.endsWith('/' +
+        // want)`). Four sites answer this question and this was the one that answered it
+        // without the guard — the relation has no home, so each site re-derives it.
         const boundaryFiles = filesMatch[1].split(',').map(f => f.trim());
-        isRelevant = boundaryFiles.some(bf => relPath === bf || relPath.endsWith(bf));
+        isRelevant = boundaryFiles.some(bf => relPath === bf || relPath.endsWith('/' + bf));
       }
 
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
