@@ -647,6 +647,83 @@ eq(codesOf({ refField: 'src/a.ts:540' }, 'hetvabhasa.md'),
 ok(lintEntry({ refField: 'src/a.ts:540' }, {})[0].refs.join(',') === 'src/a.ts:540',
    'the finding names the offending pointer, so the worklist is actionable');
 
+// --- inert declarations, as an OPT-IN enrichment -----------------------------
+// "Does this declared path select any file?" cannot be answered from the text, so it
+// needs a resolver. The lint's whole value is that it runs anywhere — including over a
+// catalogue whose project repo is not present — so the resolver is optional and its
+// ABSENCE must change nothing. That additive guarantee is the first assertion, not an
+// afterthought: an enrichment that alters an existing verdict when switched on is a
+// different tool wearing the same name.
+console.log('lintEntry — inert declarations (opt-in)');
+// A stand-in for classifySpec's kind, injected: the lint asks a question and is told an
+// answer, so it needs no fs, no git, and no repo to be tested.
+const kinds = map => spec => map[spec] || 'present';
+const codesWith = (e, cat, map) =>
+  lintEntry(e, { catalogue: cat, resolveSpec: kinds(map) }).map(f => f.code).sort().join(',');
+
+eq(codesOf({ filesField: 'nowhere/at/all.ts', validatedField: 'abc1234' }, 'dharana.md'), '',
+   'WITHOUT a resolver, a declaration that selects nothing reports exactly as before');
+eq(codesWith({ filesField: 'src/engine.js', validatedField: 'abc1234' }, 'dharana.md', {}),
+   '', 'WITH a resolver, a declaration that resolves stays clean');
+
+eq(codesWith({ filesField: 'public/audio/', validatedField: 'abc1234' }, 'dharana.md',
+             { 'public/audio/': 'external' }),
+   LINT.INERT_DECLARATION, 'a spec this repo never tracked is inert');
+eq(codesWith({ filesField: 'src/gone.ts', validatedField: 'abc1234' }, 'dharana.md',
+             { 'src/gone.ts': 'deleted' }),
+   LINT.INERT_DECLARATION, 'a spec whose file was deleted is inert too');
+
+// The sharpest case, and the one the issue was filed on: a directory. The path
+// EXISTS — fs.existsSync is true for it, so the shared classifier calls it `present`,
+// which is the right answer to a REF's question and the wrong one to a declaration's.
+// Reported by its own name because a reader who checks will find the path is really
+// there and conclude the lint is wrong.
+eq(codesWith({ filesField: 'public/audio/', validatedField: 'abc1234' }, 'dharana.md',
+             { 'public/audio/': 'directory' }),
+   LINT.INERT_DECLARATION, 'a directory exists and still selects no file');
+ok(lintEntry({ filesField: 'public/audio/', validatedField: 'a1' },
+             { catalogue: 'dharana.md', resolveSpec: kinds({ 'public/audio/': 'directory' }) })[0]
+     .refs.some(r => /director/i.test(r)),
+   '  ... and says it is a directory, not that the path is missing');
+
+// The two kinds that DO select files must not be swept in. `ambiguous` resolves to
+// several files — which is a fine thing for a declaration to do, and the opposite of
+// selecting nothing — and `reference` resolves into the store's reference area.
+// Flagging either would report working declarations as broken, and a lint that cries
+// wolf on its first run is a lint nobody runs twice.
+eq(codesWith({ filesField: 'App.tsx', validatedField: 'abc1234' }, 'dharana.md',
+             { 'App.tsx': 'ambiguous' }),
+   '', 'a spec matching SEVERAL files selects plenty — not inert');
+eq(codesWith({ filesField: 'ref/sources/x.c', validatedField: 'abc1234' }, 'dharana.md',
+             { 'ref/sources/x.c': 'reference' }),
+   '', 'a spec resolving into the store reference area is not inert');
+
+// REF: is a bibliography — it lists paths someone READ. A dangling one is already the
+// gate's 🔴, and judging it here would report every well-cited entry as broken.
+eq(codesWith({ refField: 'gone/from/here.ts', filesField: 'src/engine.js', validatedField: 'a1' },
+             'dharana.md', { 'gone/from/here.ts': 'external' }),
+   '', 'only FILES: is judged — a REF path that no longer resolves is a different finding');
+
+// The payload is the dead specs, and it must say WHICH kind: the remedies differ
+// (a deleted file means update the declaration; a never-tracked one usually means a
+// typo, a directory, or a path from another repo).
+const inert = lintEntry(
+  { filesField: 'public/audio/, src/engine.js, src/gone.ts', validatedField: 'a1' },
+  { catalogue: 'dharana.md', resolveSpec: kinds({ 'public/audio/': 'external', 'src/gone.ts': 'deleted' }) },
+).find(f => f.code === LINT.INERT_DECLARATION);
+ok(inert && inert.refs.length === 2, 'the finding names every dead spec and only those');
+ok(inert && inert.refs.some(r => r.startsWith('public/audio/') && /never/i.test(r)),
+   '  ... marking a never-tracked spec as such');
+ok(inert && inert.refs.some(r => r.startsWith('src/gone.ts') && /delet/i.test(r)),
+   '  ... and a deleted one as such, since the remedies differ');
+
+// A resolver that throws must not take the whole lint down with it — the other
+// findings for this entry are still worth having.
+eq(lintEntry({ filesField: 'src/a.ts' },
+             { catalogue: 'dharana.md', resolveSpec: () => { throw new Error('git exploded'); } })
+     .map(f => f.code).sort().join(','),
+   LINT.NO_VALIDATED, 'a resolver that throws is treated as "cannot tell", not as inert');
+
 // --- "not on disk" is three conditions, not one ------------------------------
 // Collapsing them manufactures false dangling verdicts. Each of these is a real
 // shape from the fleet, and each was found by RUNNING the report on a live project
