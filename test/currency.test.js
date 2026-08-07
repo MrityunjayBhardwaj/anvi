@@ -756,16 +756,14 @@ eq(lintEntry({ filesField: 'src/a.ts' },
 // shape from the fleet, and each was found by RUNNING the report on a live project
 // rather than by imagining what a REF looks like.
 console.log('classifySpec — deleted vs external vs bare-name');
+// The stub LISTS and answers history; it no longer resolves a spec, because
+// classifySpec no longer asks it to. A shorthand is matched by the same predicate a
+// pattern is (#207) — before that it was a `git ls-files -- '*/<spec>'` pathspec, a
+// second expression of the trailing-segment rule that the engine also states. The old
+// stub had to reimplement that pathspec to be useful, which is itself the tell: a test
+// double for a relation with two homes has to pick one.
 const clsGit = ({ tracked = [], history = [] } = {}) => (args) => {
-  const ls = args.match(/^ls-files -- "(.+?)"(?: "(.+?)")?$/);
-  if (ls) {
-    const pats = [ls[1], ls[2]].filter(Boolean);
-    return tracked.filter(t => pats.some(p => {
-      if (p.startsWith('*/')) return t.endsWith(p.slice(1)) || t === p.slice(2);
-      if (p.includes('*')) return new RegExp('^' + p.replace(/\*/g, '[^/]*') + '$').test(t);
-      return t === p;
-    })).join('\n');
-  }
+  if (args === 'ls-files') return tracked.join('\n');
   const hist = args.match(/^log --oneline -1 --all -- "(.+)"$/);
   if (hist) return history.includes(hist[1]) ? 'abc1234 x\n' : '';
   return '';
@@ -800,8 +798,7 @@ v = computeCurrency({ validatedField: 'abc1234', refField: 'SoundLayer.ts' }, {
   fileExt: /\.(ts|js)$/i,
   fileExists: exists([]),
   git: (args) => {
-    const ls = args.match(/^ls-files --/);
-    if (ls) return 'src/engine/SoundLayer.ts';
+    if (args === 'ls-files') return 'src/engine/SoundLayer.ts';
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
     if (m) return m[2] === 'src/engine/SoundLayer.ts' ? 'h1\nh2\n' : ''; // only the REAL path has drift
     return '';
@@ -844,6 +841,21 @@ eq(c.kind, 'ambiguous', 'partial path matching several files → ambiguous, neve
 c = classifySpec('engine/App.ts', exists([]),
   clsGit({ tracked: ['src/reengine/App.ts'] }));
 eq(c.kind, 'external', 'partial path matches only as a substring (reengine) → NOT a match');
+
+// The shape the two readings actually came apart on (#207). A shorthand naming a
+// DIRECTORY selects the tree beneath it, because #193 made a declaration do that — and
+// the git pathspec form this used to use has no such clause, so it selected nothing and
+// the spec was reported external. Both readings agreed on every other spec in the
+// corpus, which is why this sat latent: the duplication was visible, the disagreement
+// was not.
+c = classifySpec('audio', exists([]), clsGit({ tracked: ['public/audio/a.mp3', 'public/audio/b.mp3'] }));
+eq(c.kind, 'ambiguous', 'a shorthand naming a directory selects what is under it — two files, so ambiguous');
+c = classifySpec('audio', exists([]), clsGit({ tracked: ['public/audio/only.mp3'] }));
+eq(c.kind, 'present', '  ... and resolves outright when the directory holds exactly one');
+eq(c.path, 'public/audio/only.mp3', '  ... reporting the file, not the directory');
+// The guard that keeps the descendant clause from swallowing a neighbour.
+c = classifySpec('audio', exists([]), clsGit({ tracked: ['public/audiobook/a.mp3'] }));
+eq(c.kind, 'external', 'and a directory shorthand still lands on a separator — `audio` is not `audiobook`');
 
 // --- #57: reference-grounded classification ---------------------------------
 // A ref that resolves nowhere in the project but IS found in the store's reference
