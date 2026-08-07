@@ -439,10 +439,24 @@ process.stdin.on('end', () => {
 
       // Check if this boundary's FILES: field lists the file being edited/read
       // FILES: is the primary, deterministic match. Text matching is fallback.
-      const filesMatch = boundaryContent.match(/^FILES:\s*(.+)$/m);
+      //
+      // Read with continuations, exactly as KINDS: is fifteen lines below. That helper
+      // was written for the glob field on the argument that an author with more items
+      // than fit comfortably wraps them and loses everything after line one — and FILES:
+      // is the field MORE likely to wrap, because it holds paths. The asymmetry was
+      // never deliberate; the two fields simply grew apart (#194).
+      //
+      // What the one-line read cost was not uniform, and neither half is the whole bug:
+      // a continuation naming a concrete path still ARRIVED, because the FILES: line is
+      // itself inside the prose the text fallback searches, so the path matched itself —
+      // and the entry was then labelled a guess and its author told the declaration
+      // "did not select this file", which was false. A continuation naming a glob
+      // arrived nowhere at all, since no filename search can match a pattern. One shape
+      // was mislabelled, the other silently lost.
+      const filesField = fieldWithContinuations(boundaryContent, 'FILES');
       let isRelevant = false;
 
-      if (filesMatch) {
+      if (filesField !== null) {
         // Deterministic match: does relPath name one of the declared files? Literal or
         // glob, both anchored as a segment-aligned path suffix — see matchesDeclaredFile
         // for why the suffix is deliberate, why it must land on a separator, and why a
@@ -452,7 +466,7 @@ process.stdin.on('end', () => {
         // here.startsWith(r + path.sep)`) and `hooks/currency.js` (`r.endsWith('/' +
         // want)`). Four sites answer this question and this was the one that answered it
         // without the guard — the relation has no home, so each site re-derives it.
-        const boundaryFiles = filesMatch[1].split(',').map(f => f.trim()).filter(Boolean);
+        const boundaryFiles = filesField.split(',').map(f => f.trim()).filter(Boolean);
         isRelevant = boundaryFiles.some(bf => matchesDeclaredFile(bf, relPath));
       }
 
@@ -528,7 +542,7 @@ process.stdin.on('end', () => {
           // encodes that rule for FILES: — it yields nothing for `[comma-separated list
           // …]` — so KINDS: is held to the same test rather than to a second opinion
           // about what a placeholder looks like.
-          declares: (filesMatch !== null && extractFileSpecs(filesMatch[1]).length > 0)
+          declares: (filesField !== null && extractFileSpecs(filesField).length > 0)
             || (kindsField !== null && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim()))),
           content: boundaryContent.trim(),
         });
