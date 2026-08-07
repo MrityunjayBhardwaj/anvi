@@ -186,6 +186,137 @@ function extractFileSpecs(filesField) {
     && (tok.includes('/') || FILE_EXT.test(tok)));     // prose, not a path
 }
 
+// --- One engine for how wide a declared pattern is --------------------------
+// These two functions used to live in the injector, which meant the hook decided how
+// wide a glob was and the gate decided separately — by asking git. Git's default
+// pathspec lets `*` cross a `/`, so `FILES: public/*.glb` selected six files for the
+// gate and one for the hook: one component believed a boundary mapped six files while
+// the other believed it mapped one, and neither said so (#195).
+//
+// They live here for the same reason readField does: this is the module both consumers
+// already import, so they agree BY CONSTRUCTION rather than by two implementations
+// happening to match. The alternative considered and rejected was to keep the gate on
+// git and hand it `:(glob)` pathspec magic, which has the semantics we want — but that
+// is the engine's rule EXPRESSED A SECOND TIME, in a different language, needing to be
+// kept in step by hand. A relation re-derived twice is the defect this issue is about;
+// re-deriving it in the fix would be a joke at our own expense.
+//
+// The width rule itself is unchanged and deliberate: a single `*` is one path segment
+// wide, `**/` spans zero or more directories. It came from KINDS: and it is what
+// `test/injector-files-glob.test.js` already asserts as a NEGATIVE. Nothing here
+// widens it — git is the side that gives way.
+//
+// Note what `[` does: it is ESCAPED, i.e. treated as a literal character, not opened as
+// a character class. That is not an oversight. Fleet-wide the corpus contains seven
+// specs holding a bracket and every one of them is a Next.js dynamic route segment —
+// `app/api/outreach/[id]/route.ts` — where `[id]` is a real directory on disk. Git
+// pathspec reads that as "one of the letters i or d" and matches nothing. So the
+// bracket is a third place these two readings disagreed, latent behind the fact that
+// such a path usually exists and is answered before either reading is consulted.
+function globBody(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        // '**/' spans zero or more directories, so `**/__tests__/**` matches a
+        // __tests__ at the repo root as well as one nested six deep.
+        if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else {
+      re += c.replace(/[.+^${}()|[\]\\]/, '\\$&');
+    }
+  }
+  return re;
+}
+
+// Does `relPath` name a file the declaration `decl` selects?
+//
+// A declaration is matched as a path SUFFIX landing on a segment boundary. The suffix
+// half is deliberate: an author declaring `lib/x.cjs` means that module wherever it
+// sits. The segment guard is what stops the suffix reaching a coincidence — a raw
+// string suffix begins at an arbitrary character offset, so `cd.ts` claimed `a/bcd.ts`.
+// A glob is anchored the same way, because a literal is the degenerate glob. And a
+// declaration also selects what sits UNDER it, unconditionally, which is what makes a
+// declared directory work — a spec naming a file has nothing beneath it, so the clause
+// is empty exactly where it would be wrong (#193).
+//
+// If a pattern will not compile, fall back to the plain string form: the declaration
+// keeps doing its literal job rather than disappearing, which is the failure mode this
+// whole function is about.
+//
+// The trailing slash is stripped before compiling, not carried into the pattern: it is
+// the author saying "directory", not part of the name, and left in place it would
+// compile to a body ending in `/` and match only a doubled separator.
+function matchesDeclaredFile(decl, relPath) {
+  const spec = String(decl).replace(/\/+$/, '');
+  if (!spec) return false; // `FILES: /` declares the repo, which is not a declaration
+  try {
+    return new RegExp(`^(?:.*/)?${globBody(spec)}(?:/.*)?$`).test(relPath);
+  } catch {
+    return relPath === spec || relPath.endsWith('/' + spec)
+      || relPath.startsWith(spec + '/') || relPath.includes('/' + spec + '/');
+  }
+}
+
+// The repo's tracked files, listed once per git closure rather than once per spec.
+// Resolving a pattern now means filtering this list through the engine, where before
+// it meant one `git ls-files -- <spec>` per spec — so without the memo a catalogue
+// carrying many patterns would pay a process spawn each. Keyed on the injected `git`
+// itself, the same arrangement `committedEntries` already uses, so a caller holding two
+// repos gets two lists and tests that build a fresh closure per fixture share nothing.
+//
+// A git that cannot answer yields an EMPTY list, and every caller below must read that
+// as "cannot tell", never as "selects nothing" — the difference between silence and
+// accusation (V14).
+const trackedFilesCache = new WeakMap();
+function trackedFiles(git) {
+  if (trackedFilesCache.has(git)) return trackedFilesCache.get(git);
+  let files = [];
+  try { files = git('ls-files').split('\n').map(s => s.trim()).filter(Boolean); } catch { files = []; }
+  trackedFilesCache.set(git, files);
+  return files;
+}
+
+// Would this pattern select MORE if it named a subtree? Returns { selected, wider,
+// suggest } when it would, and null otherwise.
+//
+// This is the diagnostic half of #195, and it exists because unifying the two readings
+// is not enough on its own. Once the engine's rule wins, a declaration like
+// `public/*.glb` quietly means "the .glb files directly inside public", and the author
+// who wrote it with git or shell habits in mind meant "the .glb files under public" —
+// six files, five of them silently unreachable. The inert-declaration check cannot see
+// that: the pattern selects ONE file, so it classifies `present` and nothing is
+// reported. A declaration that selects some of what its author meant is exactly as
+// silent as one that selects none, and considerably harder to notice.
+//
+// The wider reading is computed by the SAME engine, from the pattern the finding
+// actually recommends — each lone `*` rewritten to `**/*` — so the diagnostic and the
+// advice cannot come apart, and git's pathspec is not consulted at all. Consulting it
+// would reintroduce the second reading this issue removes, and it disagrees on more
+// than star width anyway: it anchors at the repo root where a declaration is a path
+// suffix, so the counts would not be comparable in the first place.
+//
+// Deliberately silent in three cases. A pattern already containing `**` is the author
+// having said which they meant. A pattern with no `*` has no width question. And an
+// empty file list means git could not answer — "cannot tell" must never become a
+// finding, or the check accuses every declaration in the catalogue on the first machine
+// where git is slow or absent (V14, and H87's failure-toward-accusation shape).
+function globWidthGap(spec, git) {
+  const s = String(spec);
+  if (!s.includes('*') || s.includes('**')) return null;
+  const files = trackedFiles(git);
+  if (!files.length) return null;
+  const suggest = s.replace(/\*/g, '**/*');
+  const selected = files.filter(p => matchesDeclaredFile(s, p)).length;
+  const wider = files.filter(p => matchesDeclaredFile(suggest, p)).length;
+  return wider > selected ? { selected, wider, suggest } : null;
+}
+
 // --- lint: the entry's FORM, not the code's state ---------------------------
 // computeCurrency asks "has the code moved under this entry?" and needs git and a
 // project repo to answer. The lint asks a different question — "can this entry be
@@ -202,6 +333,7 @@ const LINT = {
   NO_VALIDATED: 'no-validated',
   NO_COMPUTABLE_REF: 'no-computable-ref',
   INERT_DECLARATION: 'inert-declaration',
+  NARROW_GLOB: 'narrow-glob',
 };
 
 // A REF token of the form `path/to/file.ext:540`, with an optional `-560` range.
@@ -247,7 +379,7 @@ function lineAnchoredRefs(refField) {
 // cannot be answered from the text, so it is offered rather than required — and when it
 // is absent NOTHING changes, not one existing finding (V10). An enrichment that alters a
 // verdict when switched on is a different tool wearing the same name.
-function lintEntry(entry, { catalogue, resolveSpec } = {}) {
+function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth } = {}) {
   const findings = [];
   const high = sensitivityFor(catalogue) === 'high';
 
@@ -303,7 +435,20 @@ function lintEntry(entry, { catalogue, resolveSpec } = {}) {
   // the best-cited entries in the corpus as defective.
   if (resolveSpec) {
     const dead = [];
+    const narrow = [];
     for (const spec of extractFileSpecs(entry.filesField)) {
+      // Asked BEFORE the kind, and it takes the spec out of the inert check when it
+      // fires — not to keep the report tidy, but because the inert finding's answer is
+      // FALSE here. A pattern narrowed to nothing still reaches `git log --all` with
+      // the old wide reading, finds the subtree's history, and reports "tracked once,
+      // since deleted" about files that are sitting on disk right now. Two findings on
+      // one spec where one of them is wrong teaches the reader to discount both.
+      let gap = null;
+      if (resolveGlobWidth) { try { gap = resolveGlobWidth(spec); } catch { gap = null; } }
+      if (gap) {
+        narrow.push(`${spec} → selects ${gap.selected}, where \`${gap.suggest}\` selects ${gap.wider}`);
+        continue;
+      }
       let kind = null;
       // A resolver that fails is saying "cannot tell", which is not "selects nothing".
       // Treating a git error as inert would invent findings on the first machine where
@@ -322,7 +467,13 @@ function lintEntry(entry, { catalogue, resolveSpec } = {}) {
     if (dead.length) {
       findings.push({
         code: LINT.INERT_DECLARATION, severity: high ? 'high' : 'low', refs: dead,
-        detail: 'a declared path selects no file — the entry maps nothing through it, and the injector falls back to guessing from the filename, so nothing looks wrong. Usually a typo, a directory where a file was meant, a file that moved, or a glob narrower than intended.',
+        detail: 'a declared path selects no file — the entry maps nothing through it, and the injector falls back to guessing from the filename, so nothing looks wrong. Usually a typo, a directory where a file was meant, or a file that moved.',
+      });
+    }
+    if (narrow.length) {
+      findings.push({
+        code: LINT.NARROW_GLOB, severity: high ? 'high' : 'low', refs: narrow,
+        detail: 'a declared pattern selects fewer files than the same pattern would over the subtree. A single `*` is one path segment wide here; `**/` is what spans directories — the rule KINDS: has always had. If you meant the whole subtree, say so, because the files it currently misses are reached by guessing at the filename or not at all, and nothing else reports them.',
       });
     }
   }
@@ -859,9 +1010,19 @@ function classifySpec(f, fileExists, git, refResolver) {
   if (fileExists(f)) return { kind: 'present', path: f };
   const isGlob = /[*?[\]]/.test(f);
   if (isGlob) {
-    // fs cannot stat a glob; only git can answer. A live glob misread as missing
-    // would drag a perfectly current entry toward RED.
-    try { if (git(`ls-files -- ${JSON.stringify(f)}`).trim()) return { kind: 'present', path: f }; } catch { /* fall through */ }
+    // fs cannot stat a pattern, so the repo has to answer. It answers through the SAME
+    // engine the injector matches with (`matchesDeclaredFile`) rather than through
+    // `git ls-files -- <spec>`, which was the old form and the whole of #195: git's
+    // default pathspec lets `*` cross a `/` and reads `[id]` as a character class, so
+    // the gate resolved a live declaration to six files while the hook resolved it to
+    // one, and each was confident. Git now supplies the corpus and the engine supplies
+    // the rule.
+    //
+    // An empty list means git could not answer, which is NOT "matches nothing" — fall
+    // through to the branches below rather than concluding absence from a refusal.
+    // A live pattern misread as missing would drag a perfectly current entry toward RED.
+    const files = trackedFiles(git);
+    if (files.length && files.some(p => matchesDeclaredFile(f, p))) return { kind: 'present', path: f };
   }
 
   // A shorthand — a bare basename ("SoundLayer.ts") or a partial path
@@ -1232,6 +1393,10 @@ module.exports = {
   computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom,
+  // The one glob engine and the one declaration predicate. The injector imports these
+  // rather than defining its own, which is what makes "how wide is a declared `*`" a
+  // question with a single answer instead of one answer per consumer (#195).
+  globBody, matchesDeclaredFile, globWidthGap,
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
   lintEntry, lineAnchoredRefs, LINT,

@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs, readField, declaredItems } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, extractFileSpecs, readField, declaredItems, globBody, matchesDeclaredFile } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -169,31 +169,17 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
 // with FILES:, never a filter on it — a narrowing here would drop cases on the
 // permissive side, which is the failure mode this hook can least afford.
 // The glob SYNTAX, with no opinion about what it is anchored to. Both fields that
-// accept a glob compile it here — KINDS: anchors the result to the whole path or the
-// basename, FILES: anchors it as a path suffix — so the two can differ in what they
-// REACH without ever differing in what they ACCEPT. One engine is the point: an author
-// who learns `**/` in one field must not discover the other field is stricter.
-function globBody(glob) {
-  let re = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        // '**/' spans zero or more directories, so `**/__tests__/**` matches a
-        // __tests__ at the repo root as well as one nested six deep.
-        if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
-      } else {
-        re += '[^/]*';
-      }
-    } else if (c === '?') {
-      re += '[^/]';
-    } else {
-      re += c.replace(/[.+^${}()|[\]\\]/, '\\$&');
-    }
-  }
-  return re;
-}
-
+// accept a glob compile through `globBody` — KINDS: anchors the result to the whole
+// path or the basename, FILES: anchors it as a path suffix — so the two can differ in
+// what they REACH without ever differing in what they ACCEPT. One engine is the point:
+// an author who learns `**/` in one field must not discover the other field is stricter.
+//
+// `globBody` and `matchesDeclaredFile` used to be defined here. They now come from
+// currency.js, because the FRESHNESS GATE reads the same declarations and was answering
+// "how wide is this pattern" by asking git — whose default pathspec lets `*` cross a
+// `/`. One live declaration therefore mapped six files for the gate and one for this
+// hook (#195). Same reason readField moved: the two consumers agree by construction, not
+// by two implementations happening to match.
 function globToRe(glob) {
   return new RegExp(`^${globBody(glob)}$`);
 }
@@ -214,58 +200,12 @@ function boundaryLabel(id, content) {
 }
 
 // --- FILES: — does relPath name a file this boundary declares? ----------------
-// A declaration is matched as a path SUFFIX landing on a segment boundary. The suffix
-// half is deliberate: an author declaring `lib/x.cjs` means that module wherever it
-// sits. The segment guard is what stops the suffix reaching a coincidence — a raw
-// string suffix begins at an arbitrary character offset, so `cd.ts` claimed `a/bcd.ts`.
-//
-// A glob is anchored the same way, because a literal is the degenerate glob:
-// `FILES: lib/*.cjs` reaches `pkg/lib/a.cjs` for exactly the reason `FILES: lib/x.cjs`
-// reaches `pkg/lib/x.cjs`. One predicate for both, so the field has one rule rather
-// than one rule per syntax. Before this, FILES: had no glob engine at all, so
-// `FILES: bin/lib/*.cjs` — in this repo's own dharana — matched nothing: not rejected,
-// not warned about, not obeyed. The text fallback then delivered the file anyway, so
-// nothing looked broken, and the injection advised the author to add the declaration
-// they had already written.
-//
-// The syntax comes from globBody — the KINDS: engine — so the two fields cannot drift
-// in what they ACCEPT, only in what they anchor to. If a pattern will not compile,
-// fall back to the plain string form: the declaration keeps doing its literal job
-// rather than disappearing, which is the failure mode this whole function is about.
-// A declaration also selects what sits UNDER it, which is what makes a declared
-// directory work. `FILES: public/audio/` and `FILES: packages/app/src/assetLibrary`
-// are both shapes the live corpus writes, and before this neither selected anything
-// at all — not a weakened match, no match: the file did not even reach the text
-// fallback, because a declaration names a directory while the fallback searches for a
-// FILENAME, and no audio file is called "audio". So the boundary's checks arrived
-// nowhere while its entry read healthy, the silent half of the inert-declaration
-// family rather than the mislabelled half (#193).
-//
-// The descendant clause is unconditional rather than gated on "is this spec a
-// directory?", and that is the whole design. Asking the question needs either the
-// filesystem — a stat per declaration per edit, in a hook, and an answer that differs
-// between a checkout and a bare clone — or a guess from the spelling, and the guess is
-// the one that fails: a trailing slash misses the second shape above, and "no
-// extension ⇒ directory" claims LICENSE and Makefile. Unconditional needs neither. A
-// spec naming a file has nothing beneath it, so the clause is empty exactly where it
-// would be wrong, which is the same bargain the glob support already took: a literal
-// is the degenerate glob, and now a file is the degenerate directory. One rule, one
-// predicate, and no second question for the two consumers of this field to answer
-// differently — the failure this field has produced three times already.
-//
-// The trailing slash is stripped before compiling, not carried into the pattern: it is
-// the author saying "directory", not part of the name, and left in place it would
-// compile to a body ending in `/` and match only a doubled separator.
-function matchesDeclaredFile(decl, relPath) {
-  const spec = decl.replace(/\/+$/, '');
-  if (!spec) return false; // `FILES: /` declares the repo, which is not a declaration
-  try {
-    return new RegExp(`^(?:.*/)?${globBody(spec)}(?:/.*)?$`).test(relPath);
-  } catch {
-    return relPath === spec || relPath.endsWith('/' + spec)
-      || relPath.startsWith(spec + '/') || relPath.includes('/' + spec + '/');
-  }
-}
+// `matchesDeclaredFile` lives in currency.js and is imported above. It used to live
+// here, and moving it is the fix for #195: this hook and the freshness gate both decide
+// which files a declaration selects, and while each owned a copy they disagreed — the
+// gate asked git, whose default pathspec lets a single `*` cross a `/`, so one live
+// declaration mapped six files for the gate and one for the hook. The predicate is
+// unchanged; only its address is. What it does and why is documented at the definition.
 
 function matchesKind(kindsField, relPath) {
   const base = path.basename(relPath);
