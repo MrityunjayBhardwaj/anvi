@@ -673,18 +673,27 @@ eq(codesWith({ filesField: 'src/gone.ts', validatedField: 'abc1234' }, 'dharana.
              { 'src/gone.ts': 'deleted' }),
    LINT.INERT_DECLARATION, 'a spec whose file was deleted is inert too');
 
-// The sharpest case, and the one the issue was filed on: a directory. The path
-// EXISTS — fs.existsSync is true for it, so the shared classifier calls it `present`,
-// which is the right answer to a REF's question and the wrong one to a declaration's.
-// Reported by its own name because a reader who checks will find the path is really
-// there and conclude the lint is wrong.
+// A directory USED to be the sharpest case: the path exists, so the shared classifier
+// called it `present`, and the matcher still reached nothing because it compared file
+// paths. #193 closed that — a declaration now selects what sits under it — so a
+// directory that holds tracked files is a working declaration and must NOT be reported.
+// This assertion is the one that guards against the finding outliving its defect, which
+// is the failure that teaches a reader to skip the lint.
 eq(codesWith({ filesField: 'public/audio/', validatedField: 'abc1234' }, 'dharana.md',
-             { 'public/audio/': 'directory' }),
-   LINT.INERT_DECLARATION, 'a directory exists and still selects no file');
-ok(lintEntry({ filesField: 'public/audio/', validatedField: 'a1' },
-             { catalogue: 'dharana.md', resolveSpec: kinds({ 'public/audio/': 'directory' }) })[0]
-     .refs.some(r => /director/i.test(r)),
-   '  ... and says it is a directory, not that the path is missing');
+             { 'public/audio/': 'present' }),
+   '', 'a directory holding tracked files selects them — not inert (#193)');
+
+// What survives is the narrower question: a directory with nothing under it selects
+// nothing, for the same reason a typo does. Reported by what is MISSING rather than by
+// what the spec is, because "a directory" is no longer a defect and a finding phrased
+// that way would read as a rule that no longer holds.
+eq(codesWith({ filesField: 'empty/tree', validatedField: 'abc1234' }, 'dharana.md',
+             { 'empty/tree': 'empty-directory' }),
+   LINT.INERT_DECLARATION, 'a directory with nothing under it still selects no file');
+ok(lintEntry({ filesField: 'empty/tree', validatedField: 'a1' },
+             { catalogue: 'dharana.md', resolveSpec: kinds({ 'empty/tree': 'empty-directory' }) })[0]
+     .refs.some(r => /no tracked file/i.test(r)),
+   '  ... and says what is missing under it, not that the path is absent');
 
 // The two kinds that DO select files must not be swept in. `ambiguous` resolves to
 // several files — which is a fine thing for a declaration to do, and the opposite of

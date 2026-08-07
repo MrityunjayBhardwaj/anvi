@@ -131,15 +131,32 @@ if (lintOnly) {
   try {
     execSync('git rev-parse --show-toplevel', { cwd, stdio: 'ignore' });
     resolveSpec = (spec) => {
-      // A directory is the one case where "the path exists" and "the declaration
-      // selects something" come apart. classifySpec answers `present`, because
-      // fs.existsSync is true for a directory — correct for a REF, where the question
-      // really is whether the path is there, and wrong here, where the matcher
-      // compares FILE paths and reaches nothing. Two different questions, so this one
-      // is asked here rather than by widening classifySpec: changing what that returns
-      // would move existing currency verdicts, and this finding must add without
-      // altering anything (V10).
-      try { if (fs.statSync(path.join(cwd, spec)).isDirectory()) return 'directory'; } catch { /* not a directory */ }
+      // A directory used to be the one case where "the path exists" and "the
+      // declaration selects something" came apart: the matcher compared FILE paths and
+      // reached nothing, so a plainly-present path was a dead declaration. #193 closed
+      // that — a declaration now also selects what sits under it — and this check had
+      // to move with it rather than be deleted. A finding that outlives the defect it
+      // reports is worse than no finding: it teaches the reader to skip the code.
+      //
+      // So the question narrows to the one that is still true. A directory with tracked
+      // files under it is a working declaration and must not be reported. A directory
+      // with nothing under it selects nothing, for the same reason a typo does, and is
+      // the case worth keeping — an author who declares a tree that turns out to be
+      // empty gets the same silence as an author who mistyped a path.
+      //
+      // Asked here rather than by widening classifySpec, unchanged from before: what
+      // that returns feeds existing currency verdicts, and this finding must add
+      // without altering any of them (V10).
+      try {
+        if (fs.statSync(path.join(cwd, spec)).isDirectory()) {
+          // Cannot tell ⇒ do not accuse. A git that fails here would otherwise turn a
+          // missing capability into a finding against a declaration that is probably
+          // fine, which is the shape where a reporting consumer reads a refusal as an
+          // absence (H87's second instance, V14).
+          try { return git(`ls-files -- ${JSON.stringify(spec)}`).trim() ? 'present' : 'empty-directory'; }
+          catch { return 'present'; }
+        }
+      } catch { /* not a directory */ }
       return classifySpec(spec, fileExists, git, refResolver).kind;
     };
   } catch { resolveSpec = null; }

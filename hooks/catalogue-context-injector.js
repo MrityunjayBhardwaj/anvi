@@ -232,11 +232,38 @@ function boundaryLabel(id, content) {
 // in what they ACCEPT, only in what they anchor to. If a pattern will not compile,
 // fall back to the plain string form: the declaration keeps doing its literal job
 // rather than disappearing, which is the failure mode this whole function is about.
+// A declaration also selects what sits UNDER it, which is what makes a declared
+// directory work. `FILES: public/audio/` and `FILES: packages/app/src/assetLibrary`
+// are both shapes the live corpus writes, and before this neither selected anything
+// at all — not a weakened match, no match: the file did not even reach the text
+// fallback, because a declaration names a directory while the fallback searches for a
+// FILENAME, and no audio file is called "audio". So the boundary's checks arrived
+// nowhere while its entry read healthy, the silent half of the inert-declaration
+// family rather than the mislabelled half (#193).
+//
+// The descendant clause is unconditional rather than gated on "is this spec a
+// directory?", and that is the whole design. Asking the question needs either the
+// filesystem — a stat per declaration per edit, in a hook, and an answer that differs
+// between a checkout and a bare clone — or a guess from the spelling, and the guess is
+// the one that fails: a trailing slash misses the second shape above, and "no
+// extension ⇒ directory" claims LICENSE and Makefile. Unconditional needs neither. A
+// spec naming a file has nothing beneath it, so the clause is empty exactly where it
+// would be wrong, which is the same bargain the glob support already took: a literal
+// is the degenerate glob, and now a file is the degenerate directory. One rule, one
+// predicate, and no second question for the two consumers of this field to answer
+// differently — the failure this field has produced three times already.
+//
+// The trailing slash is stripped before compiling, not carried into the pattern: it is
+// the author saying "directory", not part of the name, and left in place it would
+// compile to a body ending in `/` and match only a doubled separator.
 function matchesDeclaredFile(decl, relPath) {
+  const spec = decl.replace(/\/+$/, '');
+  if (!spec) return false; // `FILES: /` declares the repo, which is not a declaration
   try {
-    return new RegExp(`^(?:.*/)?${globBody(decl)}$`).test(relPath);
+    return new RegExp(`^(?:.*/)?${globBody(spec)}(?:/.*)?$`).test(relPath);
   } catch {
-    return relPath === decl || relPath.endsWith('/' + decl);
+    return relPath === spec || relPath.endsWith('/' + spec)
+      || relPath.startsWith(spec + '/') || relPath.includes('/' + spec + '/');
   }
 }
 

@@ -285,10 +285,13 @@ function lintEntry(entry, { catalogue, resolveSpec } = {}) {
       try { kind = resolveSpec(spec); } catch { kind = null; }
       if (kind === 'external') dead.push(`${spec} (never tracked here)`);
       else if (kind === 'deleted') dead.push(`${spec} (tracked once, since deleted)`);
-      // A directory is the case where the path plainly EXISTS and the declaration still
-      // selects nothing, because the matcher compares file paths. It is also the one a
-      // reader is most likely to argue with, so the finding says which it is.
-      else if (kind === 'directory') dead.push(`${spec} (a directory — declarations select files)`);
+      // A directory that holds nothing is the case where the path plainly EXISTS and the
+      // declaration still selects nothing. It is the one a reader is most likely to
+      // argue with, so the finding says which it is — and says what is missing rather
+      // than what the spec is, because a directory as such is now a working declaration
+      // (#193). Naming the kind instead of the emptiness is what would make this finding
+      // read as a rule that no longer holds.
+      else if (kind === 'empty-directory') dead.push(`${spec} (a directory with no tracked file under it)`);
     }
     if (dead.length) {
       findings.push({
