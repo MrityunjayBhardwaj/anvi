@@ -718,7 +718,27 @@ function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth, resolveSym
 // interpolate it; neither writes `#{2,3}` again.
 const ENTRY_DEPTH = '#{2,3}';
 
-const ENTRY_RE = new RegExp(`^${ENTRY_DEPTH}\\s+([A-Z]{1,3}\\d+(?:\\.\\d+)*)\\b[.:\\s]([\\s\\S]*?)(?=^${ENTRY_DEPTH}\\s+[A-Z]{1,3}\\d+\\b|^## Compaction Log|(?![\\s\\S]))`, 'gm');
+// One identifier, and the list form a heading may name.
+//
+// A heading naming TWO ids (`## V19/V21 amendment — …`) used to parse as NO entry at
+// all: the delimiter class after an id admits a period, colon or whitespace, so the
+// slash stopped the match and both ids were dropped silently. Three headings fleet-wide
+// are written this way, and the obvious repair — widening the delimiter to include `/`
+// — is worse than the bug: it records the first id and discards the second just as
+// silently, with a more convincing appearance of success (#89).
+//
+// So the heading names a LIST, and parseEntries emits one record per id, each sharing
+// the body, the field values and the line span. That the ids share a body is the point:
+// a two-id heading is a statement about both, and its `**REF:**` and stamps are
+// evidence about both. Recording only the first would leave the second assessed against
+// its older pointer — findable, but wrong, and wrong in the silent direction. It also
+// avoids inventing a second way for an id to be addressable, which every consumer would
+// then have to learn to read, and the ones that did not would keep answering
+// confidently (V21).
+const ID_TOKEN = '[A-Z]{1,3}\\d+(?:\\.\\d+)*';
+const ID_LIST = `${ID_TOKEN}(?:/${ID_TOKEN})*`;
+
+const ENTRY_RE = new RegExp(`^${ENTRY_DEPTH}\\s+(${ID_LIST})\\b[.:\\s]([\\s\\S]*?)(?=^${ENTRY_DEPTH}\\s+${ID_TOKEN}\\b|^## Compaction Log|(?![\\s\\S]))`, 'gm');
 
 // --- One reader for where a catalogue field starts and where it ends ---------
 // Two questions have to be answered the same way by everyone who reads these
@@ -885,34 +905,174 @@ function parseEntries(md) {
   while ((m = re.exec(md)) !== null) {
     const body = m[2];
     const lineStart = md.slice(0, m.index).split('\n').length;
-    entries.push({
-      id: m[1],
-      // Heading depth: 2 for a `## ID:` primary entry, 3 for a `### ID:` one. The
-      // regex anchors on `^#{2,3}`, so m[0] always opens with the markers. A dharana
-      // `### SV12` alignment cross-ref and a vyapti `## SV12` invariant share an id
-      // but not a level — the discriminator entryKind() uses so a per-id join never
-      // pairs them (#79).
-      level: (m[0].match(/^#{2,3}/) || ['##'])[0].length,
-      title: body.split('\n')[0].trim().slice(0, 70),
-      refField: field(body, 'REF'),
-      fixField: field(body, 'FIX'),
-      // Newest, not first — stamps are a history. See newestValidated().
-      validatedField: newestValidated(body),
-      filesField: field(body, 'FILES'),
-      lineStart,
-      lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
-    });
+    // One record per id named in the heading — normally one, and two for the
+    // slash-joined form. Every field is shared, deliberately: the ids share a heading
+    // because the statement is about all of them, so its REF, its stamps and its span
+    // are evidence about all of them. `coveredIds` records the whole list on each
+    // record, so a consumer that wants to show "this entry also covers X" can, without
+    // that being the only way X is reachable.
+    const ids = m[1].split('/');
+    for (const id of ids) {
+      entries.push({
+        id,
+        // The other ids this heading names, this one included. Length 1 is the
+        // ordinary case; nothing downstream needs to special-case it.
+        coveredIds: ids,
+        // Heading depth: 2 for a `## ID:` entry, 3 for a `### ID:` one. The regex
+        // anchors on `^#{2,3}`, so m[0] always opens with the markers. A dharana
+        // `### SV12` alignment cross-ref and a vyapti `## SV12` invariant share an id
+        // but not a level — a discriminator entryKind() still uses so a per-id join
+        // never pairs them (#79). It no longer distinguishes a primary from its
+        // continuation; `occurrence` does that, below.
+        level: (m[0].match(/^#{2,3}/) || ['##'])[0].length,
+        title: body.split('\n')[0].trim().slice(0, 70),
+        refField: field(body, 'REF'),
+        fixField: field(body, 'FIX'),
+        // Newest, not first — stamps are a history. See newestValidated().
+        validatedField: newestValidated(body),
+        filesField: field(body, 'FILES'),
+        lineStart,
+        lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
+      });
+    }
   }
-  // An `### ID` that AMENDS a `## ID` in this same catalogue (a dated addendum
-  // appended to a live entry, keeping the parent's id as the link) is not a second
-  // primary entry — but a level-3 heading on its own is NOT evidence of that. Whole
-  // catalogues author every primary entry at level 3, so "level 3 ⇒ addendum" would
-  // mislabel them wholesale (877 such headings fleet-wide vs 65 real addenda). The
-  // discriminator is the PARENT's presence, not the depth: mark the amendment only
-  // when the id is also claimed by a level-2 heading here (#85).
-  const primaries = new Set(entries.filter((e) => e.level === 2).map((e) => e.id));
-  for (const e of entries) if (e.level === 3 && primaries.has(e.id)) e.amends = true;
+  // An id that appears again in the same catalogue is a CONTINUATION of the first
+  // occurrence — a dated addendum, update, correction, recurrence or status flip
+  // keeping the parent's id as the link — not a second primary entry.
+  //
+  // The discriminator is POSITION, and the two alternatives were each measured on the
+  // live corpus before this one was chosen (#185).
+  //
+  // Not DEPTH. The previous rule marked an amendment only where a level-2 heading of
+  // the same id also existed, on the reasoning that whole catalogues author primaries
+  // at level 3 so depth alone proves nothing. That reasoning is right and the rule
+  // built on it is still backwards for the catalogues it was meant to protect: one
+  // boundary map defines `### B18:` and then appends TWENTY-TWO `## B18 UPDATE`
+  // continuations at level 2, so the old rule called every update a primary and the
+  // definition an addendum. It also missed two whole populations — a continuation at
+  // the parent's own level (62 cases), and every boundary map, which is authored
+  // entirely at level 3 so the level-2 parent set is empty by construction (18 cases).
+  //
+  // Not a KEYWORD either. Of 191 surviving repeats, 141 announce themselves —
+  // amendment, addendum, update, correction — and 50 do not while still plainly being
+  // continuations: a recurrence, a third occurrence, a status flip, a resolution moving
+  // partial→resolved, an entry retired as falsified, a companion note, an invariant
+  // restated as holding. A fixed vocabulary meeting an open one is this codebase's most
+  // familiar failure: the matching cases keep the mechanism looking healthy while the
+  // rest fail silently. Adding the five words in front of you buys one measurement and
+  // loses the next.
+  //
+  // The cost, stated because it is real: a genuine ACCIDENTAL re-use of an id — the
+  // thing V3 forbids — is absorbed here as a continuation instead of being caught. That
+  // is not an argument against the rule but an argument that it cannot ship alone, and
+  // the lint's `absorbed-continuation` report is the other half. One live instance is
+  // known: a catalogue where a third `H81` describes an unrelated failure entirely.
+  //
+  // `occurrence` is 1 for the primary and counts up. Downstream joins need it: with
+  // continuations now legal at ANY level, (id, level) no longer identifies a record —
+  // 178 later occurrences fleet-wide sit at the same level as their first — and a join
+  // on that pair would silently resolve an addendum to its primary's line span, dating
+  // one by the other. That is the very collision the level rule was introduced to stop,
+  // reappearing one level down.
+  const seenIds = new Map();
+  for (const e of entries) {
+    const n = (seenIds.get(e.id) || 0) + 1;
+    seenIds.set(e.id, n);
+    e.occurrence = n;
+    if (n > 1) e.amends = true;
+  }
   return entries;
+}
+
+// --- The GUESS: does a boundary's text name this file, absent a declaration? ------
+//
+// The last of the boundary-matching questions to get a home here, and it moved for the
+// same reason as the others: it acquired a second asker. The hook runs it FORWARDS — for
+// the file being edited, which boundaries does its text reach? — and the proposer runs
+// the identical relation BACKWARDS — for a boundary, which files does its text reach? —
+// to draft the declaration that would make the guessing unnecessary. A proposer built on
+// its own copy would draft declarations for a relation the hook does not actually
+// implement, and the mismatch would be invisible: every proposal would look reasonable,
+// and the boundary would keep guessing afterwards exactly as before (V21).
+//
+// Which region admits which term is the substance, and it is not symmetric. An entry
+// ASSERTS in prose, CITES in `REF:`, QUOTES in fenced blocks, and RECORDS HISTORY in the
+// stamps the freshness gate writes. A flat text search read all four alike, so a path
+// present because someone READ it became a claim the entry GOVERNS it — and because the
+// bibliography is the longest, most path-dense line of a well-kept entry, the better
+// documented an entry was the more files it wrongly claimed. Diligence widened the net.
+//
+//   prose        all three terms   a bare name is how a person refers to a module
+//   REF:         full path only    every item there is already a path, so a bare name is
+//                                  a collision with another file or an ordinary word
+//   VALIDATED:   nothing           its paths are what CHANGED — evidence of drift, not
+//                                  of subject, and they mean the opposite of a REF's
+//   fenced block nothing           quoted material; the entry is showing it, not
+//                                  asserting it
+//
+// An unterminated fence is left searchable. Boundary content is already cut at the next
+// divider, so a fence can lose its closer to that cut with real prose after it, and
+// swallowing the remainder would lose a real match silently. Erring wide keeps a lost
+// case visible as noise rather than as silence.
+const FENCED = /^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm;
+const REF_STARRED = /\*\*REF\b[^\n]*?:\*\*[^\n]*/g;
+const REF_PLAIN = /^[ \t]*REF\b[^:\n]*:[^\n]*/gm;
+const VALIDATED_LINE = /\*\*VALIDATED\b[^\n]*?:\*\*[^\n]*/g;
+
+function fallbackSpans(content) {
+  const body = String(content).replace(FENCED, '').replace(VALIDATED_LINE, '');
+  const biblio = (body.match(REF_STARRED) || [])
+    .concat(body.match(REF_PLAIN) || [])
+    .join('\n');
+  const prose = body.replace(REF_STARRED, '').replace(REF_PLAIN, '');
+  return { prose, biblio };
+}
+
+// The file's basename WITHOUT its extension, matching `path.basename(f, path.extname(f))`
+// exactly — including that a leading dot is not an extension, so `.eslintrc` keeps its
+// whole name. Open-coded because this module deliberately requires nothing; re-deriving
+// it in the caller is what would put the rule back in two places.
+function fileStem(relPath) {
+  const seg = String(relPath).split('/').pop() || '';
+  const dot = seg.lastIndexOf('.');
+  return dot > 0 ? seg.slice(0, dot) : seg;
+}
+
+function guessTerms(relPath) {
+  const stem = fileStem(relPath);
+  return [
+    stem,
+    relPath,
+    // CamelCase parts, so `GlyphPathResolver` is reachable from prose that says
+    // "resolver". Short fragments are dropped: a three-letter word matches everywhere.
+    ...stem.replace(/([A-Z])/g, ' $1').trim().split(/\s+/).filter((s) => s.length >= 4),
+  ];
+}
+
+// Does this boundary's own text name this file? The fallback, and only the fallback —
+// a declared match is a different question, answered by matchesDeclaredFile.
+function guessMatchesFile(content, relPath) {
+  const { prose, biblio } = fallbackSpans(content);
+  const esc = (t) => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const appearsIn = (term, region) =>
+    new RegExp(`(?:^|[^a-z0-9])${esc(term)}(?:$|[^a-z0-9])`, 'i').test(region);
+  // Identity, not suffix — at BOTH ends, since a path can be extended in either
+  // direction and each extension names a different file.
+  //
+  // Leading: the prose test admits any non-alphanumeric before the term, and `/` is one,
+  // so `src/foo.js` would otherwise match `packages/elsewhere/src/foo.js`. Nothing
+  // pathlike may precede: the path must begin where the item begins.
+  //
+  // Trailing: a '.' has to be admitted, because a bibliography item is usually followed
+  // by a sentence period — but admitting it unconditionally makes `LICENSE` match
+  // `LICENSE.md` and `Makefile` match `Makefile.old`, so every extensionless file is
+  // claimed by anything extending it. The two are told apart by what follows the dot: an
+  // extension continues into alphanumerics, a sentence does not.
+  const isPathIdentity = (term, region) =>
+    new RegExp(`(?:^|[^a-z0-9_./-])${esc(term)}(?:$|[^a-z0-9_./-]|\\.(?![a-z0-9]))`, 'i')
+      .test(region);
+  return guessTerms(relPath).some((term) => appearsIn(term, prose))
+    || isPathIdentity(relPath, biblio);
 }
 
 // --- The boundary split, for the one consumer that needs boundaries specifically ---
@@ -1057,7 +1217,7 @@ function committedEntries(storeGit, cataloguePath) {
 // would reinstate the bug on exactly the paths where the lookup failed, and those are
 // invisible from the outside: a borrowed date is indistinguishable from a real one
 // (V19 — converging failure modes must each fail closed on their own).
-function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level }) {
+function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level, occurrence }) {
   // `!id` is an EARLY EXIT, not a safety guard: with no key to look up, the lookup
   // below finds nothing and returns null anyway, so breaking this line alone turns
   // nothing red. It is here to skip a `git show` + parse that cannot succeed. Stated
@@ -1065,15 +1225,27 @@ function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level }) {
   // dead — the pair is only witnessed when both are broken together.
   if (!storeGit || !cataloguePath || !id) return null;
 
-  // Match on id AND level: an `### H45` addendum shares its id with the `## H45` it
-  // amends, and pairing the wrong one would date the parent by its addendum (#79/#85).
-  // With no level given the first match in document order wins, which is the primary
-  // in every catalogue that places an addendum after the entry it amends. The only
-  // production caller passes a level, so that path is a courtesy to direct callers —
-  // not a case this relies on.
+  // Match on id AND OCCURRENCE. An addendum shares its id with the entry it amends,
+  // and pairing the wrong one dates the parent by its addendum (#79/#85).
+  //
+  // This used to key on (id, level), which worked only while a continuation was
+  // guaranteed to sit at a different depth from its primary. Under the position rule it
+  // is not: 178 later occurrences fleet-wide are written at the SAME level as their
+  // first, including one boundary map with twenty-two of them. A level key would then
+  // resolve every one of those to the primary and read its line span — the collision
+  // this argument is about, silently restored, and invisible per-record because each
+  // lookup returns a real entry.
+  //
+  // `occurrence` is what the position rule already computes, so this asks the same
+  // question the identity rule answers rather than deriving a second notion of which
+  // record is which. Level is still accepted and still filters, for direct callers that
+  // have one and no occurrence; when both are absent the first match in document order
+  // wins, which is the primary.
   const committed = committedEntries(storeGit, cataloguePath);
   if (!committed) return null;
-  const self = committed.find((e) => e.id === id && (level === undefined || e.level === level));
+  const self = committed.find((e) => e.id === id
+    && (occurrence === undefined || e.occurrence === occurrence)
+    && (level === undefined || e.level === level));
   // Absent from HEAD: an entry that exists only in the working tree. There is no
   // committed text to date, and the lines it currently occupies belong to something
   // else in history — so answer "unknown" rather than borrow that neighbour's date.
@@ -1158,6 +1330,16 @@ function sensitivityFor(catalogue) {
 const CATALOGUE_ROLE = { vyapti: 'invariant', hetvabhasa: 'error', krama: 'lifecycle', dharana: 'focus' };
 function entryKind(catalogue, entry) {
   const base = String(catalogue || '').replace(/\.md$/, '').toLowerCase();
+  // Asked FIRST, above the dharana shape test, and that order is the fix rather than a
+  // tidy-up. A continuation is a continuation in every catalogue, but boundary maps are
+  // authored entirely at level 3, so the dharana branch below answers 'boundary' for
+  // every one of them and returns before this line is ever reached. Under the position
+  // rule 64 dharana records fleet-wide are continuations, and each would have been
+  // handed its primary's kind — reinstating, inside dharana alone, exactly the per-id
+  // join collision that giving an addendum its own kind was introduced to stop (#85).
+  // The dharana branch stays for what it actually decides: which KIND a first
+  // occurrence is, boundary or alignment.
+  if (entry && entry.amends) return 'addendum';
   if (base === 'dharana' && entry && entry.level === 3) {
     // `(?:\.\d+)*` so a boundary SUB-id (`B1.1`) is still a boundary. Without it the
     // shape test falls through to 'alignment' — an invariant-span note, which a
@@ -1594,9 +1776,11 @@ function computeCurrency(entry, opts) {
     git,
     timeAnchor: () => resolveTimeAnchor({
       git, storeGit, cataloguePath,
-      // id + level select the entry in the COMMITTED catalogue, which is where its
-      // line span is then read from. The working-tree span is deliberately not passed.
-      id: entry.id, level: entry.level,
+      // id + occurrence select the entry in the COMMITTED catalogue, which is where
+      // its line span is then read from. The working-tree span is deliberately not
+      // passed. Occurrence rather than level, because a continuation may now share
+      // its primary's depth — see the join in resolveTimeAnchor.
+      id: entry.id, level: entry.level, occurrence: entry.occurrence,
     }),
   });
 
@@ -1705,6 +1889,12 @@ module.exports = {
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers
   // to either question is a disagreement no per-consumer test can fail (V21).
   boundaryLabel, boundaryDeclares,
+  // The guess, and the regions it is allowed to read. Exported because the relation now
+  // runs in both directions — the hook asks which boundaries a file reaches, the
+  // proposer asks which files a boundary reaches — and a proposer drafting declarations
+  // from its own copy of this rule would draft them for a relation the hook does not
+  // implement, with every proposal looking perfectly reasonable (V21).
+  guessMatchesFile, fallbackSpans, guessTerms,
   // Exported so the stamp-selection rule can be asserted directly rather than
   // only through a parsed catalogue — the defect it fixes was invisible at the
   // report level for weeks precisely because nothing tested the selection.

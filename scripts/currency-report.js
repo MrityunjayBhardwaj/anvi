@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -41,6 +41,7 @@ function readDir(dir, kind) {
 const args = process.argv.slice(2);
 const staleOnly = args.includes('--stale');
 const lintOnly = args.includes('--lint');
+const proposeOnly = args.includes('--propose');
 const target = args.filter(a => !a.startsWith('--'))[0] || process.cwd();
 const cwd = path.resolve(target);
 
@@ -103,6 +104,79 @@ const kindRead = { ref: readDir(cwd, 'ref'), investigations: readDir(cwd, 'inves
 const refResolver = makeRefResolver(
   AREA_SPECS.map(a => ({ area: a.area, dir: kindRead[a.kind].dir, sub: a.sub, strip: a.strip })),
   { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+
+// --- propose mode -----------------------------------------------------------
+// Drafts a declaration for boundaries that have none. Prints; never edits. Turning a
+// large authoring job into a REVIEW job is the whole point, and a tool that rewrote
+// boundary maps would trade one invisible behaviour for another.
+//
+// What it proposes from is the finding that reshaped this. The obvious source is the
+// relation the hook already runs — the files a boundary reaches by GUESSING — read
+// backwards. Measured on three projects, that source is unusable: every undeclared
+// boundary reaches between 21 and 655 files across 39 to 65 directories, and NOT ONE
+// has a reached set small enough to be a declaration. Zero boundaries reach five files
+// or fewer. Those sets are dominated by name collisions, and proposing from them would
+// launder noise into something deterministic and permanent — strictly worse than the
+// guess it replaces, because a declaration is believed.
+//
+// The usable signal is the other half of the same predicate: a FULL PATH the author
+// already wrote in the entry's own bibliography. High precision by construction — a
+// path in a REF line is a path a person typed, not a name that happened to collide —
+// and small: mostly one to five files, covering 33 of 37, 37 of 46 and 33 of 71
+// undeclared boundaries across the three projects. So the proposal is not a guess at
+// all. It is "you already named these files; say that you govern them."
+//
+// A boundary whose bibliography names no tracked file gets an explicit refusal rather
+// than a weaker suggestion. The issue asked for a tool that can say "I cannot suggest
+// anything for this one" and be believed, and the only way to be believed is to have
+// declined when it had something worse to offer.
+if (proposeOnly) {
+  let tracked = null;
+  try {
+    tracked = git('ls-files').split('\n').filter(Boolean);
+  } catch {
+    // Same terms as the lint's opt-in enrichments: no repo, no answer, and say so
+    // rather than proposing from a file list that does not exist.
+    console.error(`no project repo at ${cwd} — proposals need the tracked file list, so nothing was drafted.`);
+    process.exit(2);
+  }
+
+  // The bibliography test, taken from the shared predicate rather than re-derived: the
+  // hook decides what "this entry names this file" means, and a proposer that answered
+  // it differently would draft declarations for a relation the hook does not implement.
+  // `biblio` is already the entry's REF span, markers included, so handing it back to
+  // the shared predicate re-extracts it as the bibliography and leaves the prose empty
+  // — which is precisely how the high-precision half gets asked on its own, without a
+  // second copy of the path-identity rule living here.
+  const namesFile = (biblio, rel) => guessMatchesFile(biblio, rel);
+
+  console.log(`Declaration proposals — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
+  let drafted = 0, declined = 0, already = 0;
+  for (const cat of CATALOGUES.filter(c => sensitivityFor(c) === 'high')) {
+    const p = path.join(anviDir, cat);
+    if (!fs.existsSync(p)) continue;
+    for (const b of splitBoundaries(fs.readFileSync(p, 'utf8'))) {
+      if (boundaryDeclares(b.content)) { already++; continue; }
+      const label = boundaryLabel(b.id, b.content);
+      const { biblio } = fallbackSpans(b.content);
+      const hits = biblio ? tracked.filter(f => namesFile(biblio, f)) : [];
+      if (!hits.length) {
+        declined++;
+        console.log(`  ${label}`);
+        console.log('      no proposal — this entry\'s REF names no tracked file, so there is'
+          + ' nothing here that is not a guess. Declare it by hand.\n');
+        continue;
+      }
+      drafted++;
+      console.log(`  ${label}`);
+      console.log(`      FILES: ${hits.join(', ')}`);
+      console.log(`      (${hits.length} ${hits.length === 1 ? 'path' : 'paths'} this entry's REF already names — review, then paste under the heading)\n`);
+    }
+  }
+  console.log(`── ${drafted} drafted, ${declined} declined, ${already} already declared`);
+  console.log('   Nothing was written. Paste what you agree with.');
+  process.exit(0);
+}
 
 // --- lint mode --------------------------------------------------------------
 // A different question from the report's: not "what drifted?" but "which entries
@@ -236,10 +310,38 @@ if (lintOnly) {
   const byCode = {};
   let total = 0;
 
+  // Every id that appears more than once in a catalogue, collected as the lint walks
+  // them so the file is read once. Printed after the findings, below.
+  const continuations = [];
+
   for (const cat of CATALOGUES) {
     const p = path.join(anviDir, cat);
     if (!fs.existsSync(p)) continue;
     const entries = parseEntries(fs.readFileSync(p, 'utf8'));
+
+    // The absorption made visible. A later occurrence of an id is now read as a
+    // continuation of the first, which is what 391 records in the fleet actually are —
+    // but the rule cannot tell that from a genuine ACCIDENTAL re-use of an id, and it
+    // absorbs both. One live instance is known: a catalogue where a third `H81`
+    // describes a completely unrelated failure.
+    //
+    // So the rule does not get to be silent. Reported as a COUNT PER ID rather than as
+    // a finding per record, on two grounds. A finding per record is 391 lines fleet-wide
+    // of which essentially all are legitimate, and a worklist that is mostly noise
+    // teaches its reader to skip it — the failure this lint's own design note warns
+    // about. And the actionable signal is not the individual record but the SHAPE of the
+    // count: an id you did not expect to have continuations at all, or one with far more
+    // than its neighbours, is where a re-use hides.
+    //
+    // Deliberately NOT filtered by whether the heading says "amendment". 265 of the 391
+    // announce themselves and 126 do not while still plainly being follow-ups — a
+    // recurrence, a third occurrence, a status flip, an entry retired as falsified. A
+    // keyword filter would present those 126 as suspects and the real re-use would sit
+    // among them, indistinguishable. A fixed vocabulary meeting an open one, in the
+    // reporting layer this time.
+    const perId = new Map();
+    for (const e of entries) if (e.amends) perId.set(e.id, (perId.get(e.id) || 0) + 1);
+    if (perId.size) continuations.push({ cat, perId });
 
     // Group by finding, not by entry. On a real corpus a single code can hit
     // hundreds of entries, and printing the same sentence 341 times is a wall, not
@@ -272,6 +374,25 @@ if (lintOnly) {
       if (g.refs.length) for (const r of g.refs) console.log(`      ${r}`);
       else console.log(`      ${g.ids.join(', ')}`);
     }
+    console.log('');
+  }
+
+  // --- continuations absorbed by the identity rule ----------------------------
+  for (const { cat, perId } of continuations) {
+    const records = [...perId.values()].reduce((a, n) => a + n, 0);
+    console.log(`${cat} — repeated identifiers`);
+    console.log(`  ${records} later ${records === 1 ? 'occurrence was' : 'occurrences were'} read as a continuation`
+      + ` of an earlier entry with the same identifier, across ${perId.size}`
+      + ` ${perId.size === 1 ? 'identifier' : 'identifiers'}:`);
+    // Sorted by count, because the signal is the outlier. Uncapped: a truncated list
+    // would read as the whole picture, and the one entry that matters is as likely to
+    // be at the bottom as the top.
+    for (const [id, n] of [...perId.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`      ${id} ×${n + 1}`);
+    }
+    console.log('  Each is treated as an addendum to the FIRST entry with that identifier,'
+      + ' and shares its verdict. If any of these is not a follow-up but a different'
+      + ' subject that reused an identifier, it is being silently merged — give it its own.');
     console.log('');
   }
 

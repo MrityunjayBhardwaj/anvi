@@ -175,11 +175,15 @@ eq((SUB[0] || {}).id, 'B41.2', 'a sub-id is captured whole, not truncated to its
 eq((SUB[0] || {}).title, '+ B47 v0.7 extension (#123)', 'a sub-id does not spill its own digits into the title');
 eq((parseEntries('## B47. Renderer → output boundary\nbody')[0] || {}).id, 'B47',
   'a period followed by a space is punctuation, not a sub-id');
-// Deliberately still unparsed: one heading naming TWO ids needs a decision about
-// what it produces, not a wider character class. Accepting `/` here would record
-// the first id and drop the second exactly as silently as this bug dropped both.
-eq(parseEntries('## QA5/QA6 addendum — covers two ids at once\nbody').length, 0,
-  'a slash-composite heading stays unparsed on purpose (#89)');
+// The decision that heading was waiting for is made (#89): it names a LIST, and
+// produces one record per id, each sharing the body and its fields. The rejected
+// repair — widening the delimiter class to admit `/` — would have recorded the first
+// id and dropped the second exactly as silently as leaving it unparsed dropped both.
+const COMPOSITE = parseEntries('## QA5/QA6 addendum — covers two ids at once\nbody');
+eq(COMPOSITE.length, 2, 'a slash-composite heading produces one record per id (#89)');
+eq(COMPOSITE.map((e) => e.id).join(','), 'QA5,QA6', 'both ids are recorded, in heading order');
+ok(COMPOSITE.every((e) => e.coveredIds.join('/') === 'QA5/QA6'),
+  'each record names the whole list, so the pairing is reportable');
 // ADDITIVITY: a heading that was previously unparsed still TERMINATED the entry
 // above it (the lookahead never required a delimiter), so recovering it must not
 // move any existing entry's extent — the property that makes this fix safe to ship
@@ -281,10 +285,27 @@ eq(orphans.length, 2, 'level-3-only catalogue still parses its entries');
 ok(!orphans[0].amends && !orphans[1].amends, 'level-3 entries with no level-2 parent are NOT amendments');
 eq(entryKind('krama.md', orphans[0]), 'lifecycle', 'an orphan level-3 primary keeps the catalogue role');
 eq(entryKind('vyapti.md', parseEntries('### V9: primary\nbody')[0]), 'invariant', 'orphan level-3 in vyapti → invariant');
-// dharana keeps its own rule even when the id IS also a level-2 heading there.
+// dharana no longer keeps its shape rule ahead of the continuation test, and the
+// reversal is deliberate. It was safe while a continuation was guaranteed to sit at a
+// different depth from its primary: level 2 answered 'focus', level 3 answered
+// 'boundary', so the pair differed and the per-id join held. Under the position rule a
+// continuation may share its primary's depth — 64 dharana records fleet-wide do — and
+// then BOTH answer 'boundary', restoring the very collision this kind exists to
+// prevent, in the one catalogue whose drift is a live hazard. So the continuation test
+// runs first, which also makes an addendum an addendum in every catalogue rather than
+// in three of four. The shape rule still decides what a FIRST occurrence is.
 const DH_SHARED = ['## B11: a boundary', 'body', '### B11 — ADDENDUM: note', 'more'].join('\n');
 const dhs = parseEntries(DH_SHARED);
-eq(entryKind('dharana.md', dhs[1]), 'boundary', 'dharana ### keeps boundary/alignment, not addendum (rule order)');
+eq(entryKind('dharana.md', dhs[0]), 'focus', 'the dharana primary keeps its role');
+eq(entryKind('dharana.md', dhs[1]), 'addendum', 'a dharana continuation is an addendum, like everywhere else');
+// The case that forced the reversal: same depth, so only the continuation test can
+// separate them. Asserted as an INEQUALITY, because what the join needs is that the two
+// kinds differ — naming them is a weaker check that would pass on a rule that gave both
+// the same wrong-but-distinct label.
+const DH_SAME = ['### B18: the boundary', 'body', '### B18 UPDATE — later', 'more'].join('\n');
+const dsame = parseEntries(DH_SAME);
+ok(entryKind('dharana.md', dsame[0]) !== entryKind('dharana.md', dsame[1]),
+  'a dharana continuation at its primary\'s OWN depth still gets a distinct kind');
 eq(entryKind('dharana.md', dhs[0]), 'focus', 'dharana ## primary → focus');
 
 // --- the anchor ladder ------------------------------------------------------
