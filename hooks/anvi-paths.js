@@ -352,6 +352,19 @@ function isInside(cwd, dir) {
 function checkAccess(cwd, dir) {
   const storeProject = storeProjectOf(dir);
   if (!storeProject) return { state: 'LOCAL', storeProject: null, reason: 'resolved inside the project — no identity to verify' };
+  // The caller's identity is its PROJECT's identity, and the project is the
+  // anchor — never whichever directory the shell happens to be sitting in. Both
+  // questions below take it from here.
+  //
+  // Assuming cwd would do is inference, and it is wrong for a whole class of
+  // real records. A record with no remote is LOCATION-keyed: its worktree list
+  // is the entirety of its identity, so a subdirectory compared against it
+  // matches nothing and the binding check answers MISMATCH — a caller told that
+  // its own project belongs to someone else, from one directory down.
+  // Remote-keyed records conceal this completely, because git reports the same
+  // remote at any depth; a remote-keyed fixture therefore passes either way,
+  // which is why this was found by sweeping live records and not by testing.
+  const root = projectAnchor(cwd).root;
   // A store project reading its OWN directory. `storeProjectOf` answers "is this
   // inside the store" and never looks at the caller, so without this a project
   // whose working directory IS its store directory is refused the knowledge it
@@ -374,7 +387,7 @@ function checkAccess(cwd, dir) {
   // points `<their dir>/.anvi` at another project's store directory becomes the
   // anchor for their own directory and gains nothing — resolved, that link lands
   // in the store, outside their root, and stays gated exactly as before.
-  if (isInside(projectAnchor(cwd).root, dir)) {
+  if (isInside(root, dir)) {
     return { state: 'LOCAL', storeProject, reason: 'resolved inside the caller\'s own directory — the caller IS this project' };
   }
   if (!IDENTITY) {
@@ -383,7 +396,7 @@ function checkAccess(cwd, dir) {
       reason: 'anvi-identity.js is not present in this installation, so the binding cannot be checked — re-run install.sh',
     };
   }
-  const v = IDENTITY.verifyBinding(identityFor(cwd), IDENTITY.readProvenance(storeProject));
+  const v = IDENTITY.verifyBinding(identityFor(root), IDENTITY.readProvenance(storeProject));
   return { state: v.state, storeProject, reason: v.reason };
 }
 

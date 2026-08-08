@@ -83,6 +83,22 @@ eq(verdict(alpha), 'alpha/alpha', 'class 1: the project root resolves to itself 
 eq(verdict(mkdir(alpha, 'hooks')), 'alpha/alpha', 'class 1: a subdirectory resolves to its project, and owns it');
 eq(verdict(alphaDeep), 'alpha/alpha', 'class 1: a deeply nested subdirectory resolves to its project, and owns it');
 
+// A LOCATION-KEYED project — bound by worktree path, with no remote. The
+// commonest shape in the live fleet, and the one a remote-keyed fixture cannot
+// stand in for: git reports the same remote from any depth, so a remote-keyed
+// record matches from a subdirectory whether or not the caller's identity is
+// taken from the right directory. A location-keyed record does not forgive that,
+// because its worktree list IS its identity — a subdirectory matches nothing.
+// This is the case the live sweep found and the fixtures above could not.
+mkstore('gamma');
+const gamma = mkdir(WORK, 'gamma');
+fs.symlinkSync(path.join(PROJECTS, 'gamma', '.anvi'), path.join(gamma, '.anvi'));
+ID.writeProvenance(path.join(PROJECTS, 'gamma'), { remote: null, worktrees: [gamma] });
+eq(P.resolveDirVerdict(gamma, '.anvi').state, 'BOUND', 'location-keyed: the recorded worktree itself is bound');
+eq(P.resolveDirVerdict(mkdir(gamma, 'src', 'deep'), '.anvi').state, 'BOUND',
+   'location-keyed: and so is a subdirectory — the caller\'s identity is its PROJECT\'s, not the shell\'s');
+eq(verdict(mkdir(gamma, 'src', 'deep')), 'gamma/gamma', 'location-keyed: which means the subdirectory is actually served');
+
 // ---------------------------------------------------------------------------
 // Class 2 — a VENDORED repository checked out inside an instrumented project.
 // The larger population and the dangerous one: without the bound, one project's
@@ -152,6 +168,20 @@ mkstore('beta');
 const namesake = mkdir(alpha, 'beta');            // inside alpha, named like a store project
 eq(served(namesake), 'alpha', 'name narrowing: a subdirectory named like a store project reads its HOST, not its namesake');
 eq(owned(namesake), 'alpha', 'name narrowing: and owns the host project, not the namesake');
+
+// Those two are carried by the WALK — the host's own `.anvi` is candidate one and
+// answers before the name is consulted at all. The KEY the name-based candidate is
+// built from is a separate decision, and it only becomes visible for a kind the
+// anchor does NOT itself hold: there the first two candidates miss and the third
+// decides. Asserted on the candidate list rather than on what gets served, because
+// the binding check would refuse the namesake anyway and a test of the served
+// result would pass on the guard's work while appearing to test this.
+mkdir(PROJECTS, 'beta', 'ref');
+const refCands = P.candidates(namesake, 'ref');
+ok(!refCands.some(c => c.startsWith(path.join(PROJECTS, 'beta') + path.sep)),
+   'name narrowing: no candidate addresses the store by the SUBDIRECTORY\'s name');
+ok(refCands.includes(path.join(PROJECTS, 'alpha', 'ref')),
+   'name narrowing: the store candidate is keyed on the project root instead — the same one candidate, anchored');
 
 // The one live fleet layout that still depends on the name: a project root with
 // no local `.anvi` whose basename matches a store project. Unchanged on purpose
