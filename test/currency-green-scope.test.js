@@ -101,5 +101,56 @@ v = computeCurrency({ validatedField: 'abc1234 2026-07-01', refField: 'a.js' },
 eq(v.status, 'YELLOW', 'changed ref → YELLOW');
 ok(!/no drift in/.test(v.reason), 'yellow is untouched by the green scope text');
 
+// --- the scope actually REACHES the output ---
+// The assertions above all run in-process. That proves the rule, and proves nothing about
+// whether the report prints it: a unit suite has passed here before over a feature that
+// was silently absent from the shipped surface. So spawn the report against a hermetic
+// project and require the words to arrive.
+console.log('the report says it, not just the module');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execSync, spawnSync } = require('child_process');
+
+const ROOT = path.join(__dirname, '..');
+const REPORT = path.join(ROOT, 'scripts', 'currency-report.js');
+const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-green-')));
+const PROJ = path.join(tmp, 'proj');
+fs.mkdirSync(path.join(PROJ, '.anvi'), { recursive: true });
+fs.mkdirSync(path.join(PROJ, 'src'), { recursive: true });
+fs.writeFileSync(path.join(PROJ, 'src/a.ts'), '// a\n');
+fs.writeFileSync(path.join(PROJ, 'src/b.ts'), '// b\n');
+fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
+execSync('git init -q', { cwd: PROJ });
+execSync('git add -A', { cwd: PROJ });
+execSync('git -c user.email=t@t -c user.name=t commit -qm i', { cwd: PROJ, stdio: 'ignore' });
+const sha = execSync('git rev-parse HEAD', { cwd: PROJ, encoding: 'utf8' }).trim();
+
+// TWO green entries, because the notice must appear once for the whole report rather than
+// once per row — stating it per row is the wall this deliberately avoids, and only a
+// second entry can tell the two arrangements apart.
+fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), `# Hetvabhasa
+
+## H1: first
+**REF:** src/a.ts
+**VALIDATED:** ${sha} 2026-08-08
+
+## H2: second
+**REF:** src/b.ts
+**VALIDATED:** ${sha} 2026-08-08
+`);
+const out = spawnSync('node', [REPORT, PROJ],
+  { cwd: PROJ, encoding: 'utf8', env: { ...process.env, ANVI_CATALOGUE_DIR: path.join(PROJ, '.anvi') } }).stdout || '';
+
+ok(/🟢/.test(out), 'control — the fixture really does produce fresh verdicts');
+ok(/no drift in 1 cited file since anchor/.test(out), 'a fresh row states how many files it compared');
+const notices = (out.match(/fresh = no cited file changed since/g) || []).length;
+eq(notices, 1, 'the scope statement appears exactly ONCE, not once per fresh row');
+ok(/claim about\n?\s*commits/.test(out) || /claim about/.test(out),
+   'and it says what the claim is about');
+ok(/still lands on anything/.test(out), 'and names what it does not cover');
+
+fs.rmSync(tmp, { recursive: true, force: true });
+
 console.log(`\n${fail ? '✗' : '✓'} currency green scope: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
