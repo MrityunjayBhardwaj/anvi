@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// The identity module, located across both install trees (V7) — a hook loads it
+// The identity module, located across both install trees — a hook loads it
 // from its own directory, the CLI from ~/.claude/hooks. Loaded DEFENSIVELY on
 // purpose: it arrived after some installs were already in place, so a tree that
 // predates it must degrade to a named verdict rather than throw inside a hook.
@@ -187,7 +187,7 @@ function existingDirs(cwd, kind) {
 
 // Split-brain detection. When more than one candidate exists for a kind, the
 // resolver silently serves the first and shadows the rest — and the copies
-// diverge (H6). Warn ONCE per condition to stderr (never stdout: hook stdout is
+// diverge. Warn ONCE per condition to stderr (never stdout: hook stdout is
 // parsed), naming the winner and the shadowed copies. Detection only: never
 // changes resolution, output, or exit code. Silence with ANVI_SILENCE_SPLITBRAIN=1.
 function warnIfSplitBrain(kind, existing) {
@@ -264,7 +264,7 @@ function realDeep(p) {
 
 // The containment core both entry points below share. Separated so that "which
 // store project is this in" is answered ONE way — two consumers computing it
-// separately is how this file came to exist (H1), and here the two would differ
+// separately is how this file came to exist, and here the two would differ
 // precisely on the symlinked-store case nobody exercises.
 function storeProjectOfReal(real) {
   const root = realSafe(storeProjectsRoot());
@@ -588,14 +588,14 @@ function resolveDirForFile(filePath, kind) {
 // worktrees bound to that project. Reading it HERE means the drift question and
 // the binding gate consult the SAME record, so the two can never disagree about
 // which working tree a store project belongs to. The record decides; the store
-// directory's NAME never does (V17).
+// directory's NAME never does.
 //
 // Returns `{ repo, reason }` and never a bare null: "I could not work out which
 // repository to ask" and "there is nothing here" must arrive as different values
-// at the point the caller acts (V14). This resolver answers on a SMALLER domain
+// at the point the caller acts. This resolver answers on a SMALLER domain
 // than projectRootFor — it can decline where the walk always produced something —
 // so the gap is handed to the caller as a stated reason rather than left to fall
-// to the permissive side, where it would read as a clean verdict (H67).
+// to the permissive side, where it would read as a clean verdict.
 function subjectRepoFor(filePath, sessionCwd) {
   if (!filePath) return { repo: null, reason: 'no file path' };
 
@@ -681,7 +681,7 @@ module.exports = {
   // Exported so consumers that need to say WHERE something landed relative to
   // the caller answer it with the same realpath containment the access check
   // uses. The alternative — each consumer comparing path strings for itself —
-  // is how this file came to exist (H1), and here the string version is not
+  // is how this file came to exist, and here the string version is not
   // merely divergent but wrong: a symlink pointing elsewhere INSIDE the repo
   // compares as "different path" while remaining plainly inside it.
   isInside,

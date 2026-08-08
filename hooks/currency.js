@@ -41,13 +41,13 @@
 //                                  also a grounding-completeness gap.
 //
 // Shared by the catalogue injector (hook) and the CLI report — kept __dirname-free
-// and side-effect-free (git is injected), so only its LOCATION varies (V7).
+// and side-effect-free (git is injected), so only its LOCATION varies.
 
 'use strict';
 
 // Extract file-path tokens from a REF: string. REF fields are heterogeneous —
 // file, file:line, file + "(symbol)", "File.md §Section", or a catalogue
-// cross-ref ("hetvabhasa H6"). We keep only tokens that look like real repo
+// cross-ref (a catalogue name plus an id). We keep only tokens that look like real repo
 // files and drop line numbers / section anchors / symbol notes / cross-refs.
 // The default discriminator. REF: is PROSE, so this list's job is to tell a path
 // from a word — it cannot simply accept "anything with a dot". Measured across the
@@ -272,7 +272,7 @@ function matchesDeclaredFile(decl, relPath) {
 //
 // A git that cannot answer yields an EMPTY list, and every caller below must read that
 // as "cannot tell", never as "selects nothing" — the difference between silence and
-// accusation (V14).
+// accusation.
 const trackedFilesCache = new WeakMap();
 function trackedFiles(git) {
   if (trackedFilesCache.has(git)) return trackedFilesCache.get(git);
@@ -305,7 +305,7 @@ function trackedFiles(git) {
 // having said which they meant. A pattern with no `*` has no width question. And an
 // empty file list means git could not answer — "cannot tell" must never become a
 // finding, or the check accuses every declaration in the catalogue on the first machine
-// where git is slow or absent (V14, and H87's failure-toward-accusation shape).
+// where git is slow or absent — the same failure-toward-accusation shape.
 function globWidthGap(spec, git) {
   const s = String(spec);
   if (!s.includes('*') || s.includes('**')) return null;
@@ -330,7 +330,7 @@ function globWidthGap(spec, git) {
 // highest-trust position** (#207).
 //
 // An empty list means git could not answer. Every caller must read that as "cannot
-// tell", never as "selects nothing" (V14) — so this returns [] for both and the callers
+// tell", never as "selects nothing" — so this returns [] for both and the callers
 // check `trackedFiles(git).length` separately when the difference matters.
 function matchedTracked(spec, git) {
   return trackedFiles(git).filter(p => matchesDeclaredFile(spec, p));
@@ -387,7 +387,7 @@ const LINT = {
 // wear backticks. Pure text — the repo question is asked elsewhere (see lintEntry's
 // `resolveSymbol`), because the grammar of a citation is a property of the field and
 // must have one reader, while "does this name still exist" is a property of a repo
-// that may not even be checked out (V21).
+// that may not even be checked out.
 //
 // The form recognised is the BIBLIOGRAPHIC one, and only it:
 //
@@ -563,7 +563,7 @@ function lineAnchoredRefs(refField) {
 // here judges the entry's FORM and needs no repo, which is what lets the lint run over a
 // catalogue whose project is not checked out. "Does this declared path select any file?"
 // cannot be answered from the text, so it is offered rather than required — and when it
-// is absent NOTHING changes, not one existing finding (V10). An enrichment that alters a
+// is absent NOTHING changes, not one existing finding. An enrichment that alters a
 // verdict when switched on is a different tool wearing the same name.
 function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth, resolveSymbol } = {}) {
   const findings = [];
@@ -684,7 +684,7 @@ function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth, resolveSym
   // A check that cries wolf is a check nobody runs twice, and this one is judged on
   // the twenty it emits, not the sixty-six it could have.
   //
-  // Opt-in on the same terms as resolveSpec: absent changes nothing (V10), and a
+  // Opt-in on the same terms as resolveSpec: absent changes nothing, and a
   // resolver that throws or cannot answer is saying "cannot tell", which must produce
   // silence rather than an accusation.
   if (resolveSymbol) {
@@ -723,9 +723,9 @@ function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth, resolveSym
 // never required a delimiter, which is why those headings still ENDED the previous
 // entry correctly: bodies were right, the entries themselves just never existed.
 //
-// `(?:\.\d+)*` captures a SUB-ID (`B1.1`) as its own id rather than truncating it to
-// `B1` and spilling the `.1` into the title. A period is a sub-id separator only when
-// a digit follows it — `B4. Compose` has punctuation, `B1.1 + B14` has a sub-id — so
+// `(?:\.\d+)*` captures a SUB-ID (`Q1.1`) as its own id rather than truncating it to
+// `Q1` and spilling the `.1` into the title. A period is a sub-id separator only when
+// a digit follows it — `Q4. Compose` has punctuation, `Q1.1 + Q14` has a sub-id — so
 // the two forms need no disambiguation beyond the digit.
 //
 // Slash-composite headings (`## <ID-A>/<ID-B> addendum`, 3 fleet-wide) stay unparsed on
@@ -747,7 +747,7 @@ const ENTRY_DEPTH = '#{2,3}';
 
 // One identifier, and the list form a heading may name.
 //
-// A heading naming TWO ids (`## V19/V21 amendment — …`) used to parse as NO entry at
+// A heading naming TWO ids (`## Q19/Q21 amendment — …`) used to parse as NO entry at
 // all: the delimiter class after an id admits a period, colon or whitespace, so the
 // slash stopped the match and both ids were dropped silently. Three headings fleet-wide
 // are written this way, and the obvious repair — widening the delimiter to include `/`
@@ -761,7 +761,7 @@ const ENTRY_DEPTH = '#{2,3}';
 // its older pointer — findable, but wrong, and wrong in the silent direction. It also
 // avoids inventing a second way for an id to be addressable, which every consumer would
 // then have to learn to read, and the ones that did not would keep answering
-// confidently (V21).
+// confidently.
 const ID_TOKEN = '[A-Z]{1,3}\\d+(?:\\.\\d+)*';
 const ID_LIST = `${ID_TOKEN}(?:/${ID_TOKEN})*`;
 
@@ -974,7 +974,7 @@ function parseEntries(md) {
   // the same id also existed, on the reasoning that whole catalogues author primaries
   // at level 3 so depth alone proves nothing. That reasoning is right and the rule
   // built on it is still backwards for the catalogues it was meant to protect: one
-  // boundary map defines `### B18:` and then appends TWENTY-TWO `## B18 UPDATE`
+  // boundary map defines `### Q18:` and then appends TWENTY-TWO `## Q18 UPDATE`
   // continuations at level 2, so the old rule called every update a primary and the
   // definition an addendum. It also missed two whole populations — a continuation at
   // the parent's own level (62 cases), and every boundary map, which is authored
@@ -990,10 +990,10 @@ function parseEntries(md) {
   // loses the next.
   //
   // The cost, stated because it is real: a genuine ACCIDENTAL re-use of an id — the
-  // thing V3 forbids — is absorbed here as a continuation instead of being caught. That
+  // thing the no-reuse rule forbids — is absorbed here as a continuation instead of being caught. That
   // is not an argument against the rule but an argument that it cannot ship alone, and
   // the lint's `absorbed-continuation` report is the other half. One live instance is
-  // known: a catalogue where a third `H81` describes an unrelated failure entirely.
+  // known: a catalogue where a third occurrence of one id describes an unrelated failure entirely.
   //
   // `occurrence` is 1 for the primary and counts up. Downstream joins need it: with
   // continuations now legal at ANY level, (id, level) no longer identifies a record —
@@ -1020,7 +1020,7 @@ function parseEntries(md) {
 // to draft the declaration that would make the guessing unnecessary. A proposer built on
 // its own copy would draft declarations for a relation the hook does not actually
 // implement, and the mismatch would be invisible: every proposal would look reasonable,
-// and the boundary would keep guessing afterwards exactly as before (V21).
+// and the boundary would keep guessing afterwards exactly as before.
 //
 // Which region admits which term is the substance, and it is not symmetric. An entry
 // ASSERTS in prose, CITES in `REF:`, QUOTES in fenced blocks, and RECORDS HISTORY in the
@@ -1201,7 +1201,7 @@ function isReachable(git, sha) {
 // Keyed on the storeGit FUNCTION rather than on the path: one process may consult
 // more than one store, and two stores can hold the same relative path. A path-keyed
 // cache would then serve one repo's entries for another's — the basename-as-identity
-// mistake (V17), one layer in. Same function ⇒ same repo, by construction.
+// mistake, one layer in. Same function ⇒ same repo, by construction.
 const committedCatalogueCache = new WeakMap();
 
 function committedEntries(storeGit, cataloguePath) {
@@ -1213,7 +1213,7 @@ function committedEntries(storeGit, cataloguePath) {
   // not in HEAD (a catalogue created this session, or a store with no commits yet).
   // Parsing sits OUTSIDE it deliberately — wrapping both would let a real parser bug
   // read as "HEAD cannot answer", which is the shape that turns a broken instrument
-  // into a quiet one (H12). parseEntries is a regex sweep over a string and has no
+  // into a quiet one. parseEntries is a regex sweep over a string and has no
   // failure of its own, so letting it throw costs nothing and hides nothing.
   let text = null;
   try {
@@ -1243,7 +1243,7 @@ function committedEntries(storeGit, cataloguePath) {
 // alternative on offer is the very span that produces the wrong date. A fallback here
 // would reinstate the bug on exactly the paths where the lookup failed, and those are
 // invisible from the outside: a borrowed date is indistinguishable from a real one
-// (V19 — converging failure modes must each fail closed on their own).
+// (converging failure modes must each fail closed on their own).
 function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level, occurrence }) {
   // `!id` is an EARLY EXIT, not a safety guard: with no key to look up, the lookup
   // below finds nothing and returns null anyway, so breaking this line alone turns
@@ -1349,10 +1349,10 @@ function sensitivityFor(catalogue) {
 // verdict diffs) so an invariant and a dharana alignment entry that reuse the same id
 // never pair against each other (#79). A dharana `### <ID>` (h3) is a CROSS-REFERENCE,
 // not a primary definition: an invariant-span alignment note (`### SV12 — ALIGNED`) or
-// a boundary (`### B1:`), pointing at the `## <ID>` (h2) invariant/pattern of that id
+// a boundary (`### Q1:`), pointing at the `## <ID>` (h2) invariant/pattern of that id
 // elsewhere. So (kind, id) separates `## SV12` [invariant] from `### SV12` [alignment].
 // Derived from (catalogue, heading level, id shape) only — a pure function of ONE entry,
-// no cross-catalogue lookup. Not renumbering (V3): the id is legitimately shared; kind
+// no cross-catalogue lookup. Not renumbering: the id is legitimately shared; kind
 // is what disambiguates the two rows.
 const CATALOGUE_ROLE = { vyapti: 'invariant', hetvabhasa: 'error', krama: 'lifecycle', dharana: 'focus' };
 function entryKind(catalogue, entry) {
@@ -1368,7 +1368,7 @@ function entryKind(catalogue, entry) {
   // occurrence is, boundary or alignment.
   if (entry && entry.amends) return 'addendum';
   if (base === 'dharana' && entry && entry.level === 3) {
-    // `(?:\.\d+)*` so a boundary SUB-id (`B1.1`) is still a boundary. Without it the
+    // `(?:\.\d+)*` so a boundary SUB-id (`Q1.1`) is still a boundary. Without it the
     // shape test falls through to 'alignment' — an invariant-span note, which a
     // boundary sub-entry is not. The sub-id form only became reachable when the
     // parser started capturing it (#87); the rule beneath tests an id SHAPE, so a new
@@ -1578,7 +1578,7 @@ function specExists(f, fileExists, git) {
 // Build the refResolver classifySpec expects: (spec) => { path, area } | null, where
 // a hit means the spec resolves into the STORE's reference material. ONE
 // implementation, so the report and the injector can never disagree about what counts
-// as reference-grounded (V1: shared resolution; V7: shared module across both trees).
+// as reference-grounded (shared resolution, through a module shared across both install trees).
 //
 // `areas` is [{ area, dir, sub?, strip }] — the label to report, the store directory
 // to index, an optional required sub-path within it (`ref/sources/` only, so a bare
@@ -1598,7 +1598,7 @@ function specExists(f, fileExists, git) {
 // 🔵 verdict; its mere presence is the opt-in, so a broken one must read as ABSENT
 // (plain 🔵, no regression), never crash, never be dressed up as an honest null.
 //
-// Takes the raw file TEXT (fs stays in the caller, V1/V7) → returns a normalized
+// Takes the raw file TEXT (fs stays in the caller) → returns a normalized
 // manifest or null. The contract, hardened against adversarial inputs:
 //   parse → is-PLAIN-object → has(version, versionSource) → surface; else null.
 // Why each guard:
@@ -1914,13 +1914,13 @@ module.exports = {
   // The boundary questions the hook no longer answers alone: what a boundary is
   // CALLED, and whether it DECLARES what it governs. Exported for the same reason
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers
-  // to either question is a disagreement no per-consumer test can fail (V21).
+  // to either question is a disagreement no per-consumer test can fail.
   boundaryLabel, boundaryDeclares,
   // The guess, and the regions it is allowed to read. Exported because the relation now
   // runs in both directions — the hook asks which boundaries a file reaches, the
   // proposer asks which files a boundary reaches — and a proposer drafting declarations
   // from its own copy of this rule would draft them for a relation the hook does not
-  // implement, with every proposal looking perfectly reasonable (V21).
+  // implement, with every proposal looking perfectly reasonable.
   guessMatchesFile, fallbackSpans, guessTerms,
   // Exported so the stamp-selection rule can be asserted directly rather than
   // only through a parsed catalogue — the defect it fixes was invisible at the
