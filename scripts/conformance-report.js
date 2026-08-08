@@ -581,7 +581,11 @@ function recordedTargets() {
     names = fs.readdirSync(root, { withFileTypes: true })
       .filter((e) => e.isDirectory()).map((e) => e.name).sort();
   } catch {
-    return { projects: 0, targets: [], noRecord: [], malformed: [], noWorktree: [], gone: [] };
+    // No projects directory at all. Distinguished from an empty one because the
+    // caller has to be able to tell "the store cannot be read" from "the store is
+    // fine and has nothing to say" — the two produce the same zero, and only one
+    // of them is health.
+    return { projects: 0, targets: [], noRecord: [], malformed: [], noWorktree: [], gone: [], unreadable: true };
   }
 
   const targets = [], noRecord = [], malformed = [], noWorktree = [], gone = [];
@@ -609,7 +613,7 @@ function recordedTargets() {
       targets.push(w);
     }
   }
-  return { projects: names.length, targets, noRecord, malformed, noWorktree, gone };
+  return { projects: names.length, targets, noRecord, malformed, noWorktree, gone, unreadable: false };
 }
 
 function computeConformance(dir, store = storeState()) {
@@ -698,7 +702,19 @@ function main(argv) {
     for (const [xs, why] of unreachable) {
       console.log(`   not reachable this way: ${xs.length} store project(s) with ${why} — ${xs.join(', ')}`);
     }
-    if (!unreachable.length) console.log('   every store project is reachable this way');
+    // The all-clear is only sayable when there was something to clear. A store
+    // that cannot be read and a store with no projects both produce zero of
+    // everything, and "every store project is reachable" over an empty set is
+    // true, reassuring, and exactly the vacuous positive this option was built
+    // to stop printing.
+    if (recorded.unreadable) {
+      console.log(`   ${tilde(storeProjects())} could not be read — this route reaches nothing, ` +
+        'which is not the same as finding nothing');
+    } else if (!recorded.projects) {
+      console.log('   the store holds no projects yet — nothing for this route to reach');
+    } else if (!unreachable.length) {
+      console.log('   every store project is reachable this way');
+    }
   }
   console.log('');
 

@@ -135,11 +135,11 @@ console.log('\n▸ one directory recorded by two projects is audited once');
 // the output. This codebase has shipped a computed property absent from its own
 // report before, so the wiring gets its own witness.
 console.log('\n▸ spawned: the option reaches the report');
-function run(args) {
+function run(args, home = HOME) {
   try {
     return execFileSync(process.execPath,
       [path.join(__dirname, '..', 'scripts', 'conformance-report.js'), ...args],
-      { encoding: 'utf8', env: { ...process.env, HOME }, stdio: ['ignore', 'pipe', 'pipe'] });
+      { encoding: 'utf8', env: { ...process.env, HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
     return String(e.stdout || '') + String(e.stderr || '');
   }
@@ -173,6 +173,27 @@ console.log('\n▸ spawned: a named directory is audited even when no record kno
   has(out, 'stranger', 'an explicitly named directory survives the record-derived list');
   has(out, 'buried', 'and the recorded ones are still there — the two lists are unioned, not swapped');
   has(out, 'plus 1 named on the command line', 'the output says how many came from the caller');
+}
+
+console.log('\n▸ an empty result never reads as an all-clear');
+{
+  // Zero targets has three causes and only one of them is health. The all-clear
+  // sentence is true over an empty set, which is what makes it dangerous: it is
+  // the same vacuous positive this whole option exists to stop printing, and the
+  // first version of this code printed it for a store that did not exist.
+  const EMPTY = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-recorded-empty-')));
+  const outNoStore = run(['--recorded'], EMPTY);
+  has(outNoStore, 'could not be read', 'a store that cannot be read says so');
+  has(outNoStore, 'not the same as finding nothing', 'and says what the zero does NOT mean');
+  hasNot(outNoStore, 'every store project is reachable', 'it does NOT print the all-clear');
+
+  fs.mkdirSync(path.join(EMPTY, '.anvideck', 'projects'), { recursive: true });
+  const outEmpty = run(['--recorded'], EMPTY);
+  has(outEmpty, 'no projects yet', 'an empty store is its own message, not the unreadable one');
+  hasNot(outEmpty, 'every store project is reachable', 'and still not the all-clear');
+  hasNot(outEmpty, 'could not be read', 'the two zeros stay distinguishable');
+
+  fs.rmSync(EMPTY, { recursive: true, force: true });
 }
 
 process.env.HOME = REAL_HOME;
