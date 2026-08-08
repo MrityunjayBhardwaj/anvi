@@ -1735,8 +1735,10 @@ function indexDir(dir, readdir) {
 // can vouch for files it never compared, and today says nothing to distinguish them.
 //
 // Counting the three populations separately is what turns the colour into a statement.
-// Pure over the verdict — no git, no repo — so the report, the injector and the tests
-// all read one rule rather than three.
+// Pure over the verdict — no git, no repo. Applied once where the verdict is BUILT, so
+// every consumer receives the scoped sentence rather than re-deriving the counts from
+// `files` on its own; exported so a test can assert the rule directly instead of only
+// through the string it produces.
 function verdictScope(verdict) {
   const files = (verdict && verdict.files) || [];
   const resolved = files.filter((f) => f.exists !== false);
