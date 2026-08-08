@@ -109,8 +109,12 @@ console.log('\n▸ a recorded path that is not on disk is a finding, not a skip'
 
   const r = recordedTargets();
   eq(r.gone.length, 1, 'the missing directory is reported');
-  eq(r.gone[0].project, 'vanished', 'named with the project whose record claims it');
-  eq(r.gone[0].worktree, vanished, 'and with the path the record actually holds');
+  // Indexed defensively on purpose. When this assertion fails it is because the
+  // list is EMPTY, and a throw there ends the file — which would hide whether the
+  // rest of the suite still passes, the one property a falsification run is for.
+  const g = r.gone[0] || {};
+  eq(g.project, 'vanished', 'named with the project whose record claims it');
+  eq(g.worktree, vanished, 'and with the path the record actually holds');
   ok(!r.targets.includes(vanished), 'it is not audited as though it were there');
   hasNot(r.noRecord.join(','), 'vanished', 'and it is NOT filed as unreachable — the route reached it');
 }
