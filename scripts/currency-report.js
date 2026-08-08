@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -274,6 +274,10 @@ if (lintOnly) {
     // only honest answer is that we cannot tell.
     const rel = matchedTracked(file, git)[0] || (fileExists(file) ? file : null);
     if (!rel) return null;
+    // A cited name that names a tracked FILE is not a symbol, whatever its extension.
+    // The cheap pre-filter upstream asks a closed extension list, so it misses this
+    // in any language nobody listed; the repo is here and can simply be asked (#216).
+    if (citedNameIsTrackedPath(name, git)) return null;
     const last = name.split('.').pop();
     try {
       const txt = fs.readFileSync(path.join(cwd, rel), 'utf8');

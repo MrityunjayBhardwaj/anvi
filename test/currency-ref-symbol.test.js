@@ -128,6 +128,12 @@ const PROJ = path.join(tmp, 'proj');
 fs.mkdirSync(path.join(PROJ, 'src'), { recursive: true });
 fs.writeFileSync(path.join(PROJ, 'src', 'qqlive.ts'), 'export function qqStillHere() { return 1; }\n');
 fs.writeFileSync(path.join(PROJ, 'src', 'qqother.ts'), 'export const qqMovedHere = 2;\n');
+// A language the compiled extension list does not carry. The pre-filter reads
+// `qqhelper.rb` as a dotted symbol whose last segment is `rb`, and `rb` occurs in
+// any repo — so without asking the repo the citation can never be reported, and
+// the entry looks checked. Two files, because the discriminating pair is a cited
+// name the repo DOES track against one it does not.
+fs.writeFileSync(path.join(PROJ, 'src', 'qqhelper.rb'), "def qq_ruby_thing\n  1\nend\n");
 fs.mkdirSync(path.join(PROJ, '.anvi'), { recursive: true });
 fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), [
   '# Hetvabhasa', '',
@@ -142,6 +148,12 @@ fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), [
   '**VALIDATED:** 2026-01-01', '',
   '## Q4: a citation into a file this repo does not have',
   '**REF:** `vendor-bundle.js` (`qqForeignThing`)',
+  '**VALIDATED:** 2026-01-01', '',
+  '## Q5: a cited name that is a FILE in a language the closed list omits',
+  '**REF:** `src/qqlive.ts` (`qqhelper.rb`)',
+  '**VALIDATED:** 2026-01-01', '',
+  '## Q6: a name of the same shape that the repo does NOT track',
+  '**REF:** `src/qqlive.ts` (`qqabsent.rb`)',
   '**VALIDATED:** 2026-01-01', '',
 ].join('\n'));
 execSync('git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture',
@@ -158,6 +170,23 @@ ok(!/Q3/.test(goneBlock),
   'a name that MOVED is not reported — the deliberate loss, asserted so it stays deliberate');
 ok(!/Q4/.test(goneBlock),
   'a citation into a file this repo does not track is declined, not accused');
+
+// The repo answers what the closed extension list cannot. Q5 and Q6 are the SAME
+// shape to the pre-filter — a dotted name ending in an unlisted extension — and are
+// separated only by whether this repo tracks a path of that name. Asserting the pair
+// is the point: Q5 alone would also pass under a rule that simply stopped checking
+// every name ending in `.rb`, which would switch the finding off rather than aim it.
+ok(!/Q5/.test(goneBlock),
+  'a cited name that IS a tracked file is not treated as a vanished symbol, though its extension is unlisted');
+ok(/Q6/.test(goneBlock) && /qqabsent\.rb/.test(goneBlock),
+  'and a name of that same shape which the repo does not track is still checked, and still reported');
+
+// The pre-filter's own blind spot, stated directly, so the reason this fix exists
+// cannot quietly stop being true: the closed list accepts `qqhelper.rb` as a symbol.
+// If a future edit adds `rb` to that list this assertion fails and says so, rather
+// than the repo-backed rule silently becoming dead code that nothing exercises.
+ok(c.citedSymbols('`src/qqlive.ts` (`qqhelper.rb`)').some(x => x.name === 'qqhelper.rb'),
+  'the cheap pre-filter still admits it — which is what makes asking the repo load-bearing');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 
