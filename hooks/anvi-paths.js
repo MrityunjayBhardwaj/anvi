@@ -75,6 +75,15 @@ function firstTime(key) {
 
 const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
 
+// The two in-repo layouts, as path segments between a project root and a kind:
+// `<root>/<kind>` and `<root>/artifacts/<kind>`. ONE list, because two things now
+// ask it — the candidate list asks where a kind would live, and the anchor walk
+// asks whether a directory is a project root at all. Written twice they would
+// agree on the day they were written and diverge the day a third layout is added,
+// and the divergence is invisible: the anchor would simply step over a root it
+// then fails to serve, which reads as "this project has no catalogues".
+const LOCAL_LAYOUTS = [[], ['artifacts']];
+
 // Which project is THIS directory in? One answer, for every consumer.
 //
 // A working directory is not fixed for a session — a shell `cd` persists across
@@ -123,8 +132,8 @@ function projectAnchor(cwd) {
   const start = path.resolve(cwd || '.');
   const fsRoot = path.parse(start).root;
   for (let dir = start; ;) {
-    for (const rel of [['.anvi'], ['artifacts', '.anvi']]) {
-      const anvi = path.join(dir, ...rel);
+    for (const seg of LOCAL_LAYOUTS) {
+      const anvi = path.join(dir, ...seg, '.anvi');
       if (exists(anvi)) return { root: dir === start ? cwd : dir, anvi };
     }
     if (exists(path.join(dir, '.git'))) break; // repository boundary — go no further
@@ -147,8 +156,7 @@ function candidates(cwd, kind) {
   const { root } = projectAnchor(cwd);
   const name = path.basename(root);
   return [
-    path.join(root, kind),
-    path.join(root, 'artifacts', kind),
+    ...LOCAL_LAYOUTS.map((seg) => path.join(root, ...seg, kind)),
     path.join(os.homedir(), '.anvideck', 'projects', name, kind),
   ];
 }
