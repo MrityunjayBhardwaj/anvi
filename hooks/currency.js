@@ -336,6 +336,33 @@ function matchedTracked(spec, git) {
   return trackedFiles(git).filter(p => matchesDeclaredFile(spec, p));
 }
 
+// Is a name a REF cites actually a FILENAME rather than a symbol?
+//
+// `isSymbolName` already rejects the obvious ones, but it asks the compiled default
+// extension list — a closed list, built from the languages in front of whoever wrote
+// it. In a project whose language nobody listed, a parenthetical naming `helper.rb`
+// is read as a dotted symbol whose last segment is `rb`, and the check then searches
+// the repo for `rb`, which is present everywhere. The finding switches itself off,
+// quietly, on exactly the projects the closed list already under-serves.
+//
+// So ask the repo instead of lengthening the list. The repo knows what it tracks, and
+// a cited name that resolves to a tracked path is a file whatever its extension. Same
+// direction the rest of this area has gone every time: remove a closed list rather
+// than extend it, and let the corpus answer questions about itself.
+//
+// Only DOTTED names are asked, which is what keeps this free: an undotted name cannot
+// be mistaken for a file with an extension, and the dotted ones are 5% of the corpus.
+// Resolution goes through `matchedTracked`, so "does this name a file" is decided by
+// the same predicate every other consumer uses rather than by a second rule here.
+//
+// A false yes costs a silence, never an accusation — and a symbol that shares its
+// spelling with a tracked path is precisely a case where nothing here can tell which
+// was meant, so silence is the honest answer rather than the convenient one.
+function citedNameIsTrackedPath(name, git) {
+  if (!name || !String(name).includes('.')) return false;
+  try { return matchedTracked(String(name), git).length > 0; } catch { return false; }
+}
+
 // --- lint: the entry's FORM, not the code's state ---------------------------
 // computeCurrency asks "has the code moved under this entry?" and needs git and a
 // project repo to answer. The lint asks a different question — "can this entry be
@@ -1883,7 +1910,7 @@ module.exports = {
   // reason the field readers are: the report supplies the repo, but the grammar of a
   // citation is one rule, and a second reader of it would judge a different corpus
   // while reporting the same finding name.
-  citedSymbols,
+  citedSymbols, citedNameIsTrackedPath,
   // The boundary questions the hook no longer answers alone: what a boundary is
   // CALLED, and whether it DECLARES what it governs. Exported for the same reason
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers
