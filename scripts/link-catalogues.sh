@@ -19,7 +19,7 @@
 #   WRONG_LINK       .anvi is a symlink elsewhere           → repoint to the store
 #   CENTRALIZED_ONLY store exists, no local .anvi           → create the symlink   (safe)
 #   LOCAL_ONLY       real local .anvi, no central copy      → migrate then symlink  (data move)
-#   SPLIT_BRAIN      real local .anvi AND a central copy    → REFUSE (needs manual H6 merge)
+#   SPLIT_BRAIN      real local .anvi AND a central copy    → REFUSE (needs a manual merge)
 #   NEITHER          no catalogues anywhere                 → nothing to do
 #
 # Never hard-deletes: a migrated local dir is copied (cp -Rn, no clobber) before
@@ -161,7 +161,7 @@ case "$STATE" in
     ;;
   SPLIT_BRAIN)
     echo "  ✗  REFUSING: both a real local .anvi and a central copy exist — they may"
-    echo "     diverge (split-brain, H6). Resolve by hand: verify the central copy"
+    echo "     diverge (split-brain). Resolve by hand: verify the central copy"
     echo "     strictly supersets the local, then retire the local dir. Not automated."
     exit 3
     ;;

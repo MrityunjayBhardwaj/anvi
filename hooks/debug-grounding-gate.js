@@ -103,8 +103,9 @@ process.stdin.on('end', () => {
       const vyaptiPath = path.join(anviDir, 'vyapti.md');
       if (fs.existsSync(vyaptiPath)) {
         const vyapti = fs.readFileSync(vyaptiPath, 'utf8');
-        // Entry IDs are per-project: some use a plain `V1`, others a prefix like
-        // `SV1`. Hardcoding one project's prefix made this scan a silent no-op
+        // Entry IDs are per-project: some are a bare letter and number, others carry a
+        // project prefix in front of that.
+        // Hardcoding one project's prefix made this scan a silent no-op
         // everywhere else — the same "written against one project's shape and
         // assumed universal" mistake as the payload field above, and just as
         // invisible. Match any prefix, and gather both flags in one pass so a

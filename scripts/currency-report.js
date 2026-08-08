@@ -14,7 +14,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 
-// --- locate shared modules from both install trees (V7) ---------------------
+// --- locate shared modules from both install trees ---------------------
 function loadFromCandidates(name) {
   const candidates = [
     path.join(__dirname, '..', 'hooks', name),          // repo: scripts/ ↔ hooks/ siblings
@@ -86,7 +86,7 @@ const storeGit = storeRoot
 // Truth doc, or an investigation — grounding that lives in the store, never in the
 // project repo. The matching logic is shared (makeRefResolver in currency.js) so the
 // report and the injector classify identically; here we just name the store areas via
-// the SAME resolver every artifact-kind lookup uses (V1), and inject readdir.
+// the SAME resolver every artifact-kind lookup uses, and inject readdir.
 //
 // The areas are named ONCE, and three things derive from that list: the resolver's
 // index, which kinds were withheld, and the shapes that tell a pointer INTO a
@@ -220,13 +220,13 @@ if (lintOnly) {
       //
       // Asked here rather than by widening classifySpec, unchanged from before: what
       // that returns feeds existing currency verdicts, and this finding must add
-      // without altering any of them (V10).
+      // without altering any of them — purely additive.
       try {
         if (fs.statSync(path.join(cwd, spec)).isDirectory()) {
           // Cannot tell ⇒ do not accuse. A git that fails here would otherwise turn a
           // missing capability into a finding against a declaration that is probably
           // fine, which is the shape where a reporting consumer reads a refusal as an
-          // absence (H87's second instance, V14).
+          // absence — the second instance of that pattern.
           // Asked through the shared predicate, not a git pathspec — the third and last
           // site where git rather than the engine decided what a spec reaches (#207).
           // For a literal directory the two readings agree, so this is a consolidation
@@ -326,7 +326,7 @@ if (lintOnly) {
     // The absorption made visible. A later occurrence of an id is now read as a
     // continuation of the first, which is what 391 records in the fleet actually are —
     // but the rule cannot tell that from a genuine ACCIDENTAL re-use of an id, and it
-    // absorbs both. One live instance is known: a catalogue where a third `H81`
+    // absorbs both. One live instance is known: a catalogue where a third occurrence of one id
     // describes a completely unrelated failure.
     //
     // So the rule does not get to be silent. Reported as a COUNT PER ID rather than as
@@ -483,7 +483,7 @@ const withheldNotice = withheldKinds.map(k => kindRead[k].notice).filter(Boolean
 // readVendor — read a VENDOR.json manifest's TEXT from the store, given its path
 // relative to the `ref` dir (e.g. "sources/desktop-sp/VENDOR.json"). This is the fs
 // half of the vendored-source freshness read (#61); the parse/validate lives in
-// currency.js (fs-agnostic, V1/V7). Returns null if there is no ref dir or the file
+// currency.js (fs-agnostic). Returns null if there is no ref dir or the file
 // is unreadable → the core treats it as an absent manifest (plain 🔵, no regression).
 const refDir = kindRead.ref.dir;
 const readVendor = refDir
@@ -579,7 +579,7 @@ for (const cat of CATALOGUES) {
     if (v.anchor.provisional && v.status !== 'GRAY') detail += ` (provisional — last edited ~${v.anchor.ts})`;
     const anchor = v.anchor.sha ? `${v.anchor.source}@${v.anchor.sha.slice(0, 7)}` : v.anchor.source;
     // The entry's role, shown on every row so a per-id before/after join keys on
-    // (id, kind) and never pairs a `## SV12` invariant against a dharana `### SV12`
+    // (id, kind) and never pairs a `## Q12` invariant against a dharana `### Q12`
     // alignment cross-ref of the same id (#79 — the double-count that once got
     // misread as duplicate ids). The id is legitimately shared; kind disambiguates.
     const kind = entryKind(cat, e);

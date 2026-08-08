@@ -57,7 +57,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
 
   // Does a REF resolve into the STORE's reference material (vendored source, GT docs,
   // investigations)? Built from the SAME shared logic and the SAME resolver the CLI
-  // uses (V1/V7), so the point-of-use nudge and the batch report agree on what counts
+  // uses, so the point-of-use nudge and the batch report agree on what counts
   // as reference-grounded. refDir/invDir are resolved by the caller via the shared
   // resolver, anchored to the file's OWNING project.
   const refResolver = makeRefResolver([
@@ -247,7 +247,7 @@ function matchesKind(kindsField, relPath) {
 //   In a bibliography every item is already a path, so a bare-name hit is a
 //   collision with a DIFFERENT file that shares a basename, or with an ordinary
 //   English word: "until the package is rebuilt" claims every package.json in the
-//   repo, and "S1.1 scaffold" claims scaffold.ts.
+//   repo, and "Q1.1 scaffold" claims scaffold.ts.
 //   A FULL PATH is identity in either region. An entry whose REF reads
 //   "Source: packages/…/font-resolver.ts" is naming its own subject, and dropping
 //   that is a real loss — silent, which is the side this hook can least afford.
@@ -372,7 +372,7 @@ process.stdin.on('end', () => {
     // owns the entry parser the freshness gate uses — the two accept different TOKENS
     // on purpose (an entry is any `[A-Z]{1,3}\d+`; a boundary is `B<n>` or the literal
     // word `Boundary`) but take the accepted heading DEPTH from one place. They used to
-    // disagree about depth, and a boundary written `## B7:` was therefore parsed by the
+    // disagree about depth, and a boundary written at the deeper level was therefore parsed by the
     // gate, given a verdict, counted in the lint, and never seen here — its checks
     // arriving nowhere while its entry read healthy from every angle (#206).
     const matches = [];
@@ -691,7 +691,7 @@ process.stdin.on('end', () => {
       // that. The unnumbered ones are still entries, and are reported below rather
       // than dropped: an ungraded entry shown beside graded ones with nothing said
       // about it is read as fresh, which is the false confidence this gate exists
-      // to kill (V14).
+      // to kill.
       const ungraded = [];
       for (const m of matches) {
         if (/^[A-Z]{1,3}\d+$/.test(m.id)) wanted.push({ catalogue: 'dharana.md', id: m.id });
@@ -704,7 +704,7 @@ process.stdin.on('end', () => {
       for (const vid of new Set(vyaptiIds)) wanted.push({ catalogue: 'vyapti.md', id: vid });
 
       // Store reference areas resolved via the SAME shared resolver as .anvi, anchored
-      // to the file's owning project (V1) — so a REF into vendored source / GT docs /
+      // to the file's owning project — so a REF into vendored source / GT docs /
       // investigations gets the 🔵 reference-grounded verdict instead of a false gray.
       const refDir = resolveDirForFile(filePath, 'ref');
       const invDir = resolveDirForFile(filePath, 'investigations');
@@ -741,7 +741,7 @@ process.stdin.on('end', () => {
         // Could not look — which is NOT the same as looked and found nothing, and
         // must never close by inviting a stamp. A stamp asserts the entry was
         // re-confirmed; soliciting one here would ask for a confirmation at the one
-        // moment the tool cannot tell whether any is warranted (V14).
+        // moment the tool cannot tell whether any is warranted.
         message += `\nCurrency: not assessed — ${subject.reason}. `
           + 'Freshness was NOT checked for these entries, so treat none of them as confirmed; '
           + 'run `node scripts/currency-report.js <project-dir>` from the working tree to grade them.';
