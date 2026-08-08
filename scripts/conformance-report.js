@@ -30,13 +30,25 @@
 // SCOPE, stated so the report's own limits travel with it:
 //   - the catalogues (`.anvi`). The store's `ref/` and `investigations/` ride the
 //     same envelope grant and the same store repo, and are not checked separately.
-//   - one project per argument. A store copy with NO live project pointing at it is
-//     therefore invisible here — a per-project audit cannot enumerate orphans, and
-//     "nothing reported" means "nothing found in what I was pointed at".
+//   - the SUBJECT LIST is the caller's, and that is a limit as real as any check.
+//     By default this audits what it is pointed at, so "nothing reported" means
+//     "nothing found in what I was pointed at" — and a directory nobody thought to
+//     name is not merely unaudited, it reads as absent. That is not hypothetical:
+//     a fleet sweep built from a `projects/*` glob missed a working directory one
+//     level deeper, and the fleet notes recorded that project as having no working
+//     copy at all for weeks, while the store's own record named the directory.
+//     `--recorded` answers that by taking the subject list from the store instead
+//     of from the caller: every live working directory named by a project's
+//     `PROVENANCE.json`. Its own blind spot is stated in the output rather than
+//     left to be rediscovered — a store project with no record, a malformed one,
+//     or one whose record names no working copy cannot be enumerated from the
+//     record side, so the count skipped for each reason is printed.
 //
 // Usage:
 //   node scripts/conformance-report.js [project-dir ...]   (default: cwd)
 //   node scripts/conformance-report.js --issues [dirs...]  (only non-conformant)
+//   node scripts/conformance-report.js --recorded [dirs...] (targets from the store's
+//                                                            records, plus any given)
 //
 // HOME is the single control for where the store lives (both this file and the
 // shared resolver read it), so a test can point the whole audit at a temp store.
@@ -545,6 +557,61 @@ function classifyBinding(dir) {
     { remedy: `resolve by hand: ${tilde(path.join(storeProject, IDENT.PROVENANCE))}` });
 }
 
+// --- the subject list, taken from the store rather than from the caller -------
+//
+// Every other function here answers "what is the state of THIS directory". This
+// one answers the question that comes before it: which directories are there to
+// ask about. A hand-built list is a check of its own, and it is the one nobody
+// runs — it fails by omission, and an omitted project is indistinguishable in the
+// output from a project that has nothing wrong.
+//
+// The store already knows: each project's record names the working copies bound
+// to it, and that record is the same one the binding check reads, so the two
+// cannot disagree about which directories belong to a project.
+//
+// Returns the targets AND the reasons some projects produced none, because a
+// smaller subject list must never look like a cleaner fleet. `gone` is a FINDING
+// rather than a skip — a record naming a directory that is not there says
+// something about the record; the other three say only that this route cannot
+// reach the project, which is a fact about the route.
+function recordedTargets() {
+  const root = storeProjects();
+  let names;
+  try {
+    names = fs.readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  } catch {
+    return { projects: 0, targets: [], noRecord: [], malformed: [], noWorktree: [], gone: [] };
+  }
+
+  const targets = [], noRecord = [], malformed = [], noWorktree = [], gone = [];
+  // Two projects may legitimately record the same directory — an alias, or a
+  // rename mid-migration — and auditing it twice would double every finding in
+  // it. Deduped on the RESOLVED path so two spellings of one directory collapse,
+  // which is the same reason the resolver dedupes its own candidates.
+  const seen = new Set();
+  for (const name of names) {
+    const dir = path.join(root, name);
+    // The shared reader, not a hand-rolled read: it already separates the three
+    // states this needs — null for no record at all, `malformed` for one that
+    // cannot be trusted, and a parsed record otherwise. Re-deriving the path here
+    // would be a second opinion about where a record lives, which is the shape
+    // this file exists to avoid.
+    const rec = IDENT.readProvenance(dir);
+    if (!rec) { noRecord.push(name); continue; }
+    if (rec.malformed) { malformed.push(name); continue; }
+    if (!rec.worktrees.length) { noWorktree.push(name); continue; }
+    for (const w of rec.worktrees) {
+      if (!isDir(w)) { gone.push({ project: name, worktree: w }); continue; }
+      const key = realSafe(w) || path.resolve(w);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(w);
+    }
+  }
+  return { projects: names.length, targets, noRecord, malformed, noWorktree, gone };
+}
+
 function computeConformance(dir, store = storeState()) {
   const project = path.resolve(dir);
   const name = path.basename(project);
@@ -597,11 +664,43 @@ function main(argv) {
     return 0;
   }
   const issuesOnly = args.includes('--issues');
+  const fromRecords = args.includes('--recorded');
   const dirs = args.filter(a => !a.startsWith('--'));
-  const targets = dirs.length ? dirs : [process.cwd()];
+  // `--recorded` UNIONS rather than replaces: a caller naming a directory means
+  // to audit it, and a directory no record names is exactly the one worth not
+  // dropping. Explicit arguments come first so a named target keeps its position
+  // in the output whether or not the store also knows about it.
+  const recorded = fromRecords ? recordedTargets() : null;
+  let targets;
+  if (recorded) {
+    const explicit = dirs.map(d => path.resolve(d));
+    const known = new Set(explicit.map(d => realSafe(d) || d));
+    targets = [...explicit, ...recorded.targets.filter(t => !known.has(realSafe(t) || t))];
+  } else {
+    targets = dirs.length ? dirs : [process.cwd()];
+  }
 
   const store = storeState();
-  console.log(`Conformance report — ${targets.length} project(s)   (store: ${tilde(store.root)} — ${store.state})\n`);
+  console.log(`Conformance report — ${targets.length} project(s)   (store: ${tilde(store.root)} — ${store.state})`);
+  if (recorded) {
+    // Say which subject list produced this, and how much of the store it could
+    // not reach. A count of audited projects means nothing without the count it
+    // was drawn from — that is the whole defect this option exists to remove, so
+    // reproducing it in the option's own output would be a poor joke.
+    const unreachable = [
+      [recorded.noRecord, 'no record'],
+      [recorded.malformed, 'a record that does not parse'],
+      [recorded.noWorktree, 'a record naming no working copy'],
+    ].filter(([xs]) => xs.length);
+    console.log(`   subjects from the store's records — ${recorded.targets.length} live working ` +
+      `director${recorded.targets.length === 1 ? 'y' : 'ies'} across ${recorded.projects} store project(s)`);
+    if (dirs.length) console.log(`   plus ${dirs.length} named on the command line`);
+    for (const [xs, why] of unreachable) {
+      console.log(`   not reachable this way: ${xs.length} store project(s) with ${why} — ${xs.join(', ')}`);
+    }
+    if (!unreachable.length) console.log('   every store project is reachable this way');
+  }
+  console.log('');
 
   const tally = { conformant: 0, withFindings: 0, byCheck: {} };
   // Identity is a FLEET fact, not a per-project one: "two directories are the
@@ -631,6 +730,20 @@ function main(argv) {
     console.log('');
   }
 
+  // A record naming a directory that is not on disk is a finding about the
+  // RECORD, and it has no project section to appear in — there is nothing there
+  // to audit. Kept separate from the three skip reasons above for the same
+  // reason: those say the route cannot reach a project, this says the route
+  // arrived somewhere and found nothing.
+  if (recorded && recorded.gone.length) {
+    console.log('── recorded working directories that are no longer on disk\n');
+    for (const g of recorded.gone) {
+      console.log(`   ${g.project}`);
+      console.log(`     · ${tilde(g.worktree)}`);
+    }
+    console.log('     → the store still holds this project\'s catalogues; re-bind or forget the path by hand\n');
+  }
+
   // Two directories on one repository, each with its own store project, means
   // knowledge about one codebase is accumulating in two places with neither
   // aware of the other. Advisory only: which copy is authoritative is a
@@ -657,7 +770,7 @@ function main(argv) {
 
 module.exports = {
   computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
-  classifyBinding,
+  classifyBinding, recordedTargets,
   storeState, findStoreCopyByContent, storeProjectOf, isInside, check, OK_STATES, main, CATALOGUES,
 };
 
