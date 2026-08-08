@@ -525,10 +525,24 @@ a project that satisfies the concept under a different name. A false positive ge
 investigated and dies; a false negative becomes a fact in a note.
 
 - **Report:** `node ~/.claude/anvi/scripts/conformance-report.js [project-dir ...]`
-  (`--issues` prints only the projects with findings). Default target is the cwd; a
-  fleet run is a shell loop over project dirs, same as the setup scripts. Read-only,
-  no network, **always exit 0** — a worklist, not a gate. Every finding names the
-  exact script and flag that repairs it.
+  (`--issues` prints only the projects with findings). Default target is the cwd.
+  Read-only, no network, **always exit 0** — a worklist, not a gate. Every finding
+  names the exact script and flag that repairs it.
+- **The subject list is a check of its own, and `--recorded` is the one that runs
+  it.** A fleet run used to be a shell loop over project dirs, which makes the
+  audit's coverage a property of whoever wrote the glob. That failed silently: a
+  `projects/*` loop missed a working directory one level deeper, and the fleet notes
+  recorded that project as having no working copy at all for weeks while the store's
+  own record named the directory. `--recorded` takes the targets from the store
+  instead — every live working directory named by a project's `PROVENANCE.json`,
+  read through the same shared reader the binding check uses. Explicit arguments are
+  unioned, not replaced, and a directory recorded by two projects is audited once.
+  It **states its own reach**: how many live directories, across how many store
+  projects, and the count and names of those it cannot reach this way — no record, a
+  record that does not parse, or a record naming no working copy, each kept as its
+  own reason. A recorded path that is not on disk is reported separately again,
+  because there the route arrived and found nothing, which says something about the
+  record rather than about the route.
 - **Four checks.** *link* — the symlink states the linker classifies, plus the three
   it can't name (a link to a store copy under a different name, a dangling link, the
   legacy `artifacts/` layout). *grant* — present, and **scoped** to this project's own

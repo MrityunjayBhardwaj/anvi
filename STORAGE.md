@@ -131,10 +131,18 @@ risk; an unverifiable write is the direction you cannot undo.
 
 ```bash
 node ~/.claude/anvi/scripts/conformance-report.js <project-dir>
+node ~/.claude/anvi/scripts/conformance-report.js --recorded --issues
 ```
 
 Reports the link, the access grant, the binding, durability, and whether planning documents
 have been migrated.
+
+The second form audits **every working directory the store has a record of**, rather than the
+ones you remember to name. That matters because the first form's coverage is a property of
+the caller: a directory nobody lists is not reported as unaudited, it is simply absent from a
+report whose totals look complete. `--recorded` also prints what it could not reach — a store
+project with no record, one whose record does not parse, or one naming no working copy — so a
+smaller subject list never reads as a cleaner fleet.
 
 ## Moving or removing it
 
