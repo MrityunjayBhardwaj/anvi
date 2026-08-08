@@ -164,11 +164,28 @@ no project has to migrate:
 
 | Kind | Candidate order (first that exists wins) |
 |------|------------------------------------------|
-| `.anvi/` (catalogues) | `cwd/.anvi` → `cwd/artifacts/.anvi` → `~/.anvideck/projects/[name]/.anvi` |
-| `ref/` (Ground Truth docs, sources) | `cwd/ref` → `cwd/artifacts/ref` → `~/.anvideck/projects/[name]/ref` |
-| `investigations/` (experiment protocols) | `cwd/investigations` → `cwd/artifacts/investigations` → `~/.anvideck/projects/[name]/investigations` |
+| `.anvi/` (catalogues) | `root/.anvi` → `root/artifacts/.anvi` → `~/.anvideck/projects/[name]/.anvi` |
+| `ref/` (Ground Truth docs, sources) | `root/ref` → `root/artifacts/ref` → `~/.anvideck/projects/[name]/ref` |
+| `investigations/` (experiment protocols) | `root/investigations` → `root/artifacts/investigations` → `~/.anvideck/projects/[name]/investigations` |
 
-`[name]` is `basename(cwd)`. When workflows/skills say `.anvi/` (or hedge it as
+**`root` is the project the working directory is IN, not the working directory.**
+A working directory is not fixed for a session — a shell `cd` persists and arrives
+in the payload every hook receives — so anchoring the list at exactly `cwd` made a
+project's catalogues unreachable from `hooks/` or `test/`, reported as `not found`
+rather than as "looked in one place". `projectAnchor(cwd)` answers it once, for
+every consumer: **the nearest ancestor holding a `.anvi`, never past the git
+toplevel when there is one.** No such ancestor → `cwd` itself, exactly as before.
+
+The walk is what makes a subdirectory usable; the bound is what stops a vendored
+repository checked out inside a project from inheriting its host's catalogues. The
+bound is an upper limit rather than the target, which is why a directory inside the
+store still resolves to its store project rather than dying at the store root,
+which holds no `.anvi` at all. Both stopping conditions were measured across the
+fleet and neither is correct alone.
+
+`[name]` is `basename(root)` — the project's name, never a subdirectory's. That
+narrows the reach of a name rather than extending it: wherever containment answers,
+the name is not consulted. When workflows/skills say `.anvi/` (or hedge it as
 "`.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`)"), that shorthand means **"the
 `.anvi/` resolved by the order above."** This table is the one authoritative definition —
 the hooks and the docs must agree with it, not with each other ad hoc.
@@ -178,7 +195,14 @@ may use the name.** The candidate order above is a search: the basename entry is
 place to *try*, and a hit there is then gated by the binding record, so a directory
 cannot reach a store project merely by being named like it. Ownership is the other
 question — "is this path inside the store project this directory owns?" — and it is
-answered only by `ownStoreProject(cwd)`, from the realpath of `cwd/.anvi`. Answering
+answered only by `ownStoreProject(cwd)`, from the realpath of the `.anvi` the anchor
+walk found. It uses the same `projectAnchor` the candidate list does, and that is not
+a tidiness point: adding the walk to resolution alone would be worse than adding it
+to neither, because a project would then read its own knowledge from a subdirectory
+and be told in the same breath that the knowledge was another project's. For the same
+reason the binding check takes the caller's identity from the project root — a record
+with no remote is keyed on WORKTREE PATH, so a subdirectory measured against it
+matches nothing and is refused as a mismatch. Answering
 it from the name instead is what let a same-named stranger read another project's
 catalogues unflagged while a renamed working copy saw its own reported as foreign.
 Null from `ownStoreProject` means nothing proves ownership, which is a reason to
