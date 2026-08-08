@@ -15,7 +15,7 @@
 // - No-ops (exit 0, no output) when: dir missing, not a git repo, tree
 //   clean, or a merge/rebase is in progress.
 // - Commits everything dirty with an informative generated message:
-//   which projects, which files, which new entry IDs (+SP178, +SV85...).
+//   which projects, which files, which new entry IDs.
 // - Pushes best-effort: offline push failure is silent — the commit is the
 //   durability floor, the push is the backup.
 // - Never blocks the session: all failures exit 0 silently.

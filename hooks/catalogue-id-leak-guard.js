@@ -2,7 +2,7 @@
 // catalogue-id-leak-guard: PreToolUse hook for Bash
 //
 // Catalogue entry IDs (`vyapti:184`, `hetvabhasa#12`, and project-specific
-// prefixes like `SP72`) are PRIVATE index keys living in ~/.anvideck. They must
+// prefixes) are PRIVATE index keys living in ~/.anvideck. They must
 // not leak into outward-facing repo content — commit messages, GitHub issue/PR
 // titles & bodies — where they mean nothing to outside readers and surface the
 // framework that is meant to stay invisible.
@@ -23,8 +23,8 @@
 //   - Two detectors, both high-precision:
 //     1. The unambiguous index-key form `name[:#]NNN` ("vyapti:184") — works with
 //        zero catalogue access, catches cross-repo/foreign-project IDs.
-//     2. Bare IDs (`H21`, `V40`, `SP72`) cross-referenced against the project's OWN
-//        catalogue: a bare token is flagged ONLY if a real `## H21:` entry exists in
+//     2. Bare IDs (`Q21`, `Q40`, `QQ72`) cross-referenced against the project's OWN
+//        catalogue: a bare token is flagged ONLY if a real `## Q21:` entry exists in
 //        this project's .anvi. That is what makes bare-ID detection safe — "V8
 //        engine" never trips unless a real `## V8:` entry exists, so the false
 //        positives that kept bare IDs out (#45) don't occur. Deductive from ground
@@ -34,7 +34,7 @@
 //     command-string scan never saw — the #417 leak) is covered.
 //   - When the catalogue cannot be read because the resolver REFUSED this directory,
 //     the two cross-referencing detectors cannot run. Their caution is right — without
-//     the catalogue there is no way to tell `H21` from `MD5` — but the narrowing is
+//     the catalogue there is no way to tell an id from `MD5` — but the narrowing is
 //     REPORTED rather than silent, because a guard that quietly covers less than it did
 //     is indistinguishable from one that looked and found nothing (#167).
 
@@ -43,8 +43,8 @@ const os = require('os');
 const fs = require('fs');
 
 // Shared modules — hooks and CLI co-locate hooks/*.js in both install trees, so a
-// sibling require resolves in-repo and installed alike (V7). parseEntries is the ONE
-// catalogue parser (V7 again); a second ID scanner here would be a second chance to
+// sibling require resolves in-repo and installed alike. parseEntries is the ONE
+// catalogue parser; a second ID scanner here would be a second chance to
 // disagree about what an entry IS.
 let resolveDirForRead, parseEntries, adoptSession;
 try { ({ resolveDirForRead, adoptSession } = require('./anvi-paths.js')); } catch { resolveDirForRead = null; }
@@ -53,7 +53,7 @@ try { ({ parseEntries } = require('./currency.js')); } catch { parseEntries = nu
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 // The real catalogue IDs for the project at `cwd` — the set a bare token must match to
-// be a leak. Resolve via the shared resolver (V1); read every catalogue; collect ids.
+// be a leak. Resolve via the shared resolver; read every catalogue; collect ids.
 // Any failure (no catalogues, unreadable, resolver absent) → empty set, so bare-ID
 // detection simply goes quiet rather than erroring: detector 1 still runs.
 //
@@ -62,7 +62,7 @@ const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 // empty set from a REFUSED read means the identifiers in this publish are unverified
 // and the guard is covering less than it advertises. Resolving through the plain
 // wrapper merged the two, and the merge was invisible — the output of a degraded run
-// was byte-identical to a clean one (V14, #167).
+// was byte-identical to a clean one (#167).
 function projectCatalogue(cwd) {
   const ids = new Set();
   if (!resolveDirForRead || !parseEntries) return { ids, refused: false, notice: null };
@@ -137,7 +137,7 @@ process.stdin.on('end', () => {
     // guards make this safe against the false positives that kept bare IDs out (#45):
     //
     //   (a) cross-reference: a token trips only if it names an ACTUAL entry, so `K8s`
-    //       (no `## K8:` entry) stays silent.
+    //       (no matching entry) stays silent.
     //   (b) collision filter: a single-capital + single-digit ID (`V8`, `H2`, `B1`,
     //       `K3`) collides with ordinary tech/English ("V8 engine", "H2 heading", "B1
     //       visa") AND is often a real entry — cross-reference alone can't separate

@@ -3,7 +3,7 @@
 # centralized knowledge envelope so a fresh (non-elevated) session can actually
 # open and append its catalogues.
 #
-# WHY THIS EXISTS (H9 / V8): /anvi:init makes a project's .anvi a symlink into
+# WHY THIS EXISTS: /anvi:init makes a project's .anvi a symlink into
 # ~/.anvideck/projects/<name>/. That resolved path is OUTSIDE the session's
 # permitted roots, so the model's own Read/Edit on .anvi/* (and, once migrated,
 # ref/, investigations/, memory/) is DENIED. Hooks are harness-run shell (not

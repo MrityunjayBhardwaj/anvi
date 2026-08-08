@@ -247,7 +247,7 @@ function matchesKind(kindsField, relPath) {
 //   In a bibliography every item is already a path, so a bare-name hit is a
 //   collision with a DIFFERENT file that shares a basename, or with an ordinary
 //   English word: "until the package is rebuilt" claims every package.json in the
-//   repo, and "S1.1 scaffold" claims scaffold.ts.
+//   repo, and "Q1.1 scaffold" claims scaffold.ts.
 //   A FULL PATH is identity in either region. An entry whose REF reads
 //   "Source: packages/…/font-resolver.ts" is naming its own subject, and dropping
 //   that is a real loss — silent, which is the side this hook can least afford.

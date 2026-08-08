@@ -579,7 +579,7 @@ for (const cat of CATALOGUES) {
     if (v.anchor.provisional && v.status !== 'GRAY') detail += ` (provisional — last edited ~${v.anchor.ts})`;
     const anchor = v.anchor.sha ? `${v.anchor.source}@${v.anchor.sha.slice(0, 7)}` : v.anchor.source;
     // The entry's role, shown on every row so a per-id before/after join keys on
-    // (id, kind) and never pairs a `## SV12` invariant against a dharana `### SV12`
+    // (id, kind) and never pairs a `## Q12` invariant against a dharana `### Q12`
     // alignment cross-ref of the same id (#79 — the double-count that once got
     // misread as duplicate ids). The id is legitimately shared; kind disambiguates.
     const kind = entryKind(cat, e);

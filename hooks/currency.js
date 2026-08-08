@@ -947,7 +947,7 @@ function parseEntries(md) {
         coveredIds: ids,
         // Heading depth: 2 for a `## ID:` entry, 3 for a `### ID:` one. The regex
         // anchors on `^#{2,3}`, so m[0] always opens with the markers. A dharana
-        // `### SV12` alignment cross-ref and a vyapti `## SV12` invariant share an id
+        // `### Q12` alignment cross-ref and a vyapti `## Q12` invariant share an id
         // but not a level — a discriminator entryKind() still uses so a per-id join
         // never pairs them (#79). It no longer distinguishes a primary from its
         // continuation; `occurrence` does that, below.
@@ -1348,9 +1348,9 @@ function sensitivityFor(catalogue) {
 // The ROLE of an entry within its catalogue — used to key a per-id join (before/after
 // verdict diffs) so an invariant and a dharana alignment entry that reuse the same id
 // never pair against each other (#79). A dharana `### <ID>` (h3) is a CROSS-REFERENCE,
-// not a primary definition: an invariant-span alignment note (`### SV12 — ALIGNED`) or
+// not a primary definition: an invariant-span alignment note (`### Q12 — ALIGNED`) or
 // a boundary (`### Q1:`), pointing at the `## <ID>` (h2) invariant/pattern of that id
-// elsewhere. So (kind, id) separates `## SV12` [invariant] from `### SV12` [alignment].
+// elsewhere. So (kind, id) separates `## Q12` [invariant] from `### Q12` [alignment].
 // Derived from (catalogue, heading level, id shape) only — a pure function of ONE entry,
 // no cross-catalogue lookup. Not renumbering: the id is legitimately shared; kind
 // is what disambiguates the two rows.
