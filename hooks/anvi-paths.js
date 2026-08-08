@@ -73,12 +73,82 @@ function firstTime(key) {
   }
 }
 
+const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
+
+// Which project is THIS directory in? One answer, for every consumer.
+//
+// A working directory is not fixed for a session — a shell `cd` persists across
+// calls and arrives in the payload every hook receives. Anchoring at exactly
+// `cwd` therefore made a project's own knowledge vanish the moment work moved
+// into `hooks/` or `test/`: the catalogues reported NOT FOUND, and the guard
+// that labels foreign knowledge called the project's own store directory
+// EXTERNAL. Both failures are silent and both point the wrong way, because an
+// absence reads as a fact about the project rather than as a fact about where
+// we looked.
+//
+// So the search walks up. The rule, measured over the fleet before it was
+// written (#158): **the nearest ancestor holding a `.anvi`, and never past the
+// git toplevel when there is one.**
+//
+// The walk is what makes a subdirectory usable. The BOUND is what stops a
+// vendored repository checked out inside an instrumented project from
+// inheriting its host's catalogues — roughly 850 directories of third-party
+// source on this machine alone, which is the ownership family this codebase has
+// spent several issues removing. The bound is an UPPER LIMIT, not the target: a
+// project whose `.anvi` sits below the toplevel is still found, which is why a
+// directory inside the store resolves to its store project instead of dying at
+// the store root, where there is no `.anvi` at all. Both stopping conditions
+// were compared and NEITHER is correct alone.
+//
+// Two properties are deliberate, and both exist to keep this a strict superset
+// of the old behaviour rather than a new policy:
+//
+//   - No anchor found → `cwd` itself, exactly as before. A directory that
+//     resolved nothing still resolves nothing, and by the same candidates.
+//   - Anchor IS `cwd` → `cwd` is returned VERBATIM, not a normalized or
+//     realpath'd respelling, so every path string a consumer already prints or
+//     compares is byte-identical in the overwhelmingly common case.
+//
+// `.git` is tested as a plain path so a worktree or submodule — where `.git` is
+// a FILE — bounds the walk too, and so the bound costs a stat rather than a
+// subprocess on a hot path. `artifacts/.anvi` anchors as well as `.anvi`,
+// because `candidates` has always accepted that layout; zero directories on
+// this machine use it, so it changes nothing live and only stops the walk from
+// stepping over a root it would then fail to serve.
+//
+// Returns the root AND the `.anvi` that made it one, so the ownership question
+// below is answered from the same evidence rather than re-deriving it, because a
+// rule written twice is not a rule with one home.
+function projectAnchor(cwd) {
+  const start = path.resolve(cwd || '.');
+  const fsRoot = path.parse(start).root;
+  for (let dir = start; ;) {
+    for (const rel of [['.anvi'], ['artifacts', '.anvi']]) {
+      const anvi = path.join(dir, ...rel);
+      if (exists(anvi)) return { root: dir === start ? cwd : dir, anvi };
+    }
+    if (exists(path.join(dir, '.git'))) break; // repository boundary — go no further
+    if (dir === fsRoot) break;
+    dir = path.dirname(dir);
+  }
+  return { root: cwd, anvi: null };
+}
+
 // kind: '.anvi' | 'ref' | 'investigations'
+//
+// Note which directory keys the store candidate: the ANCHOR's basename, never
+// the working directory's. That is not a widening of the name-keyed candidate —
+// it is the same single candidate, anchored coherently. Keying it on `cwd` once
+// the walk exists would ask the store for a project named `hooks`, which is
+// precisely the ownership-by-name hazard; keying it on the anchor NARROWS
+// the name's reach, because a subdirectory name can no longer address the store
+// at all wherever containment already answered the question.
 function candidates(cwd, kind) {
-  const name = path.basename(cwd);
+  const { root } = projectAnchor(cwd);
+  const name = path.basename(root);
   return [
-    path.join(cwd, kind),
-    path.join(cwd, 'artifacts', kind),
+    path.join(root, kind),
+    path.join(root, 'artifacts', kind),
     path.join(os.homedir(), '.anvideck', 'projects', name, kind),
   ];
 }
@@ -230,8 +300,15 @@ function storeProjectForPath(p) {
 // Deliberately UNGATED, like existingDirs beside it: this answers "what do I
 // own", which is the question an auditor asks. A guard that consulted a gated
 // version would go blind on exactly the projects it exists to watch.
+//
+// Resolved through `projectAnchor` — the SAME function the candidate list is
+// built from, and not merely the same rule written twice. Adding the walk to one
+// of the two would be worse than adding it to neither: resolution would start
+// succeeding from a subdirectory while ownership still returned null there, so a
+// project would read its own knowledge and be told it belonged to someone else.
+// Today they fail together, which is at least consistent.
 function ownStoreProject(cwd) {
-  const anvi = realSafe(path.join(cwd, '.anvi'));
+  const { anvi } = projectAnchor(cwd);
   if (!anvi) return null;
   return storeProjectOf(anvi);
 }
@@ -280,7 +357,24 @@ function checkAccess(cwd, dir) {
   // whose working directory IS its store directory is refused the knowledge it
   // owns. "Resolved inside cwd" is the condition the policy table has always
   // stated for LOCAL; this is where it is actually decided.
-  if (isInside(cwd, dir)) {
+  //
+  // Asked about the caller's project ROOT, not about the exact working
+  // directory — the third site of the same anchoring defect, and the one only
+  // observation found. Once the candidate list walks up, a store project's own
+  // `.anvi` is no longer inside a SUBdirectory of it, so this shortcut stopped
+  // firing there and the binding check answered MISMATCH: the store repo's
+  // remote is the artifacts repo, the project's record names the project's own
+  // repo, and they duly differ. A confident, well-formed, wrong verdict — worse
+  // than the NOT FOUND it replaced, because MISMATCH asserts that a record
+  // exists and this caller is not it.
+  //
+  // Widening the base cannot weaken the guard, and for a precise reason: the
+  // root is reached by CONTAINMENT (it is the ancestor that physically holds the
+  // `.anvi` we followed), and `isInside` compares REALPATHS. A stranger who
+  // points `<their dir>/.anvi` at another project's store directory becomes the
+  // anchor for their own directory and gains nothing — resolved, that link lands
+  // in the store, outside their root, and stays gated exactly as before.
+  if (isInside(projectAnchor(cwd).root, dir)) {
     return { state: 'LOCAL', storeProject, reason: 'resolved inside the caller\'s own directory — the caller IS this project' };
   }
   if (!IDENTITY) {
@@ -533,6 +627,11 @@ function subjectRepoFor(filePath, sessionCwd) {
 module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, resolveDirForFile,
   subjectRepoFor,
+  // "Which project is this directory in" — exported so it has ONE name as well
+  // as one implementation. A consumer that needs the question answered must ask
+  // this rather than re-deriving a walk, which is how the resolution and
+  // ownership halves came to disagree in the first place.
+  projectAnchor,
   // Every hook that resolves through this module must call this once, right after
   // it parses its payload — a hook is a process per event, so without it the
   // explanations below are deduplicated against a Set that is always empty and
