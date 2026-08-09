@@ -41,7 +41,7 @@ const os = require('os');
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
 let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
-  isInside = null, projectAnchor = null, projectRootFor = null;
+  isInside = null, projectRootOfDir = null, projectRootFor = null;
 try {
   ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
     projectRootOfDir, projectRootFor } = require('./anvi-paths.js'));
@@ -96,29 +96,6 @@ function foreignProjectOf(absPath, cwd) {
   if (!absPath || !path.isAbsolute(absPath)) return null; // relative → resolves under cwd → in-repo
 
   const home = os.homedir();
-
-  // Which project CONTAINS this working directory — the upward walk, taken from
-  // the shared resolver, and deliberately the SAME question asked of the target
-  // below. An ownership comparison has two operands; asking them different
-  // questions yields a verdict about the questions rather than about ownership.
-  // Asked through the catalogue anchor, which requires a `.anvi` and stops at the
-  // repository boundary, a repository with no catalogues answered with the
-  // working directory itself — so a subdirectory failed to match its own repo's
-  // root and the repository was announced as foreign to itself.
-  //
-  // A working directory is not fixed for a session: a shell `cd` persists across
-  // calls and arrives in every payload this hook receives. Measured against
-  // `cwd`, the sibling test below therefore read every OTHER subdirectory of the
-  // project as a separate project the moment work moved into one of them —
-  // reading `test/x.js` from `hooks/` was announced as belonging to a project
-  // called `test`, in both directions, with no second project anywhere on disk.
-  //
-  // Null when this directory sits under no project at all — a scratch tree, a
-  // session's own temporary area. Then `cwd` stands in, which only decides which
-  // paths reach the sibling test below; nothing there may name an owner without
-  // evidence of its own.
-  const root = (projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd;
-  const name = path.basename(root);
 
   // Which store project this directory OWNS — resolved from where `.anvi` lands,
   // never from the directory's name. A name is self-asserted: any directory can
@@ -212,6 +189,29 @@ function foreignProjectOf(absPath, cwd) {
   if (isUnder(absPath, cwd)) return null;
   if (ownStore && isUnder(absPath, ownStore)) return null;
   if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
+
+  // Which project CONTAINS this working directory — the upward walk, taken from
+  // the shared resolver, and deliberately the SAME question asked of the target
+  // below. An ownership comparison has two operands; asking them different
+  // questions yields a verdict about the questions rather than about ownership.
+  // Asked through the catalogue anchor, which requires a `.anvi` and stops at the
+  // repository boundary, a repository with no catalogues answered with the
+  // working directory itself — so a subdirectory failed to match its own repo's
+  // root and the repository was announced as foreign to itself.
+  //
+  // A working directory is not fixed for a session: a shell `cd` persists across
+  // calls and arrives in every payload this hook receives. Measured against
+  // `cwd`, the sibling test below therefore read every OTHER subdirectory of the
+  // project as a separate project the moment work moved into one of them —
+  // reading `test/x.js` from `hooks/` was announced as belonging to a project
+  // called `test`, in both directions, with no second project anywhere on disk.
+  //
+  // Null when this directory sits under no project at all — a scratch tree, a
+  // session's own temporary area. Then `cwd` stands in, which only decides which
+  // paths reach the sibling test below; nothing there may name an owner without
+  // evidence of its own.
+  const root = (projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd;
+  const name = path.basename(root);
 
   // (a) sibling repo: shares the project root's parent directory but isn't it.
   const parent = path.dirname(root);
