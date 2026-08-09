@@ -117,6 +117,12 @@ const OK_STATES = {
   // knowledge. The count is the rollout worklist, and it drives to zero as the
   // fleet is bound — which is the precondition for anything failing closed.
   binding: ['BOUND', 'NOT_APPLICABLE'],
+  // The ignore rule's own durability. NOT_APPLICABLE covers every case where the
+  // question does not arise — no link, no repo, or the rule not covering the path
+  // at all, which the repo check already reports and this one must not repeat.
+  // UNDETERMINED is a finding on purpose: it means the committed state could not
+  // be evaluated, and an all-clear is only sayable when something was cleared.
+  portable: ['COMMITTED', 'NOT_APPLICABLE'],
 };
 function check(id, state, detail, extra = {}) {
   if (!OK_STATES[id]) throw new Error(`unknown check id: ${id}`);
@@ -394,6 +400,109 @@ function classifyRepo(dir, storeName) {
   return check('repo', 'CLEAN', '.anvi ignored, not tracked');
 }
 
+// --- check: IGNORE-RULE DURABILITY ------------------------------------------
+// The repo check above asks whether the ignore rule covers `.anvi` RIGHT NOW. It
+// asks the working tree, deliberately and correctly — `--no-index` is there
+// because without it git skips tracked paths and blames a missing rule for what
+// is really a stale index entry.
+//
+// But "does the rule cover this path now" and "will the rule still be there for
+// anyone else" are two questions, and only the first was ever asked. A rule that
+// exists solely as an uncommitted edit — or solely in `.git/info/exclude`, or in
+// a global excludes file — covers the path perfectly on this machine and does
+// not exist in a fresh clone, where the first `git add -A` then commits a
+// machine-specific symlink. That is the exact failure the repo check exists to
+// surface, reported as CLEAN. Found in real use, not in a fixture.
+//
+// So this asks the second question SEPARATELY rather than folding a second input
+// into the first verdict. The repo check keeps its answer and its meaning; a
+// project whose rule is real but uncommitted now reports a finding of its own
+// instead of reading as conformant.
+//
+// It is answered by EVALUATION, not by matching text. Git attributes a match to
+// a source file and line, so the tempting implementation is to look for that
+// pattern in the committed version of that file — but a different committed rule
+// may cover the same path, and that shape would report a project as broken for
+// having tidied its ignore file. Instead the committed ignore files are
+// materialised into a throwaway repository and git is asked there, with the
+// global excludes file suppressed. A fresh repository's `info/exclude` carries
+// only comments, so the answer is exactly "what would a clone of HEAD ignore",
+// computed by git's own semantics rather than by a re-reading of them. Nothing
+// is written anywhere but the temporary directory, and it is removed.
+function committedIgnoreEval(git, dir, relPath) {
+  const files = git(['ls-files', '-z', '--', '.gitignore', '*/.gitignore']).out
+    .split('\0').filter(Boolean);
+  let tmp = null;
+  try {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-conf-ign-'));
+    if (!gitIn(tmp)(['init', '-q']).ok) return { ok: false, reason: 'could not create a scratch repository' };
+    for (const f of files) {
+      const blob = git(['show', `HEAD:${f}`]);
+      if (!blob.ok) continue; // tracked but not in HEAD — a fresh add; nothing committed to honour
+      fs.mkdirSync(path.join(tmp, path.dirname(f)), { recursive: true });
+      fs.writeFileSync(path.join(tmp, f), blob.out);
+    }
+    const v = gitIn(tmp)(['-c', 'core.excludesFile=/dev/null', 'check-ignore', '--no-index', '-v', '--', relPath]);
+    return { ok: true, ignored: v.ok, source: (v.out.split(':')[0] || '').trim(), files };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  } finally {
+    if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* best effort */ } }
+  }
+}
+
+function classifyPortable(dir) {
+  const local = path.join(dir, '.anvi');
+  if (!lstatSafe(local)) return check('portable', 'NOT_APPLICABLE', 'no local .anvi in this repo');
+  if (!isRepo(dir)) return check('portable', 'NOT_APPLICABLE', 'not a git repo — nothing here can be committed');
+
+  const git = gitIn(dir);
+  // The repo check owns the "no rule at all" case and states it with the right
+  // remedy. Reporting it again here would be a second mechanism answering a
+  // question one already answers.
+  if (!git(['check-ignore', '--no-index', '-q', '--', '.anvi']).ok) {
+    return check('portable', 'NOT_APPLICABLE', 'no ignore rule covers .anvi — the repo check above says so and what to do');
+  }
+
+  const now = git(['check-ignore', '--no-index', '-v', '--', '.anvi']);
+  const liveSource = (now.out.split(':')[0] || '').trim();
+
+  // Ask the committed state about the same KIND of path that is on disk.
+  //
+  // `check-ignore` decides whether a pathname names a directory from a trailing
+  // slash, not from the filesystem, and a rule written `.anvi/` matches only a
+  // directory. The migrated layout puts a SYMLINK there, which such a rule does
+  // not match — that is why the setup script writes the bare form, and it is a
+  // real state on this fleet: one project's committed rule is `.anvi/` while its
+  // uncommitted edit adds the bare one. But a project that has not migrated yet
+  // still has a real directory, where `.anvi/` matches perfectly. Spelling the
+  // question the same way on both sides is what stops that project being told
+  // its committed rule is missing when it is present and correct.
+  const st = lstatSafe(local);
+  const asPath = st && st.isDirectory() ? '.anvi/' : '.anvi';
+  const evaluated = committedIgnoreEval(git, dir, asPath);
+  if (!evaluated.ok) {
+    return check('portable', 'UNDETERMINED',
+      `could not evaluate what a fresh clone would ignore (${evaluated.reason}) — this is not an all-clear`,
+      { remedy: `cd "${dir}" && git show HEAD:.gitignore   (check by hand that a rule for .anvi is committed)` });
+  }
+  if (evaluated.ignored) {
+    return check('portable', 'COMMITTED', `.anvi is ignored by the committed .gitignore as well as the working tree`);
+  }
+
+  // Not ignored in the committed state. Say which of the two ways it got here,
+  // because they have different remedies: an edit that was never committed, or a
+  // rule that lives somewhere the repo does not carry at all.
+  const inRepoFile = liveSource && !path.isAbsolute(liveSource) && !liveSource.startsWith('.git/');
+  return inRepoFile
+    ? check('portable', 'UNCOMMITTED',
+      `.anvi is ignored here but NOT in the committed state — the rule in ${liveSource} exists only as an uncommitted edit, so a fresh clone ignores nothing and the first \`git add -A\` commits a machine-specific symlink`,
+      { remedy: `cd "${dir}" && git add ${liveSource} && git commit -m "ignore the .anvi catalogue link"` })
+    : check('portable', 'LOCAL_ONLY',
+      `.anvi is ignored only by ${liveSource || 'a rule outside the repository'}, which no clone carries — the rule is local to this machine`,
+      { remedy: `cd "${dir}" && printf '.anvi\\n' >> .gitignore && git add .gitignore && git commit -m "ignore the .anvi catalogue link"` });
+}
+
 // --- check: DURABILITY ------------------------------------------------------
 // The store is where every project's catalogues physically live. If it is not a
 // git repo with a remote they are preserved nowhere — knowledge that isn't
@@ -646,6 +755,7 @@ function computeConformance(dir, store = storeState()) {
     link,
     classifyGrant(project, envelope),
     classifyRepo(project, storeName),
+    classifyPortable(project),
     classifyDurability(storeName, store),
     classifyPlanning(project),
     classifyBinding(project),
@@ -785,7 +895,8 @@ function main(argv) {
 }
 
 module.exports = {
-  computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
+  computeConformance, classifyLink, classifyGrant, classifyRepo, classifyPortable, classifyDurability,
+  classifyPlanning,
   classifyBinding, recordedTargets,
   storeState, findStoreCopyByContent, storeProjectOf, isInside, check, OK_STATES, main, CATALOGUES,
 };

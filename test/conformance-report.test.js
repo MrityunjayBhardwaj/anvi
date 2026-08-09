@@ -634,6 +634,156 @@ console.log('\nplanning — a legacy tree reports how much of it the repo actual
   has(c3.remedy, 'migrate-planning.sh', 'every legacy finding carries the command that fixes it');
 }
 
+// --- check: IGNORE-RULE DURABILITY ------------------------------------------
+// "Does the rule cover this path now" and "will the rule still be there for
+// anyone else" are two questions. The repo check asks the first, against the
+// working tree, correctly. Nothing asked the second, so a rule that existed only
+// as an uncommitted edit — the state three live projects were in — reported the
+// installation as conformant while a fresh clone would ignore nothing.
+//
+// Every case here asserts GIT'S OWN behaviour on the fixture before asserting
+// the report's reading of it, because the whole check is a claim about what a
+// clone would do and a fixture that only satisfies the code proves nothing.
+console.log('\nignore-rule durability');
+{
+  const { classifyPortable } = R;
+  // Does a clone of HEAD ignore this path? Computed here INDEPENDENTLY of the
+  // module under test — by cloning the fixture, which is the thing the check is
+  // ultimately a claim about. A helper that re-used the module's own evaluation
+  // would agree with it by construction.
+  const cloneIgnores = (d, spelling = '.anvi') => {
+    const c = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-conf-clone-'));
+    try {
+      git(path.dirname(c), 'clone', '-q', d, c);
+      try { git(c, 'check-ignore', '--no-index', '-q', '--', spelling); return true; }
+      catch { return false; }
+    } finally { fs.rmSync(c, { recursive: true, force: true }); }
+  };
+  // The migrated layout: `.anvi` is a symlink into the store. Written out here
+  // rather than folded into the fixture helper, because the DIRECTORY case below
+  // deliberately does not have one and the difference is the point.
+  const linkTo = (d, name) => fs.symlinkSync(path.join(PROJECTS, name, '.anvi'), path.join(d, '.anvi'));
+
+  {
+    // Committed: the ordinary healthy shape, and the control for everything below.
+    storeProject('ign-committed', { 'hetvabhasa.md': entry('fifty') });
+    const d = project('ign-committed', { repo: true }); linkTo(d, 'ign-committed');
+    write(path.join(d, '.gitignore'), '.anvi\n');
+    git(d, 'add', '.gitignore'); git(d, 'commit', '-q', '-m', 'ignore it');
+    ok(cloneIgnores(d), 'a real clone of this fixture genuinely ignores .anvi');
+    eq(classifyPortable(d).state, 'COMMITTED', 'and the check says the rule is committed');
+    eq(classifyRepo(d, 'ign-committed').state, 'CLEAN', 'repo is CLEAN, as it was before');
+  }
+  {
+    // The case #100 is about, and the shape found in real use: applied on disk
+    // months ago, never committed.
+    storeProject('ign-uncommitted', { 'hetvabhasa.md': entry('fiftyone') });
+    const d = project('ign-uncommitted', { repo: true }); linkTo(d, 'ign-uncommitted');
+    write(path.join(d, '.gitignore'), 'node_modules\n');
+    git(d, 'add', '.gitignore'); git(d, 'commit', '-q', '-m', 'ignore node_modules');
+    fs.appendFileSync(path.join(d, '.gitignore'), '.anvi\n');   // never committed
+
+    ok(!cloneIgnores(d), 'a real clone of this fixture does NOT ignore .anvi');
+    const c = classifyPortable(d);
+    eq(c.state, 'UNCOMMITTED', 'the check reports the rule as uncommitted');
+    ok(!c.ok, 'and it is a finding, so the project no longer reads as conformant');
+    has(c.detail, '.gitignore', 'naming the file the live rule came from');
+    has(c.remedy, 'git add .gitignore', 'remedy commits the rule that already exists');
+
+    // The constraint the issue set: the existing verdict must not be downgraded.
+    // The working-tree question still has the same right answer.
+    eq(classifyRepo(d, 'ign-uncommitted').state, 'CLEAN',
+       'repo still reports CLEAN — the second question got its own verdict, it did not spoil the first');
+    // Naming the check rather than reading the overall verdict: with several
+    // other checks failing on a bare fixture, "not conformant" passes whatever
+    // this row says.
+    const whole = computeConformance(d);
+    ok(whole.checks.some(x => x.id === 'portable' && !x.ok),
+       'and it is THIS check that carries the finding in the full audit');
+  }
+  {
+    // A rule no clone carries at all. Distinct from the above because the remedy
+    // differs: there is nothing to commit, the rule has to be moved first.
+    storeProject('ign-local', { 'hetvabhasa.md': entry('fiftytwo') });
+    const d = project('ign-local', { repo: true }); linkTo(d, 'ign-local');
+    write(path.join(d, '.gitignore'), 'node_modules\n');
+    git(d, 'add', '.gitignore'); git(d, 'commit', '-q', '-m', 'ignore node_modules');
+    fs.appendFileSync(path.join(d, '.git', 'info', 'exclude'), '.anvi\n');
+
+    ok(!cloneIgnores(d), 'a clone does not carry .git/info/exclude');
+    const c = classifyPortable(d);
+    eq(c.state, 'LOCAL_ONLY', 'and that is reported as a different state from an uncommitted edit');
+    has(c.detail, 'info/exclude', 'naming where the rule actually lives');
+    has(c.remedy, ">> .gitignore", 'remedy moves it into the repo rather than committing nothing');
+  }
+  {
+    // No rule at all. The repo check owns this and states the right remedy; a
+    // second row repeating it would be two mechanisms answering one question.
+    storeProject('ign-none', { 'hetvabhasa.md': entry('fiftythree') });
+    const d = project('ign-none', { repo: true }); linkTo(d, 'ign-none');
+    eq(classifyRepo(d, 'ign-none').state, 'UNIGNORED', 'the repo check reports the missing rule');
+    const c = classifyPortable(d);
+    eq(c.state, 'NOT_APPLICABLE', 'and this check stays out of it');
+    ok(c.ok, 'contributing no second finding for the same state');
+  }
+  {
+    // The false positive this must not have. A project that has NOT migrated yet
+    // has a real `.anvi` DIRECTORY, which a committed `.anvi/` rule matches
+    // perfectly — while the same rule does not match the symlink the migrated
+    // layout installs. Asking the committed state about the bare spelling would
+    // report this correct, committed rule as missing.
+    //
+    // Not hypothetical in the other direction either: one live project's
+    // committed rule is `.anvi/` while its uncommitted edit adds the bare form.
+    storeProject('ign-dir', { 'hetvabhasa.md': entry('fiftyfour') });
+    const d = project('ign-dir', { repo: true });
+    write(path.join(d, '.anvi', 'hetvabhasa.md'), entry('fiftyfour'));
+    write(path.join(d, '.gitignore'), '.anvi/\n');
+    git(d, 'add', '.gitignore'); git(d, 'commit', '-q', '-m', 'ignore the directory');
+
+    ok(fs.lstatSync(path.join(d, '.anvi')).isDirectory(), 'the fixture genuinely has a real directory, not a link');
+    ok(cloneIgnores(d, '.anvi/'), 'and a clone genuinely ignores it');
+    eq(classifyPortable(d).state, 'COMMITTED', 'so the committed rule is recognised, not reported missing');
+
+    // The discriminating half: the SAME committed rule against a symlink is
+    // genuinely not enough, and must still be reported.
+    storeProject('ign-dirrule-link', { 'hetvabhasa.md': entry('fiftyfive') });
+    const e = project('ign-dirrule-link', { repo: true }); linkTo(e, 'ign-dirrule-link');
+    write(path.join(e, '.gitignore'), '.anvi/\n');
+    git(e, 'add', '.gitignore'); git(e, 'commit', '-q', '-m', 'directory-only rule');
+    fs.appendFileSync(path.join(e, '.gitignore'), '.anvi\n');
+    ok(fs.lstatSync(path.join(e, '.anvi')).isSymbolicLink(), 'this one is a symlink');
+    ok(!cloneIgnores(e), 'and a clone does NOT ignore it, because a trailing slash needs a directory');
+    eq(classifyPortable(e).state, 'UNCOMMITTED', 'so the same committed rule is correctly not enough here');
+  }
+  {
+    // The check must be able to say "I could not tell". An all-clear is only
+    // sayable when something was actually cleared, so an evaluation that cannot
+    // run is a finding rather than a pass. Forced by making the scratch area
+    // unusable, which is the one input the evaluation cannot work around.
+    storeProject('ign-undet', { 'hetvabhasa.md': entry('fiftysix') });
+    const d = project('ign-undet', { repo: true }); linkTo(d, 'ign-undet');
+    write(path.join(d, '.gitignore'), '.anvi\n');
+    git(d, 'add', '.gitignore'); git(d, 'commit', '-q', '-m', 'ignore it');
+    eq(classifyPortable(d).state, 'COMMITTED', 'committed while the scratch area works');
+
+    const blocked = path.join(HOME, 'no-tmp-here');
+    fs.mkdirSync(blocked, { recursive: true });
+    fs.chmodSync(blocked, 0o500);                     // readable, not writable
+    const realTmp = process.env.TMPDIR;
+    process.env.TMPDIR = blocked;
+    let c;
+    try { c = classifyPortable(d); } finally {
+      if (realTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = realTmp;
+      fs.chmodSync(blocked, 0o700);
+    }
+    eq(c.state, 'UNDETERMINED', 'and UNDETERMINED when it cannot evaluate the committed state');
+    ok(!c.ok, 'which is a finding — not an all-clear over an evaluation that never ran');
+    has(c.detail, 'not an all-clear', 'and says so in the row itself');
+    eq(classifyPortable(d).state, 'COMMITTED', 'restored afterwards, so the fixture proved the cause');
+  }
+}
+
 // --- cleanup ----------------------------------------------------------------
 process.env.HOME = REAL_HOME;
 fs.rmSync(HOME, { recursive: true, force: true });
