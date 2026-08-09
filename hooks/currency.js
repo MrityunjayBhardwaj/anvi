@@ -381,6 +381,7 @@ const LINT = {
   INERT_DECLARATION: 'inert-declaration',
   NARROW_GLOB: 'narrow-glob',
   REF_SYMBOL_GONE: 'ref-symbol-gone',
+  REF_SYMBOL_UNCHECKED: 'ref-symbol-unchecked',
 };
 
 // Which names in a REF: are CITATIONS of code, as opposed to prose that happens to
@@ -689,10 +690,42 @@ function lintEntry(entry, { catalogue, resolveSpec, resolveGlobWidth, resolveSym
   // silence rather than an accusation.
   if (resolveSymbol) {
     const gone = [];
+    // The other half of #216, and it is the same rule the fresh verdict now obeys:
+    // a check may only assert what it resolved. A DOTTED citation is answered by its
+    // last segment, so when the full name appears nowhere and only the tail does, the
+    // verdict rests entirely on the tail — and for an ordinary tail (`type`, `value`,
+    // `geometry`) that tail can never be absent, so the citation cannot be reported
+    // however completely the member was removed.
+    //
+    // Reported as SCOPE, never as an accusation: it does not claim the member is gone,
+    // it says this one was not checked at member depth. That distinction is the whole
+    // finding — the entries in question currently look checked, and they are not.
+    //
+    // No threshold, deliberately. "Which tails are too ordinary" would need a magic
+    // number; "the verdict rests on the tail alone" needs none and is the honest
+    // population. How widely the tail occurs is EVIDENCE carried in the row, not a
+    // filter applied to it.
+    const unchecked = [];
     for (const cited of citedSymbols(entry.refField)) {
-      let verdict = null;
-      try { verdict = resolveSymbol(cited); } catch { verdict = null; }
+      let answer = null;
+      try { answer = resolveSymbol(cited); } catch { answer = null; }
+      // A resolver may answer with a bare verdict or with a verdict plus what it had
+      // in hand while deciding. Both are accepted so an older resolver keeps working:
+      // an install that predates this returns a string and simply never says unchecked.
+      const verdict = (answer && typeof answer === 'object') ? answer.verdict : answer;
+      const note = (answer && typeof answer === 'object') ? answer.note : null;
       if (verdict === 'gone' && !gone.includes(cited.name)) gone.push(cited.name);
+      if (verdict === 'unchecked') {
+        const tail = cited.name.split('.').pop();
+        const row = `${cited.name} — checked only for \`${tail}\`${note ? ` (${note})` : ''}`;
+        if (!unchecked.includes(row)) unchecked.push(row);
+      }
+    }
+    if (unchecked.length) {
+      findings.push({
+        code: LINT.REF_SYMBOL_UNCHECKED, severity: 'low', refs: unchecked,
+        detail: 'a dotted citation was resolved by its LAST SEGMENT alone — the full name appears nowhere in the repo, the tail does. This is not a claim that the member is gone; it is the report saying it did not check at member depth. Where the tail is an ordinary word it never can: the search succeeds on unrelated code, so the citation reads as verified and no removal of the member could ever make it fire. Re-point the citation at something the repo spells the way the entry does, or accept that this one is carried by the entry\'s prose rather than by the check.',
+      });
     }
     if (gone.length) {
       findings.push({

@@ -279,11 +279,35 @@ if (lintOnly) {
     // in any language nobody listed; the repo is here and can simply be asked (#216).
     if (citedNameIsTrackedPath(name, git)) return null;
     const last = name.split('.').pop();
+    // Whether the answer came from the FULL name or only from its tail is the
+    // difference between a checked citation and one that merely looks checked
+    // (#216). For an undotted name the two are the same string and nothing below
+    // changes; for a dotted one, tail-only evidence is reported as scope rather
+    // than folded into `present`.
+    const dotted = last !== name;
     try {
       const txt = fs.readFileSync(path.join(cwd, rel), 'utf8');
-      if (txt.includes(name) || new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(txt)) return 'present';
+      if (txt.includes(name)) return 'present';
+      if (new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(txt)) {
+        // The member access may genuinely be written across a line break, so this
+        // is not evidence of absence either. It is evidence that stops one step
+        // short of the claim, which is exactly what wants saying out loud.
+        if (!dotted) return 'present';
+        return { verdict: 'unchecked', note: 'in the file that cites it' };
+      }
     } catch { /* unreadable — fall through to the repo-wide question */ }
-    if (symbolCache.has(last)) return symbolCache.get(last);
+    // Keyed on the NAME, not the tail. Two dotted names can share a tail and
+    // deserve different answers, and the old key would have served the first
+    // one's verdict to the second.
+    if (symbolCache.has(name)) return symbolCache.get(name);
+    // Ask for the full dotted string before falling back to the tail — the whole
+    // point is to know WHICH question answered. Costs one search, and only for
+    // the ~5% of citations that fail the in-file test.
+    if (dotted) {
+      let full = '';
+      try { full = git(`grep -l -F -e ${JSON.stringify(name)}${CATALOGUE_EXCLUDE}`).trim(); } catch { full = ''; }
+      if (full) { symbolCache.set(name, 'present'); return 'present'; }
+    }
     let verdict;
     try {
       // The catalogues are excluded from the search, and this is load-bearing rather
@@ -295,7 +319,17 @@ if (lintOnly) {
       // It does not show up in the fleet, where `.anvi` is a symlink into the store and
       // git never walks it. That is precisely why it has to be excluded explicitly: the
       // arrangement that hides it is a deployment detail, not a property of the check.
-      verdict = git(`grep -l -w -F -e ${JSON.stringify(last)}${CATALOGUE_EXCLUDE}`).trim() ? 'present' : 'gone';
+      const hits = git(`grep -l -w -F -e ${JSON.stringify(last)}${CATALOGUE_EXCLUDE}`)
+        .split('\n').filter(Boolean);
+      verdict = hits.length ? 'present' : 'gone';
+      // A dotted name reaching here has already failed the full-string search, so a
+      // hit is the TAIL's, not the name's. How many files it hits is the evidence
+      // that separates a tail worth trusting from one that could never be absent —
+      // and it is free, because the search that decided the verdict already listed
+      // them.
+      if (dotted && verdict === 'present') {
+        verdict = { verdict: 'unchecked', note: `\`${last}\` occurs in ${hits.length} file${hits.length === 1 ? '' : 's'}` };
+      }
     } catch (e) {
       // git grep exits 1 for "no match" — that IS the finding, and it arrives as a
       // thrown error. Any other failure is git being unable to answer, and must stay
@@ -303,7 +337,7 @@ if (lintOnly) {
       // loudest possible way to be wrong.
       verdict = e && e.status === 1 ? 'gone' : null;
     }
-    symbolCache.set(last, verdict);
+    symbolCache.set(name, verdict);
     return verdict;
   } : null;
 
