@@ -433,6 +433,121 @@ console.log('\na subdirectory is not a sibling, and a name is not a project');
      'reading the project through a link to itself is not a foreign project');
 }
 
+// ── a project is foreign wherever it lives, not only next door ──────────────
+// The comparison above was reached only for paths under the working directory's
+// project root's PARENT. So a read was classified when the two projects happened
+// to be neighbours, and fell through to silence otherwise: a repository under
+// `~/src` reading one under `~/work`, or a nested checkout reading any top-level
+// project. That is a MISSING note, the direction the over-warn policy is written
+// to avoid, and an absent warning is indistinguishable from a read that was fine
+// — which is why it survived a suite whose every foreign fixture was a sibling.
+//
+// The whole block needs both directions in it. A change that simply flags
+// everything satisfies every firing case here, so each one is paired with a
+// silence case reachable from the SAME cwd.
+console.log('\na project that is not next door is still another project');
+{
+  const SRC = path.join(HOME, 'src', 'one');        // cwd
+  const WORK = path.join(HOME, 'work', 'two');      // a different parent entirely
+  for (const d of [SRC, WORK]) {
+    fs.mkdirSync(path.join(d, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'src', 'f.js'), '//\n');
+  }
+  ok(path.dirname(SRC) !== path.dirname(WORK),
+     'the two projects genuinely do not share a parent directory');
+
+  ok(fired(SRC, path.join(WORK, 'src', 'f.js')),
+     'a repository under one parent reading one under another is foreign');
+  ok(fired(path.join(SRC, 'src'), path.join(WORK, 'src', 'f.js')),
+     'and from a subdirectory of it, where the old rule was measured from');
+  ok(!fired(SRC, path.join(SRC, 'src', 'f.js')),
+     'while its own file, from the same cwd, stays silent');
+
+  // A checkout inside another checkout. Its parent is its HOST, so every
+  // top-level project on the machine was outside the domain the old rule could
+  // see — the shape the live sweep found this defect in.
+  const NEST = path.join(SRC, 'vendor', 'inner');
+  fs.mkdirSync(path.join(NEST, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(NEST, 'n.js'), '//\n');
+  ok(fs.existsSync(path.join(SRC, '.git')) && fs.existsSync(path.join(NEST, '.git')),
+     'the nested checkout and its host are genuinely both repositories');
+  ok(fired(NEST, path.join(WORK, 'src', 'f.js')),
+     'from a nested checkout, an unrelated top-level project is foreign');
+  ok(!fired(NEST, path.join(NEST, 'n.js')),
+     'while its own file, from that same cwd, stays silent');
+  ok(fired(NEST, path.join(SRC, 'src', 'f.js')),
+     'and its host is still foreign to it, as it was before');
+}
+
+// ── machinery is not a workspace, and its host still is ────────────────────
+// Comparing project roots directly reaches every repository on the machine, and
+// some of those are not projects in any sense a session cares about: a config or
+// install directory, the store, a package manager's git cache. `~/.claude` is a
+// repository on this author's machine and is read on almost every turn, so
+// naming it as a foreign project would bury the note this hook exists to
+// deliver. The rule that kept them quiet before was the neighbour test doing it
+// by accident; under a direct comparison it has to be stated.
+//
+// The rule is to ask again from ABOVE such a root rather than to decline, which
+// is what makes the last two cases here differ — a cache repository vendored
+// inside a real project reports that project, where declining would have made it
+// silent and lost a genuine cross-project read.
+console.log('\nmachinery is not a workspace, and its host still is');
+{
+  const HOMEP = path.join(HOME, 'src', 'one');   // built above; the cwd throughout
+  const CONF = path.join(HOME, '.tooling');      // a dot-directory that is a repo
+  fs.mkdirSync(path.join(CONF, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(CONF, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(CONF, 'hooks', 'h.js'), '//\n');
+  ok(fs.existsSync(path.join(CONF, '.git')),
+     'the configuration directory genuinely is a repository — the case is not vacuous');
+  ok(!fired(HOMEP, path.join(CONF, 'hooks', 'h.js')),
+     'a repository in a dot-directory is machinery, not a project to be warned about');
+
+  // The paired firing case from the same cwd. Without it the silence above
+  // cannot tell a working rule from a hook that has stopped classifying.
+  ok(fired(HOMEP, path.join(HOME, 'work', 'two', 'src', 'f.js')),
+     'while an ordinary project, from that same cwd, is still reported');
+
+  // The cache shape, one level deeper: the dot-directory is not the repository,
+  // it is above it.
+  const CACHE = path.join(HOME, '.pkgcache', 'git-v0', 'dep');
+  fs.mkdirSync(path.join(CACHE, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(CACHE, 'd.js'), '//\n');
+  ok(!fired(HOMEP, path.join(CACHE, 'd.js')),
+     'and so is one cached below a dot-directory rather than at it');
+
+  // Vendored machinery inside a REAL project. Declining outright would go
+  // silent here and lose a genuine cross-project read; asking again from above
+  // names the project that actually owns it.
+  const HOSTED = path.join(HOME, 'work', 'two', 'node_modules', 'leftpad');
+  fs.mkdirSync(path.join(HOSTED, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(HOSTED, 'i.js'), '//\n');
+  const msg = (() => {
+    const r = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(HOSTED, 'i.js') },
+        cwd: HOMEP,
+        session_id: `prov-hosted-${process.pid}-${probeN++}`,
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME },
+    });
+    return r.stdout || '';
+  })();
+  ok(msg.includes("belongs to 'two'") && !msg.includes("belongs to 'leftpad'"),
+     'a dependency repository inside a project is reported as that project, not as itself');
+
+  // And the same machinery inside THIS project is still in-envelope.
+  const OWNDEP = path.join(HOMEP, 'node_modules', 'leftpad');
+  fs.mkdirSync(path.join(OWNDEP, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(OWNDEP, 'i.js'), '//\n');
+  ok(!fired(HOMEP, path.join(OWNDEP, 'i.js')),
+     'while the same dependency inside the working project is not foreign at all');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

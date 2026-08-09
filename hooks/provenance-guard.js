@@ -89,6 +89,45 @@ function sameDir(a, b) {
   return !!ra && ra === realOf(b);
 }
 
+// Is any segment of this path a dot-directory or a `node_modules`? Those are
+// the two conventions that mark a tree as machinery rather than as work — a
+// config or install directory (`~/.claude`), the store itself (`~/.anvideck`), a
+// package manager's git cache (`~/.cache/uv/...`, `~/.uv-cache/...`), a vendored
+// dependency. The convention is the only evidence available and it is the one
+// the corpus walkers in this repository already use, so it is stated once here
+// rather than as a list of names that would go stale on the next machine.
+function isMachinerySegment(dir) {
+  const segs = path.resolve(dir).split(path.sep);
+  return segs.some((s) => (s.startsWith('.') && s !== '.' && s !== '..') || s === 'node_modules');
+}
+
+// The WORKSPACE that owns a path: its project root, skipping past roots that are
+// machinery rather than work.
+//
+// The classification below compares two project roots directly, which reaches
+// every repository on the machine rather than only the ones next door. Some of
+// those are not projects in any sense a session cares about: `~/.claude` is a
+// git repository on a developer's machine and is read on almost every turn, and
+// a package cache can hold hundreds. Naming them as foreign projects would bury
+// the note the guard exists to deliver.
+//
+// So ask AGAIN from above such a root rather than declining outright. A cache
+// repository vendored inside a real project then reports that project — its
+// actual owner — instead of going silent, which declining would have made it do.
+// Where nothing above is a workspace either, there is no project to name and the
+// caller stays silent, which is what the closing comment has always said should
+// happen to scaffolding.
+function workspaceRootFor(absPath) {
+  if (!projectRootFor) return null; // older install — unproven ownership names nothing
+  let r = projectRootFor(absPath);
+  while (r && isMachinerySegment(r)) {
+    const up = path.dirname(r);
+    if (up === r) return null;
+    r = projectRootOfDir ? projectRootOfDir(up) : null;
+  }
+  return r;
+}
+
 // Classify a filesystem path relative to the current project.
 // Returns the owning foreign project's name if the path is in ANOTHER project's
 // territory, or null if it's in-envelope / not-a-project-path (skip).
@@ -211,44 +250,36 @@ function foreignProjectOf(absPath, cwd) {
   // paths reach the sibling test below; nothing there may name an owner without
   // evidence of its own.
   const root = (projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd;
-  const name = path.basename(root);
 
-  // (a) sibling repo: shares the project root's parent directory but isn't it.
-  const parent = path.dirname(root);
-  if (isUnder(absPath, parent)) {
-    const rel = path.relative(parent, absPath);
-    const sibling = rel.split(path.sep)[0];
-    // `sibling !== name` no longer decides anything: a path inside the project
-    // resolves to the same root, so the containment answer below would reach the
-    // same verdict on its own — mutating this comparison alone changes no
-    // result. It stays as a COST early-out, not as a correctness guard. This
-    // hook runs on every Read, Grep and Glob, and the check below walks the
-    // filesystem; skipping it for the overwhelmingly common case (the path is
-    // in this project) is worth a string compare. Recorded rather than deleted
-    // because "no test moves" is a claim about what is tested.
-    if (sibling && sibling !== name && sibling !== '..') {
-      // The path segment says where to LOOK; it may not say who OWNS. This
-      // branch used to return the segment itself, so a directory was named an
-      // owning project on the strength of its basename and nothing else — two
-      // halves of one session's temporary area announced each other as foreign
-      // projects with roadmaps, in the same words the framework uses when
-      // ownership is actually established.
-      //
-      // So ask the shared resolver where the target's own project root is: a
-      // `.git` or a `.anvi` above it, resolved through realpath. That is
-      // containment, which a name cannot forge, and it is the same definition
-      // the injector uses to decide whose knowledge governs a file.
-      //
-      // Nothing above it → no project, so there is no roadmap or vocabulary to
-      // contaminate anything with. Stay silent, which is what the closing
-      // comment below has always said should happen to scaffolding and could
-      // never do from here, because this branch answered first on a superset.
-      // Silence is also the honest answer when the resolver is unavailable at
-      // all: unproven ownership is never a licence to fall back to the name.
-      const theirs = projectRootFor ? projectRootFor(absPath) : null;
-      if (theirs && !sameDir(theirs, root)) return path.basename(theirs);
-    }
-  }
+  // (a) another project: the target's project root is not this one.
+  //
+  // The path segment says where to LOOK; it may not say who OWNS. This branch
+  // used to return the segment itself, so a directory was named an owning
+  // project on the strength of its basename and nothing else — two halves of
+  // one session's temporary area announced each other as foreign projects with
+  // roadmaps, in the same words the framework uses when ownership is actually
+  // established. So ask the shared resolver where the target's own project root
+  // is: a `.git` or a `.anvi` above it, resolved through realpath. That is
+  // containment, which a name cannot forge, and it is the same definition the
+  // injector uses to decide whose knowledge governs a file.
+  //
+  // Nothing above it → no project, so there is no roadmap or vocabulary to
+  // contaminate anything with. Stay silent, which is what the closing comment
+  // below has always said should happen to scaffolding. Silence is also the
+  // honest answer when the resolver is unavailable at all: unproven ownership
+  // is never a licence to fall back to the name.
+  //
+  // The comparison used to be reached only for paths under the project root's
+  // PARENT — so a read was classified when the two projects happened to live
+  // side by side, and not otherwise. A repository under `~/src` reading one
+  // under `~/work`, or a nested checkout reading any top-level project, fell
+  // straight through to silence. That is a MISSING note, which is the direction
+  // the over-warn policy exists to avoid, and it was invisible because nothing
+  // about an absent warning looks wrong. The neighbour test was a proxy for
+  // containment from before containment could be asked; now that both operands
+  // resolve through the same walk, ask the question directly.
+  const theirs = workspaceRootFor(absPath);
+  if (theirs && !sameDir(theirs, root)) return path.basename(theirs);
 
   // The resolver is unavailable (a partial install), or the path resolves
   // nowhere at all. The literal spelling is still worth checking: it is the only
