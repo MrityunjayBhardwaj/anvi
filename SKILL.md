@@ -59,6 +59,16 @@ Load project-specific catalogues if they exist (`.anvi/` in project root):
 - Output translates to user profile language or plain English
 - Framework terminology is NEVER exposed to the user
 
+## Copilot Integration
+
+When used from VS Code Copilot Chat (no native hook mechanism, so this
+must be loaded explicitly — see `copilot-compat/README.md` for the three
+load paths):
+- `~/.claude/anvi/copilot-compat/executor-hook.md`
+- `~/.claude/anvi/copilot-compat/planner-hook.md`
+- `~/.claude/anvi/copilot-compat/checker-hook.md`
+- `~/.claude/anvi/copilot-compat/debugger-hook.md`
+
 ## Project Initialization
 
 To create project-specific catalogues:

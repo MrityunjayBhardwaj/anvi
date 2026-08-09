@@ -37,8 +37,19 @@ trap 'for d in "${SCRATCH[@]:-}"; do [ -n "$d" ] && rm -rf "$d"; done' EXIT
 # did, which is an assertion with no way to fail.
 OUT=""; RC=0
 run() { OUT="$(cd "$CWD" && HOME="$HOMEDIR" bash "$INSTALL" "$@" 2>&1)"; RC=$?; }
+# Every case below feeds answers POSITIONALLY, so it depends on which prompts
+# come first. The integration picker runs ahead of the overwrite gate's
+# successors, and it would silently eat the first line of each fixture — the
+# tests would still pass, while measuring the picker instead of the prompt they
+# name. `--only=all` selects both integrations up front and skips the picker,
+# leaving exactly the prompt sequence these assertions were written against and
+# installing precisely what the default would have installed.
+#
+# It lives in the helper rather than at each call site so a case added later
+# cannot forget it; the picker's own behaviour is covered by
+# install-noninteractive.test.sh.
 answer() { local in="$1"; shift
-  OUT="$(cd "$CWD" && printf '%s' "$in" | HOME="$HOMEDIR" bash "$INSTALL" "$@" 2>&1)"; RC=$?; }
+  OUT="$(cd "$CWD" && printf '%s' "$in" | HOME="$HOMEDIR" bash "$INSTALL" --only=all "$@" 2>&1)"; RC=$?; }
 
 echo "a fresh install with no terminal on stdin"
 fresh
