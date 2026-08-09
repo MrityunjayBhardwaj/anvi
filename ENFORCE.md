@@ -403,6 +403,34 @@ Two things it checks that a plain loop would not:
 - `PostToolUse:Artifact` / `WebFetch|WebSearch` / `mcp__.*` / `Read|Grep|Glob`: provenance-guard.js
 - `Stop`: anvideck-checkpoint.js
 
+## Retiring an Artifact
+
+Installing is not the whole contract: something that stops being shipped has to
+stop being installed, or it keeps answering from a frozen copy nobody will ever
+update again — and a dev-mode install, being a symlink to the repo, tracks the
+removal at once, so the two modes silently disagree about what the user has.
+
+Which mechanism applies depends on who else may write to the directory:
+
+| Where | Authority for removal | When |
+|---|---|---|
+| Inside `~/.claude/anvi/` — anvi's own tree | **Derived**: the shipped directory is the manifest, so installing it replaces it | every copy install |
+| A directory anvi no longer ships at all | **Listed**: `RETIRED_ANVI_DIRS` in `install.sh` | `--migrate` only |
+| `~/.claude/hooks/` — shared with other tools | **Listed**: `REMOVED` in `scripts/register-hooks.cjs` | `--migrate` only |
+
+A name that is still shipped is never removed by either list, whatever the list
+says — otherwise a maintainer's slip would install and delete it on every run.
+
+Reclaiming is skipped entirely when `~/.claude/anvi` is a symlink: in dev mode
+that path **is** the repo, so removing through it would delete the developer's
+own source. `--no-dev` breaks the link before copying and `--migrate` skips the
+copy, so the guard covers the one path that still arrives here, `--sync` over a
+dev install.
+
+**Not yet covered:** retired *skills* and *agents*. Those live in directories
+shared with other tools, where nothing derives which artifact is whose, so they
+need the listed mechanism rather than the derived one — see anvi #236.
+
 ## Knowledge Durability — Catalogue Commit Chain
 
 Catalogue entries that aren't committed don't exist (observed: 6 of 7 projects'

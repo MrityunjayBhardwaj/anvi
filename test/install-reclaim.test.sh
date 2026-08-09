@@ -76,12 +76,22 @@ ok '[ -s "$A/workflows/debug.md" ]' 'control: that same --migrate run installed 
 # the mechanism at a directory the repo really does ship.
 echo ""
 echo "a still-shipped name is never removed"
-H="$(fresh_install)"
+# The mistake is a maintainer's: a directory named in the retired list that the
+# repo still ships would be installed and then deleted on every run. The list is
+# edited inside a COPY OF THE WHOLE REPO, not in a copy of the script — install.sh
+# derives its source tree from its own location, so a script copied elsewhere has
+# no tree to install from and every assertion below it would pass on an install
+# that never happened. That is how the first version of this case read green
+# through a mutation that removed the guard entirely.
+LIVETMP="$(mktemp -d)"; LIVEREPO="$LIVETMP/repo"
+cp -R "$REPO" "$LIVEREPO" 2>/dev/null; rm -rf "$LIVEREPO/.git"
+sed -i.bak 's/^RETIRED_ANVI_DIRS=.*/RETIRED_ANVI_DIRS="workflows"/' "$LIVEREPO/install.sh"
+H="$LIVETMP/home"; mkdir -p "$H"
 A="$H/.claude/anvi"
-ok '[ -d "$REPO/workflows" ]' 'the repo genuinely still ships this directory'
-HOME="$H" RETIRED_ANVI_DIRS_OVERRIDE=workflows bash -c '
-  sed "s/^RETIRED_ANVI_DIRS=.*/RETIRED_ANVI_DIRS=\"workflows\"/" "'"$INSTALL"'" > "'"$H"'/inst.sh"
-  bash "'"$H"'/inst.sh" --migrate --only=all </dev/null >/dev/null 2>&1'
+ok '[ -d "$LIVEREPO/workflows" ]' 'the repo copy genuinely still ships the directory now listed as retired'
+ok 'grep -q "^RETIRED_ANVI_DIRS=\"workflows\"" "$LIVEREPO/install.sh"' 'and the list really was edited to name it'
+HOME="$H" bash "$LIVEREPO/install.sh" --migrate --only=all </dev/null >/dev/null 2>&1
+ok '[ -s "$A/VERSION" ]' 'control: that install actually ran to completion'
 ok '[ -d "$A/workflows" ] && [ -s "$A/workflows/debug.md" ]' 'listing a live directory as retired does not remove it'
 
 # ── the dev-mode hazard ────────────────────────────────────────────────────
@@ -96,11 +106,20 @@ H="$DEVTMP/home"; mkdir -p "$H"
 run "$H" --dev --only=all >/dev/null 2>&1 || true
 HOME="$H" bash "$REPOC/install.sh" --dev --only=all </dev/null >/dev/null 2>&1
 ok '[ -L "$H/.claude/anvi" ]' 'the dev install genuinely produced a symlink, not a directory'
-BEFORE=$(ls "$REPOC/workflows" | wc -l | tr -d ' ')
+
+# Measure the FIRST directory the install writes, not a convenient one. Without
+# the guard the copy removes that directory, its source then no longer exists,
+# cp fails and the script stops — so every LATER directory survives and an
+# assertion aimed at one of those passes while the repo is being damaged. That
+# is what the first version of this case did: it counted workflows/, which is
+# installed fourth, and stayed green through a mutation that emptied
+# cognitive-os/.
+BEFORE=$(ls "$REPOC/cognitive-os" | wc -l | tr -d ' ')
+ok '[ "$BEFORE" != "0" ]' "the repo copy genuinely has a first-installed directory to lose ($BEFORE files)"
 HOME="$H" bash "$REPOC/install.sh" --sync --only=all </dev/null >/dev/null 2>&1
-AFTER=$(ls "$REPOC/workflows" 2>/dev/null | wc -l | tr -d ' ')
-ok '[ "$BEFORE" = "$AFTER" ] && [ "$AFTER" != "0" ]' "a sync over a dev install leaves the repo's own directories intact ($BEFORE files)"
-ok '[ -s "$REPOC/cognitive-os/base-layer.md" ]' 'and the repo source it points at is still there'
+AFTER=$(ls "$REPOC/cognitive-os" 2>/dev/null | wc -l | tr -d ' ')
+ok '[ "$BEFORE" = "$AFTER" ]' "a sync over a dev install leaves the repo's own source intact ($AFTER files)"
+ok '[ -s "$REPOC/cognitive-os/base-layer.md" ]' 'and a named file inside it is still readable'
 
 echo ""
 echo "$PASS passed, $FAIL failed"
