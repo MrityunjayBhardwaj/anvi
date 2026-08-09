@@ -50,10 +50,13 @@ User message
 
   ↓
 ⑨ PreToolUse:Bash — catalogue-id-leak-guard.js
-   Fires on `gh issue|pr` and `git commit` — the SEGMENT's leading invocation, so a
-   command that merely mentions one publishes nothing, and `git commit-tree` /
-   `git commit-graph` are not `git commit`. Exempt: the private locations
-   (~/.anvideck and ~/.claude/projects/<slug>/memory/), which carry entry IDs by design.
+   Fires on `gh issue|pr` and `git commit` — asked of each segment's EXECUTABLE text
+   (quoted arguments and `#` comments removed), so a mention publishes nothing, while
+   wrappers like `sudo`/`env` and `git -C <repo> commit` still count. `git commit-tree`
+   and `git commit-graph` are not `git commit`. Exempt: the private locations
+   (~/.anvideck and ~/.claude/projects/<slug>/memory/), which carry entry IDs by design
+   — though only a `git` command can claim that by naming one; a `gh` body naming a
+   private path is publishing that text, not targeting it.
    Reminds (non-blocking) when the text carries a catalogue index key (`vyapti:184`).
    "State the finding in plain language; keep the ID in the private FIX: field."
 

@@ -119,30 +119,40 @@ process.stdin.on('end', () => {
 
     // Only outward-facing publishing commands.
     //
-    // Asked of each SEGMENT's leading invocation, not of the command string as a
-    // whole. A string may merely MENTION a publish — in a comment, an `echo`, a
-    // grep pattern, a heredoc body — and scanning text that is going nowhere for
-    // IDs is a warning about nothing, which is the one thing an advisory guard
-    // cannot afford. Splitting on the shell's own separators keeps every compound
-    // form that really does publish: `git add -A && git commit -m …`,
-    // `cd repo && gh pr create …`. Splitting can only ever produce more segments,
-    // and no separator character can occur inside the invocations matched below,
-    // so it cannot lose a real publish.
+    // The question is asked of the command's EXECUTABLE text — what the shell would
+    // actually run — never of the raw string. A string may merely MENTION a publish
+    // in a quoted argument, a `#` comment, or a heredoc body, and scanning text that
+    // is going nowhere for IDs is a warning about nothing, which is the one thing an
+    // advisory guard cannot afford.
     //
-    // `commit` is anchored against a following word character or hyphen because
+    // Removing what CANNOT be a command is the right shape here; requiring the
+    // publish to come FIRST is not. Anchoring looks equivalent and quietly drops
+    // every transparent wrapper — `sudo git commit`, `time git commit`,
+    // `env FOO=1 git commit` all publish, and all stop looking like publishes the
+    // moment you demand the leading word. Those land on the permissive side, so the
+    // narrowing would be invisible. Stripping is also list-free: it needs no roster
+    // of wrapper programs to stay current.
+    //
+    // An unterminated quote strips nothing — the patterns require their closing
+    // delimiter — so a malformed command degrades toward FIRING, which is the safe
+    // direction for a guard whose stated policy is to over-warn.
+    const executableText = (s) => s
+      .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, ' ')   // quoted arguments — text, not commands
+      .replace(/(^|\s)#.*$/, '$1');                 // a shell comment, at a word boundary
+    // Split on the shell's own command separators so a publish behind `&&`, `;`, a
+    // pipe, a newline, or a `$( )` substitution is still seen. Splitting only ever
+    // produces more pieces, and no separator character can occur inside the
+    // invocations below, so it cannot lose a real publish.
+    const segments = command.split(/(?:\|\||&&|[\n;|&()])+/).map(executableText);
+    // `commit` is guarded against a following word character or hyphen because
     // `git commit-tree` and `git commit-graph` are DIFFERENT commands that publish
     // nothing — `\b` sits happily between `commit` and `-` and matched both. The
     // pre-merge gate builds its off-trunk control with `commit-tree`, so the guard
-    // misfired inside the very workflow it lives alongside (#154).
-    //
-    // `git`'s global options sit between the program and the subcommand, so a
-    // predicate anchored straight at `commit` cannot see `git -C <repo> commit`,
-    // which publishes exactly as much as the bare form. Leading `VAR=value`
-    // assignments are stripped for the same reason (`GIT_EDITOR=true git commit`).
-    const GH_PUBLISH = /^gh\s+(?:issue|pr)\s+(?:create|edit|comment)(?![\w-])/;
-    const GIT_COMMIT = /^git\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace)(?:=|\s+)\S+\s+|--\S+\s+)*commit(?![\w-])/;
-    const leadingInvocation = (seg) => seg.trim().replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|\S*)\s+)*/, '');
-    const segments = command.split(/(?:\|\||&&|[\n;|&()])+/).map(leadingInvocation).filter(Boolean);
+    // misfired inside the very workflow it lives alongside (#154). git's global
+    // options sit between the program and the subcommand, so `git -C <repo> commit`
+    // needs them skipped explicitly — it publishes exactly as much as the bare form.
+    const GH_PUBLISH = /\bgh\s+(?:issue|pr)\s+(?:create|edit|comment)(?![\w-])/;
+    const GIT_COMMIT = /\bgit\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace)(?:=|\s+)\S+\s+|--\S+\s+)*commit(?![\w-])/;
     const isGh = segments.some(s => GH_PUBLISH.test(s));
     const isCommit = segments.some(s => GIT_COMMIT.test(s));
     if (!isGh && !isCommit) process.exit(0);
@@ -166,9 +176,15 @@ process.stdin.on('end', () => {
     // that is precisely the leak. Extending the old blanket text test to memory
     // would have let any publish buy silence by naming a private directory in its
     // body; base already lost a real `gh` leak that way for the store.
+    //
+    // Each name must END at a path boundary — a separator, whitespace, a quote, or
+    // the end of the text. A trailing-word-character test is not enough: it admits
+    // `~/work/.anvideck.bak`, a directory that is not the store, and admitting it
+    // hands that directory the store's exemption.
+    const ENDS_PATH_SEGMENT = `(?=[\\\\/]|[\\s"'\`]|$)`;
     const PRIVATE_LOCATIONS = [
-      /\.anvideck(?![\w-])/,                                          // the knowledge store
-      /\.claude[\\/]projects[\\/][^\\/\s"'`]+[\\/]memory(?![\w-])/,   // any project's memory namespace
+      new RegExp(`\\.anvideck${ENDS_PATH_SEGMENT}`),                                          // the knowledge store
+      new RegExp(`\\.claude[\\\\/]projects[\\\\/][^\\\\/\\s"'\`]+[\\\\/]memory${ENDS_PATH_SEGMENT}`), // any project's memory
     ];
     const inPrivate = (text) => PRIVATE_LOCATIONS.some(rx => rx.test(text));
     if (inPrivate(cwd) || (!isGh && inPrivate(command))) process.exit(0);

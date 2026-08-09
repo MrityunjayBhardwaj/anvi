@@ -75,6 +75,12 @@ fs.mkdirSync(MEMDIR, { recursive: true });
 const MEMFILE = path.join(MEMDIR, 'notes.md');
 fs.writeFileSync(MEMFILE, '# notes\n');
 
+// A directory whose name merely BEGINS with the store's. It is not the store and
+// gets none of its exemption — the first attempt at this fix ended a private-location
+// name on a word-character test, which admitted exactly this.
+const LOOKALIKE = path.join(HOME, 'work', '.anvideck.bak');
+fs.mkdirSync(LOOKALIKE, { recursive: true });
+
 const MSGFILE = path.join(TMP, 'msg.txt');
 
 let probeN = 0;
@@ -116,7 +122,14 @@ ok(fired(`gh pr edit 12 --body "${CLUSTER}"`), 'a PR edit carrying an own-ID clu
 // shell's separators rather than looking only at the command's first word.
 ok(fired(`git add -A && git commit -m "${KEY}"`), 'a commit chained behind `git add`');
 ok(fired(`cd ${REPO} && git commit -m "${KEY}"`), 'a commit chained behind `cd`');
+// Transparent wrappers. Each of these publishes, and each stops looking like a
+// publish the moment the predicate demands the leading word — which is why the
+// classifier removes what cannot be a command rather than requiring the command to
+// come first. They land on the permissive side, so the narrowing would be silent.
 ok(fired(`GIT_EDITOR=true git commit --amend -m "${KEY}"`), 'a commit behind a leading VAR=value assignment');
+ok(fired(`sudo git commit -m "${KEY}"`), 'a commit behind `sudo`');
+ok(fired(`time git commit -m "${KEY}"`), 'a commit behind `time`');
+ok(fired(`env FOO=1 git commit -m "${KEY}"`), 'a commit behind `env`');
 // git's global options sit BETWEEN the program and the subcommand, so a predicate
 // anchored straight at `commit` cannot see this form — which publishes exactly as
 // much as the bare one. This case fails against the base predicate too.
@@ -135,6 +148,9 @@ ok(fired(`gh pr create --title x --body "context in ${MEMFILE} — ${KEY}"`),
   'a PR body that names a memory file and leaks anyway');
 ok(fired(`gh issue create --title x --body "from ${STORE_DIR} notes — ${KEY}"`),
   'an issue body that names the store and leaks anyway');
+// The exemption is for the store, not for every name that starts like it.
+ok(fired(`git commit -m "${KEY}"`, LOOKALIKE),
+  'a commit run from a directory whose name only BEGINS with the store\'s');
 
 // ── NOT PUBLISHES ───────────────────────────────────────────────────────────
 // Every command here carries IDs. Each is silent because the command publishes
@@ -149,6 +165,13 @@ ok(!fired(`echo "next step: git commit the ${CLUSTER} work"`),
   'an echo whose text mentions a commit');
 ok(!fired(`grep -n "git commit" script.sh && echo "${CLUSTER}"`),
   'a grep whose PATTERN is `git commit`');
+// A comment runs to the end of its LINE, not to the end of the command. This is the
+// case that makes splitting into segments load-bearing: without it the comment below
+// is never stripped, because a trailing-comment pattern anchored at the end of the
+// whole string cannot reach a line that has more lines after it. Multi-line commands
+// with per-line comments are ordinary, so this is not a corner.
+ok(!fired(`cat notes.md   # rewritten after the git commit landed\necho "ids: ${CLUSTER}"`),
+  'a comment mentioning a commit on a NON-FINAL line of a multi-line command');
 
 // ── PRIVATE LOCATIONS ───────────────────────────────────────────────────────
 // Both are private, both legitimately carry entry IDs, and both must be exempt by
