@@ -251,6 +251,16 @@ function foreignProjectOf(absPath, cwd) {
   // evidence of its own.
   const root = (projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd;
 
+  // Deliberately NOT run through the machinery walk below, and the asymmetry is
+  // worth stating because asking the two operands different questions is how the
+  // last hole here was made. The walk exists to decide whether a resolved root
+  // is worth NAMING as a foreign project; this operand is never named, it only
+  // supplies the identity the target is compared against. Collapsing a session
+  // that genuinely sits in a config tree to "no workspace" would fall back to
+  // `cwd`, which differs from every foreign root by exactly as much — so the
+  // comparison reaches the same verdict either way, and the shorter route is
+  // the one that keeps a session's own directory as its own identity.
+  //
   // (a) another project: the target's project root is not this one.
   //
   // The path segment says where to LOOK; it may not say who OWNS. This branch
