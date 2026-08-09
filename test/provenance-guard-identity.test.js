@@ -551,6 +551,80 @@ console.log('\nmachinery is not a workspace, and its host still is');
      'while the same dependency inside the working project is not foreign at all');
 }
 
+// ── what the guard calls the READER's own project ──────────────────────────
+// Every message interpolates a name for the project the session belongs to, and
+// it was the basename of the working directory. That is a name asserting a
+// project — the one claim this file exists to refuse — pointed at the speaker
+// instead of at the subject. In a subdirectory it said 'hooks'; in a session's
+// temporary area it said 'scratchpad'. Neither is a project, and the sentence
+// read as though the framework had established which project the session
+// belongs to when it had established nothing.
+//
+// Four surfaces interpolate this value — the gallery listing, web results, MCP
+// results and file reads — so each is asserted separately. A fix applied to one
+// template would otherwise pass on the strength of the others.
+console.log('\nthe reader\'s own project is named by containment too');
+{
+  const PROJ = path.join(HOME, 'named', 'omega');
+  fs.mkdirSync(path.join(PROJ, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(PROJ, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(PROJ, 'f.js'), '//\n');
+  const OTHER = path.join(HOME, 'named', 'psi');
+  fs.mkdirSync(path.join(OTHER, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(OTHER, 'g.js'), '//\n');
+
+  function say(cwd, toolName, toolInput) {
+    const r = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({ tool_name: toolName, tool_input: toolInput, cwd,
+        session_id: `prov-name-${process.pid}-${probeN++}` }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME },
+    });
+    return r.stdout || '';
+  }
+  const READ = { file_path: path.join(OTHER, 'g.js') };
+
+  // Assert the hazard is present before asserting it is fixed: the
+  // subdirectory's own name must differ from the project's, or every case here
+  // passes without distinguishing the two readings.
+  ok(path.basename(path.join(PROJ, 'hooks')) !== path.basename(PROJ),
+     'the subdirectory genuinely has a different name from its project');
+
+  for (const [tool, input] of [['Read', READ], ['WebFetch', { url: 'https://example.invalid/x' }],
+    ['mcp__thing__do', {}], ['Artifact', { action: 'list' }]]) {
+    const fromRoot = say(PROJ, tool, input);
+    const fromSub = say(path.join(PROJ, 'hooks'), tool, input);
+    ok(fromRoot.includes('omega') && !fromRoot.includes("'hooks'"),
+       `${tool} names the project from the project root`);
+    ok(fromSub.includes('omega') && !fromSub.includes("'hooks'"),
+       `${tool} names it the same way from a subdirectory, not 'hooks'`);
+  }
+
+  // Where the walk finds no workspace there is no project to name, and the
+  // sentence must say so rather than invent one from the directory's basename.
+  const SCRATCH = path.join(HOME, 'sessions', 'sid-2', 'scratchpad');
+  fs.mkdirSync(SCRATCH, { recursive: true });
+  let markerAbove = false;
+  for (let d = SCRATCH, r = path.parse(d).root; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git')) || fs.existsSync(path.join(d, '.anvi'))) { markerAbove = true; break; }
+    if (d === r) break;
+  }
+  ok(!markerAbove, 'the scratch area genuinely sits under no project at all');
+
+  for (const [tool, input] of [['Read', READ], ['WebFetch', { url: 'https://example.invalid/y' }],
+    ['mcp__thing__do', {}], ['Artifact', { action: 'list' }]]) {
+    const out = say(SCRATCH, tool, input);
+    ok(out.trim().length > 0, `${tool} still speaks from a directory that is no project`);
+    ok(out.includes('this working directory') && !out.includes("'scratchpad'"),
+       `${tool} says "this working directory" rather than naming one`);
+  }
+
+  // The sentence must not degrade into "not scoped to project this working
+  // directory" — the word 'project' has to go with the name it introduces.
+  ok(!say(SCRATCH, 'WebFetch', { url: 'https://example.invalid/z' }).includes('project this working directory'),
+     'and the scope clause drops the word "project" when there is no project to name');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

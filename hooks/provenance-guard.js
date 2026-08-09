@@ -259,7 +259,16 @@ function foreignProjectOf(absPath, cwd) {
   // that genuinely sits in a config tree to "no workspace" would fall back to
   // `cwd`, which differs from every foreign root by exactly as much — so the
   // comparison reaches the same verdict either way, and the shorter route is
-  // the one that keeps a session's own directory as its own identity.
+  // the one that keeps a session's own directory as its own identity. Measured
+  // rather than argued: a variant running both operands through the walk was
+  // diffed against this one over the shapes where they can differ at all — a
+  // session sitting inside a config tree or inside the store — and no verdict
+  // moved.
+  //
+  // The NAME the messages show is a different question and is resolved
+  // separately, in `classify`, through the machinery-aware door: a label is
+  // asserted to a reader, so `'.claude'` there would be the same unfounded
+  // claim about a project that this file refuses to make about a subject.
   //
   // (a) another project: the target's project root is not this one.
   //
@@ -317,7 +326,27 @@ function foreignProjectOf(absPath, cwd) {
 // Decide whether this tool result is EXTERNAL and, if so, what to say + what to
 // dedupe on. Returns { surface, target, message } or null to stay silent.
 function classify(toolName, toolInput, cwd) {
-  const project = path.basename(cwd);
+  // What to call the reader's OWN project. Every message interpolates this, and
+  // it used to be `path.basename(cwd)` — a name asserting a project, which is
+  // the one claim this file exists to refuse, just pointed at the speaker
+  // instead of at the subject. In a subdirectory it said 'hooks'; in a session's
+  // temporary area it said 'scratchpad'. Neither is a project, and the sentence
+  // read as though the framework had established which project the session
+  // belongs to when it had established nothing.
+  //
+  // So take the basename of the working directory's PROJECT ROOT, by the same
+  // walk the subject goes through — and where that walk finds no workspace,
+  // there is no project to name. Then the honest sentence says so rather than
+  // inventing one, which is why every message below has two shapes instead of a
+  // single interpolated name.
+  const selfRoot = workspaceRootFor(path.join(cwd, 'x'));
+  const project = selfRoot ? path.basename(selfRoot) : null;
+  // The subject of "belongs to …" / "fold into …", and the scope of "not scoped
+  // to …". They differ: "not scoped to project 'anvi'" has no project to name a
+  // project WITH when there is none, so it drops the word rather than reading
+  // "not scoped to project this working directory".
+  const subject = project ? `'${project}'` : 'this working directory';
+  const scoped = project ? `project '${project}'` : 'this working directory';
 
   // Artifact — only the account-wide gallery listing is intake; publishing is outbound.
   if (toolName === 'Artifact') {
@@ -327,8 +356,8 @@ function classify(toolName, toolInput, cwd) {
       target: 'list',
       message:
         `PROVENANCE: Artifact(list) returns the account-wide gallery — every artifact ` +
-        `across all projects, not just '${project}'. Treat these as EXTERNAL until you ` +
-        `confirm each belongs to '${project}' (name its origin; cite [in-repo] vs [EXTERNAL]).`,
+        `across all projects, not just ${subject}. Treat these as EXTERNAL until you ` +
+        `confirm each belongs to ${subject} (name its origin; cite [in-repo] vs [EXTERNAL]).`,
     };
   }
 
@@ -339,8 +368,8 @@ function classify(toolName, toolInput, cwd) {
       surface: 'web',
       target,
       message:
-        `PROVENANCE: this ${toolName} result is web-wide, not scoped to project ` +
-        `'${project}'. Treat it as EXTERNAL — don't adopt it as '${project}' ground truth ` +
+        `PROVENANCE: this ${toolName} result is web-wide, not scoped to ${scoped}. ` +
+        `Treat it as EXTERNAL — don't adopt it as ground truth for ${subject} ` +
         `until you confirm it applies here.`,
     };
   }
@@ -352,7 +381,7 @@ function classify(toolName, toolInput, cwd) {
       target: toolName,
       message:
         `PROVENANCE: ${toolName} is an account/workspace-wide MCP surface, not scoped to ` +
-        `project '${project}'. Treat its results as EXTERNAL until you confirm they belong here.`,
+        `${scoped}. Treat its results as EXTERNAL until you confirm they belong here.`,
     };
   }
 
@@ -364,8 +393,15 @@ function classify(toolName, toolInput, cwd) {
     // When the owner and the stranger share a name — which is the whole reason
     // this guard stopped trusting names — "outside 'x' (it belongs to 'x')" reads
     // as a contradiction and buries the point. Say what actually differs instead.
+    //
+    // This comparison is the reason the label above had to be re-read when its
+    // meaning changed: it used to be against `basename(cwd)`, so from a
+    // subdirectory it compared a foreign project's name against a directory
+    // name like 'hooks' and could only fire by coincidence. Against the
+    // project root's name it fires when the two projects genuinely share one.
+    // Where there is no project to be named, nothing can collide with it.
     const owner =
-      foreign === project
+      project && foreign === project
         ? `a different project that happens to share the name '${project}'`
         : `'${foreign}'`;
     return {
@@ -374,7 +410,7 @@ function classify(toolName, toolInput, cwd) {
       message:
         `PROVENANCE: ${p} is outside this working directory's project (it belongs to ${owner}). ` +
         `Treat its contents as EXTERNAL — don't fold another project's roadmap, vocabulary, ` +
-        `or artifacts into '${project}' until you've confirmed the relevance.`,
+        `or artifacts into ${subject} until you've confirmed the relevance.`,
     };
   }
 
