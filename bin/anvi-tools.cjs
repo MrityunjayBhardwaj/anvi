@@ -50,7 +50,7 @@ function gsdCore() {
 
 // Load the shared artifact resolver (hooks/anvi-paths.js) — the SINGLE source of
 // path-resolution logic, so the CLI can never disagree with the hooks on where
-// catalogues live (V1). The resolver itself uses cwd + homedir only (no __dirname),
+// catalogues live. The resolver itself uses cwd + homedir only (no __dirname),
 // so it is vendoring-safe; only LOCATING it depends on layout:
 //   - dev / repo:   bin/ and hooks/ are siblings   → __dirname/../hooks
 //   - copy install: hooks land in ~/.claude/hooks   (bin is under ~/.claude/anvi/bin)
@@ -148,9 +148,10 @@ function appendToCatalogue(cwd, name, entry) {
   return filePath;
 }
 
-// Count canonical catalogue entries: `## <ID>:` headers where ID is like H1/V3/K2/SV1.
+// Count canonical catalogue entries: `## <ID>:` headers, where an ID is a short letter prefix followed by a number
+// (some projects add their own prefix on top of that).
 // Mirrors hooks/ground-truth-session-start.js so the CLI and the hook agree on the
-// count (H7). Section headers (`## Compaction Log`) lack a digit and don't match;
+// count. Section headers (`## Compaction Log`) lack a digit and don't match;
 // universal template patterns (U1/UV2/UK3) are skipped — they're shared examples,
 // not project-specific entries.
 function countCatalogueEntries(content) {
@@ -222,7 +223,7 @@ function cmdCatalogueAppend(cwd, catalogue, entryJson, raw) {
 
   // Entries are written in the canonical `## <ID>:` form with the field set from
   // references/*-template.md, so the session-start hook and `catalogue-review`
-  // both count them (H7). REF is mandatory for grounding — an appended entry has
+  // both count them. REF is mandatory for grounding — an appended entry has
   // no Ground Truth doc, so it defaults to UNGROUNDED for a human to resolve.
   let entryMd;
   if (catalogue === 'hetvabhasa') {
@@ -273,7 +274,7 @@ ${entry.lifecycle || '1. (unknown)'}
   // Containment is asked of the shared resolver, which answers it by realpath.
   // By path STRING a symlink can forge containment, and that is not a hazard the
   // CLI should re-derive its own opinion about. Guarded by typeof because the two
-  // install trees are not guaranteed to be the same version (H5/V7): an older
+  // install trees are not guaranteed to be the same version: an older
   // resolver has no such export.
   //
   // THREE states, not two. "Cannot tell" is not "inside" — reporting a file as

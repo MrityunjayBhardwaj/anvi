@@ -30,13 +30,25 @@
 // SCOPE, stated so the report's own limits travel with it:
 //   - the catalogues (`.anvi`). The store's `ref/` and `investigations/` ride the
 //     same envelope grant and the same store repo, and are not checked separately.
-//   - one project per argument. A store copy with NO live project pointing at it is
-//     therefore invisible here — a per-project audit cannot enumerate orphans, and
-//     "nothing reported" means "nothing found in what I was pointed at".
+//   - the SUBJECT LIST is the caller's, and that is a limit as real as any check.
+//     By default this audits what it is pointed at, so "nothing reported" means
+//     "nothing found in what I was pointed at" — and a directory nobody thought to
+//     name is not merely unaudited, it reads as absent. That is not hypothetical:
+//     a fleet sweep built from a `projects/*` glob missed a working directory one
+//     level deeper, and the fleet notes recorded that project as having no working
+//     copy at all for weeks, while the store's own record named the directory.
+//     `--recorded` answers that by taking the subject list from the store instead
+//     of from the caller: every live working directory named by a project's
+//     `PROVENANCE.json`. Its own blind spot is stated in the output rather than
+//     left to be rediscovered — a store project with no record, a malformed one,
+//     or one whose record names no working copy cannot be enumerated from the
+//     record side, so the count skipped for each reason is printed.
 //
 // Usage:
 //   node scripts/conformance-report.js [project-dir ...]   (default: cwd)
 //   node scripts/conformance-report.js --issues [dirs...]  (only non-conformant)
+//   node scripts/conformance-report.js --recorded [dirs...] (targets from the store's
+//                                                            records, plus any given)
 //
 // HOME is the single control for where the store lives (both this file and the
 // shared resolver read it), so a test can point the whole audit at a temp store.
@@ -105,6 +117,12 @@ const OK_STATES = {
   // knowledge. The count is the rollout worklist, and it drives to zero as the
   // fleet is bound — which is the precondition for anything failing closed.
   binding: ['BOUND', 'NOT_APPLICABLE'],
+  // The ignore rule's own durability. NOT_APPLICABLE covers every case where the
+  // question does not arise — no link, no repo, or the rule not covering the path
+  // at all, which the repo check already reports and this one must not repeat.
+  // UNDETERMINED is a finding on purpose: it means the committed state could not
+  // be evaluated, and an all-clear is only sayable when something was cleared.
+  portable: ['COMMITTED', 'NOT_APPLICABLE'],
 };
 function check(id, state, detail, extra = {}) {
   if (!OK_STATES[id]) throw new Error(`unknown check id: ${id}`);
@@ -129,9 +147,17 @@ const tilde = (p) => (p && p.startsWith(os.homedir()) ? '~' + p.slice(os.homedir
 function gitIn(cwd) {
   return (args) => {
     try {
-      return { ok: true, out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      return { ok: true, status: 0, out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
     } catch (e) {
-      return { ok: false, out: typeof e.stdout === 'string' ? e.stdout : '' };
+      // The exit STATUS is carried, not just the boolean. Several git commands
+      // use exit 1 for a meaningful negative answer and >=2 for "I could not do
+      // this at all", and a caller that sees only `ok:false` reports the second
+      // as the first. That is not hypothetical: reaching for a `check-ignore`
+      // flag that git refuses without `--stdin` made every call fail, every
+      // failure read as a clean "not ignored", and a whole fleet turned into a
+      // confident finding on every project.
+      return { ok: false, status: typeof e.status === 'number' ? e.status : null,
+        out: typeof e.stdout === 'string' ? e.stdout : '' };
     }
   };
 }
@@ -382,6 +408,133 @@ function classifyRepo(dir, storeName) {
   return check('repo', 'CLEAN', '.anvi ignored, not tracked');
 }
 
+// --- check: IGNORE-RULE DURABILITY ------------------------------------------
+// The repo check above asks whether the ignore rule covers `.anvi` RIGHT NOW. It
+// asks the working tree, deliberately and correctly — `--no-index` is there
+// because without it git skips tracked paths and blames a missing rule for what
+// is really a stale index entry.
+//
+// But "does the rule cover this path now" and "will the rule still be there for
+// anyone else" are two questions, and only the first was ever asked. A rule that
+// exists solely as an uncommitted edit — or solely in `.git/info/exclude`, or in
+// a global excludes file — covers the path perfectly on this machine and does
+// not exist in a fresh clone, where the first `git add -A` then commits a
+// machine-specific symlink. That is the exact failure the repo check exists to
+// surface, reported as CLEAN. Found in real use, not in a fixture.
+//
+// So this asks the second question SEPARATELY rather than folding a second input
+// into the first verdict. The repo check keeps its answer and its meaning; a
+// project whose rule is real but uncommitted now reports a finding of its own
+// instead of reading as conformant.
+//
+// It is answered by EVALUATION, not by matching text. Git attributes a match to
+// a source file and line, so the tempting implementation is to look for that
+// pattern in the committed version of that file — but a different committed rule
+// may cover the same path, and that shape would report a project as broken for
+// having tidied its ignore file. Instead the committed ignore files are
+// materialised into a throwaway repository and git is asked there, with the
+// global excludes file suppressed. A fresh repository's `info/exclude` carries
+// only comments, so the answer is exactly "what would a clone of HEAD ignore",
+// computed by git's own semantics rather than by a re-reading of them. Nothing
+// is written anywhere but the temporary directory, and it is removed.
+
+// Which file did the matching ignore rule come from?
+//
+// `check-ignore -v` prints `<source>:<line>:<pattern>\t<pathname>`, so the first
+// ':'-delimited field is the source. That is ambiguous for a source path
+// containing a colon — and the obvious remedy does not exist: git's `-z` refuses
+// to run without `--stdin` ("-z only makes sense with --stdin"). Reaching for it
+// here made every call fail, and because a failed call reads as "not ignored",
+// the whole fleet flipped to a confident finding on every project. A check that
+// says everything is broken is as useless as one that says nothing is, and it
+// arrives looking like a discovery.
+//
+// So the ambiguity is accepted and bounded instead. The source is a
+// repo-relative `.gitignore`, `.git/info/exclude`, or an excludes file's
+// absolute path; the value only chooses between two remedies, and a truncated
+// read of any of those still lands on a safe one.
+const ignoreSource = (out) => (String(out).split(':')[0] || '').trim();
+
+function committedIgnoreEval(git, dir, relPath) {
+  const files = git(['ls-files', '-z', '--', '.gitignore', '*/.gitignore']).out
+    .split('\0').filter(Boolean);
+  let tmp = null;
+  try {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-conf-ign-'));
+    if (!gitIn(tmp)(['init', '-q']).ok) return { ok: false, reason: 'could not create a scratch repository' };
+    for (const f of files) {
+      const blob = git(['show', `HEAD:${f}`]);
+      if (!blob.ok) continue; // tracked but not in HEAD — a fresh add; nothing committed to honour
+      fs.mkdirSync(path.join(tmp, path.dirname(f)), { recursive: true });
+      fs.writeFileSync(path.join(tmp, f), blob.out);
+    }
+    const v = gitIn(tmp)(['-c', 'core.excludesFile=/dev/null', 'check-ignore', '--no-index', '-v', '--', relPath]);
+    // `check-ignore` exits 0 for a match and 1 for none; anything else is the
+    // command failing, which must not be read as an answer. Folding those
+    // together is what turns a broken invocation into a fleet-wide finding.
+    if (!v.ok && v.status !== 1) {
+      return { ok: false, reason: `git check-ignore exited ${v.status === null ? 'abnormally' : v.status}` };
+    }
+    return { ok: true, ignored: v.ok, source: ignoreSource(v.out), files };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  } finally {
+    if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* best effort */ } }
+  }
+}
+
+function classifyPortable(dir) {
+  const local = path.join(dir, '.anvi');
+  if (!lstatSafe(local)) return check('portable', 'NOT_APPLICABLE', 'no local .anvi in this repo');
+  if (!isRepo(dir)) return check('portable', 'NOT_APPLICABLE', 'not a git repo — nothing here can be committed');
+
+  const git = gitIn(dir);
+  // The repo check owns the "no rule at all" case and states it with the right
+  // remedy. Reporting it again here would be a second mechanism answering a
+  // question one already answers.
+  if (!git(['check-ignore', '--no-index', '-q', '--', '.anvi']).ok) {
+    return check('portable', 'NOT_APPLICABLE', 'no ignore rule covers .anvi — the repo check above says so and what to do');
+  }
+
+  const now = git(['check-ignore', '--no-index', '-v', '--', '.anvi']);
+  const liveSource = ignoreSource(now.out);
+
+  // Ask the committed state about the same KIND of path that is on disk.
+  //
+  // `check-ignore` decides whether a pathname names a directory from a trailing
+  // slash, not from the filesystem, and a rule written `.anvi/` matches only a
+  // directory. The migrated layout puts a SYMLINK there, which such a rule does
+  // not match — that is why the setup script writes the bare form, and it is a
+  // real state on this fleet: one project's committed rule is `.anvi/` while its
+  // uncommitted edit adds the bare one. But a project that has not migrated yet
+  // still has a real directory, where `.anvi/` matches perfectly. Spelling the
+  // question the same way on both sides is what stops that project being told
+  // its committed rule is missing when it is present and correct.
+  const st = lstatSafe(local);
+  const asPath = st && st.isDirectory() ? '.anvi/' : '.anvi';
+  const evaluated = committedIgnoreEval(git, dir, asPath);
+  if (!evaluated.ok) {
+    return check('portable', 'UNDETERMINED',
+      `could not evaluate what a fresh clone would ignore (${evaluated.reason}) — this is not an all-clear`,
+      { remedy: `cd "${dir}" && git show HEAD:.gitignore   (check by hand that a rule for .anvi is committed)` });
+  }
+  if (evaluated.ignored) {
+    return check('portable', 'COMMITTED', `.anvi is ignored by the committed .gitignore as well as the working tree`);
+  }
+
+  // Not ignored in the committed state. Say which of the two ways it got here,
+  // because they have different remedies: an edit that was never committed, or a
+  // rule that lives somewhere the repo does not carry at all.
+  const inRepoFile = liveSource && !path.isAbsolute(liveSource) && !liveSource.startsWith('.git/');
+  return inRepoFile
+    ? check('portable', 'UNCOMMITTED',
+      `.anvi is ignored here but NOT in the committed state — the rule in ${liveSource} exists only as an uncommitted edit, so a fresh clone ignores nothing and the first \`git add -A\` commits a machine-specific symlink`,
+      { remedy: `cd "${dir}" && git add ${liveSource} && git commit -m "ignore the .anvi catalogue link"` })
+    : check('portable', 'LOCAL_ONLY',
+      `.anvi is ignored only by ${liveSource || 'a rule outside the repository'}, which no clone carries — the rule is local to this machine`,
+      { remedy: `cd "${dir}" && printf '.anvi\\n' >> .gitignore && git add .gitignore && git commit -m "ignore the .anvi catalogue link"` });
+}
+
 // --- check: DURABILITY ------------------------------------------------------
 // The store is where every project's catalogues physically live. If it is not a
 // git repo with a remote they are preserved nowhere — knowledge that isn't
@@ -545,6 +698,65 @@ function classifyBinding(dir) {
     { remedy: `resolve by hand: ${tilde(path.join(storeProject, IDENT.PROVENANCE))}` });
 }
 
+// --- the subject list, taken from the store rather than from the caller -------
+//
+// Every other function here answers "what is the state of THIS directory". This
+// one answers the question that comes before it: which directories are there to
+// ask about. A hand-built list is a check of its own, and it is the one nobody
+// runs — it fails by omission, and an omitted project is indistinguishable in the
+// output from a project that has nothing wrong.
+//
+// The store already knows: each project's record names the working copies bound
+// to it, and that record is the same one the binding check reads, so the two
+// cannot disagree about which directories belong to a project.
+//
+// Returns the targets AND the reasons some projects produced none, because a
+// smaller subject list must never look like a cleaner fleet. `gone` is a FINDING
+// rather than a skip — a record naming a directory that is not there says
+// something about the record; the other three say only that this route cannot
+// reach the project, which is a fact about the route.
+function recordedTargets() {
+  const root = storeProjects();
+  let names;
+  try {
+    names = fs.readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  } catch {
+    // No projects directory at all. Distinguished from an empty one because the
+    // caller has to be able to tell "the store cannot be read" from "the store is
+    // fine and has nothing to say" — the two produce the same zero, and only one
+    // of them is health.
+    return { projects: 0, targets: [], noRecord: [], malformed: [], noWorktree: [], gone: [], unreadable: true };
+  }
+
+  const targets = [], noRecord = [], malformed = [], noWorktree = [], gone = [];
+  // Two projects may legitimately record the same directory — an alias, or a
+  // rename mid-migration — and auditing it twice would double every finding in
+  // it. Deduped on the RESOLVED path so two spellings of one directory collapse,
+  // which is the same reason the resolver dedupes its own candidates.
+  const seen = new Set();
+  for (const name of names) {
+    const dir = path.join(root, name);
+    // The shared reader, not a hand-rolled read: it already separates the three
+    // states this needs — null for no record at all, `malformed` for one that
+    // cannot be trusted, and a parsed record otherwise. Re-deriving the path here
+    // would be a second opinion about where a record lives, which is the shape
+    // this file exists to avoid.
+    const rec = IDENT.readProvenance(dir);
+    if (!rec) { noRecord.push(name); continue; }
+    if (rec.malformed) { malformed.push(name); continue; }
+    if (!rec.worktrees.length) { noWorktree.push(name); continue; }
+    for (const w of rec.worktrees) {
+      if (!isDir(w)) { gone.push({ project: name, worktree: w }); continue; }
+      const key = realSafe(w) || path.resolve(w);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(w);
+    }
+  }
+  return { projects: names.length, targets, noRecord, malformed, noWorktree, gone, unreadable: false };
+}
+
 function computeConformance(dir, store = storeState()) {
   const project = path.resolve(dir);
   const name = path.basename(project);
@@ -575,6 +787,7 @@ function computeConformance(dir, store = storeState()) {
     link,
     classifyGrant(project, envelope),
     classifyRepo(project, storeName),
+    classifyPortable(project),
     classifyDurability(storeName, store),
     classifyPlanning(project),
     classifyBinding(project),
@@ -597,11 +810,55 @@ function main(argv) {
     return 0;
   }
   const issuesOnly = args.includes('--issues');
+  const fromRecords = args.includes('--recorded');
   const dirs = args.filter(a => !a.startsWith('--'));
-  const targets = dirs.length ? dirs : [process.cwd()];
+  // `--recorded` UNIONS rather than replaces: a caller naming a directory means
+  // to audit it, and a directory no record names is exactly the one worth not
+  // dropping. Explicit arguments come first so a named target keeps its position
+  // in the output whether or not the store also knows about it.
+  const recorded = fromRecords ? recordedTargets() : null;
+  let targets;
+  if (recorded) {
+    const explicit = dirs.map(d => path.resolve(d));
+    const known = new Set(explicit.map(d => realSafe(d) || d));
+    targets = [...explicit, ...recorded.targets.filter(t => !known.has(realSafe(t) || t))];
+  } else {
+    targets = dirs.length ? dirs : [process.cwd()];
+  }
 
   const store = storeState();
-  console.log(`Conformance report — ${targets.length} project(s)   (store: ${tilde(store.root)} — ${store.state})\n`);
+  console.log(`Conformance report — ${targets.length} project(s)   (store: ${tilde(store.root)} — ${store.state})`);
+  if (recorded) {
+    // Say which subject list produced this, and how much of the store it could
+    // not reach. A count of audited projects means nothing without the count it
+    // was drawn from — that is the whole defect this option exists to remove, so
+    // reproducing it in the option's own output would be a poor joke.
+    const unreachable = [
+      [recorded.noRecord, 'no record'],
+      [recorded.malformed, 'a record that does not parse'],
+      [recorded.noWorktree, 'a record naming no working copy'],
+    ].filter(([xs]) => xs.length);
+    console.log(`   subjects from the store's records — ${recorded.targets.length} live working ` +
+      `director${recorded.targets.length === 1 ? 'y' : 'ies'} across ${recorded.projects} store project(s)`);
+    if (dirs.length) console.log(`   plus ${dirs.length} named on the command line`);
+    for (const [xs, why] of unreachable) {
+      console.log(`   not reachable this way: ${xs.length} store project(s) with ${why} — ${xs.join(', ')}`);
+    }
+    // The all-clear is only sayable when there was something to clear. A store
+    // that cannot be read and a store with no projects both produce zero of
+    // everything, and "every store project is reachable" over an empty set is
+    // true, reassuring, and exactly the vacuous positive this option was built
+    // to stop printing.
+    if (recorded.unreadable) {
+      console.log(`   ${tilde(storeProjects())} could not be read — this route reaches nothing, ` +
+        'which is not the same as finding nothing');
+    } else if (!recorded.projects) {
+      console.log('   the store holds no projects yet — nothing for this route to reach');
+    } else if (!unreachable.length) {
+      console.log('   every store project is reachable this way');
+    }
+  }
+  console.log('');
 
   const tally = { conformant: 0, withFindings: 0, byCheck: {} };
   // Identity is a FLEET fact, not a per-project one: "two directories are the
@@ -631,6 +888,20 @@ function main(argv) {
     console.log('');
   }
 
+  // A record naming a directory that is not on disk is a finding about the
+  // RECORD, and it has no project section to appear in — there is nothing there
+  // to audit. Kept separate from the three skip reasons above for the same
+  // reason: those say the route cannot reach a project, this says the route
+  // arrived somewhere and found nothing.
+  if (recorded && recorded.gone.length) {
+    console.log('── recorded working directories that are no longer on disk\n');
+    for (const g of recorded.gone) {
+      console.log(`   ${g.project}`);
+      console.log(`     · ${tilde(g.worktree)}`);
+    }
+    console.log('     → the store still holds this project\'s catalogues; re-bind or forget the path by hand\n');
+  }
+
   // Two directories on one repository, each with its own store project, means
   // knowledge about one codebase is accumulating in two places with neither
   // aware of the other. Advisory only: which copy is authoritative is a
@@ -656,8 +927,9 @@ function main(argv) {
 }
 
 module.exports = {
-  computeConformance, classifyLink, classifyGrant, classifyRepo, classifyDurability, classifyPlanning,
-  classifyBinding,
+  computeConformance, classifyLink, classifyGrant, classifyRepo, classifyPortable, classifyDurability,
+  classifyPlanning,
+  classifyBinding, recordedTargets,
   storeState, findStoreCopyByContent, storeProjectOf, isInside, check, OK_STATES, main, CATALOGUES,
 };
 

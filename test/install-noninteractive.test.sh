@@ -10,7 +10,7 @@
 #
 # THE SHAPE OF THE ASSERTIONS: EOF is compared against BLANK ENTER on the same
 # installer, not against a fixed expectation. Both are "the user chose nothing",
-# the prompt promises both mean "install all three", and only a comparison
+# the prompt promises both mean "install both", and only a comparison
 # catches one of them silently diverging.
 
 set -u
@@ -43,12 +43,12 @@ ok '[ "$E_HOOKS" -gt 0 ]'  "an EOF install copies hooks"
 ok '[ "$E_SKILLS" = "$B_SKILLS" ] && [ "$E_HOOKS" = "$B_HOOKS" ]' \
    "EOF and blank ENTER install the same thing — both mean \"no choice made\""
 
-# The prompt states that a blank choice installs all three integrations; the
+# The prompt states that a blank choice installs both integrations; the
 # compat layers are the part a narrowed selection would drop, so they are what
 # proves the default was applied rather than a partial fallback.
 for d in gsd-compat copilot-compat; do
   [ -d "$REPO/$d" ] || continue   # only assert on layers this tree actually ships
-  ok "[ -d \"$H_EOF/.claude/anvi/$d\" ]" "an EOF install honours \"blank installs all\" — $d is present"
+  ok "[ -d \"$H_EOF/.claude/anvi/$d\" ]" "an EOF install honours \"blank installs both\" — $d is present"
 done
 
 # And the run must not have stopped at the prompt: output continuing past it is

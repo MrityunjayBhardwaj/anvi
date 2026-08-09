@@ -175,11 +175,15 @@ eq((SUB[0] || {}).id, 'B41.2', 'a sub-id is captured whole, not truncated to its
 eq((SUB[0] || {}).title, '+ B47 v0.7 extension (#123)', 'a sub-id does not spill its own digits into the title');
 eq((parseEntries('## B47. Renderer → output boundary\nbody')[0] || {}).id, 'B47',
   'a period followed by a space is punctuation, not a sub-id');
-// Deliberately still unparsed: one heading naming TWO ids needs a decision about
-// what it produces, not a wider character class. Accepting `/` here would record
-// the first id and drop the second exactly as silently as this bug dropped both.
-eq(parseEntries('## QA5/QA6 addendum — covers two ids at once\nbody').length, 0,
-  'a slash-composite heading stays unparsed on purpose (#89)');
+// The decision that heading was waiting for is made (#89): it names a LIST, and
+// produces one record per id, each sharing the body and its fields. The rejected
+// repair — widening the delimiter class to admit `/` — would have recorded the first
+// id and dropped the second exactly as silently as leaving it unparsed dropped both.
+const COMPOSITE = parseEntries('## QA5/QA6 addendum — covers two ids at once\nbody');
+eq(COMPOSITE.length, 2, 'a slash-composite heading produces one record per id (#89)');
+eq(COMPOSITE.map((e) => e.id).join(','), 'QA5,QA6', 'both ids are recorded, in heading order');
+ok(COMPOSITE.every((e) => e.coveredIds.join('/') === 'QA5/QA6'),
+  'each record names the whole list, so the pairing is reportable');
 // ADDITIVITY: a heading that was previously unparsed still TERMINATED the entry
 // above it (the lookahead never required a delimiter), so recovering it must not
 // move any existing entry's extent — the property that makes this fix safe to ship
@@ -281,10 +285,27 @@ eq(orphans.length, 2, 'level-3-only catalogue still parses its entries');
 ok(!orphans[0].amends && !orphans[1].amends, 'level-3 entries with no level-2 parent are NOT amendments');
 eq(entryKind('krama.md', orphans[0]), 'lifecycle', 'an orphan level-3 primary keeps the catalogue role');
 eq(entryKind('vyapti.md', parseEntries('### V9: primary\nbody')[0]), 'invariant', 'orphan level-3 in vyapti → invariant');
-// dharana keeps its own rule even when the id IS also a level-2 heading there.
+// dharana no longer keeps its shape rule ahead of the continuation test, and the
+// reversal is deliberate. It was safe while a continuation was guaranteed to sit at a
+// different depth from its primary: level 2 answered 'focus', level 3 answered
+// 'boundary', so the pair differed and the per-id join held. Under the position rule a
+// continuation may share its primary's depth — 64 dharana records fleet-wide do — and
+// then BOTH answer 'boundary', restoring the very collision this kind exists to
+// prevent, in the one catalogue whose drift is a live hazard. So the continuation test
+// runs first, which also makes an addendum an addendum in every catalogue rather than
+// in three of four. The shape rule still decides what a FIRST occurrence is.
 const DH_SHARED = ['## B11: a boundary', 'body', '### B11 — ADDENDUM: note', 'more'].join('\n');
 const dhs = parseEntries(DH_SHARED);
-eq(entryKind('dharana.md', dhs[1]), 'boundary', 'dharana ### keeps boundary/alignment, not addendum (rule order)');
+eq(entryKind('dharana.md', dhs[0]), 'focus', 'the dharana primary keeps its role');
+eq(entryKind('dharana.md', dhs[1]), 'addendum', 'a dharana continuation is an addendum, like everywhere else');
+// The case that forced the reversal: same depth, so only the continuation test can
+// separate them. Asserted as an INEQUALITY, because what the join needs is that the two
+// kinds differ — naming them is a weaker check that would pass on a rule that gave both
+// the same wrong-but-distinct label.
+const DH_SAME = ['### B18: the boundary', 'body', '### B18 UPDATE — later', 'more'].join('\n');
+const dsame = parseEntries(DH_SAME);
+ok(entryKind('dharana.md', dsame[0]) !== entryKind('dharana.md', dsame[1]),
+  'a dharana continuation at its primary\'s OWN depth still gets a distinct kind');
 eq(entryKind('dharana.md', dhs[0]), 'focus', 'dharana ## primary → focus');
 
 // --- the anchor ladder ------------------------------------------------------
@@ -573,20 +594,38 @@ v = computeCurrency({ validatedField: 'abc1234', filesField: 'a.js' },
   { git: makeGit({ 'abc1234:a.js': 'h1\n' }), fileExists: exists(['a.js']) });
 eq(v.status, 'YELLOW', 'FILES:-only entry is computable (was GRAY — nothing to diff)');
 
-// --- specExists: only git can answer a glob ----------------------------------
+// --- specExists: the repo supplies the corpus, the engine supplies the rule ---
+// Before #195 this asked `git ls-files -- <spec>` and took git's pathspec semantics,
+// where a single `*` crosses a `/`. The injector matched the same declarations with the
+// KINDS: engine, where it does not — so `FILES: public/*.glb` resolved to six files for
+// the gate and one for the hook, each side confident. git now only LISTS; the engine
+// decides. The stub therefore answers a bare `ls-files`, which is the whole of the
+// interface this function still uses.
 console.log('specExists');
-const lsGit = (matches) => (args) => {
-  const m = args.match(/^ls-files -- "(.+)"$/);
-  if (m) return matches[m[1]] || '';
-  return '';
+const lsGit = (tracked) => (args) => {
+  if (args === 'ls-files') return tracked.join('\n');
+  return ''; // no per-spec pathspec query is made any more, and none must creep back
 };
-ok(specExists('a.js', exists(['a.js']), lsGit({})), 'literal file present → fs answers, no git call');
-ok(!specExists('gone.js', exists([]), lsGit({})), 'literal file absent → fs is the last word');
-ok(specExists('bin/lib/*.cjs', exists([]), lsGit({ 'bin/lib/*.cjs': 'bin/lib/core.cjs\n' })),
-   'glob fs cannot stat → git resolves it (else a live glob reads as dangling)');
-ok(!specExists('bin/nope/*.cjs', exists([]), lsGit({})), 'glob matching nothing → genuinely gone');
+ok(specExists('a.js', exists(['a.js']), lsGit([])), 'literal file present → fs answers, no git call');
+ok(!specExists('gone.js', exists([]), lsGit([])), 'literal file absent → fs is the last word');
+ok(specExists('bin/lib/*.cjs', exists([]), lsGit(['bin/lib/core.cjs'])),
+   'a pattern fs cannot stat → the repo resolves it (else a live pattern reads as dangling)');
+ok(!specExists('bin/nope/*.cjs', exists([]), lsGit(['bin/lib/core.cjs'])), 'pattern matching nothing → genuinely gone');
 ok(!specExists('x/*.js', exists([]), () => { throw new Error('not a repo'); }),
    'git unavailable → not exists, never throws');
+
+// The disagreement itself, in both directions, on the shape that produced it.
+ok(!specExists('public/*.glb', exists([]), lsGit(['public/levels/lvl_1/diorama.glb'])),
+   'one star is one segment wide — it does NOT reach into a subdirectory');
+ok(specExists('public/**/*.glb', exists([]), lsGit(['public/levels/lvl_1/diorama.glb'])),
+   '  ... and `**/` is what does, so the author can still say it');
+ok(specExists('lib/*.cjs', exists([]), lsGit(['pkg/lib/core.cjs'])),
+   'a pattern is a path SUFFIX, exactly as a literal declaration is');
+// git pathspec reads `[id]` as "one of i, d" and matches nothing. The engine escapes
+// the bracket, so it means the directory literally called `[id]` — which is what every
+// bracket in the live corpus actually is (a Next.js dynamic route segment).
+ok(specExists('app/[id]/route.ts', exists([]), lsGit(['app/[id]/route.ts'])),
+   'a bracket is a literal directory name, not a character class');
 
 // --- lineAnchoredRefs -------------------------------------------------------
 // The whole finding hinges on telling a line anchor from things that merely look
@@ -647,21 +686,105 @@ eq(codesOf({ refField: 'src/a.ts:540' }, 'hetvabhasa.md'),
 ok(lintEntry({ refField: 'src/a.ts:540' }, {})[0].refs.join(',') === 'src/a.ts:540',
    'the finding names the offending pointer, so the worklist is actionable');
 
+// --- inert declarations, as an OPT-IN enrichment -----------------------------
+// "Does this declared path select any file?" cannot be answered from the text, so it
+// needs a resolver. The lint's whole value is that it runs anywhere — including over a
+// catalogue whose project repo is not present — so the resolver is optional and its
+// ABSENCE must change nothing. That additive guarantee is the first assertion, not an
+// afterthought: an enrichment that alters an existing verdict when switched on is a
+// different tool wearing the same name.
+console.log('lintEntry — inert declarations (opt-in)');
+// A stand-in for classifySpec's kind, injected: the lint asks a question and is told an
+// answer, so it needs no fs, no git, and no repo to be tested.
+const kinds = map => spec => map[spec] || 'present';
+const codesWith = (e, cat, map) =>
+  lintEntry(e, { catalogue: cat, resolveSpec: kinds(map) }).map(f => f.code).sort().join(',');
+
+eq(codesOf({ filesField: 'nowhere/at/all.ts', validatedField: 'abc1234' }, 'dharana.md'), '',
+   'WITHOUT a resolver, a declaration that selects nothing reports exactly as before');
+eq(codesWith({ filesField: 'src/engine.js', validatedField: 'abc1234' }, 'dharana.md', {}),
+   '', 'WITH a resolver, a declaration that resolves stays clean');
+
+eq(codesWith({ filesField: 'public/audio/', validatedField: 'abc1234' }, 'dharana.md',
+             { 'public/audio/': 'external' }),
+   LINT.INERT_DECLARATION, 'a spec this repo never tracked is inert');
+eq(codesWith({ filesField: 'src/gone.ts', validatedField: 'abc1234' }, 'dharana.md',
+             { 'src/gone.ts': 'deleted' }),
+   LINT.INERT_DECLARATION, 'a spec whose file was deleted is inert too');
+
+// A directory USED to be the sharpest case: the path exists, so the shared classifier
+// called it `present`, and the matcher still reached nothing because it compared file
+// paths. #193 closed that — a declaration now selects what sits under it — so a
+// directory that holds tracked files is a working declaration and must NOT be reported.
+// This assertion is the one that guards against the finding outliving its defect, which
+// is the failure that teaches a reader to skip the lint.
+eq(codesWith({ filesField: 'public/audio/', validatedField: 'abc1234' }, 'dharana.md',
+             { 'public/audio/': 'present' }),
+   '', 'a directory holding tracked files selects them — not inert (#193)');
+
+// What survives is the narrower question: a directory with nothing under it selects
+// nothing, for the same reason a typo does. Reported by what is MISSING rather than by
+// what the spec is, because "a directory" is no longer a defect and a finding phrased
+// that way would read as a rule that no longer holds.
+eq(codesWith({ filesField: 'empty/tree', validatedField: 'abc1234' }, 'dharana.md',
+             { 'empty/tree': 'empty-directory' }),
+   LINT.INERT_DECLARATION, 'a directory with nothing under it still selects no file');
+ok(lintEntry({ filesField: 'empty/tree', validatedField: 'a1' },
+             { catalogue: 'dharana.md', resolveSpec: kinds({ 'empty/tree': 'empty-directory' }) })[0]
+     .refs.some(r => /no tracked file/i.test(r)),
+   '  ... and says what is missing under it, not that the path is absent');
+
+// The two kinds that DO select files must not be swept in. `ambiguous` resolves to
+// several files — which is a fine thing for a declaration to do, and the opposite of
+// selecting nothing — and `reference` resolves into the store's reference area.
+// Flagging either would report working declarations as broken, and a lint that cries
+// wolf on its first run is a lint nobody runs twice.
+eq(codesWith({ filesField: 'App.tsx', validatedField: 'abc1234' }, 'dharana.md',
+             { 'App.tsx': 'ambiguous' }),
+   '', 'a spec matching SEVERAL files selects plenty — not inert');
+eq(codesWith({ filesField: 'ref/sources/x.c', validatedField: 'abc1234' }, 'dharana.md',
+             { 'ref/sources/x.c': 'reference' }),
+   '', 'a spec resolving into the store reference area is not inert');
+
+// REF: is a bibliography — it lists paths someone READ. A dangling one is already the
+// gate's 🔴, and judging it here would report every well-cited entry as broken.
+eq(codesWith({ refField: 'gone/from/here.ts', filesField: 'src/engine.js', validatedField: 'a1' },
+             'dharana.md', { 'gone/from/here.ts': 'external' }),
+   '', 'only FILES: is judged — a REF path that no longer resolves is a different finding');
+
+// The payload is the dead specs, and it must say WHICH kind: the remedies differ
+// (a deleted file means update the declaration; a never-tracked one usually means a
+// typo, a directory, or a path from another repo).
+const inert = lintEntry(
+  { filesField: 'public/audio/, src/engine.js, src/gone.ts', validatedField: 'a1' },
+  { catalogue: 'dharana.md', resolveSpec: kinds({ 'public/audio/': 'external', 'src/gone.ts': 'deleted' }) },
+).find(f => f.code === LINT.INERT_DECLARATION);
+ok(inert && inert.refs.length === 2, 'the finding names every dead spec and only those');
+ok(inert && inert.refs.some(r => r.startsWith('public/audio/') && /never/i.test(r)),
+   '  ... marking a never-tracked spec as such');
+ok(inert && inert.refs.some(r => r.startsWith('src/gone.ts') && /delet/i.test(r)),
+   '  ... and a deleted one as such, since the remedies differ');
+
+// A resolver that throws must not take the whole lint down with it — the other
+// findings for this entry are still worth having.
+eq(lintEntry({ filesField: 'src/a.ts' },
+             { catalogue: 'dharana.md', resolveSpec: () => { throw new Error('git exploded'); } })
+     .map(f => f.code).sort().join(','),
+   LINT.NO_VALIDATED, 'a resolver that throws is treated as "cannot tell", not as inert');
+
 // --- "not on disk" is three conditions, not one ------------------------------
 // Collapsing them manufactures false dangling verdicts. Each of these is a real
 // shape from the fleet, and each was found by RUNNING the report on a live project
 // rather than by imagining what a REF looks like.
 console.log('classifySpec — deleted vs external vs bare-name');
+// The stub LISTS and answers history; it no longer resolves a spec, because
+// classifySpec no longer asks it to. A shorthand is matched by the same predicate a
+// pattern is (#207) — before that it was a `git ls-files -- '*/<spec>'` pathspec, a
+// second expression of the trailing-segment rule that the engine also states. The old
+// stub had to reimplement that pathspec to be useful, which is itself the tell: a test
+// double for a relation with two homes has to pick one.
 const clsGit = ({ tracked = [], history = [] } = {}) => (args) => {
-  const ls = args.match(/^ls-files -- "(.+?)"(?: "(.+?)")?$/);
-  if (ls) {
-    const pats = [ls[1], ls[2]].filter(Boolean);
-    return tracked.filter(t => pats.some(p => {
-      if (p.startsWith('*/')) return t.endsWith(p.slice(1)) || t === p.slice(2);
-      if (p.includes('*')) return new RegExp('^' + p.replace(/\*/g, '[^/]*') + '$').test(t);
-      return t === p;
-    })).join('\n');
-  }
+  if (args === 'ls-files') return tracked.join('\n');
   const hist = args.match(/^log --oneline -1 --all -- "(.+)"$/);
   if (hist) return history.includes(hist[1]) ? 'abc1234 x\n' : '';
   return '';
@@ -696,8 +819,7 @@ v = computeCurrency({ validatedField: 'abc1234', refField: 'SoundLayer.ts' }, {
   fileExt: /\.(ts|js)$/i,
   fileExists: exists([]),
   git: (args) => {
-    const ls = args.match(/^ls-files --/);
-    if (ls) return 'src/engine/SoundLayer.ts';
+    if (args === 'ls-files') return 'src/engine/SoundLayer.ts';
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
     if (m) return m[2] === 'src/engine/SoundLayer.ts' ? 'h1\nh2\n' : ''; // only the REAL path has drift
     return '';
@@ -740,6 +862,21 @@ eq(c.kind, 'ambiguous', 'partial path matching several files → ambiguous, neve
 c = classifySpec('engine/App.ts', exists([]),
   clsGit({ tracked: ['src/reengine/App.ts'] }));
 eq(c.kind, 'external', 'partial path matches only as a substring (reengine) → NOT a match');
+
+// The shape the two readings actually came apart on (#207). A shorthand naming a
+// DIRECTORY selects the tree beneath it, because #193 made a declaration do that — and
+// the git pathspec form this used to use has no such clause, so it selected nothing and
+// the spec was reported external. Both readings agreed on every other spec in the
+// corpus, which is why this sat latent: the duplication was visible, the disagreement
+// was not.
+c = classifySpec('audio', exists([]), clsGit({ tracked: ['public/audio/a.mp3', 'public/audio/b.mp3'] }));
+eq(c.kind, 'ambiguous', 'a shorthand naming a directory selects what is under it — two files, so ambiguous');
+c = classifySpec('audio', exists([]), clsGit({ tracked: ['public/audio/only.mp3'] }));
+eq(c.kind, 'present', '  ... and resolves outright when the directory holds exactly one');
+eq(c.path, 'public/audio/only.mp3', '  ... reporting the file, not the directory');
+// The guard that keeps the descendant clause from swallowing a neighbour.
+c = classifySpec('audio', exists([]), clsGit({ tracked: ['public/audiobook/a.mp3'] }));
+eq(c.kind, 'external', 'and a directory shorthand still lands on a separator — `audio` is not `audiobook`');
 
 // --- #57: reference-grounded classification ---------------------------------
 // A ref that resolves nowhere in the project but IS found in the store's reference

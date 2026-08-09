@@ -34,7 +34,7 @@ User message
   ↓
 ⑥ PreToolUse:Read — catalogue-context-injector.js
    Fires when READING code at catalogued boundaries.
-   Matches via FILES: field (deterministic) or text fallback.
+   Matches via FILES: or KINDS: (both deterministic) or text fallback.
    Injects boundary context + Ground Truth REFs before you form opinions.
 
   ↓
@@ -86,9 +86,74 @@ The catalogue-context-injector uses two matching strategies:
    ```
    The hook checks if the tool's file_path matches any entry in the FILES: list.
 
-2. **Text fallback** — if no FILES: field, matches filename/CamelCase parts against boundary content.
+2. **KINDS: field (deterministic)** — comma-separated globs matched against the
+   repo-relative path, ORed with `FILES:`:
+   ```
+   ### B7: Verification surface
+   KINDS: **/__tests__/**, *.test.ts, examples/_probe-*, examples/_diag-*
+   ```
+   A pattern containing `/` matches the full relative path; one without matches the
+   basename, so `*.test.ts` works at any depth. Indented continuation lines fold into
+   the field, so a long list may wrap; a line at column zero begins something else.
 
-FILES: is preferred — it's deterministic and doesn't rely on boundary descriptions mentioning module names.
+   **A single `*` is one path segment wide; `**/` spans zero or more directories.** Both
+   fields compile through the same engine (`globBody` in `hooks/currency.js`), so the
+   rule an author learns in one is the rule in the other. This differs from git's default
+   pathspec, where `*` crosses `/` — and until #195 the freshness gate took git's reading
+   while the injector took the engine's, so one live declaration mapped six files for one
+   consumer and one for the other. The engine is now the only reading; git supplies the
+   file list and no longer interprets it. A declaration that selects less than its author
+   meant is reported by `currency-report.js --lint` as `narrow-glob`, with the wider
+   pattern quoted, because the check that asks whether a declaration selects *anything*
+   cannot see a declaration that selects *some*.
+
+   `FILES:` asks *where a file sits*. `KINDS:` asks *what a file is*, and that is a
+   question some entries can only answer that way. Verification artefacts — tests,
+   probes, diagnostics, gate scripts — sit nowhere in particular: a probe belongs to
+   whatever it is probing this week. They are therefore at no catalogued boundary,
+   and the files whose authoring most needs a project's verification discipline are
+   exactly the files that would otherwise receive none of it.
+
+3. **Text fallback** — if neither field matches, matches filename/CamelCase parts against boundary content.
+
+`FILES:` and `KINDS:` are preferred — both are deterministic and don't rely on boundary descriptions mentioning module names.
+
+### CHECKS: — the actionable half
+
+Selecting the right entry is not sufficient on its own. The injected message is
+assembled from a fixed set of named fields (silent-failure modes, "Observe THEIR
+side", hetvabhasa headlines, vyapti headlines, REFs) and never carries an entry's own
+prose — so an entry can be matched and still deliver a header with no checklist in it.
+
+`CHECKS:` is a block of list items, terminated by the first line that is not one,
+emitted verbatim and placed ahead of the catalogue digests:
+
+```
+CHECKS:
+- print the subject count outside the loop that consumes it
+- show the check RED on the unfixed arm before believing it GREEN
+```
+
+An item may also sit on the field's own line (`CHECKS: - print the subject count …`),
+which is what an author writes when replacing the template's placeholder in place.
+Content there that is *not* a list item is never promoted to a check — an unreplaced
+placeholder must not become advice the entry never gave. When the field is present but
+yields no items, the injection says so rather than passing over it: a field that could
+not be read has to be distinguishable from a field nobody wrote, which is the same
+requirement §Currency makes of an unknown verdict versus a clean one. That report is
+only possible for `CHECKS:`, because the entry carrying it was selected and there is an
+injection to say it in; a `KINDS:` nobody could read means no entry was selected and no
+message exists, so the remedy there is tolerance in the parser.
+
+Keep it short and checkable. What an entry asks you to *do* is the part that has to
+survive being skimmed, and everything below it is reference material that can run to
+tens of kilobytes. The text lives in the project's catalogue rather than in the hook
+on purpose: a hardcoded list would ship one project's hard-won lessons to every other
+project, which is the wrong-project-knowledge failure `test/injector-ownership.test.js`
+already guards against.
+
+Both fields are optional and purely additive — a catalogue that has never heard of
+them produces the same injection as before.
 
 ## Catalogue & Artifact Path Resolution (single source of truth)
 
@@ -99,11 +164,28 @@ no project has to migrate:
 
 | Kind | Candidate order (first that exists wins) |
 |------|------------------------------------------|
-| `.anvi/` (catalogues) | `cwd/.anvi` → `cwd/artifacts/.anvi` → `~/.anvideck/projects/[name]/.anvi` |
-| `ref/` (Ground Truth docs, sources) | `cwd/ref` → `cwd/artifacts/ref` → `~/.anvideck/projects/[name]/ref` |
-| `investigations/` (experiment protocols) | `cwd/investigations` → `cwd/artifacts/investigations` → `~/.anvideck/projects/[name]/investigations` |
+| `.anvi/` (catalogues) | `root/.anvi` → `root/artifacts/.anvi` → `~/.anvideck/projects/[name]/.anvi` |
+| `ref/` (Ground Truth docs, sources) | `root/ref` → `root/artifacts/ref` → `~/.anvideck/projects/[name]/ref` |
+| `investigations/` (experiment protocols) | `root/investigations` → `root/artifacts/investigations` → `~/.anvideck/projects/[name]/investigations` |
 
-`[name]` is `basename(cwd)`. When workflows/skills say `.anvi/` (or hedge it as
+**`root` is the project the working directory is IN, not the working directory.**
+A working directory is not fixed for a session — a shell `cd` persists and arrives
+in the payload every hook receives — so anchoring the list at exactly `cwd` made a
+project's catalogues unreachable from `hooks/` or `test/`, reported as `not found`
+rather than as "looked in one place". `projectAnchor(cwd)` answers it once, for
+every consumer: **the nearest ancestor holding a `.anvi`, never past the git
+toplevel when there is one.** No such ancestor → `cwd` itself, exactly as before.
+
+The walk is what makes a subdirectory usable; the bound is what stops a vendored
+repository checked out inside a project from inheriting its host's catalogues. The
+bound is an upper limit rather than the target, which is why a directory inside the
+store still resolves to its store project rather than dying at the store root,
+which holds no `.anvi` at all. Both stopping conditions were measured across the
+fleet and neither is correct alone.
+
+`[name]` is `basename(root)` — the project's name, never a subdirectory's. That
+narrows the reach of a name rather than extending it: wherever containment answers,
+the name is not consulted. When workflows/skills say `.anvi/` (or hedge it as
 "`.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`)"), that shorthand means **"the
 `.anvi/` resolved by the order above."** This table is the one authoritative definition —
 the hooks and the docs must agree with it, not with each other ad hoc.
@@ -113,7 +195,14 @@ may use the name.** The candidate order above is a search: the basename entry is
 place to *try*, and a hit there is then gated by the binding record, so a directory
 cannot reach a store project merely by being named like it. Ownership is the other
 question — "is this path inside the store project this directory owns?" — and it is
-answered only by `ownStoreProject(cwd)`, from the realpath of `cwd/.anvi`. Answering
+answered only by `ownStoreProject(cwd)`, from the realpath of the `.anvi` the anchor
+walk found. It uses the same `projectAnchor` the candidate list does, and that is not
+a tidiness point: adding the walk to resolution alone would be worse than adding it
+to neither, because a project would then read its own knowledge from a subdirectory
+and be told in the same breath that the knowledge was another project's. For the same
+reason the binding check takes the caller's identity from the project root — a record
+with no remote is keyed on WORKTREE PATH, so a subdirectory measured against it
+matches nothing and is refused as a mismatch. Answering
 it from the name instead is what let a same-named stranger read another project's
 catalogues unflagged while a renamed working copy saw its own reported as foreign.
 Null from `ownStoreProject` means nothing proves ownership, which is a reason to
@@ -213,6 +302,12 @@ centralized projects). See issue #5.
 | 10 | A version offered by `--version-list` that cannot actually be installed | `test/changelog-tag-parity.test.sh` — every advertised version has a tag, every tag an entry; only the unreleased newest is exempt |
 | 11 | A maintenance instruction still premised on a claim that has since gone stale | `test/vendored-doc-contract.test.js` — `bin/lib/VENDORED.md`'s patched/pristine table is derived from git history on every run, so a wholesale re-vendor can never stay advised for a module carrying anvi work |
 | 12 | A withheld project reported as one that never had knowledge — and advised to create some | `test/hook-refusal-reporting.test.js` — real hook processes against a hermetic store, in every refusal state, asserting no hook claims absence or names a remedy that writes |
+| 13 | A test, probe or gate script belonging to no boundary, so the verification discipline it most needs never arrives | `test/injector-kind-match.test.js` — `KINDS:` selects on what a file IS and `CHECKS:` delivers the entry's actionable half; asserted against a file matching no kind, so the glob is proven to exclude |
+| 14 | A matching field written in a shape its parser does not read, dropped without a word — so an author who wrote the field and an author who wrote nothing get the same silence | `test/injector-kind-match.test.js` — the wrapped `KINDS:` and the inline `CHECKS:` are each asserted against the well-formed form as a control, and a `CHECKS:` read as empty must SAY so |
+| 15 | A test that exists and is never run — covered only by whoever remembers to type its name | `scripts/run-tests.js` — derives the list from the filesystem, prints the discovered count beside the pass count, and fails on an untracked test file |
+| 16 | An install that finished and an install that did nothing reporting the same status, so no caller can tell either from a real failure | `test/install-exit-status.test.sh` — 0 only for a run that both completed and landed, 2 for a prompt nothing could answer; every success case also asserts the install arrived, since "exits 0" alone is met by an installer that exits 0 having done nothing |
+| 17 | A declaration that selects SOME of what its author meant — as silent as one that selects none, and invisible to a check that only asks whether anything was selected | `test/currency-narrow-glob.test.js` — the hook's count and the gate's count are asserted EQUAL rather than each asserted alone, since a per-consumer test passes over two self-consistent components that disagree; and the narrowing is reported with the wider pattern quoted |
+| 18 | A green freshness verdict read as "the reference is correct" when it only says no cited file moved — so a symbol renamed before the stamp is vouched for indefinitely | `test/currency-ref-symbol.test.js` — `ref-symbol-gone` reports a cited name the repo no longer holds anywhere; the four ways a CORRECT entry could be accused (narrative, inverted citation, an entry asserting the name is gone, a citation into a vendored file) are asserted as silences beside a positive that fires, and the search excludes the catalogues themselves, since the entry making the citation contains the name and would otherwise prove its own subject alive |
 
 ## Liveness — a quiet hook and a dead hook look identical
 
@@ -270,6 +365,30 @@ reached from the other side. Guard the call (`if (adoptSession) adoptSession(…
 so version skew degrades to the older behaviour instead of to silence, and test it
 by stripping the export from a copied tree — asserting it is genuinely absent
 first, so a pass cannot mean the skew never happened.
+
+### Running them all — an unrun test and an absent test look identical
+
+`node scripts/run-tests.js` runs every `test/*.test.js` and `test/*.test.sh`.
+`-v` shows output for passing files too; a bare word filters by filename.
+
+The list is **derived from the filesystem and never written down** — the same rule
+this section applies to hooks, applied to the tests themselves. A hardcoded array
+would move the defect up one layer: the runner would go green over a domain that had
+quietly stopped matching the repo, and a green over a shrinking domain is the most
+reassuring output a runner can produce. That is why the **discovered count is printed
+on every run**, not just on failure; the pass count means nothing without it.
+
+Two things it checks that a plain loop would not:
+
+- **A test file that is not tracked by git fails the run.** The count is cross-checked
+  against `git ls-files`, which reads the index rather than the directory and so
+  answers a question `readdir` cannot. An untracked test passes locally and does not
+  exist for anybody else — green here, absent everywhere else.
+- **A suite that reports failures and exits 0 fails the run.** The exit code is the
+  verdict, because the suites print their tallies in several different shapes and
+  parsing prose to decide pass/fail would make the runner depend on wording. The
+  tally is still read, but only to catch the case the exit code cannot express: a
+  harness that has lost the ability to fail.
 
 ## Registered In
 
@@ -406,10 +525,24 @@ a project that satisfies the concept under a different name. A false positive ge
 investigated and dies; a false negative becomes a fact in a note.
 
 - **Report:** `node ~/.claude/anvi/scripts/conformance-report.js [project-dir ...]`
-  (`--issues` prints only the projects with findings). Default target is the cwd; a
-  fleet run is a shell loop over project dirs, same as the setup scripts. Read-only,
-  no network, **always exit 0** — a worklist, not a gate. Every finding names the
-  exact script and flag that repairs it.
+  (`--issues` prints only the projects with findings). Default target is the cwd.
+  Read-only, no network, **always exit 0** — a worklist, not a gate. Every finding
+  names the exact script and flag that repairs it.
+- **The subject list is a check of its own, and `--recorded` is the one that runs
+  it.** A fleet run used to be a shell loop over project dirs, which makes the
+  audit's coverage a property of whoever wrote the glob. That failed silently: a
+  `projects/*` loop missed a working directory one level deeper, and the fleet notes
+  recorded that project as having no working copy at all for weeks while the store's
+  own record named the directory. `--recorded` takes the targets from the store
+  instead — every live working directory named by a project's `PROVENANCE.json`,
+  read through the same shared reader the binding check uses. Explicit arguments are
+  unioned, not replaced, and a directory recorded by two projects is audited once.
+  It **states its own reach**: how many live directories, across how many store
+  projects, and the count and names of those it cannot reach this way — no record, a
+  record that does not parse, or a record naming no working copy, each kept as its
+  own reason. A recorded path that is not on disk is reported separately again,
+  because there the route arrived and found nothing, which says something about the
+  record rather than about the route.
 - **Four checks.** *link* — the symlink states the linker classifies, plus the three
   it can't name (a link to a store copy under a different name, a dangling link, the
   legacy `artifacts/` layout). *grant* — present, and **scoped** to this project's own

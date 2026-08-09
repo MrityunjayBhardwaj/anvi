@@ -27,11 +27,18 @@ set -euo pipefail
 #                             is never checked out or mutated).
 #   ./install.sh --only=<list>
 #                             Install only the given integration(s), comma-separated:
-#                             claude (native agents/skills/hooks), gsd (gsd-compat/),
-#                             copilot (copilot-compat/), or all. Combine freely, e.g.
+#                             claude (native agents/skills/hooks), copilot
+#                             (copilot-compat/), or all. Combine freely, e.g.
 #                             --only=claude,copilot. Skips the interactive picker.
 #                             The shared framework (cognitive-os, workflows, CLI)
 #                             always installs — every integration reads it.
+#
+# Exit status — the only thing an automated caller can read, so each outcome has
+# its own:
+#   0  installed, or a choice the user made deliberately (declining an overwrite)
+#   2  refused before installing anything: a bad flag, a version that cannot be
+#      installed, or a prompt with no terminal to answer it (use --sync)
+#   *  an underlying command failed, and its status is passed through unchanged
 
 ANVI_DIR="$HOME/.claude/anvi"
 AGENTS_DIR="$HOME/.claude/agents"
@@ -39,6 +46,29 @@ SKILLS_DIR="$HOME/.claude/skills"
 HOOKS_DIR="$HOME/.claude/hooks"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION=$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo "unknown")
+
+# Ask a question and put the answer in ANSWER. Returns 0 if someone answered,
+# 1 if nothing was there to answer.
+#
+# A bare `read` returns 1 at end-of-input, and under `set -euo pipefail` that
+# return code ends the script. So an install with no terminal on stdin did not
+# finish and report a failure — it STOPPED at the first prompt, part-way, and the
+# 1 it exited with was the unanswered question rather than anything that went
+# wrong. An unanswerable prompt is a fact for the caller to act on, not an error:
+# ANSWER is left empty and each prompt decides what silence means for it.
+ANSWER=""
+ask() {
+  ANSWER=""
+  printf '%s' "$1"
+  # Plain `read`, default IFS: a single variable is trimmed of surrounding
+  # whitespace, so a typed " y " still matches ^[Yy]$ the way it always has.
+  # Preserving it with IFS= would turn an answered yes into a silent no.
+  read -r ANSWER && return 0
+  printf '\n'                    # the prompt carried no newline of its own
+  # End of input. A last line with no trailing newline still arrived, and that is
+  # an answer; only an empty read means nobody was on the other end.
+  [ -n "$ANSWER" ]
+}
 
 MODE="interactive"
 PROJECTS=()          # positional args = project dirs to migrate (--migrate only)
@@ -66,21 +96,19 @@ done
 
 # Which integration(s) to install. The shared framework (cognitive-os,
 # workflows, templates, CLI) always installs underneath — every integration
-# reads it. Default is all three; --only=<list> or the interactive picker
+# reads it. Default is both; --only=<list> or the interactive picker
 # below narrow that.
 INSTALL_CLAUDE=true
-INSTALL_GSD=true
 INSTALL_COPILOT=true
 if [ -n "$ONLY_ARG" ]; then
-  INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
+  INSTALL_CLAUDE=false; INSTALL_COPILOT=false
   IFS=',' read -ra ONLY_CHOICES <<< "$ONLY_ARG"
   for choice in "${ONLY_CHOICES[@]}"; do
     case "$choice" in
-      all)     INSTALL_CLAUDE=true; INSTALL_GSD=true; INSTALL_COPILOT=true ;;
+      all)     INSTALL_CLAUDE=true; INSTALL_COPILOT=true ;;
       claude)  INSTALL_CLAUDE=true ;;
-      gsd)     INSTALL_GSD=true ;;
       copilot) INSTALL_COPILOT=true ;;
-      *) echo "✗ unknown --only value: '$choice' (choices: claude, gsd, copilot, all)" >&2; exit 2 ;;
+      *) echo "✗ unknown --only value: '$choice' (choices: claude, copilot, all)" >&2; exit 2 ;;
     esac
   done
 fi
@@ -350,9 +378,16 @@ if [ -d "$ANVI_DIR" ]; then
   EXISTING_VERSION=$(cat "$ANVI_DIR/VERSION" 2>/dev/null || echo "unknown")
   if [ "$MODE" = "interactive" ]; then
     echo "Existing installation found: v${EXISTING_VERSION}"
-    echo -n "Overwrite with v${VERSION}? [y/N] "
-    read -r REPLY
-    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+    # Silence here is not a decline. An unanswered overwrite gate installs
+    # nothing, and a caller that reads 0 would carry on believing it upgraded —
+    # so this exits with a status of its own, and names the flag that does the
+    # same job without asking.
+    if ! ask "Overwrite with v${VERSION}? [y/N] "; then
+      echo "  ✗ No answer — stdin is not a terminal, so nothing was installed."
+      echo "    Re-run with --sync to upgrade without prompting."
+      exit 2
+    fi
+    if [[ ! "$ANSWER" =~ ^[Yy]$ ]]; then
       echo "Aborted."
       exit 0
     fi
@@ -369,31 +404,36 @@ if [ "$MODE" = "interactive" ] && [ -z "$ONLY_ARG" ]; then
   echo " Which integration(s) do you want to install?"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "  1) Claude Code   — native agents/skills/hooks (~/.claude/agents, ~/.claude/skills)"
-  echo "  2) GSD compat    — cognitive hooks for GSD's agents (gsd-compat/)"
-  echo "  3) Copilot compat — cognitive hooks + .github templates for VS Code Copilot Chat (copilot-compat/)"
+  echo "  1) Claude Code    — native agents/skills/hooks (~/.claude/agents, ~/.claude/skills)"
+  echo "  2) Copilot compat — cognitive hooks + .github templates for VS Code Copilot Chat (copilot-compat/)"
   echo ""
-  echo "  Pick any combination (e.g. '1,3' or '1 3'). Leave blank to install all three."
-  echo -n "  Install: "
-  # `read` returns non-zero at EOF, and this script runs under `set -e`, so an
+  echo "  Pick any combination (e.g. '1,2' or '1 2'). Leave blank to install both."
+  # `read` returns non-zero at EOF and this script runs under `set -e`, so an
   # unguarded read KILLS a non-interactive install right here — piped from curl,
-  # in CI, in a Docker build, or with stdin redirected. It dies after printing the
-  # prompt and before installing anything, which looks like a run that happened.
-  # EOF is treated as blank, which the prompt above already promises means "all".
-  read -r PICKS || PICKS=""
+  # in CI, in a Docker build, or with stdin redirected. It would die after
+  # printing the prompt and before installing anything, which looks like a run
+  # that happened.
+  #
+  # `ask` is the shared prompt helper: it leaves ANSWER empty and returns
+  # non-zero when nobody is on the other end. Unlike the overwrite gate, silence
+  # here is NOT misleading and so does not earn its own exit status — the prompt
+  # above already promises that blank means both, so an unanswered picker
+  # installs exactly what the caller would have got before this prompt existed.
+  UNPICKED=0; ask "  Install: " || UNPICKED=1
+  PICKS="$ANSWER"
+  [ "$UNPICKED" = 1 ] && echo "  No terminal to answer — installing both."
   if [ -n "$PICKS" ]; then
-    INSTALL_CLAUDE=false; INSTALL_GSD=false; INSTALL_COPILOT=false
+    INSTALL_CLAUDE=false; INSTALL_COPILOT=false
     for pick in $(echo "$PICKS" | tr ',' ' '); do
       case "$pick" in
         1) INSTALL_CLAUDE=true ;;
-        2) INSTALL_GSD=true ;;
-        3) INSTALL_COPILOT=true ;;
+        2) INSTALL_COPILOT=true ;;
         *) echo "  ⚠ ignoring unrecognized choice '$pick'" ;;
       esac
     done
-    if [ "$INSTALL_CLAUDE" = false ] && [ "$INSTALL_GSD" = false ] && [ "$INSTALL_COPILOT" = false ]; then
-      echo "  No valid choice recognized — installing all three."
-      INSTALL_CLAUDE=true; INSTALL_GSD=true; INSTALL_COPILOT=true
+    if [ "$INSTALL_CLAUDE" = false ] && [ "$INSTALL_COPILOT" = false ]; then
+      echo "  No valid choice recognized — installing both."
+      INSTALL_CLAUDE=true; INSTALL_COPILOT=true
     fi
   fi
   echo ""
@@ -463,13 +503,6 @@ cp -r "$SCRIPT_DIR/templates" "$ANVI_DIR/"
 
 # References (if exists)
 [ -d "$SCRIPT_DIR/references" ] && cp -r "$SCRIPT_DIR/references" "$ANVI_DIR/"
-
-# GSD compatibility layer (if exists and selected — additive only, an
-# unselected run leaves a previously-installed layer untouched)
-if [ "$INSTALL_GSD" = true ] && [ -d "$SCRIPT_DIR/gsd-compat" ]; then
-  cp -r "$SCRIPT_DIR/gsd-compat" "$ANVI_DIR/"
-  echo "  ✓ GSD compat installed"
-fi
 
 # Copilot compatibility layer (if exists and selected — additive only)
 if [ "$INSTALL_COPILOT" = true ] && [ -d "$SCRIPT_DIR/copilot-compat" ]; then
@@ -559,7 +592,6 @@ if [ "$INSTALL_CLAUDE" = true ]; then
   echo "  Agents:     ${AGENT_COUNT} in ${AGENTS_DIR}"
   echo "  Skills:     ${SKILL_COUNT} in ${SKILLS_DIR}"
 fi
-[ "$INSTALL_GSD" = true ]     && echo "  GSD compat:     ${ANVI_DIR}/gsd-compat/"
 [ "$INSTALL_COPILOT" = true ] && echo "  Copilot compat: ${ANVI_DIR}/copilot-compat/ (templates: copy copilot-compat/templates/.github/ into a project)"
 echo ""
 if [ "$INSTALL_CLAUDE" = true ]; then
@@ -592,9 +624,10 @@ if [ "$MODE" = "interactive" ]; then
   echo " Optional: Initialize project catalogues"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo -n "Create .anvi/ catalogues in current directory? [y/N] "
-  read -r REPLY
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+  # Three outcomes, not two: created, declined, and never asked. Reporting the
+  # last two together would say "skipped" twice for the same prompt.
+  UNASKED=0; ask "Create .anvi/ catalogues in current directory? [y/N] " || UNASKED=1
+  if [[ "$ANSWER" =~ ^[Yy]$ ]]; then
     PROJ_DIR=".anvi"
     mkdir -p "$PROJ_DIR"
     PROJ_NAME=$(basename "$(pwd)")
@@ -607,6 +640,8 @@ if [ "$MODE" = "interactive" ]; then
     done
 
     echo "  ✓ Project catalogues created in ${PROJ_DIR}/"
+  elif [ "$UNASKED" = 1 ]; then
+    echo "  Skipped — no terminal to answer. Run /anvi:init in any project to create them."
   else
     echo "  Skipped. Run /anvi:init in any project to create them."
   fi
@@ -638,20 +673,25 @@ if [ "$MODE" = "interactive" ]; then
   echo "  this any time by editing ~/.claude/anvi-config.json (\"memorySync\": true|false)."
   echo ""
   CURRENT_MEMSYNC=$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.env.HOME+"/.claude/anvi-config.json","utf8")).memorySync===true))}catch{process.stdout.write("false")}' 2>/dev/null || echo false)
-  echo -n "  Back up project memory to your anvi_artifacts remote? [y/N] (currently: ${CURRENT_MEMSYNC}) "
-  read -r REPLY
-  if [[ "$REPLY" =~ ^[Yy]$ ]]; then MEMSYNC=true; else MEMSYNC=false; fi
-  CFG="$HOME/.claude/anvi-config.json" MEMSYNC="$MEMSYNC" node -e '
-    const fs=require("fs"), f=process.env.CFG;
-    let o={}; try{const r=fs.readFileSync(f,"utf8").trim(); if(r) o=JSON.parse(r);}catch{}
-    if(typeof o!=="object"||o===null||Array.isArray(o)) o={};
-    o.memorySync = process.env.MEMSYNC==="true";
-    fs.writeFileSync(f, JSON.stringify(o,null,2)+"\n");
-  '
-  if [ "$MEMSYNC" = true ]; then
-    echo "  ✓ Memory backup ON — each project mirrors to ~/.anvideck as its next session ends."
+  if ask "  Back up project memory to your anvi_artifacts remote? [y/N] (currently: ${CURRENT_MEMSYNC}) "; then
+    if [[ "$ANSWER" =~ ^[Yy]$ ]]; then MEMSYNC=true; else MEMSYNC=false; fi
+    CFG="$HOME/.claude/anvi-config.json" MEMSYNC="$MEMSYNC" node -e '
+      const fs=require("fs"), f=process.env.CFG;
+      let o={}; try{const r=fs.readFileSync(f,"utf8").trim(); if(r) o=JSON.parse(r);}catch{}
+      if(typeof o!=="object"||o===null||Array.isArray(o)) o={};
+      o.memorySync = process.env.MEMSYNC==="true";
+      fs.writeFileSync(f, JSON.stringify(o,null,2)+"\n");
+    '
+    if [ "$MEMSYNC" = true ]; then
+      echo "  ✓ Memory backup ON — each project mirrors to ~/.anvideck as its next session ends."
+    else
+      echo "  Memory backup OFF. Enable later in ~/.claude/anvi-config.json."
+    fi
   else
-    echo "  Memory backup OFF. Enable later in ~/.claude/anvi-config.json."
+    # Nobody answered, so nothing is written. Defaulting to false here would
+    # turn an existing "yes" off without anyone having said so — a consent
+    # question is the last place to answer on the user's behalf.
+    echo "  Skipped — no terminal to answer. Memory backup unchanged (currently: ${CURRENT_MEMSYNC})."
   fi
   echo ""
 fi
@@ -673,3 +713,7 @@ if [ -d "$HOME/.claude/get-shit-done" ]; then
 fi
 
 echo "Done."
+# State the status instead of inheriting whatever the last line happened to leave.
+# A trailing `[ -d x ] && cp …` whose test is false returns 1, and a complete
+# install would report a failure for a directory that was merely absent.
+exit 0

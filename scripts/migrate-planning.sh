@@ -27,7 +27,7 @@
 # Never hard-deletes. The tree is COPIED into the store and the copy is verified
 # file-for-file against the source before the original is removed. A tracked
 # tree is untracked with `git rm -r --cached` — which leaves git history intact,
-# so the old versions remain reachable in the project repo (V2: git history is
+# so the old versions remain reachable in the project repo (git history is
 # the archive). The files are not deleted from history and are not lost.
 
 set -u
@@ -115,7 +115,7 @@ esac
 STORE_REL="${STORE_ANVI#"$STORE_ROOT_REAL"/}"
 STORE_PM="$STORE_REL/project_management"
 
-# A store with no remote is not a backup, however tidy it looks (V12).
+# A store with no remote is not a backup, however tidy it looks.
 if ! git -C "$STORE_ROOT" remote get-url origin >/dev/null 2>&1; then
   say "STORE_NO_REMOTE — REFUSING."
   say "  $STORE_ROOT has no origin, so committing there is not durability."

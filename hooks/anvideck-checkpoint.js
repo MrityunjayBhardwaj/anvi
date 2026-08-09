@@ -15,7 +15,7 @@
 // - No-ops (exit 0, no output) when: dir missing, not a git repo, tree
 //   clean, or a merge/rebase is in progress.
 // - Commits everything dirty with an informative generated message:
-//   which projects, which files, which new entry IDs (+SP178, +SV85...).
+//   which projects, which files, which new entry IDs.
 // - Pushes best-effort: offline push failure is silent — the commit is the
 //   durability floor, the push is the backup.
 // - Never blocks the session: all failures exit 0 silently.
@@ -49,7 +49,7 @@ function git(args, timeoutMs) {
 
 // Canonical memory-namespace encoding — Claude Code names ~/.claude/projects/<slug>
 // by replacing every non-alphanumeric char in the cwd with '-'. Mirrors
-// provenance-guard.js encodeCwd(); keep the two in sync (single scheme, V1).
+// provenance-guard.js encodeCwd(); keep the two in sync (single scheme).
 function encodeCwd(cwd) { return cwd.replace(/[^a-zA-Z0-9]/g, '-'); }
 
 function countFiles(dir) {
@@ -63,10 +63,10 @@ function countFiles(dir) {
 
 // Copy-sync: mirror the CURRENT project's live memory into the store so the
 // existing commit+push below carries it to anvi_artifacts. Memory must STAY a
-// real dir at its canonical ~/.claude location (H10 — the harness gates that
+// real dir at its canonical ~/.claude location (the harness gates that
 // namespace as sensitive; a symlink into the store is blocked for read/write).
 // So this is a ONE-WAY backup mirror (live → store), never read back by the
-// harness — not a second source of truth (avoids split-brain, H6/V2).
+// harness — not a second source of truth (avoids split-brain).
 // Best-effort and self-contained: any failure is swallowed so the catalogue
 // commit (the durability floor) still runs.
 // Machine-local opt-in for memory backup. Mirroring memory to the remote copies
@@ -100,7 +100,7 @@ function syncMemory(cwd) {
         `One-way backup of the live memory at\n` +
         `\`~/.claude/projects/${encodeCwd(cwd)}/memory/\`, written by the\n` +
         `anvideck-checkpoint Stop hook at session end.\n\n` +
-        `- The harness never reads memory from here — it reads/writes the live copy above (H10).\n` +
+        `- The harness never reads memory from here — it reads/writes the live copy above.\n` +
         `- Files here are OVERWRITTEN (rsync --delete) every session. Edits made here are lost.\n` +
         `- To restore after data loss: copy this directory back to the live path, then reopen the project.\n`);
     }
@@ -163,7 +163,7 @@ function run(rawInput) {
       return m ? m[1] : '(root)';
     }))];
 
-    // New catalogue entry IDs added in this diff (## SP178:, ### B4:, ## SV85: ...).
+    // New catalogue entry IDs added in this diff — any `##` or `###` heading whose id is a letter prefix plus a number.
     // Scope to .anvi/ catalogue files only — memory files (now mirrored here) may
     // quote a catalogue ID in prose, which must not inject a false (+ID) summary.
     const added = git("diff --cached --unified=0 -- ':(glob)projects/*/.anvi/*.md'");
