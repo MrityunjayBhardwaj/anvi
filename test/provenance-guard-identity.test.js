@@ -333,6 +333,30 @@ console.log('\na subdirectory is not a sibling, and a name is not a project');
   ok(fired(path.join(PROJ, 'hooks'), path.join(NEIGHBOUR, 'src', 'c.js')),
      'and still foreign from a subdirectory — the walk narrows the claim, it does not drop it');
 
+  // A project comes in two shapes and only one of them was built here at first,
+  // which is why the fixtures could not see the following at all. `gamma` above
+  // carries a `.anvi`; most repositories on a machine carry only `.git`. Asked
+  // through the catalogue anchor — which requires a `.anvi` and stops at the
+  // repository boundary — a git-only repository answers with the working
+  // DIRECTORY, so a subdirectory never matched its own repository's root and the
+  // repository was reported as foreign to itself. It was found by sweeping live
+  // directories, not by this file, and the fix is that both operands of the
+  // ownership comparison now go through the same door.
+  const GITONLY = path.join(HOME, 'walk', 'epsilon');
+  fs.mkdirSync(path.join(GITONLY, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(GITONLY, 'docs'), { recursive: true });
+  fs.mkdirSync(path.join(GITONLY, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(GITONLY, 'src', 'a.js'), '//\n');
+  fs.writeFileSync(path.join(GITONLY, 'docs', 'b.md'), '#\n');
+  ok(fs.existsSync(path.join(GITONLY, '.git')) && !fs.existsSync(path.join(GITONLY, '.anvi')),
+     'the git-only project genuinely has a repository and genuinely has no catalogues');
+  ok(!fired(path.join(GITONLY, 'src'), path.join(GITONLY, 'docs', 'b.md')),
+     'a repository with no catalogues is not foreign to itself from a subdirectory');
+  ok(!fired(path.join(GITONLY, 'docs'), path.join(GITONLY, 'src', 'a.js')),
+     'and not in the other direction either');
+  ok(fired(path.join(GITONLY, 'src'), path.join(NEIGHBOUR, 'src', 'c.js')),
+     'while it still reports a genuine neighbour from that same subdirectory');
+
   // ── no evidence of projecthood → no owner named ────────────────────────────
   // Both halves of one session's own temporary area. Neither is a project by any
   // test this module uses, and the only thing that made them "projects" before

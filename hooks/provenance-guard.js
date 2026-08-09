@@ -44,7 +44,7 @@ let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storePro
   isInside = null, projectAnchor = null, projectRootFor = null;
 try {
   ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
-    projectAnchor, projectRootFor } = require('./anvi-paths.js'));
+    projectRootOfDir, projectRootFor } = require('./anvi-paths.js'));
 } catch { /* older install */ }
 
 // Timeout guard: exit if stdin doesn't close in 5s
@@ -97,8 +97,14 @@ function foreignProjectOf(absPath, cwd) {
 
   const home = os.homedir();
 
-  // Which project this working directory is IN — the bounded upward walk, taken
-  // from the shared resolver rather than from `cwd` directly.
+  // Which project CONTAINS this working directory — the upward walk, taken from
+  // the shared resolver, and deliberately the SAME question asked of the target
+  // below. An ownership comparison has two operands; asking them different
+  // questions yields a verdict about the questions rather than about ownership.
+  // Asked through the catalogue anchor, which requires a `.anvi` and stops at the
+  // repository boundary, a repository with no catalogues answered with the
+  // working directory itself — so a subdirectory failed to match its own repo's
+  // root and the repository was announced as foreign to itself.
   //
   // A working directory is not fixed for a session: a shell `cd` persists across
   // calls and arrives in every payload this hook receives. Measured against
@@ -106,13 +112,12 @@ function foreignProjectOf(absPath, cwd) {
   // project as a separate project the moment work moved into one of them —
   // reading `test/x.js` from `hooks/` was announced as belonging to a project
   // called `test`, in both directions, with no second project anywhere on disk.
-  // That is the failure the walk was introduced to remove, arriving at the one
-  // site that answers "which project is this directory in" and never got it.
   //
-  // Anchoring here needs no new rule for that half: relative to the ROOT's
-  // parent, a path inside the project starts with the project's own name, so the
-  // `sibling !== name` test already returns silence.
-  const root = projectAnchor ? projectAnchor(cwd).root : cwd;
+  // Null when this directory sits under no project at all — a scratch tree, a
+  // session's own temporary area. Then `cwd` stands in, which only decides which
+  // paths reach the sibling test below; nothing there may name an owner without
+  // evidence of its own.
+  const root = (projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd;
   const name = path.basename(root);
 
   // Which store project this directory OWNS — resolved from where `.anvi` lands,
