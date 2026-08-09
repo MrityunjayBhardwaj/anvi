@@ -89,9 +89,16 @@ fs.writeFileSync(path.join(PROJ, 'src', 'qqmod.ts'), [
   'export function qqLoose() { return 2; }',  // Q2's tail, with no owner anywhere
   'export const qqStandalone = 3;',           // Q5: undotted and present
 ].join('\n') + '\n');
-// A DIFFERENT file carrying only a tail. This is what makes the repo-wide branch
-// reachable: the citing file has no trace of it, the repo does.
-fs.writeFileSync(path.join(PROJ, 'src', 'qqelse.ts'), 'export const qqFarAway = 4;\n');
+// A DIFFERENT file. It carries a bare tail (making the repo-wide tail branch
+// reachable), a full dotted string, and an undotted name — the last two exist so the
+// repo-wide branches are separable from the in-file ones. Without them two guards had
+// no red state: a falsification run found both, which is the whole reason to do one.
+fs.writeFileSync(path.join(PROJ, 'src', 'qqelse.ts'), [
+  'export const qqFarAway = 4;',
+  'export const qqRemote = { qqPart: 5 };',
+  'const alsoHere = qqRemote.qqPart;',   // Q7: the FULL dotted string, but not where it is cited
+  'export const qqMovedAway = 6;',       // Q8: undotted, moved out of the citing file
+].join('\n') + '\n');
 
 fs.mkdirSync(path.join(PROJ, '.anvi'), { recursive: true });
 fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), [
@@ -113,6 +120,12 @@ fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), [
   '**VALIDATED:** 2026-01-01', '',
   '## Q6: an undotted name that is gone',
   '**REF:** `src/qqmod.ts` (`qqNowhereAtAll`)',
+  '**VALIDATED:** 2026-01-01', '',
+  '## Q7: the full dotted name exists, but in a DIFFERENT file',
+  '**REF:** `src/qqmod.ts` (`qqRemote.qqPart`)',
+  '**VALIDATED:** 2026-01-01', '',
+  '## Q8: an undotted name that moved to another file',
+  '**REF:** `src/qqmod.ts` (`qqMovedAway`)',
   '**VALIDATED:** 2026-01-01', '',
 ].join('\n'));
 execSync('git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm fixture',
@@ -148,6 +161,13 @@ ok(!/Q1/.test(unchecked) && !/Q1/.test(gone),
 ok(/Q4/.test(gone) && !/Q4/.test(unchecked),
   'a dotted name with no trace at all is still GONE — the finding that already worked is untouched');
 ok(!/Q5/.test(unchecked) && !/Q5/.test(gone), 'an undotted present name is unaffected');
+// Q7 and Q8 exist because a falsification run showed the two guards below had no red
+// state without them: every earlier case was answered by reading the citing file, so
+// nothing exercised the repo-wide half at all.
+ok(!/Q7/.test(unchecked) && !/Q7/.test(gone),
+  'a dotted name whose full string lives in ANOTHER file is checked by that, not downgraded to its tail');
+ok(!/Q8/.test(unchecked) && !/Q8/.test(gone),
+  'and an undotted name that moved is still the deliberate silence it always was, never unchecked');
 ok(/Q6/.test(gone) && !/Q6/.test(unchecked),
   'and an undotted absent name is still gone, never unchecked — the tail IS the name there');
 
