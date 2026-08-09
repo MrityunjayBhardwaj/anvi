@@ -15,11 +15,15 @@
 // Fires a NON-BLOCKING reminder (never blocks — blocking Bash is too disruptive)
 // when a Bash command is an outward-facing publish:
 //   - `gh issue|pr create|edit|comment ...`, or
-//   - `git commit ...`
+//   - `git [-C dir] commit ...`
 // AND the text contains a high-signal catalogue index key.
 //
 // Scope decisions (precision over recall — a nagging guard gets ignored):
-//   - SKIPS ~/.anvideck commits, which legitimately carry entry IDs.
+//   - The publish question is asked of each SEGMENT's leading invocation, never of
+//     the command string as a whole, and `commit` is anchored so that the separate
+//     commands `git commit-tree` / `git commit-graph` cannot answer it (#154).
+//   - SKIPS the private locations — the knowledge store and any project's memory
+//     namespace — which legitimately carry entry IDs.
 //   - Two detectors, both high-precision:
 //     1. The unambiguous index-key form `name[:#]NNN` ("vyapti:184") — works with
 //        zero catalogue access, catches cross-repo/foreign-project IDs.
@@ -114,16 +118,60 @@ process.stdin.on('end', () => {
     if (!command) process.exit(0);
 
     // Only outward-facing publishing commands.
-    const isGh = /\bgh\s+(issue|pr)\s+(create|edit|comment)\b/.test(command);
-    const isCommit = /\bgit\s+commit\b/.test(command);
+    //
+    // Asked of each SEGMENT's leading invocation, not of the command string as a
+    // whole. A string may merely MENTION a publish — in a comment, an `echo`, a
+    // grep pattern, a heredoc body — and scanning text that is going nowhere for
+    // IDs is a warning about nothing, which is the one thing an advisory guard
+    // cannot afford. Splitting on the shell's own separators keeps every compound
+    // form that really does publish: `git add -A && git commit -m …`,
+    // `cd repo && gh pr create …`. Splitting can only ever produce more segments,
+    // and no separator character can occur inside the invocations matched below,
+    // so it cannot lose a real publish.
+    //
+    // `commit` is anchored against a following word character or hyphen because
+    // `git commit-tree` and `git commit-graph` are DIFFERENT commands that publish
+    // nothing — `\b` sits happily between `commit` and `-` and matched both. The
+    // pre-merge gate builds its off-trunk control with `commit-tree`, so the guard
+    // misfired inside the very workflow it lives alongside (#154).
+    //
+    // `git`'s global options sit between the program and the subcommand, so a
+    // predicate anchored straight at `commit` cannot see `git -C <repo> commit`,
+    // which publishes exactly as much as the bare form. Leading `VAR=value`
+    // assignments are stripped for the same reason (`GIT_EDITOR=true git commit`).
+    const GH_PUBLISH = /^gh\s+(?:issue|pr)\s+(?:create|edit|comment)(?![\w-])/;
+    const GIT_COMMIT = /^git\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace)(?:=|\s+)\S+\s+|--\S+\s+)*commit(?![\w-])/;
+    const leadingInvocation = (seg) => seg.trim().replace(/^(?:\w+=(?:"[^"]*"|'[^']*'|\S*)\s+)*/, '');
+    const segments = command.split(/(?:\|\||&&|[\n;|&()])+/).map(leadingInvocation).filter(Boolean);
+    const isGh = segments.some(s => GH_PUBLISH.test(s));
+    const isCommit = segments.some(s => GIT_COMMIT.test(s));
     if (!isGh && !isCommit) process.exit(0);
 
-    // Skip the private knowledge repo — entry IDs belong there (e.g. the
-    // "📝 catalogues: [entry IDs] …" commits do `cd ~/.anvideck && git commit`).
-    const anvideck = path.join(os.homedir(), '.anvideck');
-    const cwdInPrivate = cwd === anvideck || cwd.startsWith(anvideck + path.sep);
-    const cmdTouchesPrivate = /\.anvideck\b/.test(command);
-    if (cwdInPrivate || cmdTouchesPrivate) process.exit(0);
+    // Skip the private locations — where entry IDs belong. Both questions are
+    // answered from this one list: where the command RUNS, and what it NAMES.
+    // Splitting them was the defect. `~/.anvideck` had both tests hard-coded
+    // separately while `~/.claude/projects/<slug>/memory/` had neither — and memory
+    // files carry entry IDs deliberately, because that is where the private→public
+    // link is supposed to be written, so a session note citing them was reported as
+    // a leak into public content (#154).
+    //
+    // Matched by SHAPE, so the tilde and expanded forms both hit and no project
+    // slug is ever named.
+    //
+    // Where the command RUNS exempts either kind. What the command NAMES exempts
+    // only a `git` command, never a `gh` one: a path in a git command can identify
+    // the repository being committed to (`git -C ~/.anvideck commit …`), so it says
+    // something about the target — but `gh` publishes to GitHub by construction, so
+    // a private path in its body is not the target, it is TEXT BEING PUBLISHED, and
+    // that is precisely the leak. Extending the old blanket text test to memory
+    // would have let any publish buy silence by naming a private directory in its
+    // body; base already lost a real `gh` leak that way for the store.
+    const PRIVATE_LOCATIONS = [
+      /\.anvideck(?![\w-])/,                                          // the knowledge store
+      /\.claude[\\/]projects[\\/][^\\/\s"'`]+[\\/]memory(?![\w-])/,   // any project's memory namespace
+    ];
+    const inPrivate = (text) => PRIVATE_LOCATIONS.some(rx => rx.test(text));
+    if (inPrivate(cwd) || (!isGh && inPrivate(command))) process.exit(0);
 
     // The full outward-facing text: the command string PLUS any file it publishes from.
     const scanned = command + referencedFileText(command, cwd);

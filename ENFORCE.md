@@ -50,7 +50,10 @@ User message
 
   ↓
 ⑨ PreToolUse:Bash — catalogue-id-leak-guard.js
-   Fires on `gh issue|pr` and `git commit` (outside ~/.anvideck).
+   Fires on `gh issue|pr` and `git commit` — the SEGMENT's leading invocation, so a
+   command that merely mentions one publishes nothing, and `git commit-tree` /
+   `git commit-graph` are not `git commit`. Exempt: the private locations
+   (~/.anvideck and ~/.claude/projects/<slug>/memory/), which carry entry IDs by design.
    Reminds (non-blocking) when the text carries a catalogue index key (`vyapti:184`).
    "State the finding in plain language; keep the ID in the private FIX: field."
 
@@ -70,7 +73,7 @@ User message
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
-| Catalogue ID leak guard | PreToolUse:Bash (`gh issue\|pr`, `git commit` outside ~/.anvideck) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
+| Catalogue ID leak guard | PreToolUse:Bash (`gh issue\|pr`, `git commit` — outside the private locations) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
 | Provenance guard | PostToolUse:Artifact\|WebFetch\|WebSearch\|mcp__*\|Read\|Grep\|Glob (non-project-scoped results) | `~/.claude/hooks/provenance-guard.js` |
