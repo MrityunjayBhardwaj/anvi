@@ -476,8 +476,11 @@ console.log('\na project that is not next door is still another project');
      'from a nested checkout, an unrelated top-level project is foreign');
   ok(!fired(NEST, path.join(NEST, 'n.js')),
      'while its own file, from that same cwd, stays silent');
+  // Its host, too, was outside the old domain whenever the nesting was more
+  // than one level deep: the parent of `vendor/inner` is `vendor`, and the
+  // host's own files do not sit under it.
   ok(fired(NEST, path.join(SRC, 'src', 'f.js')),
-     'and its host is still foreign to it, as it was before');
+     'and so is the host it sits inside, which a deeper nesting also hid');
 }
 
 // ── machinery is not a workspace, and its host still is ────────────────────
