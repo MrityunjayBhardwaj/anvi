@@ -1720,6 +1720,57 @@ function indexDir(dir, readdir) {
   return rel;
 }
 
+// What a verdict actually compared, and what it did not (#214).
+//
+// A verdict is a claim about evidence, and green has been stating the strongest
+// available claim from the weakest available evidence: it says a colour, when what it
+// knows is a set of files, an anchor, and whether any commit since touched them.
+// Read as "this entry's reference is correct" it overstates — green inherits whatever
+// correctness the reference had when the stamp was written, and nothing revisits it.
+//
+// The gap is not only wording, and this is the part that makes it worth code. GREEN is
+// reachable while SOME resolved files had UNCOMPUTABLE drift: when the anchor is absent
+// from a file's history the `git log` throws, that file's `changedCommits` is null, and
+// the terminal only requires that not EVERY present file be null. So a green verdict
+// can vouch for files it never compared, and today says nothing to distinguish them.
+//
+// Counting the three populations separately is what turns the colour into a statement.
+// Pure over the verdict — no git, no repo. Applied once where the verdict is BUILT, so
+// every consumer receives the scoped sentence rather than re-deriving the counts from
+// `files` on its own; exported so a test can assert the rule directly instead of only
+// through the string it produces.
+function verdictScope(verdict) {
+  const files = (verdict && verdict.files) || [];
+  const resolved = files.filter((f) => f.exists !== false);
+  return {
+    cited: files.length,
+    compared: resolved.filter((f) => f.changedCommits !== null).length,
+    uncomputable: resolved.filter((f) => f.changedCommits === null).length,
+    unresolved: files.length - resolved.length,
+  };
+}
+
+// Green's own sentence, naming its scope. Deliberately keeps the shape of the phrase it
+// replaces ("no drift ... since anchor") so a reader who knew the old line still reads
+// this one, and states the count BEFORE any caveat: the common case is every cited file
+// compared, and that case must stay short enough to scan down a column of them.
+//
+// The uncomputable clause is the honest half. It names what this green does NOT speak
+// for, rather than leaving those files inside a number that reads as total — the same
+// distinction the withheld-area notice already draws elsewhere in the report: a pointer
+// nobody followed is not a pointer that resolved.
+function greenScopeText(scope) {
+  const n = scope.compared;
+  let s = `no drift in ${n} cited ${n === 1 ? 'file' : 'files'} since anchor`;
+  if (scope.uncomputable) {
+    const u = scope.uncomputable;
+    s += ` — ${u} further ${u === 1 ? 'file was' : 'files were'} resolved but NOT compared `
+      + `(anchor absent from ${u === 1 ? 'its' : 'their'} history), so this verdict does not speak for `
+      + `${u === 1 ? 'it' : 'them'}`;
+  }
+  return s;
+}
+
 // Compute a currency verdict for one entry.
 //   entry: { validatedField?, fixField?, refField?, id?, lineStart?, lineEnd? }
 //   opts:  { git, fileExists, storeGit?, cataloguePath? }
@@ -1892,11 +1943,11 @@ function computeCurrency(entry, opts) {
   if (present.every(f => f.changedCommits === null)) {
     return withVendor({ status: 'GRAY', anchor, files, reason: 'anchor sha not in current history (squash?) — drift uncomputable' });
   }
-  return withVendor({ status: 'GREEN', anchor, files, reason: 'no REF drift since anchor' });
+  return withVendor({ status: 'GREEN', anchor, files, reason: greenScopeText(verdictScope({ files })) });
 }
 
 module.exports = {
-  computeCurrency, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
+  computeCurrency, verdictScope, greenScopeText, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom, matchedTracked,
   // The one glob engine and the one declaration predicate. The injector imports these

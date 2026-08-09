@@ -612,4 +612,20 @@ const partialTally = partialCount ? `
 console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ` +
   `${SYMBOL.RED} ${counts.RED} dangling  ${SYMBOL.REFERENCE} ${counts.REFERENCE} reference-grounded  ` +
   `${SYMBOL.GRAY} ${counts.GRAY} unknown${withheldTally}${partialTally}`);
+// What "fresh" is a claim ABOUT (#214). Stated once, beside the number that invites the
+// misreading, rather than on every green row — a sentence repeated a few hundred times is
+// a wall, and the per-row line already carries the part that varies (how many files, and
+// whether any resolved file went uncompared).
+//
+// The point is the difference between two claims that look identical from the inside:
+// "nothing moved since the stamp" is what the gate measured, and "this entry's reference
+// is correct" is what green gets read as. Green inherits whatever correctness the
+// reference had when the stamp was written; if it was wrong then, or was never checked at
+// that depth, nothing here revisits it. Saying so does not close the gap — it makes it
+// visible, which is the whole of what this line is for.
+if (counts.GREEN) {
+  console.log(`   ${SYMBOL.GREEN} fresh = no cited file changed since that entry's anchor. That is a claim about`);
+  console.log('     commits, not about whether the citation still lands on anything: a reference that');
+  console.log('     was wrong when it was stamped stays fresh indefinitely. Re-read, don\'t re-trust.');
+}
 if (staleOnly && shown === 0) console.log('(no stale entries — all fresh)');
