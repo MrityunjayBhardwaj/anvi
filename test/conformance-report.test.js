@@ -757,6 +757,28 @@ console.log('\nignore-rule durability');
     eq(classifyPortable(e).state, 'UNCOMMITTED', 'so the same committed rule is correctly not enough here');
   }
   {
+    // The PREMISE the committed evaluation rests on: `check-ignore` uses exit 1
+    // for a meaningful "no match" and a larger status for "I could not run".
+    // Folding those together is what turned a refused flag into a confident
+    // finding on every project on the fleet, so the distinction is asserted here
+    // rather than assumed — if a future git stops honouring it, this fails
+    // instead of the report quietly flipping.
+    //
+    // The abnormal-exit branch itself is PREVENTIVE: the call's arguments are
+    // fixed, so nothing in normal operation reaches it, and it has no red state
+    // in this suite. Said rather than implied.
+    const d = project('ign-exitcodes', { repo: true });
+    write(path.join(d, '.gitignore'), '.anvi\n');
+    const status = (args) => {
+      try { execFileSync('git', args, { cwd: d, stdio: ['ignore', 'pipe', 'pipe'] }); return 0; }
+      catch (e) { return typeof e.status === 'number' ? e.status : null; }
+    };
+    eq(status(['check-ignore', '--no-index', '-q', '--', '.anvi']), 0, 'a match exits 0');
+    eq(status(['check-ignore', '--no-index', '-q', '--', 'README.md']), 1, 'no match exits 1 — an answer, not a failure');
+    ok((status(['check-ignore', '--no-index', '-q', '--']) ?? 99) > 1,
+       'and a refused invocation exits above 1 — which is why the two are not folded together');
+  }
+  {
     // The check must be able to say "I could not tell". An all-clear is only
     // sayable when something was actually cleared, so an evaluation that cannot
     // run is a finding rather than a pass. Forced by making the scratch area

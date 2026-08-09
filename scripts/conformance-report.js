@@ -147,9 +147,17 @@ const tilde = (p) => (p && p.startsWith(os.homedir()) ? '~' + p.slice(os.homedir
 function gitIn(cwd) {
   return (args) => {
     try {
-      return { ok: true, out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      return { ok: true, status: 0, out: execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
     } catch (e) {
-      return { ok: false, out: typeof e.stdout === 'string' ? e.stdout : '' };
+      // The exit STATUS is carried, not just the boolean. Several git commands
+      // use exit 1 for a meaningful negative answer and >=2 for "I could not do
+      // this at all", and a caller that sees only `ok:false` reports the second
+      // as the first. That is not hypothetical: reaching for a `check-ignore`
+      // flag that git refuses without `--stdin` made every call fail, every
+      // failure read as a clean "not ignored", and a whole fleet turned into a
+      // confident finding on every project.
+      return { ok: false, status: typeof e.status === 'number' ? e.status : null,
+        out: typeof e.stdout === 'string' ? e.stdout : '' };
     }
   };
 }
@@ -429,6 +437,24 @@ function classifyRepo(dir, storeName) {
 // only comments, so the answer is exactly "what would a clone of HEAD ignore",
 // computed by git's own semantics rather than by a re-reading of them. Nothing
 // is written anywhere but the temporary directory, and it is removed.
+
+// Which file did the matching ignore rule come from?
+//
+// `check-ignore -v` prints `<source>:<line>:<pattern>\t<pathname>`, so the first
+// ':'-delimited field is the source. That is ambiguous for a source path
+// containing a colon — and the obvious remedy does not exist: git's `-z` refuses
+// to run without `--stdin` ("-z only makes sense with --stdin"). Reaching for it
+// here made every call fail, and because a failed call reads as "not ignored",
+// the whole fleet flipped to a confident finding on every project. A check that
+// says everything is broken is as useless as one that says nothing is, and it
+// arrives looking like a discovery.
+//
+// So the ambiguity is accepted and bounded instead. The source is a
+// repo-relative `.gitignore`, `.git/info/exclude`, or an excludes file's
+// absolute path; the value only chooses between two remedies, and a truncated
+// read of any of those still lands on a safe one.
+const ignoreSource = (out) => (String(out).split(':')[0] || '').trim();
+
 function committedIgnoreEval(git, dir, relPath) {
   const files = git(['ls-files', '-z', '--', '.gitignore', '*/.gitignore']).out
     .split('\0').filter(Boolean);
@@ -443,7 +469,13 @@ function committedIgnoreEval(git, dir, relPath) {
       fs.writeFileSync(path.join(tmp, f), blob.out);
     }
     const v = gitIn(tmp)(['-c', 'core.excludesFile=/dev/null', 'check-ignore', '--no-index', '-v', '--', relPath]);
-    return { ok: true, ignored: v.ok, source: (v.out.split(':')[0] || '').trim(), files };
+    // `check-ignore` exits 0 for a match and 1 for none; anything else is the
+    // command failing, which must not be read as an answer. Folding those
+    // together is what turns a broken invocation into a fleet-wide finding.
+    if (!v.ok && v.status !== 1) {
+      return { ok: false, reason: `git check-ignore exited ${v.status === null ? 'abnormally' : v.status}` };
+    }
+    return { ok: true, ignored: v.ok, source: ignoreSource(v.out), files };
   } catch (e) {
     return { ok: false, reason: e.message };
   } finally {
@@ -465,7 +497,7 @@ function classifyPortable(dir) {
   }
 
   const now = git(['check-ignore', '--no-index', '-v', '--', '.anvi']);
-  const liveSource = (now.out.split(':')[0] || '').trim();
+  const liveSource = ignoreSource(now.out);
 
   // Ask the committed state about the same KIND of path that is on disk.
   //
