@@ -41,8 +41,11 @@ const os = require('os');
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
 let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
-  isInside = null;
-try { ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside } = require('./anvi-paths.js')); } catch { /* older install */ }
+  isInside = null, projectRootOfDir = null, projectRootFor = null;
+try {
+  ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
+    projectRootOfDir, projectRootFor } = require('./anvi-paths.js'));
+} catch { /* older install */ }
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -73,13 +76,25 @@ function isUnder(absPath, dir) {
   return absPath === dir || absPath.startsWith(d);
 }
 
+// Are these two path strings the same directory? Compared by realpath, because
+// the anchor returns `cwd` verbatim while the target's root is resolved — so a
+// sibling that is merely a LINK to this project would otherwise pass as a
+// different one and be named as its own project. A primitive, not a second
+// containment rule: the containment questions stay with the shared resolver.
+const realOf = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+function sameDir(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ra = realOf(a);
+  return !!ra && ra === realOf(b);
+}
+
 // Classify a filesystem path relative to the current project.
 // Returns the owning foreign project's name if the path is in ANOTHER project's
 // territory, or null if it's in-envelope / not-a-project-path (skip).
 function foreignProjectOf(absPath, cwd) {
   if (!absPath || !path.isAbsolute(absPath)) return null; // relative → resolves under cwd → in-repo
 
-  const name = path.basename(cwd);
   const home = os.homedir();
 
   // Which store project this directory OWNS — resolved from where `.anvi` lands,
@@ -175,12 +190,64 @@ function foreignProjectOf(absPath, cwd) {
   if (ownStore && isUnder(absPath, ownStore)) return null;
   if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
 
-  // (a) sibling repo: shares cwd's parent directory but isn't cwd.
-  const parent = path.dirname(cwd);
+  // Which project CONTAINS this working directory — the upward walk, taken from
+  // the shared resolver, and deliberately the SAME question asked of the target
+  // below. An ownership comparison has two operands; asking them different
+  // questions yields a verdict about the questions rather than about ownership.
+  // Asked through the catalogue anchor, which requires a `.anvi` and stops at the
+  // repository boundary, a repository with no catalogues answered with the
+  // working directory itself — so a subdirectory failed to match its own repo's
+  // root and the repository was announced as foreign to itself.
+  //
+  // A working directory is not fixed for a session: a shell `cd` persists across
+  // calls and arrives in every payload this hook receives. Measured against
+  // `cwd`, the sibling test below therefore read every OTHER subdirectory of the
+  // project as a separate project the moment work moved into one of them —
+  // reading `test/x.js` from `hooks/` was announced as belonging to a project
+  // called `test`, in both directions, with no second project anywhere on disk.
+  //
+  // Null when this directory sits under no project at all — a scratch tree, a
+  // session's own temporary area. Then `cwd` stands in, which only decides which
+  // paths reach the sibling test below; nothing there may name an owner without
+  // evidence of its own.
+  const root = (projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd;
+  const name = path.basename(root);
+
+  // (a) sibling repo: shares the project root's parent directory but isn't it.
+  const parent = path.dirname(root);
   if (isUnder(absPath, parent)) {
     const rel = path.relative(parent, absPath);
     const sibling = rel.split(path.sep)[0];
-    if (sibling && sibling !== name && sibling !== '..') return sibling;
+    // `sibling !== name` no longer decides anything: a path inside the project
+    // resolves to the same root, so the containment answer below would reach the
+    // same verdict on its own — mutating this comparison alone changes no
+    // result. It stays as a COST early-out, not as a correctness guard. This
+    // hook runs on every Read, Grep and Glob, and the check below walks the
+    // filesystem; skipping it for the overwhelmingly common case (the path is
+    // in this project) is worth a string compare. Recorded rather than deleted
+    // because "no test moves" is a claim about what is tested.
+    if (sibling && sibling !== name && sibling !== '..') {
+      // The path segment says where to LOOK; it may not say who OWNS. This
+      // branch used to return the segment itself, so a directory was named an
+      // owning project on the strength of its basename and nothing else — two
+      // halves of one session's temporary area announced each other as foreign
+      // projects with roadmaps, in the same words the framework uses when
+      // ownership is actually established.
+      //
+      // So ask the shared resolver where the target's own project root is: a
+      // `.git` or a `.anvi` above it, resolved through realpath. That is
+      // containment, which a name cannot forge, and it is the same definition
+      // the injector uses to decide whose knowledge governs a file.
+      //
+      // Nothing above it → no project, so there is no roadmap or vocabulary to
+      // contaminate anything with. Stay silent, which is what the closing
+      // comment below has always said should happen to scaffolding and could
+      // never do from here, because this branch answered first on a superset.
+      // Silence is also the honest answer when the resolver is unavailable at
+      // all: unproven ownership is never a licence to fall back to the name.
+      const theirs = projectRootFor ? projectRootFor(absPath) : null;
+      if (theirs && !sameDir(theirs, root)) return path.basename(theirs);
+    }
   }
 
   // The resolver is unavailable (a partial install), or the path resolves

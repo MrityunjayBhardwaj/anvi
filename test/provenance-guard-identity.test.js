@@ -71,6 +71,15 @@ function firedIn(home, cwd, filePath, session) {
 }
 const fired = (cwd, filePath) => firedIn(HOME, cwd, filePath);
 
+// Does this target resolve to somewhere inside cwd? A property of the FIXTURE,
+// computed here rather than borrowed from the module under test — it exists to
+// prove a case actually reaches the branch it claims to exercise, and a check
+// that asked the code would be answered by the code.
+function isInsideCwd(cwd, target) {
+  const r = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  return r(target).startsWith(r(cwd) + path.sep);
+}
+
 const ALPHA_CAT = path.join(storeOf('alpha'), 'hetvabhasa.md');
 const BETA_CAT = path.join(storeOf('beta'), 'hetvabhasa.md');
 
@@ -260,6 +269,168 @@ console.log('\na session working inside the store is not a stranger to it');
      'a genuinely foreign store read from an ordinary working copy still fires');
   ok(fired(OWNER, path.join(OWNER, 'borrowed', 'hetvabhasa.md')),
      'and a symlink inside the repo still cannot launder a store path');
+}
+
+// ── a subdirectory is not a sibling, and a name is not a project ────────────
+// Two defects in one six-line branch, both of which made the guard name an
+// owning project it had no evidence for.
+//
+// The first: the sibling test measured against `cwd`. A shell `cd` persists
+// across calls and arrives in every payload, so once work moved into a
+// subdirectory every OTHER subdirectory of the same project read as a separate
+// project — `test/` "belongs to" a project called test, in both directions, with
+// no second project on disk. Anchoring at the project ROOT fixes it with no new
+// rule: relative to the root's parent, an in-project path starts with the
+// project's own name.
+//
+// The second: having decided a path was a sibling, the branch returned the path
+// SEGMENT as the owner. That is a name establishing ownership, which is the one
+// thing this file exists to prevent — two halves of a session's temporary area
+// announced each other as foreign projects with roadmaps. Now the target must
+// sit under a real project root (`.git` or `.anvi`, resolved), and where nothing
+// does, the guard is silent for the reason the closing comment has always given.
+//
+// EVERY assertion below whose expected outcome is silence needs a firing case in
+// the same block. A hook that never blocks exits 0 on a hard error, so a crash
+// and a correct silence are the same output — while writing this, an unfinished
+// edit threw on every call and read as three clean passes. Silence alone cannot
+// witness anything.
+console.log('\na subdirectory is not a sibling, and a name is not a project');
+{
+  // The project: a `.anvi`, so the walk anchors on it, plus two subdirectories.
+  const PROJ = path.join(HOME, 'walk', 'gamma');
+  fs.mkdirSync(path.join(PROJ, 'hooks'), { recursive: true });
+  fs.mkdirSync(path.join(PROJ, 'test'), { recursive: true });
+  fs.mkdirSync(storeOf('gamma'), { recursive: true });
+  fs.writeFileSync(path.join(storeOf('gamma'), 'hetvabhasa.md'), '# gamma\n');
+  fs.symlinkSync(storeOf('gamma'), path.join(PROJ, '.anvi'));
+  fs.writeFileSync(path.join(PROJ, 'hooks', 'a.js'), '//\n');
+  fs.writeFileSync(path.join(PROJ, 'test', 'b.js'), '//\n');
+
+  // A real neighbour: a repository of its own, sharing the project's parent.
+  // This is the positive control — it must keep firing from every cwd below.
+  const NEIGHBOUR = path.join(HOME, 'walk', 'delta');
+  fs.mkdirSync(path.join(NEIGHBOUR, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(NEIGHBOUR, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(NEIGHBOUR, 'src', 'c.js'), '//\n');
+
+  ok(fs.existsSync(path.join(PROJ, '.anvi')) && fs.existsSync(path.join(NEIGHBOUR, '.git')),
+     'the project and its neighbour genuinely carry the markers the walk looks for');
+  ok(!fs.existsSync(path.join(PROJ, 'hooks', '.git')) && !fs.existsSync(path.join(PROJ, 'hooks', '.anvi')),
+     'and the subdirectory carries none of its own — so it must resolve by walking up');
+
+  ok(!fired(path.join(PROJ, 'hooks'), path.join(PROJ, 'test', 'b.js')),
+     'working in hooks/, a file in test/ is the same project — silent');
+  ok(!fired(path.join(PROJ, 'test'), path.join(PROJ, 'hooks', 'a.js')),
+     'and the other way round, which is how this fired in both directions at once');
+  ok(!fired(path.join(PROJ, 'hooks'), path.join(PROJ, 'README.md')),
+     'as is a file at the project root read from a subdirectory');
+
+  // The control. If these go quiet the fix has bought its silence by breaking
+  // the guard, which is exactly what an unfinished edit did during authoring.
+  ok(fired(PROJ, path.join(NEIGHBOUR, 'src', 'c.js')),
+     'while a genuine neighbouring repository is still foreign from the project root');
+  ok(fired(path.join(PROJ, 'hooks'), path.join(NEIGHBOUR, 'src', 'c.js')),
+     'and still foreign from a subdirectory — the walk narrows the claim, it does not drop it');
+
+  // A project comes in two shapes and only one of them was built here at first,
+  // which is why the fixtures could not see the following at all. `gamma` above
+  // carries a `.anvi`; most repositories on a machine carry only `.git`. Asked
+  // through the catalogue anchor — which requires a `.anvi` and stops at the
+  // repository boundary — a git-only repository answers with the working
+  // DIRECTORY, so a subdirectory never matched its own repository's root and the
+  // repository was reported as foreign to itself. It was found by sweeping live
+  // directories, not by this file, and the fix is that both operands of the
+  // ownership comparison now go through the same door.
+  const GITONLY = path.join(HOME, 'walk', 'epsilon');
+  fs.mkdirSync(path.join(GITONLY, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(GITONLY, 'docs'), { recursive: true });
+  fs.mkdirSync(path.join(GITONLY, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(GITONLY, 'src', 'a.js'), '//\n');
+  fs.writeFileSync(path.join(GITONLY, 'docs', 'b.md'), '#\n');
+  ok(fs.existsSync(path.join(GITONLY, '.git')) && !fs.existsSync(path.join(GITONLY, '.anvi')),
+     'the git-only project genuinely has a repository and genuinely has no catalogues');
+  ok(!fired(path.join(GITONLY, 'src'), path.join(GITONLY, 'docs', 'b.md')),
+     'a repository with no catalogues is not foreign to itself from a subdirectory');
+  ok(!fired(path.join(GITONLY, 'docs'), path.join(GITONLY, 'src', 'a.js')),
+     'and not in the other direction either');
+  ok(fired(path.join(GITONLY, 'src'), path.join(NEIGHBOUR, 'src', 'c.js')),
+     'while it still reports a genuine neighbour from that same subdirectory');
+
+  // ── no evidence of projecthood → no owner named ────────────────────────────
+  // Both halves of one session's own temporary area. Neither is a project by any
+  // test this module uses, and the only thing that made them "projects" before
+  // was that their names differ.
+  const SESS = path.join(HOME, 'sessions', 'sid-1');
+  fs.mkdirSync(path.join(SESS, 'scratchpad'), { recursive: true });
+  fs.mkdirSync(path.join(SESS, 'tasks'), { recursive: true });
+  fs.writeFileSync(path.join(SESS, 'tasks', 't.json'), '{}\n');
+  fs.writeFileSync(path.join(SESS, 'scratchpad', 'n.md'), 'x\n');
+
+  // Assert the absence the case rests on, all the way up. If any ancestor
+  // happened to carry a marker these would pass for the wrong reason.
+  let markerAbove = false;
+  for (let d = path.join(SESS, 'tasks'), root = path.parse(d).root; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git')) || fs.existsSync(path.join(d, '.anvi'))) { markerAbove = true; break; }
+    if (d === root) break;
+  }
+  ok(!markerAbove, 'the session directory genuinely has no project marker at any level above it');
+
+  ok(!fired(path.join(SESS, 'scratchpad'), path.join(SESS, 'tasks', 't.json')),
+     'a sibling of the working directory that is no project is not named as one');
+  ok(!fired(path.join(SESS, 'tasks'), path.join(SESS, 'scratchpad', 'n.md')),
+     'and symmetrically — neither half of a temp area owns the other');
+
+  // The same shape WITH evidence must still be named, or the rule above is just
+  // a way of switching the branch off.
+  const REALSIB = path.join(SESS, 'checkout');
+  fs.mkdirSync(path.join(REALSIB, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(REALSIB, 'f.txt'), 'y\n');
+  ok(fired(path.join(SESS, 'scratchpad'), path.join(REALSIB, 'f.txt')),
+     'while a sibling that IS a repository is still reported, in the same position');
+
+  // The owner is named from where the root LANDS, not from the path segment, so
+  // a project nested below a scaffolding directory is named as itself.
+  const NESTED = path.join(HOME, 'walk', 'vendor', 'inner');
+  fs.mkdirSync(path.join(NESTED, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(NESTED, 'g.txt'), 'z\n');
+  ok(!fs.existsSync(path.join(HOME, 'walk', 'vendor', '.git')),
+     'the intermediate directory is genuinely not a project itself');
+  const nestedMsg = (() => {
+    const r = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(NESTED, 'g.txt') },
+        cwd: PROJ,
+        session_id: `prov-nested-${process.pid}-${probeN++}`,
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME },
+    });
+    return r.stdout || '';
+  })();
+  ok(nestedMsg.includes("belongs to 'inner'") && !nestedMsg.includes("belongs to 'vendor'"),
+     'a project nested under a non-project directory is named as itself, not as the segment');
+
+  // ── a link is not a second project ─────────────────────────────────────────
+  // The anchor is returned verbatim while the target's root is resolved, so a
+  // sibling that is merely another spelling of this project would otherwise be
+  // named as a different one — a name establishing ownership by the back door.
+  //
+  // The cwd here must be a SUBDIRECTORY, and that is the whole point of the
+  // case. From the project root the target resolves back inside cwd and the
+  // containment test answers first, so the case passes with or without this
+  // guard — it reaches the code without reaching it by the route under test.
+  // From a subdirectory containment is false, the sibling branch runs, and the
+  // guard is the only thing standing between a link and a second project.
+  const MIRROR = path.join(HOME, 'walk', 'gamma-mirror');
+  fs.symlinkSync(PROJ, MIRROR);
+  ok(fs.realpathSync(path.join(MIRROR, 'test', 'b.js')) === fs.realpathSync(path.join(PROJ, 'test', 'b.js')),
+     'the mirror really is another spelling of the same file');
+  ok(!isInsideCwd(path.join(PROJ, 'hooks'), path.join(MIRROR, 'test', 'b.js')),
+     'and from a subdirectory it resolves OUTSIDE cwd, so containment cannot answer it');
+  ok(!fired(path.join(PROJ, 'hooks'), path.join(MIRROR, 'test', 'b.js')),
+     'reading the project through a link to itself is not a foreign project');
 }
 
 console.log('');

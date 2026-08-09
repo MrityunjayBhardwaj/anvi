@@ -547,15 +547,37 @@ function requireDirForWrite(cwd, kind) {
 // caller's cue to stay silent.
 function projectRootFor(filePath) {
   if (!filePath) return null;
-  let dir = path.dirname(path.resolve(filePath));
-  try { dir = fs.realpathSync(dir); } catch { /* unsaved/new file — walk the literal path */ }
-  const fsRoot = path.parse(dir).root;
+  return projectRootOfDir(path.dirname(path.resolve(filePath)));
+}
+
+// The same question asked of a DIRECTORY rather than of a file in it.
+//
+// Two doors, one walk, because an ownership comparison has two operands and they
+// must be asked the SAME question. Asked of the target through `projectRootFor`
+// and of the working directory through the catalogue anchor, the provenance
+// guard compared two different notions of "project": the anchor requires a
+// `.anvi` and stops at the repository boundary, so in a repository that has no
+// catalogues it answers with the working directory itself. A subdirectory then
+// failed to match its own repository's root and the repo was announced as
+// foreign to itself — a wrong verdict produced entirely by which door each side
+// went through, on every project that is a git repository without a `.anvi`.
+//
+// Deliberately NOT the catalogue anchor, and the two must not be merged: the
+// anchor answers "whose catalogues serve this directory", where the absence of a
+// `.anvi` is a real answer and the git boundary is a real bound. This answers
+// "which project physically contains this path", where a repository root is an
+// answer whether or not anyone has catalogued it.
+function projectRootOfDir(dir) {
+  if (!dir) return null;
+  let d = path.resolve(dir);
+  try { d = fs.realpathSync(d); } catch { /* not yet on disk — walk the literal path */ }
+  const fsRoot = path.parse(d).root;
   for (;;) {
     try {
-      if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, '.anvi'))) return dir;
+      if (fs.existsSync(path.join(d, '.git')) || fs.existsSync(path.join(d, '.anvi'))) return d;
     } catch { /* unreadable dir → keep walking up */ }
-    if (dir === fsRoot) return null;
-    dir = path.dirname(dir);
+    if (d === fsRoot) return null;
+    d = path.dirname(d);
   }
 }
 
@@ -646,7 +668,8 @@ function subjectRepoFor(filePath, sessionCwd) {
 }
 
 module.exports = {
-  candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, resolveDirForFile,
+  candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, projectRootOfDir,
+  resolveDirForFile,
   subjectRepoFor,
   // "Which project is this directory in" — exported so it has ONE name as well
   // as one implementation. A consumer that needs the question answered must ask
