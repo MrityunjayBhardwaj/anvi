@@ -117,6 +117,14 @@ fi
 PRUNE_FLAG=""
 [ "$MODE" = "migrate" ] && PRUNE_FLAG="--prune"
 
+# Directories anvi shipped in a PAST version and no longer ships at all. This is
+# the ONLY authorization to delete a directory nothing derives, and it is the
+# exact analogue of the retired-hook list in scripts/register-hooks.cjs — same
+# rule, same gate: a still-shipped name never appears here, and removal happens
+# only under --migrate. The CONTENTS of a directory anvi still ships need no
+# list: installing it replaces it, so anything no longer shipped goes with it.
+RETIRED_ANVI_DIRS="gsd-compat"
+
 # ── Version helpers (CHANGELOG is the version catalogue; git tags are the
 #    installable refs for older releases) ─────────────────────────────────────
 norm_ver() { echo "${1#v}"; }   # strip a leading 'v'
@@ -492,21 +500,55 @@ mkdir -p "$ANVI_DIR" "$AGENTS_DIR" "$SKILLS_DIR"
 
 echo "Installing framework to ${ANVI_DIR}..."
 
+# Install a directory anvi WHOLLY OWNS, by replacing it rather than copying over
+# it. `~/.claude/anvi/` is anvi's own tree — nothing else installs there — so the
+# shipped directory IS the manifest for its contents, and a file in the installed
+# copy that anvi no longer ships is retired by definition, with no list needed to
+# say so. Copying over the top leaves those files answering forever: an
+# `@~/.claude/anvi/<dir>/<file>.md` reference still resolves, against a frozen
+# copy that will never be updated again, and a dev-mode install (a symlink to the
+# repo) tracks the removal immediately — so the two install modes diverge in what
+# the user actually has, invisibly. `bin/lib` has always been installed this way;
+# this is that, generalized to every directory in the tree.
+#
+# Deliberately NOT used for the SHARED directories — hooks, skills, agents — where
+# other tools' artifacts sit beside ours and nothing derives which is which. There
+# removal stays authorized by an explicit retired list.
+install_owned_dir() {
+  src="$1"
+  name="$(basename "$src")"
+  # Two guards on a `rm -rf`, both about paths this function must never touch.
+  # Empty: with no target the join would reach up out of the tree. Symlink: in
+  # dev mode $ANVI_DIR IS the repo, so removing "$ANVI_DIR/$name" would delete
+  # the developer's own source directory. The copy path is not reached in dev
+  # mode today — --no-dev breaks the link first and --migrate skips the copy —
+  # but `--sync` over a dev install does arrive here, where it has always
+  # stopped at cp's "are identical". Leaving that path exactly as it was is the
+  # point: reclaiming is skipped, the cp still runs, and the outcome is
+  # unchanged from before this function existed.
+  [ -n "$ANVI_DIR" ] || return 0
+  [ -L "$ANVI_DIR" ] || rm -rf "$ANVI_DIR/$name"
+  cp -r "$src" "$ANVI_DIR/"
+}
+
 # Cognitive OS (base layer, lenses, translation, context rot)
-cp -r "$SCRIPT_DIR/cognitive-os" "$ANVI_DIR/"
+install_owned_dir "$SCRIPT_DIR/cognitive-os"
 
 # Workflows (39 workflow definitions)
-cp -r "$SCRIPT_DIR/workflows" "$ANVI_DIR/"
+install_owned_dir "$SCRIPT_DIR/workflows"
 
 # Templates (debug session + future templates)
-cp -r "$SCRIPT_DIR/templates" "$ANVI_DIR/"
+install_owned_dir "$SCRIPT_DIR/templates"
 
 # References (if exists)
-[ -d "$SCRIPT_DIR/references" ] && cp -r "$SCRIPT_DIR/references" "$ANVI_DIR/"
+[ -d "$SCRIPT_DIR/references" ] && install_owned_dir "$SCRIPT_DIR/references"
 
-# Copilot compatibility layer (if exists and selected — additive only)
+# Copilot compatibility layer (if exists and selected — additive only).
+# Reclaimed only when we are actually installing it: a run that did not select
+# this integration has said nothing about it, and treating silence as "remove"
+# would uninstall it from under anyone whose upgrade command omits --only.
 if [ "$INSTALL_COPILOT" = true ] && [ -d "$SCRIPT_DIR/copilot-compat" ]; then
-  cp -r "$SCRIPT_DIR/copilot-compat" "$ANVI_DIR/"
+  install_owned_dir "$SCRIPT_DIR/copilot-compat"
   echo "  ✓ Copilot compat installed"
 fi
 
@@ -514,16 +556,34 @@ fi
 mkdir -p "$ANVI_DIR/bin"
 cp "$SCRIPT_DIR/bin/anvi-tools.cjs" "$ANVI_DIR/bin/"
 chmod +x "$ANVI_DIR/bin/anvi-tools.cjs"
-rm -rf "$ANVI_DIR/bin/lib"
+[ -L "$ANVI_DIR" ] || rm -rf "$ANVI_DIR/bin/lib"
 cp -r "$SCRIPT_DIR/bin/lib" "$ANVI_DIR/bin/"
 
-# Scripts (.sh helpers + .js tools like currency-report.js)
+# Scripts (.sh helpers + .js tools like currency-report.js). Owned the same way,
+# reclaimed the same way — it is populated by two globs rather than one directory
+# copy, so the replace is spelled out here instead of going through the helper.
 [ -d "$SCRIPT_DIR/scripts" ] && {
+  [ -L "$ANVI_DIR" ] || rm -rf "$ANVI_DIR/scripts"
   mkdir -p "$ANVI_DIR/scripts"
   cp "$SCRIPT_DIR/scripts/"*.sh "$ANVI_DIR/scripts/" 2>/dev/null || true
   cp "$SCRIPT_DIR/scripts/"*.js "$ANVI_DIR/scripts/" 2>/dev/null || true
   chmod +x "$ANVI_DIR/scripts/"*.sh 2>/dev/null || true
 }
+
+# Directories anvi no longer ships at all. Nothing derives these — the tree above
+# cannot reclaim what it never copies — so they need the explicit retired list,
+# and they follow the retired-hook rule exactly: removal only under --migrate,
+# and never a name the install above just wrote. That last clause is the guard
+# against a maintainer listing a live directory: it would otherwise be installed
+# and deleted on every run.
+if [ -n "$PRUNE_FLAG" ] && [ -n "$ANVI_DIR" ] && [ ! -L "$ANVI_DIR" ]; then
+  for retired in $RETIRED_ANVI_DIRS; do
+    [ -d "$SCRIPT_DIR/$retired" ] && continue   # still shipped → never removed
+    [ -d "$ANVI_DIR/$retired" ] || continue
+    rm -rf "$ANVI_DIR/$retired"
+    echo "  ✓ Removed retired directory: ${retired}/"
+  done
+fi
 
 # Hooks (enforcement chain — see ENFORCE.md). Claude-Code-specific: they
 # register in Claude Code's settings.json, so only install with that integration.
