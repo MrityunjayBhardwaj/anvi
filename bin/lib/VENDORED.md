@@ -62,10 +62,11 @@ count — and the stated total — are low by roughly the size of that commit. R
 them needs the pristine 1.27.0 bytes, which is the `--upstream` run below; the commit
 list beside each module comes from history alone and is current either way.
 
-**Every sha above is a commit on the default branch, which for this repo means a squash.**
-The branch commits that went into one are gone by the time the merge lands, so a list
-written on a branch names shas that its own history will not contain. Re-derive the column
-after merging rather than transcribing it from the branch you were working on.
+**Every sha above is a commit as it exists on the default branch.** The older ones landed
+there directly; anything arriving through a pull request arrives as a squash, which replaces
+the branch's own commits with one new sha. So a list written while still on a branch names
+shas that the history it describes will never contain. Re-derive the column after merging
+rather than transcribing it from the branch you were working on.
 
 **The line counts are a dated measurement, not a live one.** Measured 2026-08-02
 against a pristine copy of 1.27.0, counting insertions + deletions
