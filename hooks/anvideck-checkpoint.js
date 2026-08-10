@@ -16,6 +16,15 @@
 //   clean, or a merge/rebase is in progress.
 // - Commits everything dirty with an informative generated message:
 //   which projects, which files, which new entry IDs.
+// - EXCEPT projects holding a live harvest lease (#148): those are excluded from
+//   the sweep, because an author is mid-harvest and about to commit them with a
+//   real message. The quiet-period guard below cannot cover this — it detects a
+//   commit that just LANDED, and a harvest has none behind it. Excluding by
+//   pathspec rather than deferring the whole run is deliberate: the store is
+//   shared with concurrent sessions, so a global defer would delay THEIR
+//   durability to protect this project's narrative. See anvi-harvest-lease.js.
+// - Records any catalogue entry IDs it does sweep, per project, so a later wrap
+//   can name the pre-swept entries instead of leaving the split silent.
 // - Pushes best-effort: offline push failure is silent — the commit is the
 //   durability floor, the push is the backup.
 // - Never blocks the session: all failures exit 0 silently.
@@ -39,6 +48,17 @@ const MIRROR_README = 'MIRROR-README.md'; // marker kept in the store mirror; rs
 // Sized to cover a slow commit+push, small enough that a legit backup lands one
 // Stop later at most. ANVIDECK_QUIET_SECONDS overrides (used by tests).
 const QUIET_SECONDS = Number(process.env.ANVIDECK_QUIET_SECONDS) || 90;
+
+// Harvest leases (#148) — the forward-looking half of the same problem the quiet
+// period solves backwards. Imported, never re-derived: the TTL and the directory
+// have to mean the same thing here as they do to the wrap that writes them.
+// Guarded like the other shared-module imports: if the module is missing the hook
+// keeps its pre-#148 behaviour (sweep everything) rather than dying — but that is
+// the PERMISSIVE direction, so it is asserted in the test suite rather than
+// trusted, since a swallowed import failure and a store with no leases look
+// identical from here.
+let liveLeases = null, recordSwept = null;
+try { ({ liveLeases, recordSwept } = require('./anvi-harvest-lease.js')); } catch { /* pre-#148 behaviour */ }
 
 function git(args, timeoutMs) {
   return execSync(`git ${args}`, {
@@ -132,8 +152,21 @@ function run(rawInput) {
       if (fs.existsSync(path.join(DIR, '.git', marker))) process.exit(0);
     }
 
-    const dirty = git('status --porcelain').trim();
-    if (!dirty) process.exit(0); // clean — workflow layer already committed
+    // Projects mid-harvest are excluded from EVERYTHING below — the dirty check
+    // and the `add`. Both must use the same scope or the two disagree: an
+    // unscoped dirty check plus a scoped add produces an empty commit attempt on
+    // every Stop while a lease is held.
+    const leased = liveLeases ? liveLeases() : [];
+    const scope = leased.length
+      ? `-- . ${leased.map(p => JSON.stringify(`:(exclude)projects/${p}/`)).join(' ')}`
+      : '';
+
+    const dirty = git(`status --porcelain ${scope}`).trim();
+    // Clean here means "nothing to commit that isn't leased". Either the workflow
+    // layer already committed, or the only dirty paths belong to a harvest in
+    // progress — in which case this is the loss-free defer: the tree is untouched
+    // and the wrap commits it, or a later Stop does once the lease expires.
+    if (!dirty) process.exit(0);
 
     // Quiet-period guard (#65): if a commit just landed, an author is likely
     // mid-commit (staged files, or a commit whose sibling edits aren't staged
@@ -154,7 +187,7 @@ function run(rawInput) {
       }
     } catch { /* no commits yet / not a repo state we can read — fall through and commit */ }
 
-    git('add -A');
+    git(`add -A ${scope}`);
 
     // Which projects were touched?
     const files = git('diff --cached --name-only').trim().split('\n').filter(Boolean);
@@ -167,10 +200,26 @@ function run(rawInput) {
     // Scope to .anvi/ catalogue files only — memory files (now mirrored here) may
     // quote a catalogue ID in prose, which must not inject a false (+ID) summary.
     const added = git("diff --cached --unified=0 -- ':(glob)projects/*/.anvi/*.md'");
-    const ids = [...new Set(
-      (added.match(/^\+#{2,3} ((?:SP|SV|SK|H|V|K|B)\d+)/gm) || [])
-        .map(l => l.replace(/^\+#{2,3} /, ''))
-    )];
+    // Collected PER PROJECT as well as flat. The flat list is the message summary
+    // (unchanged); the per-project split is what lets a sweep leave a record the
+    // wrap can read, so a split the lease didn't prevent is at least legible (#148).
+    // Attribution comes from the diff's own file headers rather than from matching
+    // IDs to projects by prefix — prefixes are reused across projects, so a prefix
+    // would attribute one project's entry to another.
+    const idsByProject = new Map();
+    const ids = [];
+    let curProject = null;
+    for (const line of added.split('\n')) {
+      const header = line.match(/^\+\+\+ b\/projects\/([^/]+)\/\.anvi\//);
+      if (header) { curProject = header[1]; continue; }
+      const m = line.match(/^\+#{2,3} ((?:SP|SV|SK|H|V|K|B)\d+)/);
+      if (!m) continue;
+      if (!ids.includes(m[1])) ids.push(m[1]);
+      if (!curProject) continue;
+      if (!idsByProject.has(curProject)) idsByProject.set(curProject, []);
+      const forProject = idsByProject.get(curProject);
+      if (!forProject.includes(m[1])) forProject.push(m[1]);
+    }
 
     const fileSummary = files.length <= 3
       ? files.map(f => path.basename(f)).join(', ')
@@ -179,6 +228,18 @@ function run(rawInput) {
 
     const msg = `📓 auto-checkpoint: ${projects.join(', ')} — ${fileSummary}${idSummary}`;
     git(`commit -m ${JSON.stringify(msg)}`);
+
+    // Leave a record of every entry this sweep claimed, so a wrap that runs later
+    // can name the pre-swept entries and their commit rather than writing a message
+    // that describes work split across two commits without saying so (#148). Runs
+    // BEFORE the push: the commit is the durability floor, and the record is about
+    // the commit, not about whether it reached the remote.
+    if (recordSwept && idsByProject.size) {
+      try {
+        const sha = git('rev-parse HEAD').trim();
+        for (const [project, list] of idsByProject) recordSwept(project, sha, list);
+      } catch { /* the record is a courtesy to the narrative; never risk the push */ }
+    }
 
     // Best-effort push — offline failure is fine, commit is already the floor
     try { git('push', 20000); } catch { /* silent — will push on a later checkpoint */ }

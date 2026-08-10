@@ -37,6 +37,25 @@ returns; the project name is `basename(cwd)`.
 <step name="1_harvest_catalogues">
 Review THIS session for durable knowledge and write it to the right catalogue.
 
+FIRST, before writing anything, take a harvest lease for every project you are
+about to harvest — one per project, since a session can span several:
+
+    anvi-tools harvest-lease acquire [project]     # defaults to basename(cwd)
+
+Why this comes first (#148). The Stop hook commits the store whenever a response
+finishes and the tree is dirty, which is the correct behaviour for a durability
+backstop and does not need to know what a wrap is. But it means every response
+boundary between your first catalogue write and your own commit is a chance for
+the entries to land under a generated message instead of yours. Nothing is lost;
+the reasoning is, and the reasoning is why a catalogue commit exists. The hook's
+quiet-period guard cannot cover this — it detects a commit that just landed, not
+one that is coming. The lease is how you tell it one is coming; while it is held
+the hook leaves that project's paths alone and still commits every other
+project, so a concurrent session's durability is never delayed by your harvest.
+
+The lease expires on its own, so a crash cannot strand it — but release it as
+soon as you have committed, at the end of this step.
+
 - Bug fixed / error pattern      → hetvabhasa (root cause, detection signal,
                                     the trap, the real fix, REF).
 - Invariant discovered/validated → vyapti (statement, confirmed-by, REF).
@@ -57,9 +76,36 @@ Rules:
   summarising it into "harvested 3 entries". A user who cannot name the file
   cannot check it, back it up, or notice when it stops being written — and the
   path is outside their repo, which is the part that surprises people.
-- Then say whether it is SAFE, not merely written. The store commits on session
-  end; committing is not pushing. If the store has no remote, the entries you
-  just harvested exist on this machine only — state that plainly.
+- Then say whether it is SAFE, not merely written. Committing is not pushing. If
+  the store has no remote, the entries you just harvested exist on this machine
+  only — state that plainly.
+
+COMMIT AS SOON AS THE WRITES ARE DONE — here, not in step 3. The commit used to
+sit two steps away, with the whole memory update in between, and that gap is the
+window the checkpoint hook wins: in the store's history the median gap between a
+sweep and the author's own commit was about two minutes. The lease closes the
+window; committing early makes it small in the first place, and it makes the
+"is it SAFE?" answer above true when you give it rather than a promise about
+step 3.
+
+    git -C ~/.anvideck add -- projects/<project>/          # scope it; never -A
+    git -C ~/.anvideck commit -m "<what was learned, and why>"
+    git -C ~/.anvideck push
+
+Before writing the message, ask what the hook already took:
+
+    anvi-tools harvest-lease swept [project]                # "<sha> <ids...>" per sweep
+
+Any line here is an entry committed earlier under a generated message — because
+it was written before the lease, or because the harvest outran it. Name those
+entries and their commit in your own message so the reasoning stays findable
+from either commit. Then clear the record and release the lease, in that order:
+
+    anvi-tools harvest-lease clear-swept [project]          # only AFTER the commit succeeded
+    anvi-tools harvest-lease release [project]
+
+If the commit fails, leave both alone — the record is the only evidence the split
+happened, and the lease is still protecting work that is still uncommitted.
 </step>
 
 <step name="2_update_memory">
@@ -72,11 +118,19 @@ covers the fact.
 </step>
 
 <step name="3_persist">
-Persist the writes durably (V5 — uncommitted knowledge doesn't exist).
-- Catalogue changes live under ~/.anvideck → commit + push to the anvi_artifacts
-  remote with a clear message (better than a terse auto-checkpoint). Non-interactive.
+Confirm the writes are durable (V5 — uncommitted knowledge doesn't exist).
+- Catalogue changes were committed and pushed in step 1, while the reasoning was
+  fresh and the lease was held. Verify it landed rather than assuming: the store
+  is shared with concurrent sessions, so check your own commit is there —
+  `git -C ~/.anvideck log origin/main -1 --format='%h %s'`, and if a phrase from
+  your message is missing, `git log origin/main -S"<phrase>"` finds which commit
+  swallowed it.
+- Anything still uncommitted under ~/.anvideck at this point is either another
+  project you have not harvested yet or a lease you forgot to release. Check
+  `anvi-tools harvest-lease live` and release what is yours.
 - Memory files are written in place (not a pushed repo) — no commit needed.
-Print a one-line summary of what was committed and pushed.
+Print a one-line summary of what was committed and pushed, naming any entries a
+sweep had already claimed.
 </step>
 
 <step name="4_next_session_prompt">
@@ -111,7 +165,8 @@ Carry out any remaining freeform instructions passed in $ARGUMENTS.
 <success_criteria>
 - [ ] Session learnings harvested into the correct catalogues (or an explicit "nothing durable this session")
 - [ ] Memory updated (index + detail), update-not-duplicate, absolute dates
-- [ ] Catalogue changes committed + pushed to anvi_artifacts
+- [ ] Catalogue changes committed + pushed to anvi_artifacts, under YOUR message
+- [ ] Harvest lease released for every project it was taken for
 - [ ] Next-session kickoff prompt printed inline, copy-pasteable
 - [ ] Any $ARGUMENTS instructions carried out
 - [ ] Hygiene/gap-check run ONLY if explicitly requested

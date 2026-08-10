@@ -453,12 +453,34 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
 3. **Stop-hook backstop** — `anvideck-checkpoint.js` fires when a response finishes:
    if `~/.anvideck` is dirty it auto-commits (`📓 auto-checkpoint: <project> — <files>
    (+new entry IDs)`) and pushes best-effort. No-ops when clean. This is the
-   consistency guarantee — layer 2 can be skipped; this can't. **Quiet-period
-   guard:** if the store's last commit is younger than 90s
-   (`ANVIDECK_QUIET_SECONDS`), it defers this Stop — an author likely just
-   committed deliberately, and `add -A` would bury a rich message under the terse
-   one. The defer is loss-free: the dirty state persists and the next Stop commits
-   it once quiet. So layer 2's explicit rich commit is never clobbered by layer 3.
+   consistency guarantee — layer 2 can be skipped; this can't. Two guards keep it
+   from burying layer 2's rich message under its terse one, and they cover opposite
+   directions in time:
+   - **Quiet period (backwards).** If the store's last commit is younger than 90s
+     (`ANVIDECK_QUIET_SECONDS`), it defers this Stop — an author likely just
+     committed deliberately, and `add -A` would bury a rich message under the terse
+     one. Loss-free: the dirty state persists and the next Stop commits it once
+     quiet.
+   - **Harvest lease (forwards).** A quiet period can only see a commit that has
+     already landed, so it cannot protect a harvest that has not committed yet —
+     measured against the store's own history, it would have deferred 2 of 68
+     recorded splits, because at sweep time the median gap since the previous
+     commit was 456s. So the wrap publishes its intent instead: it takes a lease
+     (`anvi-tools harvest-lease acquire`) before writing entries and releases it
+     after its own commit, and the hook excludes leased projects from both its
+     dirty check and its `add`. **Scoped, never a global defer** — the store is
+     shared with concurrent sessions, and deferring the whole run would delay
+     THEIR durability to protect one project's narrative. TTL-bounded (900s,
+     `ANVI_HARVEST_LEASE_SECONDS`) and ignored when stale or future-dated, for the
+     same reason the quiet period proceeds on clock skew: a backstop must never be
+     stalled indefinitely by state it cannot verify. Rule and TTL live in one
+     module both sides import, `hooks/anvi-harvest-lease.js` (V7/V21).
+   - **When a split happens anyway** — entries written before the lease, or a
+     harvest that outran the TTL — the sweep records what it took, per project,
+     with the commit sha. `anvi-tools harvest-lease swept` reads it, and the wrap
+     names those entries in its own message so the reasoning is findable from
+     either commit. A sweep that adds no entries records nothing, so the wrap never
+     announces a split that did not occur.
 4. **Memory backup (opt-in)** — the same Stop hook also mirrors the current
    project's auto-memory (`~/.claude/projects/<slug>/memory/`) into the store at
    `~/.anvideck/projects/<name>/memory/` so it rides the commit+push above. Memory

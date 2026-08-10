@@ -67,6 +67,23 @@ function loadAnviPaths() {
 }
 const anviPaths = loadAnviPaths();
 
+// Same two-layout problem, same answer, for the harvest-lease module (#148). The
+// wrap needs to acquire and release a lease around its catalogue harvest, and the
+// checkpoint hook needs to read it; both must agree on the directory and the TTL, so
+// there is one module and neither side re-derives the rule. Routed through
+// the CLI rather than invoked by path from the workflow, so the candidate list stays
+// in one place instead of being hand-rolled in instructions.
+function loadHarvestLease() {
+  const candidates = [
+    path.join(__dirname, '..', 'hooks', 'anvi-harvest-lease.js'),
+    path.join(os.homedir(), '.claude', 'hooks', 'anvi-harvest-lease.js'),
+  ];
+  for (const c of candidates) {
+    try { return require(c); } catch { /* try next layout */ }
+  }
+  return null;
+}
+
 // The READ path, for a command that REPORTS what it found. `findAnviDir` answers
 // with a directory or null, and null means both "there is nothing here" and
 // "there is something and you may not have it". A command that merges them tells
@@ -427,6 +444,70 @@ async function main() {
     case 'catalogue-append': {
       cmdCatalogueAppend(cwd, args[1], args[2], raw);
       return;
+    }
+
+    // harvest-lease <acquire|release|live|swept|clear-swept> [project]
+    // Defaults the project to basename(cwd) — the same name the checkpoint hook's
+    // store paths use — so the wrap does not have to restate it. The name selects a
+    // lease file here; it is never an ownership claim.
+    case 'harvest-lease': {
+      const lease = loadHarvestLease();
+      if (!lease) {
+        // A refusal must not read as "no lease is held" — the caller's next move
+        // differs completely. Non-zero, and say which module is missing.
+        console.error('harvest-lease: hooks/anvi-harvest-lease.js not found in either install layout');
+        process.exitCode = 1;
+        return;
+      }
+      const action = args[1];
+      const project = args[2] || path.basename(cwd);
+      switch (action) {
+        case 'acquire': {
+          if (!lease.acquire(project)) { console.error(`harvest-lease: could not acquire for ${project}`); process.exitCode = 1; return; }
+          // Taking the lease is not the same as being protected by it, and the two
+          // resolve the module from DIFFERENT places: this CLI tries the repo first,
+          // while the Stop hook can only require its own sibling in the installed
+          // hooks dir. A dev-mode install symlinks each hook FILE, so an updated
+          // checkpoint hook goes live instantly while a NEWLY ADDED sibling has no
+          // symlink until the installer runs again — the hook then falls back to
+          // sweeping everything, silently, on the permissive side. So the author
+          // would be told the harvest is safe by the one component that cannot
+          // honour the lease. Check the hook's own view and say which case this is.
+          const hooksDir = path.join(os.homedir(), '.claude', 'hooks');
+          const hookLive = fs.existsSync(path.join(hooksDir, 'anvideck-checkpoint.js'));
+          const moduleLive = fs.existsSync(path.join(hooksDir, 'anvi-harvest-lease.js'));
+          if (hookLive && !moduleLive) {
+            console.error(
+              `harvest lease WRITTEN for ${project}, but NOT honoured: the installed ` +
+              `checkpoint hook has no anvi-harvest-lease.js beside it, so it will keep ` +
+              `sweeping.\nRe-run install.sh --sync, then acquire again. Until then commit ` +
+              `each catalogue write immediately — do not rely on the lease.`);
+            process.exitCode = 1;
+            return;
+          }
+          console.log(`harvest lease held for ${project} (${lease.LEASE_SECONDS}s) — the checkpoint hook will leave it alone`);
+          return;
+        }
+        case 'release':
+          lease.release(project);
+          console.log(`harvest lease released for ${project}`);
+          return;
+        case 'live':
+          for (const p of lease.liveLeases()) console.log(p);
+          return;
+        case 'swept': {
+          const entries = lease.readSwept(project);
+          for (const e of entries) console.log(`${e.sha} ${e.ids.join(' ')}`);
+          return;
+        }
+        case 'clear-swept':
+          lease.clearSwept(project);
+          return;
+        default:
+          console.error('harvest-lease: acquire|release|live|swept|clear-swept');
+          process.exitCode = 1;
+          return;
+      }
     }
 
     case 'catalogue-review': {
