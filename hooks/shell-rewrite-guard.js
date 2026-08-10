@@ -62,77 +62,17 @@
 // at module scope it would arm a process-exiting timer inside any test that requires
 // this file.
 
-// ── Quote-state scanner ──────────────────────────────────────────────────────
-// Whether a `$` is quoted decides whether the shell rewrites it, so the question
-// cannot be asked with a bare regex — `'$VAR'` and `$VAR` differ only in context.
-// Returns an array of quote states, one per character: 0 unquoted, 1 single, 2 double.
-function quoteStates(s) {
-  const st = new Array(s.length).fill(0);
-  let mode = 0; // 0 none, 1 single, 2 double
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (mode === 0 && c === '\\') { st[i] = 0; i++; if (i < s.length) st[i] = 0; continue; }
-    if (mode === 2 && c === '\\') { st[i] = 2; i++; if (i < s.length) st[i] = 2; continue; }
-    if (mode === 0 && c === "'") { mode = 1; st[i] = 1; continue; }
-    if (mode === 1 && c === "'") { mode = 0; st[i] = 1; continue; }
-    if (mode === 0 && c === '"') { mode = 2; st[i] = 2; continue; }
-    if (mode === 2 && c === '"') { mode = 0; st[i] = 2; continue; }
-    st[i] = mode;
-  }
-  return st;
-}
-
-// ── Heredoc-body scanner ─────────────────────────────────────────────────────
-// A heredoc body is DATA — the shell hands it to a program — so most of what this
-// guard looks for cannot happen there. But NOT all of it, and the intuitive version
-// of this fix is wrong in the dangerous direction, so the policy below was measured
-// in both shells rather than reasoned about (#253):
-//
-//   <<'EOF'   $var[1] → literal `$var[1]`      --include=*.js → literal
-//   <<EOF     $var[1] → `h` in zsh             --include=*.js → literal
-//                     → `hello[1]` in bash
-//
-// Two facts fall out. Pathname expansion NEVER happens in a heredoc body, either
-// form, either shell — so the glob rule is always a false positive there. But an
-// UNQUOTED body does perform parameter expansion, and zsh genuinely applies
-// SUBSCRIPTING inside it, so the `$var[` rule is correct there and must keep firing.
-// Excluding both bodies wholesale — which is what "heredoc bodies are data" suggests,
-// and what this was first written to do — would put a false negative in a guard whose
-// whole purpose is catching failures that fall silent.
-//
-// Returns a parallel array: 0 outside any body, 1 inside a QUOTED body (inert for
-// every rule), 2 inside an UNQUOTED one (inert for splitting and globbing only).
-//
-// `<<<` is a herestring, not a heredoc, and is left alone by construction rather than
-// by a special case: the pattern requires a delimiter name after the `<<`, and `<`
-// is not a name character. That matters because `<<< "$list"` is this guard's own
-// recommended remedy — a case asserts a risky loop AFTER one is still reported, so
-// nothing silently swallows the rest of the command.
-function heredocStates(s, states) {
-  const hd = new Array(s.length).fill(0);
-  const re = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g;
-  let m;
-  while ((m = re.exec(s)) !== null) {
-    if (states[m.index] !== 0) continue;        // an introducer inside quotes is text
-    const stripTabs = m[1] === '-';
-    const kind = m[2] !== '' ? 1 : 2;           // quoted delimiter → fully inert body
-    const delim = m[3];
-    const nl = s.indexOf('\n', m.index + m[0].length);
-    if (nl === -1) break;                       // introducer with no body at all
-    let i = nl + 1, end = s.length;
-    while (i <= s.length) {
-      const eol = s.indexOf('\n', i);
-      const lineEnd = eol === -1 ? s.length : eol;
-      const line = stripTabs ? s.slice(i, lineEnd).replace(/^\t+/, '') : s.slice(i, lineEnd);
-      if (line === delim) { end = i; break; }
-      if (eol === -1) { end = s.length; break; } // unterminated: body runs to the end
-      i = eol + 1;
-    }
-    for (let k = nl + 1; k < end; k++) hd[k] = kind;
-    re.lastIndex = Math.max(re.lastIndex, end);
-  }
-  return hd;
-}
+// ── Span scanners ────────────────────────────────────────────────────────────
+// `quoteStates` and `heredocStates` moved to hooks/shell-spans.js when the
+// catalogue-ID leak guard needed the same spans to answer a different question
+// (#242). They are re-exported below so this guard's export surface — and the tests
+// written against it — are unchanged by the move. The POLICY over those spans stays
+// here, because it is not the same policy in both guards: for the rules below, a
+// QUOTED body is inert for everything, while an UNQUOTED one is inert only for
+// splitting and globbing, since parameter expansion still happens there and zsh
+// genuinely subscripts inside it. That seam is why the scanner reports two states
+// rather than a boolean.
+const { quoteStates, heredocStates } = require('./shell-spans.js');
 
 // There is deliberately NO `bash -c` exemption, and the reason is worth recording
 // because writing one was the first instinct. The documented remedy is to wrap a probe

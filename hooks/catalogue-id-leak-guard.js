@@ -50,9 +50,14 @@ const fs = require('fs');
 // sibling require resolves in-repo and installed alike. parseEntries is the ONE
 // catalogue parser; a second ID scanner here would be a second chance to
 // disagree about what an entry IS.
-let resolveDirForRead, parseEntries, adoptSession;
+let resolveDirForRead, parseEntries, adoptSession, blankQuotedHeredocs;
 try { ({ resolveDirForRead, adoptSession } = require('./anvi-paths.js')); } catch { resolveDirForRead = null; }
 try { ({ parseEntries } = require('./currency.js')); } catch { parseEntries = null; }
+// The span scanner is shared with the shell-rewrite guard rather than copied — the
+// two guards need different policies over the same spans, so what they share is
+// finding them. If an older install has no such module, the fallback leaves the
+// command untouched, which degrades toward FIRING: the safe direction here.
+try { ({ blankQuotedHeredocs } = require('./shell-spans.js')); } catch { blankQuotedHeredocs = null; }
 
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
@@ -143,7 +148,27 @@ process.stdin.on('end', () => {
     // pipe, a newline, or a `$( )` substitution is still seen. Splitting only ever
     // produces more pieces, and no separator character can occur inside the
     // invocations below, so it cannot lose a real publish.
-    const segments = command.split(/(?:\|\||&&|[\n;|&()])+/).map(executableText);
+    // A QUOTED heredoc body (`<<'X'`, `<<"X"`) is removed for the same reason a
+    // quoted argument is: the shell hands it to a program verbatim — no expansion, no
+    // substitution, nothing run — so no line of it can be the publish this guard is
+    // looking for. It is not covered by the quote stripping above, because a heredoc
+    // body is neither a quoted span nor a comment; its lines were being split on
+    // newlines and offered to the publish predicate as if the shell would run them.
+    // A session-wrap command writing prose into a memory file mentioned a publishing
+    // command inside such a body, was classified as a publish, and so ALSO lost the
+    // private-location exemption that applies only to non-`gh` commands — a
+    // classifier error costing the exemption too (#242).
+    //
+    // The asymmetry is deliberate and is the whole point: an UNQUOTED body (`<<X`)
+    // still performs parameter and command substitution, so it is left alone. The
+    // heredoc is the right unit to act on, not the backtick — a backtick outside a
+    // quoted body IS command substitution and genuinely runs.
+    //
+    // Classification only. The scanned text below is deliberately still the FULL
+    // command, because a heredoc body is very often the thing being published — a
+    // body carrying an ID is exactly the leak this guard exists to catch.
+    const classifiable = blankQuotedHeredocs ? blankQuotedHeredocs(command) : command;
+    const segments = classifiable.split(/(?:\|\||&&|[\n;|&()])+/).map(executableText);
     // `commit` is guarded against a following word character or hyphen because
     // `git commit-tree` and `git commit-graph` are DIFFERENT commands that publish
     // nothing — `\b` sits happily between `commit` and `-` and matched both. The
