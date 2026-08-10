@@ -40,7 +40,7 @@ The commit list is the re-apply order, oldest first.
 
 | Module | State | Lines vs 1.27.0 | anvi commits to re-apply, oldest first |
 |---|---|---|---|
-| `commands.cjs` | patched | 78 | `714665e` `3c39e29` `df3a27f` `fc786cd` `98c88a6` `11941f1` |
+| `commands.cjs` | patched | 78 | `714665e` `3c39e29` `df3a27f` `fc786cd` `98c88a6` `11941f1` `ccb9eca` |
 | `config.cjs` | patched | 18 | `3c39e29` `df3a27f` |
 | `core.cjs` | patched | 302 | `7359e61` `714665e` `3c39e29` `df3a27f` `98c88a6` `11941f1` `9c52fc0` `390e7cc` |
 | `frontmatter.cjs` | pristine | 0 | — |
@@ -56,6 +56,11 @@ The commit list is the re-apply order, oldest first.
 | `template.cjs` | patched | 6 | `98c88a6` |
 | `uat.cjs` | patched | 10 | `3c39e29` `df3a27f` `98c88a6` |
 | `verify.cjs` | patched | 12 | `3c39e29` `df3a27f` `98c88a6` |
+
+`commands.cjs` has been patched again since that measurement (`ccb9eca`), so its
+count — and the stated total — are low by roughly the size of that commit. Re-deriving
+them needs the pristine 1.27.0 bytes, which is the `--upstream` run below; the commit
+list beside each module comes from history alone and is current either way.
 
 **The line counts are a dated measurement, not a live one.** Measured 2026-08-02
 against a pristine copy of 1.27.0, counting insertions + deletions
