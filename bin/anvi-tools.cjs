@@ -460,6 +460,22 @@ async function main() {
         return;
       }
       const action = args[1];
+      // A flag-shaped token is never a project name (#250). The project is POSITIONAL,
+      // so `harvest-lease acquire --project anvi` leased a project called `--project`,
+      // printed success, exited 0, and left the real one unprotected — the permissive
+      // direction, and the only tell was a word typed as a flag coming back as a value.
+      // The module's validator now refuses it too, but it can only say the name is
+      // invalid; it does not know what the caller meant. Refusing on the ARGUMENT's
+      // shape here is what lets the message name the form they wanted.
+      if (typeof args[2] === 'string' && args[2].startsWith('-')) {
+        const verb = action || 'acquire';
+        console.error(
+          `harvest-lease: "${args[2]}" is not a project name — the project is positional.\n` +
+          `  anvi-tools harvest-lease ${verb} ${path.basename(cwd)}\n` +
+          `With no project at all it defaults to the current directory's name.`);
+        process.exitCode = 1;
+        return;
+      }
       const project = args[2] || path.basename(cwd);
       switch (action) {
         case 'acquire': {

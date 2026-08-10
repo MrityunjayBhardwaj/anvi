@@ -72,9 +72,20 @@ const LEASE_SECONDS = Number(process.env.ANVI_HARVEST_LEASE_SECONDS) || 900;
 // A project name is used to build a git pathspec and a filename, so it is checked
 // rather than trusted. Anything outside this charset is not a project this store
 // can hold, and `..`/separators must never reach either use.
+//
+// A LEADING hyphen is rejected separately (#250). The hyphen itself has to stay in
+// the charset — real projects are named with it — but a token that starts with one
+// is a flag, and the charset happily accepted `--project` and `--` as names. That is
+// not a cosmetic complaint: `harvest-lease acquire --project anvi` leased a project
+// that cannot exist, printed success, exited 0, and left the real one unprotected,
+// so the checkpoint hook was free to sweep the harvest the lease exists to defer.
+// The failure is on the permissive side and reads as confirmation, which is why the
+// check belongs HERE — this is the one place that answers "is this a project name",
+// so every caller inherits the answer instead of re-deriving it.
 function isValidProject(name) {
   return typeof name === 'string'
     && /^[A-Za-z0-9._-]+$/.test(name)
+    && !name.startsWith('-')
     && name !== '.' && name !== '..';
 }
 
