@@ -111,6 +111,7 @@ const COVERED = new Set([
   'debug-grounding-gate.js',
   'experiment-protocol-guard.js',
   'catalogue-id-leak-guard.js',
+  'shell-rewrite-guard.js',        // witnessed below, plus test/shell-rewrite-guard.test.js
   'anvi-route-logger.js',
   'anvideck-checkpoint.js',       // anvideck-checkpoint-memory-sync.test.sh
   'register-hooks.cjs',           // the registrar itself, not a hook
@@ -235,6 +236,37 @@ r = fire('catalogue-id-leak-guard.js', {
   tool_input: { command: 'git commit -m "fix the parameter name on both sides"' },
 });
 ok(r.ctx === '', 'silent on a clean publish');
+
+console.log('shell-rewrite-guard (PreToolUse:Bash)');
+// Driven with the FULL payload the harness sends — event name and tool name included,
+// not just tool_input. The hook's own suite constructs a narrower payload to keep its
+// cases readable, so this is the case that proves it is alive against the real shape:
+// a hook that only ever saw the abbreviated form could depend on a field the harness
+// spells differently and nothing would notice.
+r = fire('shell-rewrite-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'SHAS=$(git log --format=%H); for s in $SHAS; do git cat-file -t "$s"; done' },
+});
+ok(r.exit === 0, 'exits 0 (reminds, never blocks)');
+ok(/iterates ONCE|rewrites part of this command/.test(r.ctx),
+   'ALIVE: reacts to a bare unquoted expansion in a for list');
+ok(/while IFS= read -r/.test(r.ctx), 'and names the remedy rather than only the fault');
+
+// Precision, from the same position: the documented remedy must earn silence, or the
+// guard trains the reader to dismiss it — which is worse than not having it.
+r = fire('shell-rewrite-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'git log --format=%H | while IFS= read -r s; do git cat-file -t "$s"; done' },
+});
+ok(r.ctx === '', 'silent on the `while IFS= read -r` remedy');
+
+// And the highest-volume false-positive risk: unquoted command substitution DOES
+// word-split in zsh, so it is correct and must stay silent. Measured, not assumed.
+r = fire('shell-rewrite-guard.js', {
+  cwd: P, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+  tool_input: { command: 'for f in $(git ls-files); do echo "$f"; done' },
+});
+ok(r.ctx === '', 'silent on `for f in $(cmd)` — command substitution splits');
 
 // #45 — bare ID that names a REAL entry (H21 exists in the fixture) is caught. This
 // is the leak class the command-string `name:NNN` form never saw.

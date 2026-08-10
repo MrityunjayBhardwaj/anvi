@@ -31,6 +31,7 @@ const REGISTRATIONS = [
   ['PreToolUse',       'Read',       'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
   ['PreToolUse',       'Bash',       'catalogue-id-leak-guard.js',    5],
+  ['PreToolUse',       'Bash',       'shell-rewrite-guard.js',        5],
   ['PostToolUse',      'Read',       'anvi-route-logger.js',          5],
   // Provenance Check enforcement — flag results from non-project-scoped surfaces.
   ['PostToolUse',      'Artifact',           'provenance-guard.js',   5],
