@@ -94,11 +94,17 @@ function quoteStates(s) {
 // is covered, and the case it created was not.
 
 // Names that DO expand to multiple words unquoted in zsh, so flagging them is wrong.
-// `$@`/`$*`/`$argv` are arrays; a name the same command assigns as `name=(…)` is an
-// array too. Everything else is assumed scalar, which is the common case for a value
-// captured from `$(…)` — and the case all nine recorded instances were.
+// `$argv` is zsh's positional array; a name the same command assigns as `name=(…)` is
+// an array too. Everything else is assumed scalar, which is the common case for a value
+// captured from `$(…)` — and the case every recorded instance was.
+//
+// `@` and `*` were listed here too and have been REMOVED as unreachable (#249): the
+// scan below requires `[A-Za-z_]` after the `$`, so it can never hand this function
+// those names, and `$@`/`$*` are already silent for that reason. They are asserted
+// silent in the suite so that widening the scan reddens a case and brings whoever
+// widens it back here — which a comment alone would not do.
 function isArrayLike(name, cmd) {
-  if (name === '@' || name === '*' || name === 'argv') return true;
+  if (name === 'argv') return true;
   return new RegExp(`\\b${name.replace(/[^A-Za-z0-9_]/g, '')}=\\(`).test(cmd);
 }
 
@@ -161,6 +167,9 @@ process.stdin.on('end', () => {
     // interpolation followed by a bracket: `"^## $pre[0-9]+"` becomes `"^## +"`.
     // Only inside double quotes — unquoted it would also glob, and single quotes are
     // literal. Bracing (`${pre}[0-9]`) is the fix for this one, unlike (1).
+    // The state check is the ONLY thing keeping a single-quoted `'$re[0-9]'` — an
+    // ordinary literal — from being reported; nothing else in the guard answers it,
+    // so it carries its own silence case (#249).
     for (const m of cmd.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)\[/g)) {
       if (states[m.index] !== 2) continue;
       findings.push(`\`$${m[1]}[…]\` is parsed as an array subscript, not as \`$${m[1]}\` ` +
@@ -172,6 +181,11 @@ process.stdin.on('end', () => {
     // the cwd and, finding nothing, aborts the command under `nomatch` before the
     // program runs. Loud, so cheap — included because the near-miss it caused sat one
     // command away from a label asserting a conclusion.
+    // What the state check actually covers is narrower than it looks (#249). The
+    // single-quoted REMEDY `--include='*.js'` is already answered by the value pattern,
+    // which excludes quote characters, so the check cannot be what protects it. Its only
+    // real work is the DOUBLE-quoted `"--include=*.js"`, where the value pattern does
+    // match and only the state distinguishes it — and that is the case it carries.
     for (const m of cmd.matchAll(/(--?[A-Za-z][A-Za-z0-9-]*=)([^\s'"]*[*?][^\s'"]*)/g)) {
       if (states[m.index] !== 0) continue;
       findings.push(`\`${m[1]}${m[2]}\` is glob-expanded against the current directory; ` +
@@ -184,9 +198,13 @@ process.stdin.on('end', () => {
     const message =
       `⚠ This shell rewrites part of this command before it runs (zsh, not bash):\n` +
       findings.map(f => `  • ${f}`).join('\n') +
-      `\n\nWhy this is worth a line of text: nine instances of this class are ` +
-      `catalogued, and almost every one failed toward the answer that required no ` +
-      `action — a loop that runs once under-reports, so the gate says "nothing found".\n` +
+      // No instance COUNT here on purpose (#249). A number in shipped text has to be
+      // re-synced by hand every time the catalogue moves, and it had already drifted by
+      // one before anybody read it. What makes the warning worth reading is the
+      // direction of the failure, which does not change.
+      `\n\nWhy this is worth a line of text: this pattern recurs, and almost every ` +
+      `recorded instance failed toward the answer that required no action — a loop ` +
+      `that runs once under-reports, so the gate says "nothing found".\n` +
       `Remedies, in order of preference: \`while IFS= read -r x; do … done <<< "$list"\`, ` +
       `which splits on newlines in BOTH shells; wrap the whole probe in \`bash -c '…'\`; ` +
       `or write the items literally.\n` +

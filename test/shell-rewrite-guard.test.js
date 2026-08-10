@@ -114,7 +114,25 @@ silent(`echo 'for x in $LIST; do :; done'`, 'the idiom inside single quotes — 
 silent('arr=(a b c); for x in $arr; do echo "$x"; done', 'a real zsh array does split');
 silent('for x in "$@"; do echo "$x"; done', 'quoted "$@"');
 silent('for x in $@; do echo "$x"; done', 'unquoted $@ — an array, so it splits');
+// ⚠ The two cases below do NOT exercise the array-name exemption, and it matters that
+// the next reader knows which predicate answers them (#249). The scan requires
+// `[A-Za-z_]` after the `$`, so `$@` and `$*` never reach it — they are silent by the
+// scan's shape. `@`/`*` were listed as array names on top of that and were unreachable
+// dead code; they have been removed. These cases now pin the reachability boundary:
+// widen the scan and they redden, which is what sends whoever widens it to isArrayLike.
+silent('for x in $*; do echo "$x"; done', 'unquoted $* — silent via the scan, not the exemption');
+// `$argv` is the only name the first clause of isArrayLike still covers, and nothing
+// else in the guard answers it: with that clause removed this is the case that reddens.
+silent('for x in $argv; do echo "$x"; done', 'unquoted $argv — the reachable array name');
 fires('LIST=$(cat f); for x in $LIST; do echo "$x"; done', 'a scalar captured from $(…)');
+
+// The two remaining exemptions that had no case of their own (#249). Each is the ONLY
+// thing standing between a correct command and a false positive, verified by removing
+// it and watching exactly this line go red.
+silent(`echo 'grep -cE "^## $pre[0-9]+" file.md'`,
+       'single-quoted `$re[0-9]` — a literal, so rule 3 must not fire');
+silent('grep -rn PATTERN "--include=*.js" .',
+       'double-quoted `--include=*.js` — no glob expansion, so rule 4 must not fire');
 
 console.log('\nGROUP 5 — the message has to be actionable, not just present');
 const msg = fires('SHAS=$(git log --format=%H); for s in $SHAS; do echo "$s"; done',
@@ -122,7 +140,14 @@ const msg = fires('SHAS=$(git log --format=%H); for s in $SHAS; do echo "$s"; do
 ok(/while IFS= read -r/.test(msg), true, 'names the primary remedy');
 ok(/bash -c/.test(msg), true, 'names the bash -c remedy');
 ok(/examined=N/.test(msg), true, 'asks for the denominator alongside a zero');
-ok(/nine instances/.test(msg), true, 'says why it is worth reading (the recurrence count)');
+// Deliberately NOT an instance count (#249): a number in shipped text needs re-syncing
+// by hand every time the catalogue moves, and it had drifted by one already. What the
+// message must carry is the DIRECTION of the failure, which is what makes it worth
+// reading and never needs maintaining.
+ok(/failed toward the answer that required no action/.test(msg), true,
+   'says why it is worth reading — the failure direction, with no count to keep in sync');
+ok(/\bnine\b|\bten\b|\d+ instances/.test(msg), false,
+   'and carries no hand-synced instance count');
 ok(/iterates ONCE/.test(msg), true, 'states the concrete consequence, not just "unquoted"');
 
 console.log('\nGROUP 6 — a hook must never block the session');
