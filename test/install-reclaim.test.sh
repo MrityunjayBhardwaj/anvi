@@ -94,6 +94,86 @@ HOME="$H" bash "$LIVEREPO/install.sh" --migrate --only=all </dev/null >/dev/null
 ok '[ -s "$A/VERSION" ]' 'control: that install actually ran to completion'
 ok '[ -d "$A/workflows" ] && [ -s "$A/workflows/debug.md" ]' 'listing a live directory as retired does not remove it'
 
+# ── the SHARED directories: skills and agents ──────────────────────────────
+# A different authority from everything above. `~/.claude/anvi/` is anvi's own
+# tree, so the shipped set is the manifest and a replace authorizes itself.
+# `~/.claude/skills/` and `~/.claude/agents/` are shared with other tools — a
+# replace there would delete someone else's work — so removal can only be
+# authorized by NAMING the artifact, exactly as retired hooks are.
+#
+# The foreign artifacts below are the load-bearing part: they are what makes this
+# a listed mechanism rather than a derived one, and a fix that reclaimed by
+# "anything not shipped" would destroy them while every anvi assertion stayed
+# green.
+echo ""
+echo "a retired skill or agent, in a directory shared with other tools"
+H="$(fresh_install)"
+SK="$H/.claude/skills"; AG="$H/.claude/agents"
+ok '[ -d "$SK/anvi-debug" ]' 'the first install produced skills'
+ok '[ -e "$AG/anvi-debugger.md" ]' 'and agents'
+
+# Retired: named in the list, no longer in the shipped tree.
+mkdir -p "$SK/anvi-sync"; echo stale > "$SK/anvi-sync/SKILL.md"
+# Foreign: another tool's artifacts, which no derivation could tell from ours.
+mkdir -p "$SK/someone-elses-skill"; echo theirs > "$SK/someone-elses-skill/SKILL.md"
+echo theirs > "$AG/someone-elses-agent.md"
+# Controls: still shipped, clobbered so the run must rewrite them.
+echo CLOBBERED > "$SK/anvi-debug/SKILL.md"
+echo CLOBBERED > "$AG/anvi-debugger.md"
+
+run "$H" --sync --only=all
+ok '[ -e "$SK/anvi-sync/SKILL.md" ]' 'a plain sync leaves the retired skill alone, as it does for a retired hook'
+
+run "$H" --migrate --only=all
+ok '! grep -q CLOBBERED "$SK/anvi-debug/SKILL.md"' 'control: that same --migrate run rewrote a still-shipped skill'
+ok '! grep -q CLOBBERED "$AG/anvi-debugger.md"' 'control: and a still-shipped agent'
+ok '[ ! -e "$SK/anvi-sync" ]' '--migrate removes the retired skill'
+ok '[ -s "$SK/someone-elses-skill/SKILL.md" ]' 'another tool'"'"'s skill is untouched'
+ok '[ -s "$AG/someone-elses-agent.md" ]' 'and another tool'"'"'s agent is untouched'
+
+# The agent half of the list has no member in the shipped repo, so it is exercised
+# by naming one here. Without this the loop could be deleted with the suite green.
+echo ""
+echo "a retired agent is removed by the same rule"
+AGTMP="$(mktemp -d)"; AGREPO="$AGTMP/repo"
+cp -R "$REPO" "$AGREPO" 2>/dev/null; rm -rf "$AGREPO/.git"
+# Whole tree, not a copy of the script: install.sh derives its source from its own
+# location, so an edited copy elsewhere installs nothing and every assertion below
+# would read the PREVIOUS run's output.
+sed -i.bak 's/^RETIRED_AGENTS=.*/RETIRED_AGENTS="anvi-retired-thing.md"/' "$AGREPO/install.sh"
+ok 'grep -q "^RETIRED_AGENTS=\"anvi-retired-thing.md\"" "$AGREPO/install.sh"' 'the list really was edited to name it'
+ok '[ ! -e "$AGREPO/agents/anvi-retired-thing.md" ]' 'and the repo copy genuinely does not ship it'
+H="$AGTMP/home"; mkdir -p "$H"
+HOME="$H" bash "$AGREPO/install.sh" --only=all </dev/null >/dev/null 2>&1
+AG="$H/.claude/agents"
+echo stale > "$AG/anvi-retired-thing.md"
+echo theirs > "$AG/someone-elses-agent.md"
+HOME="$H" bash "$AGREPO/install.sh" --migrate --only=all </dev/null >/dev/null 2>&1
+ok '[ -s "$H/.claude/anvi/VERSION" ]' 'control: that install actually ran to completion'
+ok '[ ! -e "$AG/anvi-retired-thing.md" ]' 'the retired agent is gone'
+ok '[ -s "$AG/someone-elses-agent.md" ]' 'and the foreign agent beside it is not'
+
+# The same maintainer'"'"'s-mistake guard the directory list has: a name still shipped
+# is never removed, or it would be installed and deleted on every run.
+echo ""
+echo "a still-shipped skill or agent named as retired is never removed"
+# Both guards get their own case. They are separate lines answering the same rule
+# for differently-shaped artifacts — a directory and a file — so one case cannot
+# witness the other, and an unwitnessed guard can be deleted with the suite green.
+SKTMP="$(mktemp -d)"; SKREPO="$SKTMP/repo"
+cp -R "$REPO" "$SKREPO" 2>/dev/null; rm -rf "$SKREPO/.git"
+sed -i.bak 's/^RETIRED_SKILLS=.*/RETIRED_SKILLS="anvi-debug"/' "$SKREPO/install.sh"
+sed -i.bak 's/^RETIRED_AGENTS=.*/RETIRED_AGENTS="anvi-debugger.md"/' "$SKREPO/install.sh"
+ok '[ -d "$SKREPO/skills/anvi-debug" ]' 'the repo copy genuinely still ships the skill now listed as retired'
+ok '[ -f "$SKREPO/agents/anvi-debugger.md" ]' 'and still ships the agent now listed as retired'
+ok 'grep -q "^RETIRED_SKILLS=\"anvi-debug\"" "$SKREPO/install.sh"' 'the skill list really was edited to name it'
+ok 'grep -q "^RETIRED_AGENTS=\"anvi-debugger.md\"" "$SKREPO/install.sh"' 'and the agent list really was edited to name it'
+H="$SKTMP/home"; mkdir -p "$H"
+HOME="$H" bash "$SKREPO/install.sh" --migrate --only=all </dev/null >/dev/null 2>&1
+ok '[ -s "$H/.claude/anvi/VERSION" ]' 'control: that install actually ran to completion'
+ok '[ -s "$H/.claude/skills/anvi-debug/SKILL.md" ]' 'listing a live skill as retired does not remove it'
+ok '[ -s "$H/.claude/agents/anvi-debugger.md" ]' 'and listing a live agent as retired does not remove it'
+
 # ── the dev-mode hazard ────────────────────────────────────────────────────
 # In dev mode $ANVI_DIR IS the repo, by symlink. Reclaiming through it would
 # delete the developer's own source directory — so the guard is not a formality,

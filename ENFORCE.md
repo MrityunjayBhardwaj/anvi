@@ -423,6 +423,8 @@ Which mechanism applies depends on who else may write to the directory:
 | Inside `~/.claude/anvi/` — anvi's own tree | **Derived**: the shipped directory is the manifest, so installing it replaces it | every copy install |
 | A directory anvi no longer ships at all | **Listed**: `RETIRED_ANVI_DIRS` in `install.sh` | `--migrate` only |
 | `~/.claude/hooks/` — shared with other tools | **Listed**: `REMOVED` in `scripts/register-hooks.cjs` | `--migrate` only |
+| `~/.claude/skills/` — shared with other tools | **Listed**: `RETIRED_SKILLS` in `install.sh` (by directory) | `--migrate` only |
+| `~/.claude/agents/` — shared with other tools | **Listed**: `RETIRED_AGENTS` in `install.sh` (by file) | `--migrate` only |
 
 A name that is still shipped is never removed by either list, whatever the list
 says — otherwise a maintainer's slip would install and delete it on every run.
@@ -433,9 +435,11 @@ own source. `--no-dev` breaks the link before copying and `--migrate` skips the
 copy, so the guard covers the one path that still arrives here, `--sync` over a
 dev install.
 
-**Not yet covered:** retired *skills* and *agents*. Those live in directories
-shared with other tools, where nothing derives which artifact is whose, so they
-need the listed mechanism rather than the derived one — see anvi #236.
+**Not covered:** a skill or agent retired while a **dev-mode** install is active.
+Dev mode symlinks each shipped artifact and exits before the copy path, so a
+retired one leaves a dangling link until the developer reinstalls without
+`--dev`. Stated here rather than handled silently, because the whole reason this
+contract exists is that an absent mechanism announces nothing.
 
 ## Knowledge Durability — Catalogue Commit Chain
 

@@ -125,6 +125,20 @@ PRUNE_FLAG=""
 # list: installing it replaces it, so anything no longer shipped goes with it.
 RETIRED_ANVI_DIRS="gsd-compat"
 
+# Skills and agents anvi shipped in a PAST version and no longer ships at all.
+# These need a list for a different reason than the directories above. `~/.claude/
+# anvi/` is anvi's own tree, so the shipped set is the manifest and a replace
+# authorizes itself. `~/.claude/skills/` and `~/.claude/agents/` are SHARED —
+# other tools' skills and other agents sit right beside ours, and no derivation
+# says which artifact is whose — so removal there can only be authorized by
+# naming the artifact. Same gate as the other two lists: a still-shipped name
+# never appears here, and removal happens only under --migrate.
+#
+# Skills are named by DIRECTORY (`anvi-sync`), agents by FILE (`anvi-thing.md`),
+# because that is the shape each is installed as.
+RETIRED_SKILLS="anvi-sync"
+RETIRED_AGENTS=""
+
 # ── Version helpers (CHANGELOG is the version catalogue; git tags are the
 #    installable refs for older releases) ─────────────────────────────────────
 norm_ver() { echo "${1#v}"; }   # strip a leading 'v'
@@ -639,6 +653,32 @@ if [ "$INSTALL_CLAUDE" = true ]; then
   echo "  ✓ ${SKILL_COUNT} skills installed"
 fi
 
+# ─── Retired skills and agents ──────────────────────────────────────────────
+# The shared-directory half of the retirement contract. Both loops run AFTER the
+# installs above, so "still shipped" is not merely read from the repo — the
+# artifact the guard protects has just been written, and removing it would undo
+# work from this same run. Only under --migrate, matching the retired-hook and
+# retired-directory rules exactly.
+#
+# Dev mode never reaches here: it exits before the copy path, so a skill retired
+# while a developer is symlinked leaves a dangling link until they reinstall
+# without --dev. Named in ENFORCE.md rather than silently handled, because the
+# whole lesson of this contract is that an absent mechanism announces nothing.
+if [ -n "$PRUNE_FLAG" ] && [ "$INSTALL_CLAUDE" = true ]; then
+  for retired in $RETIRED_SKILLS; do
+    [ -d "$SCRIPT_DIR/skills/$retired" ] && continue   # still shipped → never removed
+    [ -d "$SKILLS_DIR/$retired" ] || [ -L "$SKILLS_DIR/$retired" ] || continue
+    rm -rf "$SKILLS_DIR/$retired"
+    echo "  ✓ Removed retired skill: ${retired}"
+  done
+  for retired in $RETIRED_AGENTS; do
+    [ -f "$SCRIPT_DIR/agents/$retired" ] && continue   # still shipped → never removed
+    [ -e "$AGENTS_DIR/$retired" ] || [ -L "$AGENTS_DIR/$retired" ] || continue
+    rm -f "$AGENTS_DIR/$retired"
+    echo "  ✓ Removed retired agent: ${retired}"
+  done
+fi
+
 # ─── Summary ────────────────────────────────────────────────────────────────
 
 echo ""
@@ -763,12 +803,13 @@ if [ -d "$HOME/.claude/get-shit-done" ]; then
   echo " GSD detected — coexistence mode"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
-  echo "  GSD and Anvi can coexist. Both use .planning/ (compatible format)."
-  echo "  /gsd: commands still work alongside /anvi: commands."
+  echo "  GSD and Anvi can coexist. /gsd: commands still work alongside /anvi: ones."
+  echo "  They no longer share a planning directory: GSD writes .planning/,"
+  echo "  Anvi writes .anvi/project_management/. To move a project's planning tree:"
+  echo "    ./install.sh --migrate <project-dir>"
   echo "  Anvi is standalone — its CLI uses a vendored planning lib (bin/lib/)."
   echo ""
-  echo "  To migrate: replace /gsd: with /anvi: in your workflow."
-  echo "  Run /anvi:sync to track GSD upstream changes."
+  echo "  To switch over: replace /gsd: with /anvi: in your workflow."
   echo ""
 fi
 

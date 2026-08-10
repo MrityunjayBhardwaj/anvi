@@ -73,7 +73,6 @@
   /anvi                 Activate cognitive OS
   /anvi:session         Session-only activation
   /anvi:audit           Self-coherence audit
-  /anvi:sync            Check GSD upstream changes
   /anvi:update          Update this clone to the latest anvi (framework + hooks
                         + per-project catalogue migration, idempotent)
 
