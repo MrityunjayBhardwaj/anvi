@@ -40,7 +40,7 @@ The commit list is the re-apply order, oldest first.
 
 | Module | State | Lines vs 1.27.0 | anvi commits to re-apply, oldest first |
 |---|---|---|---|
-| `commands.cjs` | patched | 78 | `714665e` `3c39e29` `df3a27f` `fc786cd` `98c88a6` `11941f1` `ccb9eca` |
+| `commands.cjs` | patched | 78 | `714665e` `3c39e29` `df3a27f` `fc786cd` `98c88a6` `11941f1` `ccb9eca` `58c7171` |
 | `config.cjs` | patched | 18 | `3c39e29` `df3a27f` |
 | `core.cjs` | patched | 302 | `7359e61` `714665e` `3c39e29` `df3a27f` `98c88a6` `11941f1` `9c52fc0` `390e7cc` |
 | `frontmatter.cjs` | pristine | 0 | — |
