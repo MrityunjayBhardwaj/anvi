@@ -187,6 +187,53 @@ ok(!fired(`printf '%s\\n' "${CLUSTER}" >> ${MEMFILE}`), 'a plain append to a mem
 ok(!fired(`git -C ${STORE_DIR} commit -m "${CLUSTER}"`), 'a commit into the store, named by path');
 ok(!fired(`git commit -m "${CLUSTER}"`, STORE_DIR), 'a commit run from inside the store');
 
+// ── THE HEREDOC SEAM ────────────────────────────────────────────────────────
+// A QUOTED heredoc body is handed to a program verbatim — nothing in it runs — so no
+// line of it can be the publish this guard classifies on. An UNQUOTED body still
+// performs substitution, so it is left alone. Both directions are asserted, because
+// an exclusion written to the category ("a heredoc body is data") is wider than the
+// category earns and the excess is a false negative (#242, #253).
+//
+// Every case here carries IDs, so a silence is about the classification and never
+// about there being nothing to find.
+console.log('\nSILENT — a QUOTED heredoc body cannot be a command:');
+// The reported shape, verbatim in structure: a session wrap writing prose into a
+// memory file, where the prose mentions a publishing command in backticks. Before
+// the fix this was read as a `gh` publish, which ALSO cost it the private-location
+// exemption, since that exemption deliberately does not apply to `gh`.
+ok(!fired(`python3 - <<'PY'
+open('${MEMFILE}','w').write("""
+Wrapped the session. Ran \\\`gh pr create --title "x"\\\` after the tests were green,
+and recorded ${KEY} against it.
+""")
+PY`), 'the reported wrap: a quoted heredoc writing prose into a memory file');
+ok(!fired(`cat > ${MSGFILE} <<'EOF'
+gh issue create --title x --body "${KEY}"
+EOF`), 'a quoted heredoc body whose line IS a publish, written to a plain file');
+
+console.log('\nFIRES — an UNQUOTED body still substitutes, so it stays classified:');
+// The load-bearing half of the asymmetry: `$( )` inside an unquoted body really does
+// execute, so this genuinely publishes and must be seen.
+ok(fired(`cat <<PY
+$(gh pr create --title x --body "${KEY}")
+PY`), 'a command substitution inside an unquoted body really runs');
+// ⚠ DIRECTION PIN. A bare line in an unquoted body is not executed either — `cat`
+// merely prints it — so this case OVER-scans. That is the safe direction for an
+// advisory guard, and it is asserted so the over-scan cannot silently drift to the
+// permissive side. If this is ever narrowed, this is the assertion to revisit.
+ok(fired(`cat <<PY
+gh pr create --title x --body "${KEY}"
+PY`), 'a bare publish line in an unquoted body is still reported (over-scan, never under)');
+
+console.log('\nFIRES — the body is still SCANNED, only the classification changed:');
+// The fix removes quoted bodies from CLASSIFICATION only. A heredoc body is very
+// often the thing being published, so it must still be searched for IDs — otherwise
+// the fix would hand every leak a way to buy silence.
+ok(fired(`gh issue create --title x --body "$(cat <<'EOF'
+Findings: ${KEY}
+EOF
+)"`), 'a real publish whose payload is a quoted heredoc carrying an index key');
+
 // ── NOTHING TO FIND ─────────────────────────────────────────────────────────
 // The inverse control: real publishes, correctly silent. Without these a guard that
 // simply stopped flagging would still satisfy every case above except the FIRE block.

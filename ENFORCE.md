@@ -51,7 +51,9 @@ User message
   ↓
 ⑨ PreToolUse:Bash — catalogue-id-leak-guard.js
    Fires on `gh issue|pr` and `git commit` — asked of each segment's EXECUTABLE text
-   (quoted arguments and `#` comments removed), so a mention publishes nothing, while
+   (quoted arguments, `#` comments, and QUOTED heredoc bodies removed — a `<<'X'` body
+   is handed to a program verbatim, so no line of it can be the publish; an UNQUOTED
+   `<<X` body still substitutes and is left alone), so a mention publishes nothing, while
    wrappers like `sudo`/`env` and `git -C <repo> commit` still count. `git commit-tree`
    and `git commit-graph` are not `git commit`. Exempt: the private locations
    (~/.anvideck and ~/.claude/projects/<slug>/memory/), which carry entry IDs by design
