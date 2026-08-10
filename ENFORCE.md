@@ -1,6 +1,6 @@
 # Enforcement Chain — How Grounding Is Actually Enforced
 
-Ten hooks/mechanisms fire at different points. No single point of failure.
+Eleven hooks/mechanisms fire at different points. No single point of failure.
 
 ```
 Session starts
@@ -61,7 +61,17 @@ User message
    "State the finding in plain language; keep the ID in the private FIX: field."
 
   ↓
-⑩ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
+⑩ PreToolUse:Bash — shell-rewrite-guard.js
+   Fires on every Bash command. Warns when THIS shell (zsh) rewrites an argument
+   before the command sees it: a bare `$VAR` in a `for` list or `set --` (iterates
+   ONCE, unlike bash), `$var[…]` in a quoted pattern (array subscripting), or a glob
+   reaching a flag value unquoted (aborted by `nomatch`). Nine instances of this class
+   are catalogued and almost all failed toward "nothing found" — the answer that
+   requires no action. Silent on the remedies: `while IFS= read -r`, a `bash -c`
+   wrapper, and `$(…)`, which DOES split in zsh.
+
+  ↓
+⑪ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
    Enforces the base-layer Provenance Check. Fires when a tool returns data from a
    surface that isn't scoped to this project (account-wide artifact gallery, web,
    any MCP server, or a file read in ANOTHER project's territory). Injects a one-line
@@ -77,6 +87,7 @@ User message
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
 | Catalogue ID leak guard | PreToolUse:Bash (`gh issue\|pr`, `git commit` — outside the private locations) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
+| Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
 | Provenance guard | PostToolUse:Artifact\|WebFetch\|WebSearch\|mcp__*\|Read\|Grep\|Glob (non-project-scoped results) | `~/.claude/hooks/provenance-guard.js` |
