@@ -15,11 +15,15 @@
 // Fires a NON-BLOCKING reminder (never blocks — blocking Bash is too disruptive)
 // when a Bash command is an outward-facing publish:
 //   - `gh issue|pr create|edit|comment ...`, or
-//   - `git commit ...`
+//   - `git [-C dir] commit ...`
 // AND the text contains a high-signal catalogue index key.
 //
 // Scope decisions (precision over recall — a nagging guard gets ignored):
-//   - SKIPS ~/.anvideck commits, which legitimately carry entry IDs.
+//   - The publish question is asked of each SEGMENT's leading invocation, never of
+//     the command string as a whole, and `commit` is anchored so that the separate
+//     commands `git commit-tree` / `git commit-graph` cannot answer it (#154).
+//   - SKIPS the private locations — the knowledge store and any project's memory
+//     namespace — which legitimately carry entry IDs.
 //   - Two detectors, both high-precision:
 //     1. The unambiguous index-key form `name[:#]NNN` ("vyapti:184") — works with
 //        zero catalogue access, catches cross-repo/foreign-project IDs.
@@ -114,16 +118,76 @@ process.stdin.on('end', () => {
     if (!command) process.exit(0);
 
     // Only outward-facing publishing commands.
-    const isGh = /\bgh\s+(issue|pr)\s+(create|edit|comment)\b/.test(command);
-    const isCommit = /\bgit\s+commit\b/.test(command);
+    //
+    // The question is asked of the command's EXECUTABLE text — what the shell would
+    // actually run — never of the raw string. A string may merely MENTION a publish
+    // in a quoted argument, a `#` comment, or a heredoc body, and scanning text that
+    // is going nowhere for IDs is a warning about nothing, which is the one thing an
+    // advisory guard cannot afford.
+    //
+    // Removing what CANNOT be a command is the right shape here; requiring the
+    // publish to come FIRST is not. Anchoring looks equivalent and quietly drops
+    // every transparent wrapper — `sudo git commit`, `time git commit`,
+    // `env FOO=1 git commit` all publish, and all stop looking like publishes the
+    // moment you demand the leading word. Those land on the permissive side, so the
+    // narrowing would be invisible. Stripping is also list-free: it needs no roster
+    // of wrapper programs to stay current.
+    //
+    // An unterminated quote strips nothing — the patterns require their closing
+    // delimiter — so a malformed command degrades toward FIRING, which is the safe
+    // direction for a guard whose stated policy is to over-warn.
+    const executableText = (s) => s
+      .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, ' ')   // quoted arguments — text, not commands
+      .replace(/(^|\s)#.*$/, '$1');                 // a shell comment, at a word boundary
+    // Split on the shell's own command separators so a publish behind `&&`, `;`, a
+    // pipe, a newline, or a `$( )` substitution is still seen. Splitting only ever
+    // produces more pieces, and no separator character can occur inside the
+    // invocations below, so it cannot lose a real publish.
+    const segments = command.split(/(?:\|\||&&|[\n;|&()])+/).map(executableText);
+    // `commit` is guarded against a following word character or hyphen because
+    // `git commit-tree` and `git commit-graph` are DIFFERENT commands that publish
+    // nothing — `\b` sits happily between `commit` and `-` and matched both. The
+    // pre-merge gate builds its off-trunk control with `commit-tree`, so the guard
+    // misfired inside the very workflow it lives alongside (#154). git's global
+    // options sit between the program and the subcommand, so `git -C <repo> commit`
+    // needs them skipped explicitly — it publishes exactly as much as the bare form.
+    const GH_PUBLISH = /\bgh\s+(?:issue|pr)\s+(?:create|edit|comment)(?![\w-])/;
+    const GIT_COMMIT = /\bgit\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace)(?:=|\s+)\S+\s+|--\S+\s+)*commit(?![\w-])/;
+    const isGh = segments.some(s => GH_PUBLISH.test(s));
+    const isCommit = segments.some(s => GIT_COMMIT.test(s));
     if (!isGh && !isCommit) process.exit(0);
 
-    // Skip the private knowledge repo — entry IDs belong there (e.g. the
-    // "📝 catalogues: [entry IDs] …" commits do `cd ~/.anvideck && git commit`).
-    const anvideck = path.join(os.homedir(), '.anvideck');
-    const cwdInPrivate = cwd === anvideck || cwd.startsWith(anvideck + path.sep);
-    const cmdTouchesPrivate = /\.anvideck\b/.test(command);
-    if (cwdInPrivate || cmdTouchesPrivate) process.exit(0);
+    // Skip the private locations — where entry IDs belong. Both questions are
+    // answered from this one list: where the command RUNS, and what it NAMES.
+    // Splitting them was the defect. `~/.anvideck` had both tests hard-coded
+    // separately while `~/.claude/projects/<slug>/memory/` had neither — and memory
+    // files carry entry IDs deliberately, because that is where the private→public
+    // link is supposed to be written, so a session note citing them was reported as
+    // a leak into public content (#154).
+    //
+    // Matched by SHAPE, so the tilde and expanded forms both hit and no project
+    // slug is ever named.
+    //
+    // Where the command RUNS exempts either kind. What the command NAMES exempts
+    // only a `git` command, never a `gh` one: a path in a git command can identify
+    // the repository being committed to (`git -C ~/.anvideck commit …`), so it says
+    // something about the target — but `gh` publishes to GitHub by construction, so
+    // a private path in its body is not the target, it is TEXT BEING PUBLISHED, and
+    // that is precisely the leak. Extending the old blanket text test to memory
+    // would have let any publish buy silence by naming a private directory in its
+    // body; base already lost a real `gh` leak that way for the store.
+    //
+    // Each name must END at a path boundary — a separator, whitespace, a quote, or
+    // the end of the text. A trailing-word-character test is not enough: it admits
+    // `~/work/.anvideck.bak`, a directory that is not the store, and admitting it
+    // hands that directory the store's exemption.
+    const ENDS_PATH_SEGMENT = `(?=[\\\\/]|[\\s"'\`]|$)`;
+    const PRIVATE_LOCATIONS = [
+      new RegExp(`\\.anvideck${ENDS_PATH_SEGMENT}`),                                          // the knowledge store
+      new RegExp(`\\.claude[\\\\/]projects[\\\\/][^\\\\/\\s"'\`]+[\\\\/]memory${ENDS_PATH_SEGMENT}`), // any project's memory
+    ];
+    const inPrivate = (text) => PRIVATE_LOCATIONS.some(rx => rx.test(text));
+    if (inPrivate(cwd) || (!isGh && inPrivate(command))) process.exit(0);
 
     // The full outward-facing text: the command string PLUS any file it publishes from.
     const scanned = command + referencedFileText(command, cwd);
