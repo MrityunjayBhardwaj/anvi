@@ -172,7 +172,11 @@ ok "$(head_msg)" "📓 auto-checkpoint: anvi — hetvabhasa.md (+H903)" "unchang
 echo "TEST 10 — a name that is not a project name never becomes a pathspec or a file"
 # The project name is used to build BOTH a git pathspec and a filename, so it is
 # validated rather than trusted.
-for bad in ".." "../escape" "a/b" "" "x;rm -rf /"; do
+# The flag-shaped names are here because the charset ALLOWED them (#250): a hyphen has
+# to stay legal inside a name — real projects are spelled with it — so `--project` and
+# `--` passed as names, and a lease was written for a project that cannot exist while
+# the real one went unprotected. A LEADING hyphen is what makes it a flag.
+for bad in ".." "../escape" "a/b" "" "x;rm -rf /" "--project" "--" "-" "-x"; do
   rc=0; lease acquire "$bad" >/dev/null 2>&1 || rc=$?
   ok "$([ "$rc" != 0 ] && echo rejected || echo accepted)" "rejected" "rejected as a project name: [$bad]"
 done
@@ -267,6 +271,31 @@ printf '%s\n' "$INWINDOW" >> "$LEDGER"          # timestamp only — no sha, no 
 ok "$(lease swept anvi | grep -c "$INWINDOW")" "0" "an in-window line with no sha is dropped on parse"
 ok "$(lease swept anvi | grep -c 'undefined')" "0" "and never reported as a sweep with an undefined sha"
 lease clear-swept anvi
+
+echo "TEST 15 — a flag-shaped argument is refused, and the message names the positional form"
+# `harvest-lease acquire --project anvi` leased a project called `--project`, printed
+# success, exited 0, and left the real one unprotected (#250). Two guards refuse it
+# now — the module's name validator (TEST 10) and the CLI's argument-shape check —
+# because failure modes that converge on the permissive answer must each fail closed
+# on their own. They cannot be told apart by EXIT CODE: delete the CLI check and the
+# module still refuses, so the status stays 1 and an exit-code case would pass over a
+# missing guard. The MESSAGE is the discriminator, so that is what is asserted here.
+CLI15="${CLI:-$ROOT/bin/anvi-tools.cjs}"
+F15="$T/leasehome"; mkdir -p "$F15/.claude/hooks"
+cli15(){ HOME="$F15" CLAUDE_DIR="$F15/.claude" node "$CLI15" harvest-lease "$@" 2>&1; }
+cli15_rc(){ HOME="$F15" CLAUDE_DIR="$F15/.claude" node "$CLI15" harvest-lease "$@" >/dev/null 2>&1; echo $?; }
+
+ok "$(cli15_rc acquire --project)" "1" "the CLI refuses a flag-shaped project argument"
+ok "$(cli15 acquire --project | grep -c 'is not a project name')" "1" "and says what is wrong with it"
+ok "$(cli15 acquire --project | grep -c 'positional')" "1" "and names the form the caller wanted"
+ok "$(cli15 acquire --project | grep -c 'could not acquire')" "0" "rather than the generic failure, which does not say what to type"
+ok "$(cli15 live)" "" "and nothing was leased for it"
+# A guard that always refuses is indistinguishable from one that works, so the same
+# position has to succeed for a real name.
+ok "$(cli15_rc acquire realproj)" "0" "a real name from the same position still succeeds"
+ok "$(cli15 live)" "realproj" "and that is the lease that exists"
+cli15 release realproj >/dev/null
+ok "$(cli15 live)" "" "released again, leaving no state behind for later cases"
 
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
