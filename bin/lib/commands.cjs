@@ -265,15 +265,31 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   }
 
   const config = loadConfig(cwd);
+  const planningRel = planningRootRelative(cwd);
+
+  // Durability is a fact about the TREE, not about which branch this call took, so it
+  // is answered once — before any early return — and every outcome carries the answer.
+  // A field that is `false` on one outcome and ABSENT on three is not a weaker signal
+  // than a wrong one: `undefined` is falsy, so a caller branching on it calls a tree
+  // non-durable in exactly the case where the project repo just committed it.
+  const legacy = usesLegacyPlanning(cwd);
+  const ignored = legacy && isGitIgnored(cwd, planningRel);
+  // For a legacy tree, ASK GIT WHAT IT TRACKS. An ignore rule is not the question:
+  // a tree nothing ignores and nothing has ever committed is held nowhere, and a
+  // check reading only `.gitignore` calls it durable — the exact error this project
+  // documents against itself.
+  const heldByProjectRepo = () =>
+    execGit(cwd, ['ls-files', '--', planningRel]).stdout.trim().length > 0;
+  const treeDurability = () => (!legacy ? true : ignored ? false : heldByProjectRepo());
 
   // Check commit_docs config
   if (!config.commit_docs) {
-    const result = { committed: false, hash: null, reason: 'skipped_commit_docs_false' };
+    // The preference is being honoured; whether anything holds these documents is a
+    // separate question, and it is answered rather than left to the caller to assume.
+    const result = { committed: false, hash: null, reason: 'skipped_commit_docs_false', durable: treeDurability(), planning_root: planningRel };
     output(result, raw, 'skipped');
     return;
   }
-
-  const planningRel = planningRootRelative(cwd);
 
   // A migrated tree lives under `.anvi/`, a symlink into the ~/.anvideck store —
   // its own git repo, committed and pushed by the checkpoint hook. The project
@@ -295,8 +311,11 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
       `anvi: ${planningRel}/ is gitignored — these documents are being committed NOWHERE.\n` +
       `      The project repo skips them and the store does not hold them.\n` +
       `      Migrate to .anvi/project_management to make them durable: anvi update\n`);
+    // `skipped` is the word for a preference being honoured. This is knowledge with no
+    // home, which is its opposite, so it gets its own word on the raw surface too —
+    // the raw form is what a workflow captures, and there the two were indistinguishable.
     const result = { committed: false, hash: null, reason: 'skipped_gitignored', durable: false, planning_root: planningRel };
-    output(result, raw, 'skipped');
+    output(result, raw, 'nowhere');
     return;
   }
 
@@ -318,11 +337,14 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   const commitResult = execGit(cwd, commitArgs);
   if (commitResult.exitCode !== 0) {
     if (commitResult.stdout.includes('nothing to commit') || commitResult.stderr.includes('nothing to commit')) {
-      const result = { committed: false, hash: null, reason: 'nothing_to_commit' };
+      // Nothing to add means what was already there is already committed — but that is
+      // measured, not assumed, because an empty tree reaches this branch too.
+      const result = { committed: false, hash: null, reason: 'nothing_to_commit', durable: treeDurability(), planning_root: planningRel };
       output(result, raw, 'nothing');
       return;
     }
-    const result = { committed: false, hash: null, reason: 'nothing_to_commit', error: commitResult.stderr };
+    // git failed for some other reason, so nothing was written by this call.
+    const result = { committed: false, hash: null, reason: 'nothing_to_commit', durable: treeDurability(), planning_root: planningRel, error: commitResult.stderr };
     output(result, raw, 'nothing');
     return;
   }
@@ -330,7 +352,9 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   // Get short hash
   const hashResult = execGit(cwd, ['rev-parse', '--short', 'HEAD']);
   const hash = hashResult.exitCode === 0 ? hashResult.stdout : null;
-  const result = { committed: true, hash, reason: 'committed' };
+  // The project repo now holds these documents — the one outcome whose durability is
+  // established by this call rather than measured from the tree it found.
+  const result = { committed: true, hash, reason: 'committed', durable: true, planning_root: planningRel };
   output(result, raw, hash || 'committed');
 }
 

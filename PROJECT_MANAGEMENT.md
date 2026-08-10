@@ -175,14 +175,28 @@ since a date", it is not a skip — it is a disablement wearing a skip's vocabul
 
 "The store already holds this" and "nothing holds this" are opposites.
 
-| Reason | Meaning | Durable |
-|--------|---------|---------|
-| `durable_in_store` | tree is under `.anvi/`; the store commits and pushes it | yes |
-| `skipped_gitignored` | legacy tree, ignored by the project repo; nothing holds it | **no** |
-| `committed` | legacy tree, tracked; the project repo holds it | yes |
+All five terminal outcomes, with the word each prints under `--raw`:
 
-Reporting the first two both as `skipped` is what let the gap survive
-(`bin/lib/commands.cjs:298`).
+| Reason | Raw word | Meaning | Durable |
+|--------|----------|---------|---------|
+| `durable_in_store` | `store` | tree is under `.anvi/`; the store commits and pushes it | yes |
+| `committed` | the hash | legacy tree, tracked; this call put it in the project repo | yes |
+| `nothing_to_commit` | `nothing` | nothing new to write; measured against what git tracks | measured |
+| `skipped_commit_docs_false` | `skipped` | `commit_docs` is off — a preference being honoured | measured |
+| `skipped_gitignored` | `nowhere` | legacy tree, ignored by the project repo; nothing holds it | **no** |
+
+Reporting the two skips both as `skipped` is what let the gap survive. `skipped`
+now means only "a preference is being honoured"; documents held nowhere say
+`nowhere`.
+
+**`durable` is answered on every outcome, and for a legacy tree it is measured.**
+A field that is `false` on one outcome and absent on three is not a weaker
+signal than a wrong one — `undefined` is falsy, so a caller branching on it
+calls a tree non-durable in exactly the case where the project repo just
+committed it. Where the answer is *measured*, it comes from what git actually
+tracks, never from the ignore rule alone: a tree nothing ignores and nothing
+has ever committed is held nowhere, and a check reading only `.gitignore`
+calls it durable.
 
 ---
 
