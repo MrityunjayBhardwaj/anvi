@@ -150,6 +150,74 @@ ok(/\bnine\b|\bten\b|\d+ instances/.test(msg), false,
    'and carries no hand-synced instance count');
 ok(/iterates ONCE/.test(msg), true, 'states the concrete consequence, not just "unquoted"');
 
+console.log('\nGROUP 7 — heredoc bodies are data, but not uniformly (#253)');
+// Measured in both shells, not reasoned about — and the intuitive reading is wrong in
+// the dangerous direction. A body is never PATHNAME-expanded, either form, so the glob
+// rule is always a false positive there. But an UNQUOTED body IS parameter-expanded and
+// zsh really does subscript inside it, so that one rule must keep firing. Excluding
+// both bodies wholesale would put a false negative in a guard against silent failure.
+const QGLOB = "cat <<'PROBES'\ngrep -rn X --include=*.js .\nPROBES";
+const UGLOB = 'cat <<PROBES\ngrep -rn X --include=*.js .\nPROBES';
+silent(QGLOB, 'quoted heredoc: a glob is literal text — the reported false positive');
+silent(UGLOB, 'unquoted heredoc: still no pathname expansion, so still silent');
+silent("cat <<'P'\nfor x in $LIST; do echo $x; done\nP", 'quoted heredoc: no loop this shell runs');
+silent('cat <<P\nfor x in $LIST; do echo $x; done\nP', 'unquoted heredoc: still no loop this shell runs');
+silent("cat <<'P'\ngrep -cE \"^## $pre[0-9]+\" f\nP", 'quoted heredoc: $pre[ is literal');
+// The one that must NOT be excluded. zsh expands parameters in an unquoted body and
+// subscripts there — measured: `$var[1]` prints `h`. Silence here would be a false
+// negative introduced by the fix for a false positive.
+fires('cat <<P\ngrep -cE "^## $pre[0-9]+" f\nP',
+      'UNQUOTED heredoc: $pre[ really does subscript, so it must still fire');
+// A body exclusion is the same SHAPE as the position-anchored exemption that had to be
+// deleted in #249 — it can swallow everything after it. These pin that it does not.
+fires("cat <<'P'\nharmless text\nP\nL=$(cat f); for x in $L; do echo $x; done",
+      'a risky loop AFTER the terminator is still reported');
+fires('grep -rn X --include=*.js . ; cat <<\'P\'\nharmless\nP',
+      'a risky command BEFORE the heredoc is still reported');
+// `<<<` is a herestring, not a heredoc. It is also this guard's own recommended
+// remedy, so mistaking it for an introducer would swallow the rest of every command
+// that takes the advice.
+fires('while IFS= read -r x; do :; done <<< "$list"\nL=$(cat f); for x in $L; do echo $x; done',
+      'a herestring is not a heredoc — the loop after it is still reported');
+silent("cat <<-'P'\n\tgrep -rn X --include=*.js .\n\tP", 'the <<- tab-stripped form is recognised too');
+// ⚠ The case above does NOT witness the tab-stripping: if the tabs are not stripped the
+// terminator is never matched, the body runs to the end of the command, and the glob is
+// still covered — so it stays silent for the WRONG reason. What discriminates is text
+// AFTER a tab-indented terminator, which only gets scanned if the body actually ended.
+fires("cat <<-'P'\n\tharmless\n\tP\nL=$(cat f); for x in $L; do echo $x; done",
+      '<<- terminator is recognised WITH its tabs, so the command after it is still scanned');
+// An introducer inside quotes is text, not an introducer. Without that check it opens a
+// body that never terminates and swallows the rest of the command — the same
+// swallow-everything-after shape as the position-anchored exemption deleted in #249.
+fires("echo 'usage: cmd <<EOF'\nL=$(cat f); for x in $L; do echo $x; done",
+      'a quoted <<EOF is text — the loop after it is still reported');
+
+console.log('\nGROUP 8 — the pure predicates, reached directly (#254)');
+// isArrayLike cannot be handed a non-identifier through the runtime: the scan that
+// feeds it constrains the shape. The refusal is still asserted, because the edit that
+// would make it reachable — widening that scan — is the one this file invites, and an
+// untested guard clause is what #249 removed from here.
+const G = require(HOOK);
+ok(G.isArrayLike('argv', 'x'), true, 'argv is an array name');
+ok(G.isArrayLike('arr', 'arr=(a b c)'), true, 'a name the command assigns as arr=(…) is an array');
+ok(G.isArrayLike('arr', 'echo hi'), false, 'the same name with no such assignment is not');
+// The old code stripped non-word characters, which SHORTENS the name and BROADENS the
+// pattern: "@#" became "" and `\b=\(` matched any array assignment anywhere, returning
+// "array-like" — i.e. silence. Refusing is the reporting direction.
+ok(G.isArrayLike('@#', 'x=(1)'), false, 'a name that would strip to EMPTY is refused, not widened');
+ok(G.isArrayLike('a-b', 'x=(1)'), false, 'a name that would strip to a different name is refused too');
+// ⚠ Neither case above witnesses the REFUSAL: with it removed, `@#` and `a-b` are
+// interpolated as literal text and the pattern simply fails to match, so both still
+// return false for a different reason. Only a name carrying regex METACHARACTERS
+// distinguishes them — which is the whole hazard, since interpolating one builds a
+// pattern that matches things the name does not.
+ok(G.isArrayLike('.*', 'x=(1)'), false, 'a name of regex metacharacters is refused, not interpolated into the pattern');
+// And one that would build an INVALID pattern: unrefused, the RegExp constructor throws,
+// the runtime's blanket catch swallows it, and the guard goes silent on the whole command.
+let threw = false;
+try { G.isArrayLike('(', 'x=(1)'); } catch { threw = true; }
+ok(threw, false, 'a name that would build an invalid pattern is refused rather than thrown');
+
 console.log('\nGROUP 6 — a hook must never block the session');
 // Exit 0 on every path, including malformed input, and no output that could be read
 // as a refusal.
