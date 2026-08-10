@@ -163,7 +163,8 @@ The everyday loop:
 | `/anvi:rq` | Surface the right questions for the current context |
 | `/anvi:lens` | Map all lenses — active, sister, opposing, parent |
 | `/anvi:orient` | Where am I? What's known / unknown / assumed? |
-| `/anvi:teach` | Extract and persist a lesson to the catalogues |
+| `/anvi:sess-wrap` | Harvest the session's lessons into the catalogues |
+| `/anvi:currency` | Which catalogue entries have drifted from the code they cite |
 | `/anvi:ground` | Establish three-layer grounding (catalogues → Ground Truth → source) |
 
 **⚡ Quick execution**

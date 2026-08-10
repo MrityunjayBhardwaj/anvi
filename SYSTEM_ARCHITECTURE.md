@@ -176,15 +176,15 @@ Complete structural map of the cognitive operating system.
          │ invoked via
          ▼
 ╔══════════════════════════════════════════════════════════════════════╗
-║                    SKILL LAYER (49 /anvi: commands)                  ║
+║                 SKILL LAYER — the /anvi: command set                 ║
 ║                                                                      ║
-║  /anvi              /anvi:debug         /anvi:plan-phase            ║
-║  /anvi:init         /anvi:execute-phase /anvi:verify-work           ║
-║  /anvi:session      /anvi:do            /anvi:progress              ║
-║  /anvi:rq           /anvi:lens          /anvi:assume                ║
-║  /anvi:why          /anvi:teach         /anvi:contrast              ║
-║  /anvi:reframe      /anvi:blind-spots   /anvi:boundary              ║
-║  /anvi:trace        ...and 30+ more                                 ║
+║  /anvi              /anvi:debug         /anvi:plan-phase             ║
+║  /anvi:init         /anvi:execute-phase /anvi:verify-work            ║
+║  /anvi:session      /anvi:do            /anvi:progress               ║
+║  /anvi:rq           /anvi:lens          /anvi:orient                 ║
+║  /anvi:explore      /anvi:sess-wrap     /anvi:currency               ║
+║  /anvi:ground       /anvi:audit         /anvi:ship                   ║
+║  /anvi:help         — see /anvi:help for the full set                ║
 ╚══════════════════════════════════════════════════════════════════════╝
          │ backed by
          ▼
