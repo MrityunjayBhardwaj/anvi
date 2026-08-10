@@ -218,6 +218,30 @@ let threw = false;
 try { G.isArrayLike('(', 'x=(1)'); } catch { threw = true; }
 ok(threw, false, 'a name that would build an invalid pattern is refused rather than thrown');
 
+console.log('\nGROUP 9 — the heredoc span logic, asserted directly');
+// Reached directly so the spans can be checked independently of the rules that consume
+// them — and so the export earns its place rather than existing only for one predicate.
+const spans = c => { const st = G.quoteStates(c); return G.heredocStates(c, st).join(''); };
+ok(spans("cat <<'A'\nbody\nA\ntail").includes('1111'), true, 'a quoted body is marked inert');
+ok(/2222/.test(spans('cat <<A\nbody\nA\ntail')), true, 'an unquoted body is marked expansion-capable');
+ok(spans("cat <<'A'\nbody\nA\ntail").endsWith('0000'), true, 'the terminator and everything after it are OUTSIDE the body');
+ok(/^0+$/.test(spans('echo hi')), true, 'a command with no heredoc marks nothing');
+// A body with no terminator runs to the end, which is what the shell does too — the
+// rest of the string really is the document, so excluding it is correct rather than
+// over-broad.
+ok(spans('cat <<EOF\nstuff\nmore').endsWith('2222'), true, 'an unterminated body extends to the end, as the shell reads it');
+// ⚠ KNOWN LIMIT, pinned so it stays the SAFE direction. Two heredocs introduced on one
+// line (`cmd <<A <<B`) is legal shell; only the first body is recognised here, so the
+// second is still scanned as command text. That means this shape keeps the original
+// false positive — it never produces a false negative, which is the direction that
+// would matter. If this case is ever fixed, this assertion is the one to update.
+{
+  const c = 'cmd <<A <<B\nbodyA\nA\nbodyB\nB';
+  const s = spans(c);
+  ok(s[c.indexOf('bodyA')], '2', 'the FIRST body on a shared introducer line is recognised');
+  ok(s[c.indexOf('bodyB')], '0', 'the second is NOT — so it over-scans, and never under-scans');
+}
+
 console.log('\nGROUP 6 — a hook must never block the session');
 // Exit 0 on every path, including malformed input, and no output that could be read
 // as a refusal.
