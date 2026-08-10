@@ -232,6 +232,42 @@ ok "$(run_acquire | grep -c 'lease held')" "1" "and reports the lease as held"
 rm -f "$FAKE/.claude/hooks/anvideck-checkpoint.js" "$FAKE/.claude/hooks/anvi-harvest-lease.js"
 ok "$(acquire_rc)" "0" "no installed hook at all: acquire exits 0, nothing to warn about"
 
+echo "TEST 14 — the swept ledger is bounded, and stale lines are never adopted"
+# Only a wrap clears the ledger, and most sweeps are never followed by one — in the
+# store's history 174 of 242 entry-carrying sweeps were the only commit those entries
+# got. Unbounded, the file would eventually make a wrap report weeks of unrelated
+# sweeps as its own split: a false claim in the one artifact this change exists to
+# make trustworthy.
+lease clear-swept anvi; lease clear-swept basher
+printf '\n## H910: a fresh sweep\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+drive
+ok "$(lease swept anvi | grep -c .)" "1" "the fresh sweep is recorded"
+# Hand-plant a line dated well outside the window, as a crashed session would leave.
+LEDGER="$CLAUDE/anvi-harvest/anvi.swept"
+OLD="$(node -e "console.log(new Date(Date.now()-3*86400*1000).toISOString())")"
+printf '%s deadbeef H001 H002\n' "$OLD" >> "$LEDGER"
+ok "$(grep -c . "$LEDGER")" "2" "the stale line is physically present in the file"
+ok "$(lease swept anvi | grep -c .)" "1" "but reads back filtered — the stale sweep is not adopted"
+ok "$(lease swept anvi | grep -c deadbeef)" "0" "and specifically not the three-day-old one"
+# A later sweep must PRUNE it, so the file cannot grow without bound even unread.
+printf '\n## H911: a later sweep\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+drive
+ok "$(grep -c deadbeef "$LEDGER")" "0" "a later sweep pruned the stale line from disk"
+ok "$(lease swept anvi | grep -c .)" "2" "while both in-window sweeps are kept"
+# Malformed lines must be dropped rather than mis-reported as sweeps. TWO shapes,
+# because they are answered by different code and only one of them is answered by the
+# window: an unparseable date yields NaN, and NaN fails the window's own comparison,
+# so the first shape does NOT exercise the parse guard. The second — a valid,
+# in-window timestamp with no sha — passes the window and can only be caught on
+# parse, so it is the shape that actually pins that guard.
+printf 'not-a-timestamp whatever H999\n' >> "$LEDGER"
+ok "$(lease swept anvi | grep -c H999)" "0" "an unparseable date is dropped (via the window, not the parse guard)"
+INWINDOW="$(node -e "console.log(new Date(Date.now()-60000).toISOString())")"
+printf '%s\n' "$INWINDOW" >> "$LEDGER"          # timestamp only — no sha, no ids
+ok "$(lease swept anvi | grep -c "$INWINDOW")" "0" "an in-window line with no sha is dropped on parse"
+ok "$(lease swept anvi | grep -c 'undefined')" "0" "and never reported as a sweep with an undefined sha"
+lease clear-swept anvi
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]

@@ -88,7 +88,7 @@ window; committing early makes it small in the first place, and it makes the
 "is it SAFE?" answer above true when you give it rather than a promise about
 step 3.
 
-    git -C ~/.anvideck add -- projects/<project>/          # scope it; never -A
+    git -C ~/.anvideck add -- projects/<project>/.anvi/    # catalogues only; never -A
     git -C ~/.anvideck commit -m "<what was learned, and why>"
     git -C ~/.anvideck push
 
@@ -106,6 +106,12 @@ from either commit. Then clear the record and release the lease, in that order:
 
 If the commit fails, leave both alone — the record is the only evidence the split
 happened, and the lease is still protecting work that is still uncommitted.
+
+Stage `.anvi/` only, not the whole project directory. The memory backup mirror
+lands under the same directory and is written by the Stop hook, not by you; it
+needs no reasoning attached, and folding it into this commit makes the message
+describe files it is not about. Leave it to the checkpoint hook, which is what
+it is for.
 </step>
 
 <step name="2_update_memory">

@@ -121,27 +121,67 @@ function liveLeases(nowMs) {
   return live.sort();
 }
 
+// How far back a recorded sweep still counts as "taken out from under the harvest
+// I am writing up now". The ledger is only cleared by a wrap, and most sweeps are
+// never followed by one — in the store's history 174 of 242 entry-carrying sweeps
+// were the only commit those entries ever got. Without a window the file grows
+// forever and a wrap eventually reports weeks of unrelated sweeps as its own split,
+// which is worse than reporting nothing: the one artifact this exists to make
+// trustworthy becomes the one making a false claim. A day comfortably covers a
+// session and excludes everything that is somebody else's story.
+const SWEPT_WINDOW_SECONDS = Number(process.env.ANVI_SWEPT_WINDOW_SECONDS) || 86400;
+
+function parseSweptLine(line) {
+  const [stamp, sha, ...ids] = line.trim().split(/\s+/);
+  const at = Date.parse(stamp);
+  // Drop rather than mis-report. The two halves are not equally load-bearing, and
+  // mutating them says so: removing the `!sha` check lets an in-window line with no
+  // sha through, and the wrap then reports a sweep whose commit is `undefined`.
+  // Removing the NaN check changes nothing measurable, because an unparseable date
+  // yields NaN and NaN fails the window comparison below on its own. It is kept
+  // deliberately anyway: that is a subtle dependency on `NaN >= 0` being false, and
+  // a future edit to the window predicate would let malformed lines through with no
+  // test to notice. Redundant here, load-bearing the moment the window changes.
+  if (!sha || Number.isNaN(at)) return null;
+  return { at, sha, ids };
+}
+
+function withinWindow(e, nowMs) {
+  const age = (nowMs - e.at) / 1000;
+  return age >= 0 && age < SWEPT_WINDOW_SECONDS;
+}
+
 // Record that the hook committed catalogue entries for a project without the
-// author's message. Append-only: several sweeps can precede one wrap commit, and
-// the wrap needs all of them to describe the split honestly.
-function recordSwept(project, sha, ids) {
+// author's message. Append-only within the window: several sweeps can precede one
+// wrap commit, and the wrap needs all of them to describe the split honestly.
+// Pruning happens here rather than on read, so the file cannot grow without bound
+// even if nothing ever reads it.
+function recordSwept(project, sha, ids, nowMs) {
   if (!isValidProject(project) || !ids || !ids.length) return false;
+  const now = nowMs === undefined ? Date.now() : nowMs;
   try {
     fs.mkdirSync(HARVEST_DIR, { recursive: true });
-    fs.appendFileSync(sweptPath(project), `${sha} ${ids.join(' ')}\n`);
+    const kept = rawSwept(project).filter(e => withinWindow(e, now));
+    kept.push({ at: now, sha, ids });
+    fs.writeFileSync(sweptPath(project),
+      kept.map(e => `${new Date(e.at).toISOString()} ${e.sha} ${e.ids.join(' ')}\n`).join(''));
     return true;
   } catch { return false; }
 }
 
-// [{sha, ids}] — what was swept since the last clear. Empty when nothing was.
-function readSwept(project) {
-  if (!isValidProject(project)) return [];
+function rawSwept(project) {
   let raw;
   try { raw = fs.readFileSync(sweptPath(project), 'utf8'); } catch { return []; }
-  return raw.split('\n').filter(Boolean).map(line => {
-    const [sha, ...ids] = line.trim().split(/\s+/);
-    return { sha, ids };
-  }).filter(e => e.sha);
+  return raw.split('\n').filter(Boolean).map(parseSweptLine).filter(Boolean);
+}
+
+// [{sha, ids}] — what was swept since the last clear, within the window. Empty when
+// nothing was. Filtered on read as well as pruned on write: a ledger left behind by
+// a session that crashed before its wrap must not be adopted by the next one.
+function readSwept(project, nowMs) {
+  if (!isValidProject(project)) return [];
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  return rawSwept(project).filter(e => withinWindow(e, now));
 }
 
 // Cleared by the wrap AFTER its commit names the pre-swept entries — never before,
@@ -153,7 +193,7 @@ function clearSwept(project) {
 }
 
 module.exports = {
-  HARVEST_DIR, LEASE_SECONDS, isValidProject,
+  HARVEST_DIR, LEASE_SECONDS, SWEPT_WINDOW_SECONDS, isValidProject,
   acquire, release, liveLeases, recordSwept, readSwept, clearSwept,
 };
 
