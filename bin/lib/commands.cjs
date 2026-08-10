@@ -278,8 +278,14 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   // a tree nothing ignores and nothing has ever committed is held nowhere, and a
   // check reading only `.gitignore` calls it durable — the exact error this project
   // documents against itself.
-  const heldByProjectRepo = () =>
-    execGit(cwd, ['ls-files', '--', planningRel]).stdout.trim().length > 0;
+  // Ask HEAD, not the index. `git ls-files` would count files THIS call just staged,
+  // so a commit that then failed would report the tree as held by a repo that never
+  // committed it — the same over-claim, one branch further down. An unborn HEAD (a
+  // repo with no commits) fails the command, which is correctly "holds nothing".
+  const heldByProjectRepo = () => {
+    const r = execGit(cwd, ['ls-tree', '-r', '--name-only', 'HEAD', '--', planningRel]);
+    return r.exitCode === 0 && r.stdout.trim().length > 0;
+  };
   const treeDurability = () => (!legacy ? true : ignored ? false : heldByProjectRepo());
 
   // Check commit_docs config

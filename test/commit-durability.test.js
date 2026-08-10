@@ -124,6 +124,32 @@ console.log('\nGROUP 2 — the answer comes from the tree, not from which branch
 ok(json(legacyLoose()).durable === false,
   'a tree nothing ignores and nothing has committed is NOT durable');
 
+console.log('\nGROUP 2b — a FAILED commit leaves files staged, and staged is not held');
+// The durability branches downstream of `git add` run with this call's own files in
+// the index. Measuring the index would report the tree as held by a repo that never
+// committed it — the same over-claim this file exists to prevent, one branch further
+// down. A pre-commit hook that refuses is the cheapest way to reach that branch.
+{
+  const dir = repo((d, git) => {
+    write(d, '.planning/ROADMAP.md', 'x');
+    write(d, 'README.md', 'hi');
+    git('add', 'README.md'); git('commit', '-qm', 'init');
+    const hook = path.join(d, '.git', 'hooks', 'pre-commit');
+    fs.writeFileSync(hook, '#!/bin/sh\necho "refused by policy" >&2\nexit 1\n');
+    fs.chmodSync(hook, 0o755);
+  });
+  const r = json(dir);
+  eq(r.reason, 'nothing_to_commit', 'a refused commit reports the non-committing outcome');
+  ok(String(r.error).includes('refused by policy'), 'and carries git\'s own error text');
+  eq(r.durable, false,
+    'durable is FALSE — the documents are staged, and staged is not committed');
+  // The control that makes the case meaningful: the files really were staged, so a
+  // measurement reading the index would have answered true here.
+  const staged = execFileSync('git', ['ls-files', '--', '.planning'],
+    { cwd: dir, encoding: 'utf-8', env: ENV }).trim();
+  ok(staged.length > 0, `the index really does hold them (${JSON.stringify(staged)})`);
+}
+
 console.log('\nGROUP 3 — two opposite outcomes never share a word, on either surface');
 {
   const preference = rawOf(legacyLoose());        // a preference being honoured
