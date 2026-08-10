@@ -54,9 +54,13 @@
 // nothing from disk, so it cannot go stale against an install.
 'use strict';
 
-// Exit paths are all silent-and-zero: a guard that breaks must never block a
-// session. Mirrors the other PreToolUse guards.
-const stdinTimeout = setTimeout(() => process.exit(0), 5000);
+// The pure predicates are exported and the runtime runs only when this file is
+// INVOKED, mirroring hooks/anvi-harvest-lease.js. Without that seam the refusal in
+// isArrayLike could not be tested at all — the scan cannot produce a name that
+// reaches it — and an untested guard clause is the exact thing #249 cleared out of
+// this file. The stdin timeout lives inside the runtime block for the same reason:
+// at module scope it would arm a process-exiting timer inside any test that requires
+// this file.
 
 // ── Quote-state scanner ──────────────────────────────────────────────────────
 // Whether a `$` is quoted decides whether the shell rewrites it, so the question
@@ -76,6 +80,58 @@ function quoteStates(s) {
     st[i] = mode;
   }
   return st;
+}
+
+// ── Heredoc-body scanner ─────────────────────────────────────────────────────
+// A heredoc body is DATA — the shell hands it to a program — so most of what this
+// guard looks for cannot happen there. But NOT all of it, and the intuitive version
+// of this fix is wrong in the dangerous direction, so the policy below was measured
+// in both shells rather than reasoned about (#253):
+//
+//   <<'EOF'   $var[1] → literal `$var[1]`      --include=*.js → literal
+//   <<EOF     $var[1] → `h` in zsh             --include=*.js → literal
+//                     → `hello[1]` in bash
+//
+// Two facts fall out. Pathname expansion NEVER happens in a heredoc body, either
+// form, either shell — so the glob rule is always a false positive there. But an
+// UNQUOTED body does perform parameter expansion, and zsh genuinely applies
+// SUBSCRIPTING inside it, so the `$var[` rule is correct there and must keep firing.
+// Excluding both bodies wholesale — which is what "heredoc bodies are data" suggests,
+// and what this was first written to do — would put a false negative in a guard whose
+// whole purpose is catching failures that fall silent.
+//
+// Returns a parallel array: 0 outside any body, 1 inside a QUOTED body (inert for
+// every rule), 2 inside an UNQUOTED one (inert for splitting and globbing only).
+//
+// `<<<` is a herestring, not a heredoc, and is left alone by construction rather than
+// by a special case: the pattern requires a delimiter name after the `<<`, and `<`
+// is not a name character. That matters because `<<< "$list"` is this guard's own
+// recommended remedy — a case asserts a risky loop AFTER one is still reported, so
+// nothing silently swallows the rest of the command.
+function heredocStates(s, states) {
+  const hd = new Array(s.length).fill(0);
+  const re = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    if (states[m.index] !== 0) continue;        // an introducer inside quotes is text
+    const stripTabs = m[1] === '-';
+    const kind = m[2] !== '' ? 1 : 2;           // quoted delimiter → fully inert body
+    const delim = m[3];
+    const nl = s.indexOf('\n', m.index + m[0].length);
+    if (nl === -1) break;                       // introducer with no body at all
+    let i = nl + 1, end = s.length;
+    while (i <= s.length) {
+      const eol = s.indexOf('\n', i);
+      const lineEnd = eol === -1 ? s.length : eol;
+      const line = stripTabs ? s.slice(i, lineEnd).replace(/^\t+/, '') : s.slice(i, lineEnd);
+      if (line === delim) { end = i; break; }
+      if (eol === -1) { end = s.length; break; } // unterminated: body runs to the end
+      i = eol + 1;
+    }
+    for (let k = nl + 1; k < end; k++) hd[k] = kind;
+    re.lastIndex = Math.max(re.lastIndex, end);
+  }
+  return hd;
 }
 
 // There is deliberately NO `bash -c` exemption, and the reason is worth recording
@@ -105,24 +161,41 @@ function quoteStates(s) {
 // widens it back here — which a comment alone would not do.
 function isArrayLike(name, cmd) {
   if (name === 'argv') return true;
-  return new RegExp(`\\b${name.replace(/[^A-Za-z0-9_]/g, '')}=\\(`).test(cmd);
+  // A name that is not a plain identifier is not one this function can answer about,
+  // so it is REFUSED rather than repaired (#254). The previous line stripped the
+  // offending characters, which reads as the careful option and is the opposite:
+  // stripping SHORTENS the name, and a shorter name is a BROADER pattern — in the
+  // limit `\b=\(`, which matches any array assignment anywhere, returns "array-like",
+  // and makes the guard go SILENT. Returning false keeps the detection rules live,
+  // which is the reporting direction and the safe one here. Unreachable today (the
+  // only call site passes a capture constrained to this same shape); it exists
+  // because the edit that would make it reachable — widening that scan — is exactly
+  // the one this file's comments invite.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return false;
+  return new RegExp(`\\b${name}=\\(`).test(cmd);
 }
 
 // A bare parameter expansion — `$NAME` or `${NAME}` — that is not quoted, not a
 // command substitution, and not array-like. `$(` is excluded by construction: the
 // scan requires a name character (or `{`) after the `$`.
-function bareScalarExpansions(text, offset, states, cmd) {
+function bareScalarExpansions(text, offset, states, hd, cmd) {
   const found = [];
   const re = /\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g;
   let m;
   while ((m = re.exec(text)) !== null) {
     if (states[offset + m.index] !== 0) continue;      // quoted → shell leaves it alone
+    if (hd[offset + m.index] !== 0) continue;          // heredoc body → no loop this shell runs
     if (isArrayLike(m[1], cmd)) continue;              // arrays do split
     found.push(m[0]);
   }
   return found;
 }
 
+module.exports = { quoteStates, heredocStates, isArrayLike, bareScalarExpansions };
+
+if (require.main !== module) return;
+
+const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { input += chunk; });
@@ -134,6 +207,7 @@ process.stdin.on('end', () => {
     if (!cmd) process.exit(0);
 
     const states = quoteStates(cmd);
+    const hd = heredocStates(cmd, states);
     const findings = [];
 
     // (1) `for NAME in <list>` — the nine-instance mechanism. The list ends at the
@@ -143,7 +217,7 @@ process.stdin.on('end', () => {
       const rest = cmd.slice(start);
       const end = rest.search(/;|\n|\bdo\b/);
       const list = end === -1 ? rest : rest.slice(0, end);
-      const bare = bareScalarExpansions(list, start, states, cmd);
+      const bare = bareScalarExpansions(list, start, states, hd, cmd);
       if (bare.length) {
         findings.push(`\`for … in ${bare[0]}\` iterates ONCE here (bash: once per line). ` +
                       `The loop body runs with the whole newline-joined string as the variable.`);
@@ -157,7 +231,7 @@ process.stdin.on('end', () => {
       const rest = cmd.slice(start);
       const end = rest.search(/;|\n/);
       const list = end === -1 ? rest : rest.slice(0, end);
-      const bare = bareScalarExpansions(list, start, states, cmd);
+      const bare = bareScalarExpansions(list, start, states, hd, cmd);
       if (bare.length) {
         findings.push(`\`set -- ${bare[0]}\` sets \$# to 1 here, so \$1…\$n never populate.`);
       }
@@ -172,6 +246,7 @@ process.stdin.on('end', () => {
     // so it carries its own silence case (#249).
     for (const m of cmd.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)\[/g)) {
       if (states[m.index] !== 2) continue;
+      if (hd[m.index] === 1) continue;                 // quoted body is literal; an UNQUOTED one really does subscript
       findings.push(`\`$${m[1]}[…]\` is parsed as an array subscript, not as \`$${m[1]}\` ` +
                     `followed by \`[…]\` — the pattern silently becomes something else. ` +
                     `Brace it: \`\${${m[1]}}[…]\`.`);
@@ -188,6 +263,7 @@ process.stdin.on('end', () => {
     // match and only the state distinguishes it — and that is the case it carries.
     for (const m of cmd.matchAll(/(--?[A-Za-z][A-Za-z0-9-]*=)([^\s'"]*[*?][^\s'"]*)/g)) {
       if (states[m.index] !== 0) continue;
+      if (hd[m.index] !== 0) continue;                 // no pathname expansion in any heredoc body
       findings.push(`\`${m[1]}${m[2]}\` is glob-expanded against the current directory; ` +
                     `with no match zsh aborts the command before it runs. Quote it: ` +
                     `\`${m[1]}'${m[2]}'\`.`);
