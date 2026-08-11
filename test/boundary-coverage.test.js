@@ -101,6 +101,35 @@ console.log('\nboth populations are covered — the directory AND the registrar'
   ok(ghost && ghost.missing === true, 'and is marked as registered-but-not-present');
   ok(ghost && ghost.grade === 'absent', 'and is graded absent, not silently skipped');
   ok(r.registeredCount === 2, `the registrar's own table is the authority (${r.registeredCount} registered)`);
+  ok(r.registrarReadable === true, 'and the report says the registrar was readable');
+}
+
+// An UNREADABLE population is not an EMPTY one — the failure this tool exists to
+// catch, occurring one level up in the tool itself. Found in self-review: losing
+// the registrar silently halved what was judged and still printed "0 absent". It
+// is reachable in practice, not in theory: the install copies scripts/*.sh and
+// scripts/*.js, and the registrar is a .cjs, so a copy-mode installation is
+// exactly where this degrades.
+console.log('\nan unreadable population is not an empty one');
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bcov-noreg-'));
+  cleanup.push(root);
+  fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'hooks', 'declared-one.js'), '// stub\n');
+  // deliberately NO scripts/register-hooks.cjs
+  const r = coverage({ root, dharana: DHARANA });
+  ok(r.registrarReadable === false, 'a missing registrar is reported as unreadable, not as zero hooks');
+  ok(r.registeredCount === null, 'and its count is null rather than 0 — the two mean opposite things');
+
+  const run = (cwd) => {
+    try {
+      const out = execFileSync(process.execPath, [TOOL], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return { code: 0, out, err: '' };
+    } catch (e) { return { code: e.status, out: String(e.stdout || ''), err: String(e.stderr || '') }; }
+  };
+  const res = run(root);
+  ok(res.code !== 0, `the CLI refuses rather than printing a clean report (exit ${res.code})`);
+  ok(!/absent/.test(res.out), 'and prints no coverage figure over a population it could not read');
 }
 
 // ── the shared rule, not a second one ───────────────────────────────────────

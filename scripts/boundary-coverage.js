@@ -125,6 +125,13 @@ function coverage({ root = ROOT, dharana } = {}) {
     ? fs.readdirSync(hooksDir).filter(f => f.endsWith('.js') || f.endsWith('.cjs')).sort()
     : [];
 
+  // A population this tool cannot read is NOT an empty population. Losing the
+  // registrar silently halves what is judged and the report still prints "0
+  // absent" — the same permissive shape this tool exists to catch, one level up.
+  // It matters in practice rather than in theory: the install copies scripts/*.sh
+  // and scripts/*.js, and the registrar is a .cjs, so a copy-mode installation is
+  // exactly where this degrades. Surfaced as a value the caller must handle; the
+  // CLI refuses on it.
   const registered = registeredFiles(root);
   const rows = new Map();
   const add = (rel, why) => {
@@ -144,6 +151,9 @@ function coverage({ root = ROOT, dharana } = {}) {
   return {
     boundaries,
     rows: all,
+    // null is NOT zero. A caller that treats an unreadable registrar as "no hooks
+    // registered" judges half the population and prints a clean report.
+    registrarReadable: registered !== null,
     registeredCount: registered ? registered.length : null,
     declared: all.filter(r => r.grade === 'declared'),
     exempt: all.filter(r => r.grade === 'exempt'),
@@ -198,6 +208,18 @@ try {
   res = coverage({ dharana: fs.readFileSync(doc, 'utf8') });
 } catch (e) {
   console.error(`✗ ${e.message}`);
+  process.exit(2);
+}
+
+// One of the two populations could not be read, so the report would be about a
+// smaller question than the one it names — and it would say "0 absent" while
+// judging half the files. Refuse, with the same code as any other cannot-answer.
+if (!res.registrarReadable) {
+  console.error('✗ the registrar (scripts/register-hooks.cjs) could not be read, so which files');
+  console.error('  are registered hooks is unknown. Refusing to report: this tool judges TWO');
+  console.error('  populations, and answering about one of them prints a clean-looking result');
+  console.error('  over half the question. Run it from a clone — an installation copies');
+  console.error('  scripts/*.sh and scripts/*.js, and the registrar is a .cjs.');
   process.exit(2);
 }
 

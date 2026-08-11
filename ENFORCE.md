@@ -700,6 +700,12 @@ been right for the wrong reason.
   deliberately different codes: "no boundaries were read" and "every file is
   covered" must never reach a caller as the same answer, and the permissive one
   invites creating catalogues in a store the caller has not proven it owns.
+- **An unreadable population is not an empty one.** The tool judges two
+  populations, and if the registrar cannot be read it refuses (exit 2) rather than
+  reporting on one of them — otherwise it prints a clean-looking "0 absent" over
+  half the question. This is reachable rather than theoretical: the install copies
+  `scripts/*.sh` and `scripts/*.js` and the registrar is a `.cjs`, so a copy-mode
+  installation is precisely where it would have degraded. Run it from a clone.
 - **`EXEMPT:` carries a reason, and the reason is required.** One per line:
   `EXEMPT: hooks/anvi-identity.js — store identity, catalogued under its own entries`.
   An exemption that states nothing suppresses a finding and leaves a later reader
