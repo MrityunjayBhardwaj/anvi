@@ -664,3 +664,61 @@ investigated and dies; a false negative becomes a fact in a note.
   the two hardest behaviours here (`check-ignore` skipping tracked paths; a symlink
   and its target counting as **one** physical directory) belong to the real tools, and
   a fixture that doesn't run them cannot see either.
+
+## Boundary Coverage — a boundary cannot report a file it never declared
+
+The freshness verdict answers "have this boundary's declared files moved?" It is
+computed over the declared list, so it has no term for a file that was never
+declared: such a file yields no row at all — not red, not amber — and the entry
+reads healthy exactly where it is blind.
+
+That is not hypothetical. Three boundaries were dark on members when this section
+was written: a live registered `PreToolUse` guard, the shared module both Bash
+guards import, and both artifacts added by the previous merge. Editing any of them
+produced **zero bytes** of injected context, while the drift rows for those same
+boundaries had been amber for three sessions, naming only files that were already
+covered. Amber is what a maintained map looks like, which is why nobody looked.
+
+**Coverage is a gradient, not a yes/no**, and the middle tier is what hid the gap:
+
+| grade | meaning | durable? |
+|---|---|---|
+| **declared** | named in the boundary's `FILES:` | yes |
+| **exempt** | an `EXEMPT:` line, with a stated reason | yes |
+| **mentioned** | the filename appears in the entry's *prose*, so the injector's text fallback matches it | **no** — one paragraph edit removes it silently |
+| **absent** | covered by nothing | — |
+
+Two files were covered only because their names happened to appear in a sentence
+somebody wrote for another reason. That is why the count looked plausible while
+the map was rotting, and why a boolean answer would have called them covered and
+been right for the wrong reason.
+
+- **Report:** `node ~/.claude/anvi/scripts/boundary-coverage.js` — grades every
+  file in `hooks/` plus every hook the registrar registers. Exit **0** clean,
+  **1** when something is absent or exempted without a reason, **2** when there is
+  no `dharana.md`, **3** when the catalogues were *withheld*. The last two are
+  deliberately different codes: "no boundaries were read" and "every file is
+  covered" must never reach a caller as the same answer, and the permissive one
+  invites creating catalogues in a store the caller has not proven it owns.
+- **An unreadable population is not an empty one.** The tool judges two
+  populations, and if the registrar cannot be read it refuses (exit 2) rather than
+  reporting on one of them — otherwise it prints a clean-looking "0 absent" over
+  half the question. This is reachable rather than theoretical: the install copies
+  `scripts/*.sh` and `scripts/*.js` and the registrar is a `.cjs`, so a copy-mode
+  installation is precisely where it would have degraded. Run it from a clone.
+- **`EXEMPT:` carries a reason, and the reason is required.** One per line:
+  `EXEMPT: hooks/anvi-identity.js — store identity, catalogued under its own entries`.
+  An exemption that states nothing suppresses a finding and leaves a later reader
+  nothing to re-test, which is the shape a false negative takes.
+- **`FILES:` is not parsed there.** The rule for that field lives in
+  `hooks/currency.js` and every consumer imports it, so the injector deciding a
+  file is covered and the report deciding it is declared cannot answer the same
+  question two ways.
+- **Known blind spot, stated rather than implied:** a file outside `hooks/` that is
+  not a registered hook may still belong to a boundary — one of the three real gaps
+  was `scripts/hook-imports.cjs` — but "every file in `scripts/` belongs to a
+  boundary" is false, so that case is not decidable and the tool does not claim it.
+- **Tests:** `node test/boundary-coverage.test.js` — fixtures only. The catalogues
+  live in `~/.anvideck` and `.anvi` is a gitignored symlink, so there is no
+  `dharana.md` in a fresh clone; every case builds its own boundary text and tree,
+  and the suite means the same thing in CI as it does on the author's machine.
