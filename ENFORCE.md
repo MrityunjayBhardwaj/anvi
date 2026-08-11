@@ -422,6 +422,24 @@ Two things it checks that a plain loop would not:
 - `PostToolUse:Artifact` / `WebFetch|WebSearch` / `mcp__.*` / `Read|Grep|Glob`: provenance-guard.js
 - `Stop`: anvideck-checkpoint.js
 
+Registration says the harness will RUN a hook. It does not say the hook can LOAD what it
+imports, and those are different questions once hooks share modules. After registering,
+`register-hooks.cjs` asks the second one (`scripts/hook-imports.cjs`): for every registered
+hook present in the install, each `require('./x.js')` is resolved the way Node will resolve
+it — from the hook's **realpath**, not from the install directory.
+
+That distinction is the design. A symlinked hook loads its siblings out of the repo it
+points into, so a dev-mode install is healthy with no copy of the module beside it; asking
+"is the file in `~/.claude/hooks/`" would report every dev install as broken. What is
+actually being caught is a **stale** install — one made before a shared module existed,
+where the importing hook's `try/catch` swallows the failure and the hook runs with its
+feature silently switched off.
+
+Reported, never fatal: `install.sh` runs under `set -euo pipefail`, so a non-zero status
+here would abort an otherwise healthy install over a diagnosis. The output names the remedy
+and prints its denominator, because a sweep that examined nothing looks exactly like a clean
+one.
+
 ## Retiring an Artifact
 
 Installing is not the whole contract: something that stops being shipped has to

@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { reportInstall } = require('./hook-imports.cjs');
 
 const HOME = os.homedir();
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
@@ -200,6 +201,18 @@ function main() {
     const deleted = pruneOrphanFiles();
     if (deleted.length > 0) console.log(`  ✓ Deleted ${deleted.length} orphan hook file(s): ${deleted.join(', ')}`);
   }
+
+  // Registration says the harness will RUN these hooks; it says nothing about whether
+  // they can load what they import (#244). The installer ships `hooks/*.js` by glob, so
+  // a fresh install is complete — but an install made before a shared module existed
+  // has no copy of it, and every such import is swallowed by a try/catch, so the hook
+  // runs with its feature quietly switched off. Asked here because this is the one
+  // component that knows the registered set and runs on every install path.
+  //
+  // Reported, never fatal: the caller runs under `set -euo pipefail`, and aborting an
+  // otherwise healthy install over a diagnosis would trade a silent degradation for a
+  // broken installation. The loud line is the point.
+  reportInstall(HOOKS_DIR, [...new Set(REGISTRATIONS.map(r => r[2]))]);
 }
 
 if (require.main === module) main();
