@@ -9,7 +9,7 @@ of where the code came from.
 |---|---|
 | Source | GSD `bin/lib/`, upstream [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done) |
 | GSD version | **1.27.0** |
-| Vendored | 2026-07-07 (`5545c77`) |
+| Vendored | 2026-07-07 — `node scripts/vendor-drift.js` names the commit per module |
 | State | **11 of 16 modules carry anvi patches** — see the table below |
 | Consumer | `bin/anvi-tools.cjs` (`GSD_LIB` points here) |
 | License | MIT — see [`LICENSE.GSD`](./LICENSE.GSD) |
@@ -36,37 +36,46 @@ derived from git history, and `test/vendored-doc-contract.test.js` fails when th
 table and the tree disagree.
 
 **patched** — carries anvi commits since it was vendored. **pristine** — untouched.
-The commit list is the re-apply order, oldest first.
 
-| Module | State | Lines vs 1.27.0 | anvi commits to re-apply, oldest first |
-|---|---|---|---|
-| `commands.cjs` | patched | 78 | `714665e` `3c39e29` `df3a27f` `fc786cd` `98c88a6` `11941f1` `ad0d9c7` |
-| `config.cjs` | patched | 18 | `3c39e29` `df3a27f` |
-| `core.cjs` | patched | 302 | `7359e61` `714665e` `3c39e29` `df3a27f` `98c88a6` `11941f1` `9c52fc0` `390e7cc` |
-| `frontmatter.cjs` | pristine | 0 | — |
-| `init.cjs` | patched | 148 | `3c39e29` `df3a27f` `98c88a6` |
-| `milestone.cjs` | patched | 10 | `3c39e29` `df3a27f` |
-| `model-profiles.cjs` | pristine | 0 | — |
-| `phase.cjs` | patched | 40 | `3c39e29` `df3a27f` |
-| `profile-output.cjs` | patched | 12 | `3c39e29` |
-| `profile-pipeline.cjs` | pristine | 0 | — |
-| `roadmap.cjs` | pristine | 0 | — |
-| `security.cjs` | pristine | 0 | — |
-| `state.cjs` | patched | 6 | `3c39e29` |
-| `template.cjs` | patched | 6 | `98c88a6` |
-| `uat.cjs` | patched | 10 | `3c39e29` `df3a27f` `98c88a6` |
-| `verify.cjs` | patched | 12 | `3c39e29` `df3a27f` `98c88a6` |
+| Module | State | Lines vs 1.27.0 |
+|---|---|---|
+| `commands.cjs` | patched | 78 |
+| `config.cjs` | patched | 18 |
+| `core.cjs` | patched | 302 |
+| `frontmatter.cjs` | pristine | 0 |
+| `init.cjs` | patched | 148 |
+| `milestone.cjs` | patched | 10 |
+| `model-profiles.cjs` | pristine | 0 |
+| `phase.cjs` | patched | 40 |
+| `profile-output.cjs` | patched | 12 |
+| `profile-pipeline.cjs` | pristine | 0 |
+| `roadmap.cjs` | pristine | 0 |
+| `security.cjs` | pristine | 0 |
+| `state.cjs` | patched | 6 |
+| `template.cjs` | patched | 6 |
+| `uat.cjs` | patched | 10 |
+| `verify.cjs` | patched | 12 |
 
-`commands.cjs` has been patched again since that measurement (`ad0d9c7`), so its
-count — and the stated total — are low by roughly the size of that commit. Re-deriving
-them needs the pristine 1.27.0 bytes, which is the `--upstream` run below; the commit
-list beside each module comes from history alone and is current either way.
+**Which commits to re-apply is not written down here. Ask the tool:**
 
-**Every sha above is a commit as it exists on the default branch.** The older ones landed
-there directly; anything arriving through a pull request arrives as a squash, which replaces
-the branch's own commits with one new sha. So a list written while still on a branch names
-shas that the history it describes will never contain. Re-derive the column after merging
-rather than transcribing it from the branch you were working on.
+```sh
+node scripts/vendor-drift.js
+```
+
+**This document names no commit, on purpose, and putting the list back would reintroduce a
+defect rather than add a convenience.** A commit list can only be written while you are still
+on the branch that produced it, and this repo merges by squash — so the branch's own commits
+are replaced by one new sha at merge time, and every sha the list names stops existing in the
+history the list describes. The result was not a slip that better discipline would catch: the
+check went green on the branch, green in CI, and reddened the default branch the instant it
+landed, because **no run before the merge could have produced the right answer.** Deriving the
+column costs one command and removes the class. `test/vendored-doc-contract.test.js` fails if
+a sha reappears in this file.
+
+`commands.cjs` has been patched again since the line counts below were measured, so its
+count — and the stated total — are low by roughly the size of that commit. Re-deriving those
+needs the pristine 1.27.0 bytes, which is the `--upstream` run; the state and commit list come
+from history alone and are current on every run.
 
 **The line counts are a dated measurement, not a live one.** Measured 2026-08-02
 against a pristine copy of 1.27.0, counting insertions + deletions
@@ -92,8 +101,9 @@ Per module, decided by the table above — not by one rule for the directory:
 - **pristine** (`frontmatter`, `model-profiles`, `profile-pipeline`, `roadmap`,
   `security`) — nothing of ours is in them, so re-vendor wholesale from a newer GSD
   and update this file. That is exactly what "pristine" is recorded for.
-- **patched** — diff first, then re-vendor and re-apply that module's commits from
-  the table. Never overwrite it in one step.
+- **patched** — diff first, then re-vendor and re-apply that module's commits, which
+  `node scripts/vendor-drift.js` lists in the order to apply them, oldest first. Never
+  overwrite it in one step.
 
 `core.cjs` is the one to be careful with. Its 302 lines are not incidental drift;
 they are three safety properties:
@@ -110,17 +120,15 @@ is what made the old version of this document a hazard rather than merely inaccu
 
 ### What the patches did
 
-| Commit | Change |
-|---|---|
-| `7359e61` | resolve the project-management tree, with a loud legacy fallback |
-| `714665e` | resolve `.anvi` through the shared resolver; stop calling two opposite outcomes "skipped" |
-| `3c39e29` | route the unambiguous path joins through the tree resolver |
-| `df3a27f` | route the reported-path strings through the tree resolver |
-| `fc786cd` | let workflows ask where the documents live |
-| `98c88a6` | repair three paths the transform above fused, and the prose it ate |
-| `11941f1` | report what the repo actually holds, not whether an ignore rule exists |
-| `9c52fc0` | stop counting files the tree no longer has |
-| `390e7cc` | refuse to serve knowledge to a directory that cannot prove it owns it |
+Also derived, for the same reason the commit list is — this was a second table of the
+same shas, carrying a hand-written gloss of each one. The glosses were the commit
+subjects, so nothing was lost by asking git for them instead:
+
+```sh
+node scripts/vendor-drift.js --commits
+```
+
+That prints every patch commit, deduplicated across modules, each with its subject.
 
 ## The policy, as it actually stands
 
