@@ -15,9 +15,18 @@
 // WHAT IS DERIVED VS WHAT IS DATED. Two different kinds of claim live in that file
 // and they are checked differently:
 //
-//   state (patched / pristine, and which commits) — DERIVED from this repo's own
-//     history on every run. Always current, always enforceable, needs nothing
-//     external. This is the claim a re-vendorer acts on.
+//   state (patched / pristine) — DERIVED from this repo's own history on every run.
+//     Always current, always enforceable, needs nothing external.
+//
+//   which commits to re-apply — DERIVED and NOT WRITTEN DOWN AT ALL. This is the
+//     claim a re-vendorer acts on, and it is the one the document is now forbidden
+//     to carry. It used to be a stored column checked against the derivation, which
+//     cannot work in a repo that squash-merges: the list can only be written on the
+//     branch, and the merge replaces exactly those shas. Green on the branch, green
+//     in CI, red on the default branch the moment it landed — with no run before the
+//     merge able to produce the right answer. So the assertion inverted, from "the
+//     stored column matches" to "no sha is stored", and this file now checks instead
+//     that the tool still supplies what the document stopped saying.
 //
 //   line counts vs upstream — a DATED measurement, because re-deriving it needs
 //     pristine upstream bytes this repo deliberately does not carry (anvi is
@@ -51,17 +60,13 @@ ok(patched.length > 0 && pristine.length > 0,
   `the partition is non-trivial — ${patched.length} patched, ${pristine.length} pristine (a contract where every row is the same passes vacuously)`);
 
 // ── the per-module table ────────────────────────────────────────────────────
-// | `core.cjs` | patched | 302 | `7359e61` `714665e` … |
-const ROW = /^\|\s*`([\w.-]+\.cjs)`\s*\|\s*(patched|pristine)\s*\|\s*(\d+)\s*\|\s*(.*?)\s*\|\s*$/;
+// | `core.cjs` | patched | 302 |
+const ROW = /^\|\s*`([\w.-]+\.cjs)`\s*\|\s*(patched|pristine)\s*\|\s*(\d+)\s*\|\s*$/;
 const table = new Map();
 for (const line of text.split('\n')) {
   const m = line.match(ROW);
   if (!m) continue;
-  table.set(m[1], {
-    state: m[2],
-    lines: Number(m[3]),
-    shas: (m[4].match(/`([0-9a-f]{7})`/g) || []).map(s => s.replace(/`/g, '')),
-  });
+  table.set(m[1], { state: m[2], lines: Number(m[3]) });
 }
 
 console.log(`\nthe document's table covers exactly the tree (${table.size} rows for ${modules.length} modules)`);
@@ -74,17 +79,96 @@ for (const r of patched) {
   const row = table.get(r.file);
   if (!row) continue;
   ok(row.state === 'patched', `${r.file} is listed patched (${r.patches.length} anvi commits)`);
-  // The SEQUENCE, not the set: oldest-first is the order a re-vendor must re-apply
-  // them in, so a correct set in the wrong order is still wrong instructions.
-  ok(row.shas.join(' ') === r.patches.join(' '),
-    `${r.file} lists its commits, oldest first (want ${r.patches.join(' ')}, doc has ${row.shas.join(' ') || 'none'})`);
 }
 for (const r of pristine) {
   const row = table.get(r.file);
   if (!row) continue;
   ok(row.state === 'pristine', `${r.file} is listed pristine`);
-  ok(row.shas.length === 0, `${r.file} lists no commits to re-apply`);
   ok(row.lines === 0, `${r.file} shows 0 differing lines — a pristine module that differs is a contradiction`);
+}
+
+// ── the document must name no commit at all ─────────────────────────────────
+// This is the assertion that replaced the one comparing a stored commit column
+// against the derived one, and the reason for the swap is structural rather than
+// stylistic. A commit list can only be written while you are on the branch that
+// produced it; this repo merges by squash, so those shas are replaced by one new
+// sha at merge time and cease to exist in the history the document describes. The
+// old check therefore went green on the branch, green in CI, and reddened the
+// default branch on the merge itself — NO RUN BEFORE THE MERGE COULD HAVE BEEN
+// RIGHT, because the correct sha did not exist yet. Storing nothing removes the
+// class; teaching the comparison to forgive a squashed ancestor would only have
+// taught it to accept the stale answer.
+//
+// Total, with no exemption. Every sha this file used to carry — the per-module
+// column, the gloss table, and the vendoring anchor in the header — is derivable
+// from scripts/vendor-drift.js, and each was added by an author on a branch, so
+// each had the same exposure. An exemption here would be a hole in the only
+// assertion asking this question, and it would be invisible ever after.
+console.log('\nthe document stores no commit sha — the whole class, not just the column');
+{
+  const shas = [...text.matchAll(/`([0-9a-f]{7,40})`/g)].map(m => m[1]);
+  ok(shas.length === 0,
+    `no sha appears in the document${shas.length ? ` — found ${shas.length}: ${[...new Set(shas)].join(' ')}` : ''}`);
+  // A negative assertion is worthless if the thing it scans is empty or the pattern
+  // is broken, and both failures read as a pass. Prove the scan reaches real text
+  // and the pattern can still find a sha when one is present.
+  ok(text.length > 2000, `the document was actually read (${text.length} bytes)`);
+  const canary = text.replace('# Vendored GSD Library', '# Vendored GSD Library `deadbee`');
+  ok([...canary.matchAll(/`([0-9a-f]{7,40})`/g)].length === 1,
+    'and the pattern finds a sha when one is planted — so the empty result means absence, not a broken scan');
+}
+
+// ── what the document stopped storing, the tool must still supply ───────────
+// Removing a claim is only safe if the reader can still get the answer. The
+// re-vendorer's actual question — which commits must I re-apply, in what order —
+// now has exactly one source, so that source has to be exercised here rather than
+// assumed to work.
+console.log('\nthe answer the document no longer stores is still obtainable');
+{
+  const { execFileSync } = require('child_process');
+  const TOOL = path.join(ROOT, 'scripts', 'vendor-drift.js');
+  const out = execFileSync(process.execPath, [TOOL, '--commits'], { encoding: 'utf8' });
+  for (const r of patched) {
+    ok(out.includes(`${r.file.padEnd(22)} ${String(r.patches.length).padStart(2)}  ${r.patches.join(' ')}`),
+      `${r.file}: the tool lists its ${r.patches.length} commits`);
+  }
+
+  // The SEQUENCE, not the set: oldest-first is the order a re-vendor must apply
+  // them in, so a correct set in the wrong order is still wrong instructions.
+  //
+  // This asks GIT, not the derivation. Comparing the tool's output against
+  // inventory()'s list would compare the derivation with itself — both sides come
+  // out of patchesSince, so reversing it flips both and the assertion still holds.
+  // (Observed: a mutation removing the reversal left this suite fully green.) Oldest
+  // first means each commit is an ancestor of the next, which git answers on its own.
+  for (const r of patched) {
+    if (r.patches.length < 2) continue;
+    let ordered = true;
+    for (let i = 0; i + 1 < r.patches.length; i++) {
+      try {
+        execFileSync('git', ['merge-base', '--is-ancestor', r.patches[i], r.patches[i + 1]],
+          { cwd: ROOT, stdio: 'ignore' });
+      } catch { ordered = false; break; }
+    }
+    ok(ordered, `${r.file}: each listed commit is an ancestor of the next — oldest first (${r.patches.join(' ')})`);
+  }
+
+  // The gloss table this file used to carry was the commit subjects. If the tool
+  // prints the shas without them, the removal did lose something after all.
+  //
+  // Scoped to the subjects section AND anchored to a single line. Both narrowings
+  // were bought by a mutation that removed the subjects and stayed green:
+  // "sha followed by something" is satisfied by the PATCHED listing, where each sha
+  // is followed by the next sha on the same line — and once scoped to the section it
+  // was still satisfied, because a bare column of shas puts the NEXT sha one newline
+  // away and \s+ crosses newlines. A subject is text on the sha's own line.
+  const subjectsBlock = out.split('commit subjects')[1] || '';
+  ok(subjectsBlock.trim() !== '', 'the tool prints a commit-subjects section under --commits');
+  const everySha = [...new Set(patched.flatMap(r => r.patches))];
+  ok(everySha.length > 0, `there are ${everySha.length} distinct patch commits to describe`);
+  const described = everySha.filter(s => new RegExp(`^\\s*${s}[ \\t]+\\S.*$`, 'm').test(subjectsBlock));
+  ok(described.length === everySha.length,
+    `each carries its subject on its own line, replacing the hand-written gloss (${described.length}/${everySha.length})`);
 }
 
 // ── the headline claim, the one that went stale ─────────────────────────────
