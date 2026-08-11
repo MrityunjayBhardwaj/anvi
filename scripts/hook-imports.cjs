@@ -94,11 +94,28 @@ function auditInstall(hooksDir, files) {
     }
 
     examined++;
-    for (const dep of siblingImports(source)) {
-      imports++;
-      const { target, present } = resolver(dep);
-      if (!present) missing.push({ hook: file, dep, lookedIn: path.dirname(target) });
-    }
+    // Follow the chain, not just the first step. Today every shared module is a leaf, so
+    // one level would be complete — but the failure this whole check exists to catch is a
+    // dependency that resolves for the importer and not for the runtime. If a shared
+    // module ever imports another, a one-level check reports the registered hook as
+    // healthy while the load still fails, which is the same silent-permissive answer in
+    // a new place. `seen` is keyed on the resolved target, so a diamond is walked once
+    // and a cycle terminates.
+    const seen = new Set();
+    const walk = (src, from) => {
+      for (const dep of siblingImports(src)) {
+        const { target, present } = from(dep);
+        if (seen.has(target)) continue;
+        seen.add(target);
+        imports++;
+        if (!present) { missing.push({ hook: file, dep, lookedIn: path.dirname(target) }); continue; }
+        // A module that resolves but cannot be read is not evidence of health.
+        let next;
+        try { next = fs.readFileSync(fs.realpathSync(target), 'utf-8'); } catch { continue; }
+        walk(next, resolveFrom(target));
+      }
+    };
+    walk(source, resolver);
   }
 
   return { examined, imports, missing, unresolvable };

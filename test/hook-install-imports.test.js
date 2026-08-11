@@ -97,6 +97,32 @@ console.log('\nGROUP 4 — the states that must not be silently swallowed');
   eq(r.examined, 0, 'and the denominator says so rather than implying a clean inspection');
 }
 
+console.log('\nGROUP 4b — a TRANSITIVE dependency is followed');
+{
+  // The hole a one-level check leaves: the registered hook's own import resolves, so it
+  // reads as healthy, while the module it just loaded cannot load what IT needs. Same
+  // silent-permissive answer, one step further down.
+  const d = tmp('transitive');
+  fs.writeFileSync(path.join(d, 'guard.js'), "try { require('./mid.js'); } catch {}\n");
+  fs.writeFileSync(path.join(d, 'mid.js'), "require('./deep.js');\n");
+  const r = M.auditInstall(d, ['guard.js']);
+  ok(r.missing.some(m => m.dep === 'deep.js'), 'the second-level module is reported missing');
+  eq(r.missing.length, 1, 'and the first level, which does resolve, is not reported');
+  ok(r.imports >= 2, `both levels were counted (imports=${r.imports})`);
+
+  // OBSERVED: the runtime agrees this is broken, so the finding is not pedantry.
+  const run = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(d, 'mid.js'))})`], { encoding: 'utf-8' });
+  ok(run.status !== 0, 'and node really does fail to load that chain');
+}
+{
+  const d = tmp('cycle');
+  fs.writeFileSync(path.join(d, 'guard.js'), "require('./a.js');\n");
+  fs.writeFileSync(path.join(d, 'a.js'), "require('./b.js');\n");
+  fs.writeFileSync(path.join(d, 'b.js'), "require('./a.js');\n");
+  const r = M.auditInstall(d, ['guard.js']);
+  eq(r.missing.length, 0, 'a cycle among present modules terminates and reports nothing');
+}
+
 console.log('\nGROUP 5 — the report names the remedy, and says which way it answered');
 {
   const d = tmp('report-bad');
