@@ -72,15 +72,16 @@ landed, because **no run before the merge could have produced the right answer.*
 column costs one command and removes the class. `test/vendored-doc-contract.test.js` fails if
 a sha reappears in this file.
 
-`commands.cjs` has been patched again since the line counts below were measured, so its
-count — and the stated total — are low by roughly the size of that commit. Re-deriving those
-needs the pristine 1.27.0 bytes, which is the `--upstream` run; the state and commit list come
-from history alone and are current on every run.
-
 **The line counts are a dated measurement, not a live one.** Measured 2026-08-02
 against a pristine copy of 1.27.0, counting insertions + deletions
 (`git diff --no-index --numstat`), **642 differing lines** across the eleven patched
 modules. Upstream has not moved from 1.27.0, so all of the divergence is ours.
+
+`commands.cjs` has been patched again since that measurement, so its count — and the
+stated total — are low by roughly the size of that commit. Re-deriving them needs the
+pristine 1.27.0 bytes, which is the `--upstream` run; the state and the commit list come
+from history alone and are current on every run, which is the whole reason only the line
+counts carry a date.
 
 Re-derive any of this at any time:
 
