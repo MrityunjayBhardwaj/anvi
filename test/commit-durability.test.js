@@ -90,6 +90,14 @@ const migrated = () => repo((d, git) => {
   write(d, '.anvi/project_management/ROADMAP.md', 'x');
   git('add', '-A'); git('commit', '-qm', 'init');
 });
+// NEITHER tree. The state that used to be answered from "the tree is not legacy",
+// which reported a store guarantee for a project that had never had one. A real repo
+// with a real commit, so the only thing distinguishing it from `migrated()` is the
+// absence of the tree itself.
+const noTree = () => repo((d, git) => {
+  write(d, 'README.md', 'hi');
+  git('add', '-A'); git('commit', '-qm', 'init');
+});
 
 console.log('\nGROUP 1 — every terminal outcome answers the durability question');
 // The failure this guards: `durable` absent on an outcome is read by a caller as
@@ -107,6 +115,22 @@ check('nothing to commit, tree is tracked', legacyTracked(), 'nothing_to_commit'
 check('migrated tree', migrated(), 'durable_in_store', true);
 check('gitignored legacy tree', legacyIgnored(), 'skipped_gitignored', false);
 check('commit_docs off, tree held nowhere', legacyLoose(), 'skipped_commit_docs_false', false);
+check('no tree of either kind', noTree(), 'no_planning_tree', false);
+
+console.log('\nGROUP 1b — an absent tree is not the migrated tree with the store unmentioned');
+// The defect: `!legacy` was read as "therefore migrated", so a project with NO tree
+// was told its documents were durable in a store that had never been consulted. The
+// pair is the assertion — a fix that hardcoded either answer fails one of them.
+{
+  const absent = json(noTree());
+  const store = json(migrated());
+  ok(absent.reason !== store.reason,
+    `the two reasons differ (${absent.reason} vs ${store.reason})`);
+  ok(absent.durable !== store.durable,
+    `and so do the durability answers (${absent.durable} vs ${store.durable})`);
+  eq(store.durable, true, 'the migrated tree still reports durable — this fix must not cost that');
+  eq(absent.durable, false, 'while a project with no tree claims no guarantee');
+}
 
 console.log('\nGROUP 2 — the answer comes from the tree, not from which branch was taken');
 // Same reason, opposite durability: this is what separates "measured" from a constant.
@@ -159,6 +183,12 @@ console.log('\nGROUP 3 — two opposite outcomes never share a word, on either s
   eq(preference, 'skipped', 'a preference honoured still reads `skipped`');
   eq(nowhere, 'nowhere', 'documents held nowhere say so');
   eq(rawOf(migrated()), 'store', 'the store outcome keeps its own word');
+  // "held nowhere" is an alarm; "nothing here yet" is not. Sharing a word would make
+  // the alarm fire on every fresh project, which is how an alarm stops being read.
+  const none = rawOf(noTree());
+  eq(none, 'none', 'a project with no tree gets its own word too');
+  ok(none !== nowhere && none !== 'store' && none !== preference,
+    `and it collides with none of the others (${JSON.stringify(none)})`);
 }
 
 console.log('\nGROUP 4 — the outcome list is derived from the code, not from this file');

@@ -412,6 +412,32 @@ console.log('\n— the planning-root command, spawned as workflows invoke it —
   const mc = JSON.parse(run(migrated, 'commit', '--message', 'x'));
   eq(mc.reason, 'durable_in_store',
      'the durability step does not borrow the word "skipped" for the durable case');
+  eq(m.exists, true, 'and the migrated tree reports that it exists');
+
+  // NEITHER tree. Every case above has a tree of one kind, so all of them could pass
+  // while the no-tree state answered from "not legacy, therefore migrated" — which it
+  // did: a fresh repo with no .anvi and no .planning was told `durable: true`, naming
+  // a store nothing had consulted and a root that had never been created.
+  const bare2 = path.join(TMP, 'cli-notree');
+  fs.mkdirSync(bare2, { recursive: true });
+  git(bare2, 'init', '-q', '.');
+  fs.writeFileSync(path.join(bare2, 'README.md'), 'hi');
+  git(bare2, 'add', 'README.md');
+  git(bare2, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+  const nt = JSON.parse(run(bare2, 'planning-root'));
+  eq(nt.legacy, false, 'a project with no tree is not legacy');
+  eq(nt.exists, false, 'and says the root does not exist yet');
+  eq(nt.durable, false,
+     'so it claims NO durability — the root is where a tree would go, not where one is');
+  // `root` is still reported, because a caller creating the tree needs the location.
+  // The bug was never the path; it was the guarantee attached to it.
+  ok(typeof nt.root === 'string' && nt.root.length > 0,
+     'while still reporting where a tree WOULD be created');
+
+  // The two surfaces agree here too.
+  const ntc = JSON.parse(run(bare2, 'commit', '--message', 'x'));
+  eq(ntc.reason, 'no_planning_tree', 'the durability step names the absent-tree outcome');
+  eq(ntc.durable, nt.durable, 'and both surfaces give the same durability answer');
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} planning-root: ${pass} passed, ${fail} failed`);

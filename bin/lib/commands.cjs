@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { safeReadFile, loadConfig, isGitIgnored, legacyTreeDurability, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
+const { safeReadFile, loadConfig, isGitIgnored, legacyTreeDurability, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, planningTreeState, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { MODEL_PROFILES } = require('./model-profiles.cjs');
 
@@ -52,19 +52,26 @@ function cmdCurrentTimestamp(format, raw) {
  */
 function cmdPlanningRoot(cwd, raw) {
   const rel = planningRootRelative(cwd);
-  const legacy = usesLegacyPlanning(cwd);
+  const state = planningTreeState(cwd);
+  const legacy = state === 'legacy';
   // A legacy tree is durable only if the project repo actually holds its files;
   // a migrated one is durable because the store commits and pushes it.
   //
   // Measured by what is TRACKED, not by whether an ignore rule exists. The
   // absence of a rule is not the presence of a commit — a tree with neither
   // reported `durable: true` while nothing in it was committed anywhere.
+  //
+  // And a project with NO tree is not the migrated case wearing a different hat.
+  // `root` here is where a tree WOULD go, not where one is; reporting it durable
+  // answered a question about a directory that does not exist. `exists` says which
+  // reading `root` deserves, because the path alone cannot say.
   const legacyState = legacy ? legacyTreeDurability(cwd) : null;
   const result = {
     root: planningRoot(cwd),
     path: rel,
     legacy,
-    durable: legacyState ? legacyState.durable : true,
+    exists: state !== 'absent',
+    durable: legacyState ? legacyState.durable : state === 'migrated',
   };
   // Partial tracking is a real third state; a bare boolean has to round it to a
   // lie, so report the counts that produced the verdict alongside it.
@@ -272,7 +279,8 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   // A field that is `false` on one outcome and ABSENT on three is not a weaker signal
   // than a wrong one: `undefined` is falsy, so a caller branching on it calls a tree
   // non-durable in exactly the case where the project repo just committed it.
-  const legacy = usesLegacyPlanning(cwd);
+  const state = planningTreeState(cwd);
+  const legacy = state === 'legacy';
   const ignored = legacy && isGitIgnored(cwd, planningRel);
   // For a legacy tree, ASK GIT WHAT IT TRACKS. An ignore rule is not the question:
   // a tree nothing ignores and nothing has ever committed is held nowhere, and a
@@ -286,7 +294,37 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
     const r = execGit(cwd, ['ls-tree', '-r', '--name-only', 'HEAD', '--', planningRel]);
     return r.exitCode === 0 && r.stdout.trim().length > 0;
   };
-  const treeDurability = () => (!legacy ? true : ignored ? false : heldByProjectRepo());
+  // The `absent` arm is UNREACHABLE as this function currently stands, and is kept
+  // deliberately. `commit_docs` defaults to true and its config.json lives INSIDE the
+  // planning root, so a project with no tree has no config and cannot take the only
+  // branch that calls this before the absent outcome returns. It is kept because the
+  // defect being fixed was precisely a `!legacy` that meant "therefore migrated": if
+  // a later edit reorders these branches, an absent tree must not fall into `true`
+  // again. Measured, not assumed — a mutation restoring `true` here reddens nothing,
+  // which is what "unreachable" means and why this comment says so out loud.
+  const treeDurability = () => {
+    if (state === 'absent') return false;
+    if (state === 'migrated') return true;
+    return ignored ? false : heldByProjectRepo();
+  };
+
+  // No tree of either kind. "The store holds this" would name a store nothing
+  // consulted and a planning_root that has never been created, so this gets its own
+  // outcome rather than sharing one with the migrated case.
+  //
+  // Answered BEFORE the commit_docs preference: with no tree there are no documents
+  // for a preference to be about, and no config file to express one.
+  //
+  // Deliberately NOT a stderr warning like the gitignored case. Nothing is at risk
+  // yet — with no tree there is nothing to lose today — and a warning about documents
+  // that do not exist is the noise that teaches people to ignore the one that matters.
+  // The cost this DOES carry is that the claim would become false the moment the first
+  // document is written, which is why the field is answered rather than left optimistic.
+  if (state === 'absent') {
+    const result = { committed: false, hash: null, reason: 'no_planning_tree', durable: false, planning_root: planningRel };
+    output(result, raw, 'none');
+    return;
+  }
 
   // Check commit_docs config
   if (!config.commit_docs) {
@@ -303,7 +341,7 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   // commit the link rather than the documents. Report that distinctly: "the
   // store has it" and "nothing has it" are opposite outcomes and must not share
   // a word.
-  if (!usesLegacyPlanning(cwd)) {
+  if (state === 'migrated') {
     const result = { committed: false, hash: null, reason: 'durable_in_store', durable: true, planning_root: planningRel };
     output(result, raw, 'store');
     return;
