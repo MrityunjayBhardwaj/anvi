@@ -695,10 +695,38 @@ function planningRoot(cwd) {
   return current;
 }
 
-/** True when `cwd` is still on the pre-migration layout. */
+/**
+ * Which planning tree this project actually has: `migrated`, `legacy`, or `absent`.
+ *
+ * THREE states, deliberately not a boolean. `usesLegacyPlanning` answers its own
+ * question correctly, but it is a question about the LEGACY tree only — and every
+ * caller that read `!legacy` as "therefore migrated" inherited a claim about a tree
+ * that may not exist at all. A project with neither tree took the not-legacy branch
+ * and was told its documents were `durable_in_store`, naming a store that had never
+ * been consulted and a `planning_root` that had never been created.
+ *
+ * The absent case is the one where a wrong reassurance costs the most: it is exactly
+ * when nothing has been committed yet. Nothing is at risk *today* — with no tree there
+ * are no documents to lose — but the claim becomes false the moment the first document
+ * is written, which is the moment nobody re-asks.
+ *
+ * Returning the state rather than a pair of booleans is the point. A caller cannot
+ * express "not legacy, therefore migrated" against this signature.
+ */
+function planningTreeState(cwd) {
+  if (fs.existsSync(path.join(anviDirFor(cwd), PM_LEAF))) return 'migrated';
+  if (fs.existsSync(path.join(cwd, LEGACY_PM_RELATIVE))) return 'legacy';
+  return 'absent';
+}
+
+/**
+ * True when `cwd` is still on the pre-migration layout.
+ *
+ * Derived from `planningTreeState` rather than repeating its existence checks, so
+ * the two cannot answer differently about the same tree.
+ */
 function usesLegacyPlanning(cwd) {
-  return !fs.existsSync(path.join(anviDirFor(cwd), PM_LEAF))
-    && fs.existsSync(path.join(cwd, LEGACY_PM_RELATIVE));
+  return planningTreeState(cwd) === 'legacy';
 }
 
 /**
@@ -1258,6 +1286,7 @@ module.exports = {
   planningRootRelative,
   pmRel,
   usesLegacyPlanning,
+  planningTreeState,
   PM_RELATIVE,
   LEGACY_PM_RELATIVE,
 };
