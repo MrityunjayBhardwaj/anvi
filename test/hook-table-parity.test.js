@@ -1,0 +1,159 @@
+#!/usr/bin/env node
+// ENFORCE.md §Hook Files is the table a reader consults to learn which hooks
+// fire. Nothing asserted it agrees with the registrar, so it could drift from
+// the registrar silently and forever — and it had: anvi-route-logger.js was
+// registered on PostToolUse:Read, wired and live, with no row in the table. It
+// appeared in §Registered In, so the document contradicted itself in two places
+// a reader has no reason to compare.
+//
+// WHY A TEST AND NOT JUST THE ROW: the missing row is one edit; the reason it
+// survived is that four tests read ENFORCE.md and five read REGISTRATIONS and
+// none joined them. Adding the row without the join fixes today's instance and
+// leaves the next one just as invisible.
+//
+// THE AUTHORITY IS THE REGISTRAR, IMPORTED, NOT RE-PARSED. REGISTRATIONS is the
+// same export scripts/boundary-coverage.js consults, so the thing that wires a
+// hook and the thing that audits the documentation of it cannot answer
+// differently. Deriving the expectation by re-reading the registrar's source
+// would make this check self-confirming the moment the two parsers agreed on a
+// bug.
+//
+// THE SECTION ANCHOR IS DEFENSIVE, NOT LOAD-BEARING — measured, not assumed.
+// Eleven lines of ENFORCE.md carry a `~/.claude/hooks/` path and only nine are
+// rows of this table, so scoping LOOKS load-bearing. It is not: the two extras
+// name the DIRECTORY rather than a file (prose about how install health is
+// decided, and a row of the RETIRING table), so requiring a filename already
+// excludes them and a whole-file scan returns the same nine. Anchoring to the
+// heading, stopping at the next one, and demanding a table row change nothing
+// today.
+//
+// They are kept because the property they defend is one edit away: the moment
+// any other section names a specific hook FILE — a retiring table that lists
+// files instead of the directory, an example, a migration note — an unscoped
+// reading would report it as documented-but-unregistered and the failure would
+// be an instrument fault wearing the costume of a finding. The cost is three
+// lines; the alternative is a check whose corpus is "wherever the string
+// appears".
+//
+// Stated plainly so nobody later reads the scoping as evidence of a hazard that
+// was actually observed. It was not. What was observed is that it is free.
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const { REGISTRATIONS } = require('../scripts/register-hooks.cjs');
+
+let pass = 0, fail = 0;
+const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
+const ROOT = path.join(__dirname, '..');
+
+// --- the two populations -----------------------------------------------------
+
+// Every distinct hook FILE the registrar registers. A hook registered against
+// several matchers (provenance-guard has four) is one file and wants one row.
+function registeredFiles(regs) {
+  return [...new Set(regs.map(r => r[2]))].sort();
+}
+
+// The hook files named by rows of §Hook Files. Anchored to the heading and
+// terminated by the next one — see the header note on why the whole file is the
+// wrong corpus.
+function tableRows(text, heading = '## Hook Files') {
+  const lines = text.split('\n');
+  const start = lines.findIndex(l => l.trim() === heading);
+  if (start === -1) return null;            // null is not empty: the section is gone.
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) { end = i; break; }
+  }
+  const found = [];
+  for (const line of lines.slice(start + 1, end)) {
+    if (!line.trimStart().startsWith('|')) continue;   // prose inside the section is not a row
+    // A row names a file; the directory alone (`~/.claude/hooks/`) is not one.
+    for (const m of line.matchAll(/`~\/\.claude\/hooks\/([A-Za-z0-9._-]+\.(?:js|cjs))`/g)) {
+      found.push(m[1]);
+    }
+  }
+  return [...new Set(found)].sort();
+}
+
+const diff = (a, b) => a.filter(x => !b.includes(x));
+
+// --- the live assertion ------------------------------------------------------
+
+const enforce = fs.readFileSync(path.join(ROOT, 'ENFORCE.md'), 'utf8');
+const registered = registeredFiles(REGISTRATIONS);
+const documented = tableRows(enforce);
+
+console.log('hook table parity — ENFORCE.md §Hook Files vs scripts/register-hooks.cjs');
+ok(documented !== null, 'the §Hook Files section exists and was located');
+
+const missing = documented === null ? registered : diff(registered, documented);
+const extra = documented === null ? [] : diff(documented, registered);
+
+// The denominator, always — a "0 missing" with no population behind it cannot be
+// told from a check that enumerated nothing.
+console.log(`  registered: ${registered.length}   documented: ${documented ? documented.length : 'SECTION NOT FOUND'}`);
+console.log(`  registered but undocumented: ${missing.length}${missing.length ? ' — ' + missing.join(', ') : ''}`);
+console.log(`  documented but unregistered: ${extra.length}${extra.length ? ' — ' + extra.join(', ') : ''}`);
+
+ok(registered.length > 0, `the registrar yielded a non-empty population (${registered.length} hook files)`);
+ok(missing.length === 0, 'every registered hook has a row in §Hook Files');
+ok(extra.length === 0, 'every row in §Hook Files names a registered hook');
+
+// --- the parser's own cases, on fixtures ------------------------------------
+//
+// The live assertion above can only ever be green in a healthy tree, so on its
+// own it cannot show that it WOULD go red. These build the unhealthy trees.
+
+const TABLE = [
+  '## Hook Files',
+  '',
+  '| Hook | Trigger | File |',
+  '|------|---------|------|',
+  '| One | SessionStart | `~/.claude/hooks/alpha.js` |',
+  '| Two | Stop | `~/.claude/hooks/beta.js` |',
+  '',
+  '## Next Section',
+  '',
+  'Prose naming `~/.claude/hooks/gamma.js` outside the section.',
+  '',
+  '| A directory row | x | `~/.claude/hooks/` — shared with other tools |',
+].join('\n');
+
+const parsed = tableRows(TABLE);
+ok(JSON.stringify(parsed) === JSON.stringify(['alpha.js', 'beta.js']),
+  `only the section's file rows are read (got ${JSON.stringify(parsed)})`);
+ok(!parsed.includes('gamma.js'), 'a hook path in prose AFTER the section is not counted as a row');
+
+// The exact defect this test was written for: a registered hook with no row.
+const regsWithThree = [
+  ['SessionStart', null, 'alpha.js', 5],
+  ['Stop', null, 'beta.js', 5],
+  ['PostToolUse', 'Read', 'delta.js', 5],
+];
+const m1 = diff(registeredFiles(regsWithThree), tableRows(TABLE));
+ok(m1.length === 1 && m1[0] === 'delta.js',
+  `a registered hook missing from the table is reported (got ${JSON.stringify(m1)})`);
+
+// The other direction: a row for something nothing registers.
+const e1 = diff(tableRows(TABLE), registeredFiles([['SessionStart', null, 'alpha.js', 5]]));
+ok(e1.length === 1 && e1[0] === 'beta.js',
+  `a row naming an unregistered hook is reported (got ${JSON.stringify(e1)})`);
+
+// One file, many matchers, one row — provenance-guard's real shape.
+const manyMatchers = registeredFiles([
+  ['PostToolUse', 'Artifact', 'alpha.js', 5],
+  ['PostToolUse', 'WebFetch|WebSearch', 'alpha.js', 5],
+  ['PostToolUse', 'mcp__.*', 'alpha.js', 5],
+]);
+ok(manyMatchers.length === 1 && manyMatchers[0] === 'alpha.js',
+  'a hook registered against several matchers counts as one file');
+
+// A missing section must not read as a clean table. Same shape as the
+// unreadable-registrar defect the coverage tool shipped with: the absence of a
+// population is not a population of zero.
+ok(tableRows(TABLE, '## No Such Heading') === null,
+  'a missing section returns null, not an empty list');
+
+console.log(`\n${fail === 0 ? '✓' : '✗'} hook table parity: ${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);

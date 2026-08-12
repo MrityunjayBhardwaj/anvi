@@ -92,7 +92,17 @@ User message
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
+| Route logger | PostToolUse:Read (reads of a cognitive-OS spec or a project catalogue) | `~/.claude/hooks/anvi-route-logger.js` |
 | Provenance guard | PostToolUse:Artifact\|WebFetch\|WebSearch\|mcp__*\|Read\|Grep\|Glob (non-project-scoped results) | `~/.claude/hooks/provenance-guard.js` |
+
+This table is **asserted to match the registrar**, in both directions, by
+`test/hook-table-parity.test.js` — it imports `REGISTRATIONS` from
+`scripts/register-hooks.cjs` rather than re-reading it, so the list that wires a hook
+and the list that documents one cannot disagree. Registering a hook without adding its
+row fails the suite, and so does a row naming something nothing registers. Before that
+check existed the table listed 8 of 9: the route logger was live and undocumented here
+while appearing in §Registered In, so the document contradicted itself in two places a
+reader has no reason to compare.
 
 ## Boundary Matching
 
