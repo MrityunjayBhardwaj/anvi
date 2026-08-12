@@ -7,9 +7,17 @@
 // a reader has no reason to compare.
 //
 // WHY A TEST AND NOT JUST THE ROW: the missing row is one edit; the reason it
-// survived is that four tests read ENFORCE.md and five read REGISTRATIONS and
+// survived is that four tests read ENFORCE.md and four read REGISTRATIONS and
 // none joined them. Adding the row without the join fixes today's instance and
 // leaves the next one just as invisible.
+//
+// WHAT IS ASSERTED, PRECISELY: the set of hook FILES, in both directions, and
+// for each file that every EVENT the registrar uses for it appears in its
+// Trigger cell. What is NOT asserted is the rest of the Trigger prose — the
+// matcher detail and the parenthetical describing when it fires are written for
+// a reader and are not mechanically derived. A row can therefore still be wrong
+// about the fine grain of when a hook runs; it can no longer be wrong about
+// which hooks exist or which event they hang off.
 //
 // THE AUTHORITY IS THE REGISTRAR, IMPORTED, NOT RE-PARSED. REGISTRATIONS is the
 // same export scripts/boundary-coverage.js consults, so the thing that wires a
@@ -76,6 +84,50 @@ function tableRows(text, heading = '## Hook Files') {
   return [...new Set(found)].sort();
 }
 
+// file -> its Trigger cell, over the same rows tableRows() counts.
+function tableTriggers(text, heading = '## Hook Files') {
+  const lines = text.split('\n');
+  const start = lines.findIndex(l => l.trim() === heading);
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) { end = i; break; }
+  }
+  const out = new Map();
+  for (const line of lines.slice(start + 1, end)) {
+    if (!line.trimStart().startsWith('|')) continue;
+    const m = line.match(/`~\/\.claude\/hooks\/([A-Za-z0-9._-]+\.(?:js|cjs))`/);
+    if (!m) continue;
+    const cells = line.split('|').map(c => c.trim()).filter(Boolean);
+    out.set(m[1], cells[1] || '');
+  }
+  return out;
+}
+
+// file -> the set of events the registrar hangs it off.
+function eventsByFile(regs) {
+  const out = new Map();
+  for (const [event, , file] of regs) {
+    if (!out.has(file)) out.set(file, new Set());
+    out.get(file).add(event);
+  }
+  return out;
+}
+
+// Every event the registrar uses for a file must appear in that file's Trigger
+// cell. Returns the violations, so a caller can print them rather than a bare
+// count — a row that names the wrong event is worse than a missing row, because
+// it reads as maintained.
+function triggerMismatches(regs, triggers) {
+  const bad = [];
+  for (const [file, evs] of eventsByFile(regs)) {
+    const cell = triggers.get(file);
+    if (cell === undefined) continue;          // absence is the other check's finding
+    for (const e of evs) if (!cell.includes(e)) bad.push(`${file}: registrar says ${e}, cell says "${cell}"`);
+  }
+  return bad;
+}
+
 const diff = (a, b) => a.filter(x => !b.includes(x));
 
 // --- the live assertion ------------------------------------------------------
@@ -96,9 +148,17 @@ console.log(`  registered: ${registered.length}   documented: ${documented ? doc
 console.log(`  registered but undocumented: ${missing.length}${missing.length ? ' — ' + missing.join(', ') : ''}`);
 console.log(`  documented but unregistered: ${extra.length}${extra.length ? ' — ' + extra.join(', ') : ''}`);
 
+const triggers = tableTriggers(enforce);
+const badTriggers = triggers === null ? [] : triggerMismatches(REGISTRATIONS, triggers);
+const pairs = [...eventsByFile(REGISTRATIONS).values()].reduce((n, s) => n + s.size, 0);
+console.log(`  (file, event) pairs checked: ${pairs}   trigger mismatches: ${badTriggers.length}`);
+for (const b of badTriggers) console.log(`    ${b}`);
+
 ok(registered.length > 0, `the registrar yielded a non-empty population (${registered.length} hook files)`);
 ok(missing.length === 0, 'every registered hook has a row in §Hook Files');
 ok(extra.length === 0, 'every row in §Hook Files names a registered hook');
+ok(pairs >= registered.length, `the (file, event) population is non-empty (${pairs} pairs)`);
+ok(badTriggers.length === 0, "each row's Trigger names every event the registrar hangs that hook off");
 
 // --- the parser's own cases, on fixtures ------------------------------------
 //
@@ -148,6 +208,29 @@ const manyMatchers = registeredFiles([
 ]);
 ok(manyMatchers.length === 1 && manyMatchers[0] === 'alpha.js',
   'a hook registered against several matchers counts as one file');
+
+// A row whose Trigger names the wrong event. The file is present and both
+// membership checks stay green, so without this the table could say a hook fires
+// on Stop while the registrar hangs it off SessionStart.
+const wrongEvent = triggerMismatches(
+  [['PostToolUse', 'Read', 'alpha.js', 5]],
+  tableTriggers(TABLE));
+ok(wrongEvent.length === 1 && wrongEvent[0].includes('alpha.js'),
+  `a Trigger naming the wrong event is reported (got ${JSON.stringify(wrongEvent)})`);
+
+// ...and the same row with the right event is silent, so the check above is not
+// simply always-red.
+const rightEvent = triggerMismatches(
+  [['SessionStart', null, 'alpha.js', 5]],
+  tableTriggers(TABLE));
+ok(rightEvent.length === 0, 'a Trigger naming the registrar\'s event is accepted');
+
+// A file registered on several events needs ALL of them in the cell, not just one.
+const partial = triggerMismatches(
+  [['SessionStart', null, 'alpha.js', 5], ['PreToolUse', 'Bash', 'alpha.js', 5]],
+  tableTriggers(TABLE));
+ok(partial.length === 1 && partial[0].includes('PreToolUse'),
+  `a cell naming only one of two registered events is reported (got ${JSON.stringify(partial)})`);
 
 // A missing section must not read as a clean table. Same shape as the
 // unreadable-registrar defect the coverage tool shipped with: the absence of a
