@@ -92,7 +92,22 @@ User message
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
+| Route logger | PostToolUse:Read (reads of a cognitive-OS spec or a project catalogue) | `~/.claude/hooks/anvi-route-logger.js` |
 | Provenance guard | PostToolUse:Artifact\|WebFetch\|WebSearch\|mcp__*\|Read\|Grep\|Glob (non-project-scoped results) | `~/.claude/hooks/provenance-guard.js` |
+
+`test/hook-table-parity.test.js` holds this table to the registrar. It imports
+`REGISTRATIONS` from `scripts/register-hooks.cjs` rather than re-reading it, so the list
+that wires a hook and the list that documents one cannot disagree. Asserted: the set of
+**files**, in both directions — registering a hook without adding its row fails the
+suite, and so does a row naming something nothing registers — and, for each file, that
+every **event** the registrar hangs it off appears in its Trigger cell. Not asserted:
+the rest of the Trigger prose. The matcher detail and the parenthetical are written for
+a reader, so a row can still be imprecise about exactly when a hook fires; it can no
+longer be wrong about which hooks exist or which event they hang off.
+
+Before that check existed the table listed 8 of 9: the route logger was live and
+undocumented here while appearing in §Registered In, so the document contradicted itself
+in two places a reader has no reason to compare.
 
 ## Boundary Matching
 
