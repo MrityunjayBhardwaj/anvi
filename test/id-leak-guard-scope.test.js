@@ -102,6 +102,25 @@ function fired(command, cwd) {
   catch { return out.length > 0; }
 }
 
+// The same probe, returning the TEXT. The hook now reports two independent properties
+// of one publish, so "did it fire" can no longer tell which one fired — and a case
+// that means to witness one of them would be satisfied by the other.
+function context(command, cwd) {
+  const payload = JSON.stringify({
+    tool_name: 'Bash',
+    tool_input: { command },
+    cwd: cwd || REPO,
+    session_id: `leak-ctx-${process.pid}-${probeN++}`,
+  });
+  const r = spawnSync(process.execPath, [HOOK], {
+    input: payload, encoding: 'utf8', env: { ...process.env, HOME },
+  });
+  try { return JSON.parse(r.stdout || '{}').hookSpecificOutput.additionalContext || ''; }
+  catch { return ''; }
+}
+const closes = (command, cwd) => /CLOSING-KEYWORD CHECK/.test(context(command, cwd));
+const leaks = (command, cwd) => /CATALOGUE-ID LEAK CHECK/.test(context(command, cwd));
+
 // Three id-bearing texts, so no case is silent merely for lack of anything to find.
 const CLUSTER = 'H104 and H105 and V25 together';   // 3 real own entries → cluster detector
 const KEY = 'see vyapti:184 for the rule';          // catalogue-free index key
@@ -240,6 +259,85 @@ EOF
 console.log('\nSILENT — a real publish carrying no IDs:');
 ok(!fired(`git commit -m "fix: handle the empty case"`), 'a clean commit');
 ok(!fired(`gh pr create --title "Handle empty" --body "No ids here."`), 'a clean PR');
+
+// ── THE CLOSING-KEYWORD NEGATION CHECK (#262) ───────────────────────────────
+// A body written to PREVENT a misreading performs the closure it disclaims: the
+// parser matches a keyword beside a reference and cannot see a negation placed
+// before it. #259's body said "This does **not** close #244" and merging it closed
+// #244.
+//
+// EVERY SILENCE CASE BELOW CARRIES A REAL CLOSING REFERENCE. That is the denominator
+// discipline the whole guard is built on, applied to this check: a body with no
+// `closes #N` in it at all is silent for a reason that says nothing about the
+// predicate, and a check examining zero references reads identical to a clean one.
+console.log('\nFIRES — a negation the closing-keyword parser cannot see:');
+// The reported sentence, verbatim in structure — emphasis included, since that is how
+// a disclaimer is actually written and a pattern over raw text would miss it.
+ok(closes(`gh pr create --title x --body "This does **not** close #244 — that asks a different question."`),
+  'the reported shape: an emphasised negation in a PR description');
+// ⚠ THE ASTERISK CASE ABOVE DOES NOT WITNESS THE EMPHASIS STRIPPING. `*` is not a word
+// character, so `\bnot\b` matches inside `**not**` with or without it — a mutation
+// removing the strip left that case green. Underscore emphasis is the form that needs
+// it, because `_` IS a word character and the boundary disappears. Without this case
+// the normalization reads as covered and is not.
+ok(closes(`gh pr create --title x --body "This does _not_ close #244"`),
+  'an ITALICISED negation — the form the emphasis stripping actually exists for');
+ok(closes(`git commit -m "refactor: does not fix #12, groundwork only"`),
+  'a commit message — the other surface GitHub reads');
+ok(closes(`gh pr edit 7 --body "this doesn't resolve #31"`), 'a contraction');
+ok(closes(`gh pr edit 7 --body "this cannot close #31"`), '`cannot`');
+ok(closes(`gh pr edit 7 --body "this will never fix #31"`), '`never`');
+// The docs allow a colon after the keyword (`Closes: #10`), so the parser fires on a
+// form the obvious pattern misses.
+ok(closes(`gh pr edit 7 --body "does not close: #10"`), 'the documented colon form');
+// The body was never in the command string.
+fs.writeFileSync(MSGFILE, 'Title\n\nThis does not close #244.\n');
+ok(closes(`git commit -F ${MSGFILE}`), 'a message in a file');
+// The DENOMINATOR, in the message itself. A count of hits alone cannot be read.
+// The colon form is in the denominator too — the keyword pattern is written twice (the
+// detector and the count), and a mutation aimed at only one of them stays green because
+// the other still answers. Counting a `Closes: #N` here exercises the count's copy.
+const denom = context(`gh pr create --title x --body "Closes: #1 and does not close #2"`);
+ok(/Examined 2 closing references in this text; 1 carries a negation/.test(denom),
+  'the finding states how many references were examined, not only how many were hit');
+
+console.log('\nSILENT — a real closing reference, correctly left alone:');
+ok(!closes(`gh pr create --title x --body "Fixes the parser.\n\nCloses #244"`),
+  'an ordinary intended closure');
+ok(!closes(`gh pr create --title x --body "This is not the answer to #244. Closes #245"`),
+  'the recommended rephrase — the negation cannot reach across the sentence boundary');
+ok(!closes(`gh pr create --title x --body "Not a full fix, but closes #12"`),
+  '`but` — the negation governs the clause before the contrast, and the closure is meant');
+ok(!closes(`gh pr create --title x --body "I am not sure this is right. Closes #12"`),
+  'a negation in the previous sentence');
+
+console.log('\nSILENT — a surface GitHub\'s linker does not read:');
+// Scope, and the reason it is worth having: a warning about something that cannot
+// happen is the noise that gets a guard ignored. Keywords link from a pull request
+// DESCRIPTION and a commit message — not from issue bodies or comments.
+ok(!closes(`gh issue create --title x --body "This does not close #244"`),
+  'an issue body — keywords there link nothing');
+ok(!closes(`gh issue comment 5 --body "This does not close #244"`), 'an issue comment');
+ok(!closes(`gh pr comment 5 --body "This does not close #244"`), 'a PR comment');
+// The paired control for all three: the identical sentence on the surface that DOES
+// link. Without it, the three silences above are also what a dead predicate produces.
+ok(closes(`gh pr create --title x --body "This does not close #244"`),
+  'CONTROL: the same sentence in a PR description does fire');
+
+console.log('\nBOTH CHECKS, ONE PUBLISH — the exemption belongs to the ID check alone:');
+// The private-location exemption was argued for entry IDs: the store is entitled to
+// carry them. It says nothing about closing keywords — a commit into a repo with a
+// remote closes issues in THAT repo exactly as here. It used to be an `exit(0)`, which
+// would have silently handed this check an exemption reasoned for something else.
+const bothText = `does not close #12 — ${CLUSTER}`;
+ok(closes(`git -C ${STORE_DIR} commit -m "${bothText}"`, REPO),
+  'a commit into the store still gets the closing-keyword finding');
+ok(!leaks(`git -C ${STORE_DIR} commit -m "${bothText}"`, REPO),
+  'and the entry IDs in that same text stay exempt, as before');
+// Outside the private locations both fire on one publish, so the two findings are
+// shown to be independent rather than one masking the other.
+ok(closes(`git commit -m "${bothText}"`) && leaks(`git commit -m "${bothText}"`),
+  'outside the store the same text produces both findings');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

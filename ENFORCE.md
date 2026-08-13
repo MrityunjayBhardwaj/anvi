@@ -61,6 +61,15 @@ User message
    private path is publishing that text, not targeting it.
    Reminds (non-blocking) when the text carries a catalogue index key (`vyapti:184`).
    "State the finding in plain language; keep the ID in the private FIX: field."
+   SECOND CHECK, same text: a NEGATED CLOSING KEYWORD. GitHub's parser matches a keyword
+   beside an issue reference and cannot see a negation placed before it, so a body
+   written to prevent a misreading performs the closure it disclaims — "does **not**
+   close #244" closed #244. Narrower scope than the ID check, and deliberately so: only
+   a pull request DESCRIPTION and a COMMIT MESSAGE, the two surfaces GitHub's linker
+   reads. Issue bodies and comments cannot close anything, so firing there would be a
+   warning about something that cannot happen. The private-location exemption applies to
+   the ID check ONLY — the store is entitled to carry entry IDs and is entitled to
+   nothing about closing keywords.
 
   ↓
 ⑩ PreToolUse:Bash — shell-rewrite-guard.js
@@ -88,7 +97,7 @@ User message
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
-| Catalogue ID leak guard | PreToolUse:Bash (`gh issue\|pr`, `git commit` — outside the private locations) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
+| Publish-text guard (catalogue IDs; negated closing keywords) | PreToolUse:Bash (`gh issue\|pr`, `git commit`; the ID check skips the private locations, the closing-keyword check covers only a PR description and a commit message) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
 | Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
