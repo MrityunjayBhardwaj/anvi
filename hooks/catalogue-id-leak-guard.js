@@ -41,6 +41,36 @@
 //     the catalogue there is no way to tell an id from `MD5` — but the narrowing is
 //     REPORTED rather than silent, because a guard that quietly covers less than it did
 //     is indistinguishable from one that looked and found nothing (#167).
+//
+// SECOND PROPERTY, SAME TEXT: a NEGATED CLOSING KEYWORD (#262).
+//
+// GitHub's closing-keyword parser matches a keyword immediately followed by an issue
+// reference. It cannot see a negation, because the negation sits BEFORE the keyword,
+// where the parser never looks — so a body written to PREVENT a misreading performs
+// the closure it disclaims. "This does **not** close #244" contains `close #244`
+// intact, and merging it closed #244: a bare `closed` event in the timeline with no
+// commit attached, which is the tell. Care makes it likelier, not less: the author who
+// has thought about being misread is the one who writes the disclaimer, and "does not
+// close #N" is its natural phrasing.
+//
+// This lives here rather than in a hook of its own because it is a property of the
+// SAME text, decided from the SAME two inputs: the publish classification below (which
+// is the expensive, hard-won part — segments, wrappers, quoted heredocs) and the
+// scanned text assembled from the command plus any `--body-file`. A second hook would
+// have to copy both, and a copy behaves identically only on the day it is made.
+
+// ⚠ The two checks have DIFFERENT scopes, and the difference is load-bearing.
+// The ID check covers every publishing surface. The closing-keyword check covers only
+// the surfaces GitHub's parser actually reads: a pull request DESCRIPTION and a COMMIT
+// MESSAGE. Keywords in issue bodies, issue comments and PR comments do not link, so
+// firing there would be a warning about something that cannot happen — and an advisory
+// guard is worth only as much as its silence.
+// Grounded in GitHub's own documentation rather than assumed:
+// https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue
+// — "You can link a pull request to an issue by using a supported keyword in the pull
+// request's description or in a commit message." Nine keywords (close/closes/closed,
+// fix/fixes/fixed, resolve/resolves/resolved), case-insensitive, and each may be
+// followed by a COLON (`Closes: #10`), which is why the pattern below allows one.
 
 const path = require('path');
 const os = require('os');
@@ -180,6 +210,11 @@ process.stdin.on('end', () => {
     const GIT_COMMIT = /\bgit\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace)(?:=|\s+)\S+\s+|--\S+\s+)*commit(?![\w-])/;
     const isGh = segments.some(s => GH_PUBLISH.test(s));
     const isCommit = segments.some(s => GIT_COMMIT.test(s));
+    // The narrower classification the closing-keyword check needs: only a pull
+    // request DESCRIPTION is read by GitHub's linker, so `create`/`edit` count and
+    // `comment` does not. Derived from the same segments, so every wrapper the
+    // publish predicate above learned to see is seen here too, for free.
+    const isPrBody = segments.some(s => /\bgh\s+pr\s+(?:create|edit)(?![\w-])/.test(s));
     if (!isGh && !isCommit) process.exit(0);
 
     // Skip the private locations — where entry IDs belong. Both questions are
@@ -212,15 +247,73 @@ process.stdin.on('end', () => {
       new RegExp(`\\.claude[\\\\/]projects[\\\\/][^\\\\/\\s"'\`]+[\\\\/]memory${ENDS_PATH_SEGMENT}`), // any project's memory
     ];
     const inPrivate = (text) => PRIVATE_LOCATIONS.some(rx => rx.test(text));
-    if (inPrivate(cwd) || (!isGh && inPrivate(command))) process.exit(0);
+    // ⚠ THE EXEMPTION BELONGS TO THE ID CHECK, NOT TO THE HOOK. It used to be an
+    // `exit(0)`, which was right while this file asked one question — but an exit is
+    // scoped to the process, so a second check added below would have inherited an
+    // exemption argued for something else and gone silent where it is still needed.
+    // The reasoning does not carry: the store is entitled to carry entry IDs, and is
+    // entitled to nothing about closing keywords — a commit into a repo with a remote
+    // closes issues in THAT repo exactly as here. So it is a flag the ID detectors
+    // consult, and there is a case asserting the closing check still fires inside a
+    // private location while the IDs in the same text stay exempt.
+    const idChecksExempt = inPrivate(cwd) || (!isGh && inPrivate(command));
 
     // The full outward-facing text: the command string PLUS any file it publishes from.
     const scanned = command + referencedFileText(command, cwd);
 
+    // ── The closing-keyword negation check (#262) ──────────────────────────────
+    // Only where GitHub's linker actually reads (see the header): a PR description or
+    // a commit message.
+    //
+    // Emphasis is stripped first — but NOT for the reason it looks like, and the
+    // difference is the whole reason it is written down. `does **not** close #244` (the
+    // reported instance) matches perfectly well without stripping: `*` is not a word
+    // character, so the boundaries around `not` still hold. It is the UNDERSCORE form
+    // that needs it — `_not_` has word characters on both sides, so `\bnot\b` cannot
+    // match, and the guard would go silent on an italicised disclaimer.
+    // Measured, not assumed: a mutation removing the strip left the asterisk case green
+    // and only the underscore case red.
+    const closingSurface = isPrBody ? 'this pull request description'
+      : isCommit ? 'this commit message' : null;
+    let closingFinding = '';
+    if (closingSurface) {
+      const prose = scanned.replace(/[*_~`]/g, '').replace(/[ \t]+/g, ' ');
+      // A keyword adjacent to a reference — what the parser matches, and the
+      // DENOMINATOR. A count of negated hits alone cannot be read: zero found out of
+      // zero examined is a body with no closures in it, and zero out of nine is a
+      // clean one. They are different facts and the message states which it is.
+      const REF = String.raw`(?:[\w.-]+\/[\w.-]+)?#\d+`;
+      const KEYWORD = String.raw`(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)`;
+      const examined = [...prose.matchAll(new RegExp(String.raw`\b${KEYWORD}\b:?\s+(${REF})`, 'gi'))];
+      // The negation window. Bounded, and it may not cross a sentence boundary — the
+      // negation has to govern THIS clause to reach the keyword. A comma is allowed
+      // (`does not, in my reading, close #12`), which is why `but` is excluded
+      // separately: in "not a full fix, but closes #12" the negation governs the
+      // clause before the contrast and the closure is genuinely intended.
+      const NEG = String.raw`(?:\b(?:not|never|nor|no longer)\b|\b\w+n['’]t\b|\bcannot\b)`;
+      const negated = [...prose.matchAll(
+        new RegExp(String.raw`${NEG}([^.;:!?\n]{0,32}?)\b${KEYWORD}\b:?\s+(${REF})`, 'gi'))]
+        .filter(m => !/\bbut\b/i.test(m[1]));
+      if (negated.length) {
+        const quoted = [...new Set(negated.map(m => m[0].trim()))].map(s => `"${s}"`).join(', ');
+        const refs = [...new Set(negated.map(m => m[2]))].join(', ');
+        closingFinding =
+          `CLOSING-KEYWORD CHECK: ${closingSurface} carries ${quoted}. The keyword sits ` +
+          `immediately beside the reference, and GitHub's parser cannot see a negation ` +
+          `placed before it — so this will CLOSE ${refs} despite saying it does not. ` +
+          `The tell afterwards is a bare \`closed\` event with no commit attached.\n` +
+          `Examined ${examined.length} closing reference${examined.length === 1 ? '' : 's'} ` +
+          `in this text; ${negated.length} carr${negated.length === 1 ? 'ies' : 'y'} a negation.\n` +
+          `→ Phrase it so the keyword never touches the number — "this is not the answer ` +
+          `to ${refs.split(', ')[0]}". Rewording the negation is not enough; the keyword ` +
+          `has to move away from the reference.`;
+      }
+    }
+
     // Detector 1 — the unambiguous index-key form `name[:#]NNN`. Catalogue-free, so it
     // catches a foreign project's key that isn't in this repo's own entries.
     const keyPattern = /\b(hetv[aā]bh[aā]sa|vy[aā]pti|krama|dharana)\s*[:#]\s*\d+/i;
-    const keyHit = scanned.match(keyPattern);
+    const keyHit = idChecksExempt ? null : scanned.match(keyPattern);
 
     // Detector 2 — bare IDs that are REAL entries in this project's catalogue. Two
     // guards make this safe against the false positives that kept bare IDs out (#45):
@@ -242,10 +335,14 @@ process.stdin.on('end', () => {
       const prefixLen = m[1].length, num = parseInt(m[2], 10);
       return prefixLen >= 2 || num >= 10; // multi-letter prefix OR 2+ digit number
     };
-    const { ids, refused: catalogueRefused, notice } = projectCatalogue(cwd);
+    const { ids, refused: catalogueRefused, notice } = idChecksExempt
+      ? { ids: new Set(), refused: false, notice: null }
+      : projectCatalogue(cwd);
     // Every DISTINCT id-shaped token in the outward text, computed once and reused by
     // the bare-id, cluster, and density detectors below.
-    const idTokens = [...new Set([...scanned.matchAll(/\b([A-Z]{1,3}\d{1,4})\b/g)].map(m => m[1]))];
+    const idTokens = idChecksExempt
+      ? []
+      : [...new Set([...scanned.matchAll(/\b([A-Z]{1,3}\d{1,4})\b/g)].map(m => m[1]))];
 
     const bareHits = ids.size
       ? idTokens.filter(id => ids.has(id) && flaggableIdShape(id))
@@ -289,10 +386,6 @@ process.stdin.on('end', () => {
         ])]
       : [];
 
-    if (!keyHit && !bareHits.length && !clusterHits.length && !denseHits.length && !blindTokens.length) {
-      process.exit(0);
-    }
-
     const surface = isGh ? 'this GitHub issue/PR' : 'this commit message';
     // Union the tokens every detector matched, in a stable order, deduped.
     const tokenSet = new Set([...bareHits, ...clusterHits, ...denseHits]);
@@ -332,7 +425,11 @@ process.stdin.on('end', () => {
         `explicit index keys, and dense runs of ID-shaped tokens — did run.)`
       : '';
 
-    const message = [finding, coverage].filter(Boolean).join('\n\n');
+    // Both properties of the same publish, on the same channel. The closing-keyword
+    // finding leads: it names something that WILL happen on merge, where the ID
+    // findings name something already written.
+    const message = [closingFinding, finding, coverage].filter(Boolean).join('\n\n');
+    if (!message) process.exit(0);
 
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: message }
