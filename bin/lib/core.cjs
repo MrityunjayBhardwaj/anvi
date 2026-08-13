@@ -177,10 +177,27 @@ function loadConfig(cwd) {
     phase_naming: 'sequential', // 'sequential' (default, auto-increment) or 'custom' (arbitrary string IDs)
   };
 
+  // The read and the resolution are two steps, deliberately separated. Some of the
+  // answers below are DETECTED rather than declared — `commit_docs` falls back to
+  // whether the planning tree is gitignored — and a detection that lives inside the
+  // read is unreachable from the one case it was written for: a project that has never
+  // written a config at all. Reading is allowed to fail. Resolving is not.
+  let parsed;
   try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw);
+    parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch {
+    parsed = null;
+  }
+  // A missing file, a malformed one, and a file holding `null` or an array all say the
+  // same thing to the resolution: nothing here is explicitly set. None of them may be
+  // read as an instruction, and none of them means "commit everything".
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) parsed = {};
 
+  // Migrations rewrite a file that was actually read, so they only apply when one was.
+  // Their own failure must not cost the caller a resolved config — which is precisely
+  // what the single outer catch used to do: it returned bare defaults and skipped every
+  // detection below it.
+  try {
     // Migrate deprecated "depth" key to "granularity" with value mapping
     if ('depth' in parsed && !('granularity' in parsed)) {
       const depthToGranularity = { quick: 'coarse', standard: 'standard', comprehensive: 'fine' };
@@ -221,56 +238,54 @@ function loadConfig(cwd) {
     if (configDirty) {
       try { fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2), 'utf-8'); } catch {}
     }
+  } catch { /* a migration is best-effort; the resolution below still runs */ }
 
-    const get = (key, nested) => {
-      if (parsed[key] !== undefined) return parsed[key];
-      if (nested && parsed[nested.section] && parsed[nested.section][nested.field] !== undefined) {
-        return parsed[nested.section][nested.field];
-      }
-      return undefined;
-    };
+  const get = (key, nested) => {
+    if (parsed[key] !== undefined) return parsed[key];
+    if (nested && parsed[nested.section] && parsed[nested.section][nested.field] !== undefined) {
+      return parsed[nested.section][nested.field];
+    }
+    return undefined;
+  };
 
-    const parallelization = (() => {
-      const val = get('parallelization');
-      if (typeof val === 'boolean') return val;
-      if (typeof val === 'object' && val !== null && 'enabled' in val) return val.enabled;
-      return defaults.parallelization;
-    })();
+  const parallelization = (() => {
+    const val = get('parallelization');
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'object' && val !== null && 'enabled' in val) return val.enabled;
+    return defaults.parallelization;
+  })();
 
-    return {
-      model_profile: get('model_profile') ?? defaults.model_profile,
-      commit_docs: (() => {
-        const explicit = get('commit_docs', { section: 'planning', field: 'commit_docs' });
-        // If explicitly set in config, respect the user's choice
-        if (explicit !== undefined) return explicit;
-        // Auto-detection: when no explicit value and .planning/ is gitignored,
-        // default to false instead of true
-        if (isGitIgnored(cwd, pmRel(cwd, ))) return false;
-        return defaults.commit_docs;
-      })(),
-      search_gitignored: get('search_gitignored', { section: 'planning', field: 'search_gitignored' }) ?? defaults.search_gitignored,
-      branching_strategy: get('branching_strategy', { section: 'git', field: 'branching_strategy' }) ?? defaults.branching_strategy,
-      phase_branch_template: get('phase_branch_template', { section: 'git', field: 'phase_branch_template' }) ?? defaults.phase_branch_template,
-      milestone_branch_template: get('milestone_branch_template', { section: 'git', field: 'milestone_branch_template' }) ?? defaults.milestone_branch_template,
-      quick_branch_template: get('quick_branch_template', { section: 'git', field: 'quick_branch_template' }) ?? defaults.quick_branch_template,
-      research: get('research', { section: 'workflow', field: 'research' }) ?? defaults.research,
-      plan_checker: get('plan_checker', { section: 'workflow', field: 'plan_check' }) ?? defaults.plan_checker,
-      verifier: get('verifier', { section: 'workflow', field: 'verifier' }) ?? defaults.verifier,
-      nyquist_validation: get('nyquist_validation', { section: 'workflow', field: 'nyquist_validation' }) ?? defaults.nyquist_validation,
-      parallelization,
-      brave_search: get('brave_search') ?? defaults.brave_search,
-      firecrawl: get('firecrawl') ?? defaults.firecrawl,
-      exa_search: get('exa_search') ?? defaults.exa_search,
-      text_mode: get('text_mode', { section: 'workflow', field: 'text_mode' }) ?? defaults.text_mode,
-      sub_repos: get('sub_repos', { section: 'planning', field: 'sub_repos' }) ?? defaults.sub_repos,
-      resolve_model_ids: get('resolve_model_ids') ?? defaults.resolve_model_ids,
-      context_window: get('context_window') ?? defaults.context_window,
-      phase_naming: get('phase_naming') ?? defaults.phase_naming,
-      model_overrides: parsed.model_overrides || null,
-    };
-  } catch {
-    return defaults;
-  }
+  return {
+    model_profile: get('model_profile') ?? defaults.model_profile,
+    commit_docs: (() => {
+      const explicit = get('commit_docs', { section: 'planning', field: 'commit_docs' });
+      // If explicitly set in config, respect the user's choice
+      if (explicit !== undefined) return explicit;
+      // Auto-detection: when no explicit value and .planning/ is gitignored,
+      // default to false instead of true
+      if (isGitIgnored(cwd, pmRel(cwd, ))) return false;
+      return defaults.commit_docs;
+    })(),
+    search_gitignored: get('search_gitignored', { section: 'planning', field: 'search_gitignored' }) ?? defaults.search_gitignored,
+    branching_strategy: get('branching_strategy', { section: 'git', field: 'branching_strategy' }) ?? defaults.branching_strategy,
+    phase_branch_template: get('phase_branch_template', { section: 'git', field: 'phase_branch_template' }) ?? defaults.phase_branch_template,
+    milestone_branch_template: get('milestone_branch_template', { section: 'git', field: 'milestone_branch_template' }) ?? defaults.milestone_branch_template,
+    quick_branch_template: get('quick_branch_template', { section: 'git', field: 'quick_branch_template' }) ?? defaults.quick_branch_template,
+    research: get('research', { section: 'workflow', field: 'research' }) ?? defaults.research,
+    plan_checker: get('plan_checker', { section: 'workflow', field: 'plan_check' }) ?? defaults.plan_checker,
+    verifier: get('verifier', { section: 'workflow', field: 'verifier' }) ?? defaults.verifier,
+    nyquist_validation: get('nyquist_validation', { section: 'workflow', field: 'nyquist_validation' }) ?? defaults.nyquist_validation,
+    parallelization,
+    brave_search: get('brave_search') ?? defaults.brave_search,
+    firecrawl: get('firecrawl') ?? defaults.firecrawl,
+    exa_search: get('exa_search') ?? defaults.exa_search,
+    text_mode: get('text_mode', { section: 'workflow', field: 'text_mode' }) ?? defaults.text_mode,
+    sub_repos: get('sub_repos', { section: 'planning', field: 'sub_repos' }) ?? defaults.sub_repos,
+    resolve_model_ids: get('resolve_model_ids') ?? defaults.resolve_model_ids,
+    context_window: get('context_window') ?? defaults.context_window,
+    phase_naming: get('phase_naming') ?? defaults.phase_naming,
+    model_overrides: parsed.model_overrides || null,
+  };
 }
 
 // ─── Git utilities ────────────────────────────────────────────────────────────

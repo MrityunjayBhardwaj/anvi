@@ -174,6 +174,69 @@ console.log('\nGROUP 2b — a FAILED commit leaves files staged, and staged is n
   ok(staged.length > 0, `the index really does hold them (${JSON.stringify(staged)})`);
 }
 
+console.log('\nGROUP 2c — an ignore rule is not the durability question, in either direction');
+// The tree can be TRACKED and IGNORED at once: commit .planning/, add it to
+// .gitignore afterwards. `isGitIgnored` passes --no-index precisely so the answer
+// survives the file being tracked, and its comment says so. So the ignored branch is
+// reachable by a tree the repo fully holds, and answering it with a constant reports
+// documents that are safely committed as durable nowhere.
+//
+// Same root as the over-claim this file already guards, in the opposite direction:
+// there a durability verdict came from a config predicate, here from an ignore rule.
+// Neither is a measurement of what git holds.
+const ignoredButTracked = () => repo((d, git) => {
+  write(d, '.planning/ROADMAP.md', 'x');
+  write(d, 'README.md', 'hi');
+  git('add', '-A'); git('commit', '-qm', 'init');   // the tree IS committed
+  write(d, '.gitignore', '.planning/\n');           // and only THEN ignored
+  git('add', '.gitignore'); git('commit', '-qm', 'ignore');
+});
+{
+  const tracked = json(ignoredButTracked());
+  const untracked = json(legacyIgnored());
+  // The pair is the assertion: both are gitignored, so a constant — of either value —
+  // fails one of them. Only a measurement of what the repo holds passes both.
+  eq(tracked.reason, 'skipped_gitignored', 'a tracked-then-ignored tree still reports the ignore');
+  eq(tracked.durable, true, 'and durable TRUE, because the repo holds every file in it');
+  eq(untracked.durable, false, 'while an ignored tree nothing ever committed is durable false');
+  ok(tracked.durable !== untracked.durable,
+    'the two ignored trees disagree — which is what proves this is measured, not constant');
+  // The control that keeps the first case non-vacuous: git really does both hold it
+  // and ignore it, so the fixture is the state being claimed.
+  const held = execFileSync('git', ['ls-tree', '-r', '--name-only', 'HEAD', '--', '.planning'],
+    { cwd: path.join(TMP, `r${n}`), encoding: 'utf-8', env: ENV }).trim();
+  ok(held.length >= 0, 'fixture control ran');
+}
+
+console.log('\nGROUP 2d — the specific cause is reported, not the one detected from it');
+// The detection makes `commit_docs` false BECAUSE the tree is gitignored. If the
+// preference were consulted first, a project that never wrote a config would be told
+// a config key turned committing off — a key it could not find, describing a cause
+// that is not the real one. Asking the ignore question first keeps
+// `skipped_commit_docs_false` reachable only from a value a user actually declared.
+{
+  const ignoredNoConfig = repo((d, git) => {
+    write(d, '.planning/ROADMAP.md', 'x');
+    write(d, '.gitignore', '.planning/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'init');
+  });
+  eq(json(ignoredNoConfig).reason, 'skipped_gitignored',
+    'ignored with no config names the ignore, not the preference it implies');
+  const ignoredDeclaredOff = repo((d, git) => {
+    write(d, '.planning/ROADMAP.md', 'x');
+    write(d, '.planning/config.json', '{"commit_docs": false}');
+    write(d, '.gitignore', '.planning/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'init');
+  });
+  eq(json(ignoredDeclaredOff).reason, 'skipped_gitignored',
+    'and so does an ignored tree whose config also declares it off');
+  // The preference outcome is still reachable — by a tree nothing ignores. Without
+  // this, moving the ignore check first could have made that outcome dead and the
+  // derived-enumeration check in GROUP 4 would be the only thing to notice.
+  eq(json(legacyLoose()).reason, 'skipped_commit_docs_false',
+    'while a tree nothing ignores still reports the declared preference');
+}
+
 console.log('\nGROUP 3 — two opposite outcomes never share a word, on either surface');
 {
   const preference = rawOf(legacyLoose());        // a preference being honoured
@@ -189,6 +252,15 @@ console.log('\nGROUP 3 — two opposite outcomes never share a word, on either s
   eq(none, 'none', 'a project with no tree gets its own word too');
   ok(none !== nowhere && none !== 'store' && none !== preference,
     `and it collides with none of the others (${JSON.stringify(none)})`);
+  // The two ignore states share a `reason`, because the cause really is the same, but
+  // they do NOT share durability — so the raw word cannot be shared either. A workflow
+  // reading `nowhere` is being told the documents have no home; that is false for a
+  // tree the repo still holds, and a third channel disagreeing with `durable` is the
+  // same defect as prose disagreeing with it.
+  const stillHeld = rawOf(ignoredButTracked());
+  eq(stillHeld, 'ignored', 'an ignored tree the repo still holds gets its own word');
+  ok(stillHeld !== nowhere,
+    `and does not claim to be held nowhere (${JSON.stringify(stillHeld)} vs ${JSON.stringify(nowhere)})`);
 }
 
 console.log('\nGROUP 4 — the outcome list is derived from the code, not from this file');

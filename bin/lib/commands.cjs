@@ -305,7 +305,12 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   const treeDurability = () => {
     if (state === 'absent') return false;
     if (state === 'migrated') return true;
-    return ignored ? false : heldByProjectRepo();
+    // NOT `ignored ? false : …`. An ignore rule is a statement about what git will add
+    // NEXT, never about what it already holds: `.planning/` can be committed and then
+    // gitignored afterwards, and `isGitIgnored` passes --no-index precisely so it still
+    // answers true for a tracked path. Short-circuiting on it reported a tree the repo
+    // fully holds as durable nowhere. The question is what HEAD contains, so ask that.
+    return heldByProjectRepo();
   };
 
   // No tree of either kind. "The store holds this" would name a store nothing
@@ -323,6 +328,34 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   if (state === 'absent') {
     const result = { committed: false, hash: null, reason: 'no_planning_tree', durable: false, planning_root: planningRel };
     output(result, raw, 'none');
+    return;
+  }
+
+  // Answered BEFORE the commit_docs preference, and that order is the point. When no
+  // config declares a preference, `commit_docs` is DERIVED from exactly this state —
+  // so consulting the preference first reports the derived cause instead of the real
+  // one, and tells an author to go looking for a config key they never wrote. Asking
+  // the ignore question first also keeps `skipped_commit_docs_false` reachable only
+  // from a value someone actually declared.
+  if (ignored) {
+    const held = treeDurability();
+    // The two cases are opposites and must not share a sentence. A tree committed
+    // BEFORE it was ignored is still held by the repo; only new documents are being
+    // dropped. Saying "committed NOWHERE" there would contradict the `durable` field
+    // this same call returns — and a warning that disagrees with its own data is the
+    // one people learn to scroll past.
+    process.stderr.write(held
+      ? `anvi: ${planningRel}/ is gitignored — anything NEW here will not be committed.\n` +
+        `      What the repo already holds stays held; new documents do not join it.\n` +
+        `      Migrate to .anvi/project_management to make them durable: anvi update\n`
+      : `anvi: ${planningRel}/ is gitignored — these documents are being committed NOWHERE.\n` +
+        `      The project repo skips them and the store does not hold them.\n` +
+        `      Migrate to .anvi/project_management to make them durable: anvi update\n`);
+    // `skipped` is the word for a preference being honoured, which this is not. The raw
+    // form is what a workflow captures, so the two ignore states get their own words
+    // there too: knowledge with no home, versus a tree the repo still holds.
+    const result = { committed: false, hash: null, reason: 'skipped_gitignored', durable: held, planning_root: planningRel };
+    output(result, raw, held ? 'ignored' : 'nowhere');
     return;
   }
 
@@ -344,22 +377,6 @@ function cmdCommit(cwd, message, files, raw, amend, noVerify) {
   if (state === 'migrated') {
     const result = { committed: false, hash: null, reason: 'durable_in_store', durable: true, planning_root: planningRel };
     output(result, raw, 'store');
-    return;
-  }
-
-  // Legacy tree: still the project repo's job. An ignore rule here means the
-  // documents are durable NOWHERE — the project repo skips them and the store
-  // never sees them — so the skip is announced rather than merely returned.
-  if (isGitIgnored(cwd, planningRel)) {
-    process.stderr.write(
-      `anvi: ${planningRel}/ is gitignored — these documents are being committed NOWHERE.\n` +
-      `      The project repo skips them and the store does not hold them.\n` +
-      `      Migrate to .anvi/project_management to make them durable: anvi update\n`);
-    // `skipped` is the word for a preference being honoured. This is knowledge with no
-    // home, which is its opposite, so it gets its own word on the raw surface too —
-    // the raw form is what a workflow captures, and there the two were indistinguishable.
-    const result = { committed: false, hash: null, reason: 'skipped_gitignored', durable: false, planning_root: planningRel };
-    output(result, raw, 'nowhere');
     return;
   }
 
