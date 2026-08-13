@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, planningRoot, pmRel } = require('./core.cjs');
+const { output, error, planningRoot, pmRel, DETECTED_CONFIG_KEYS } = require('./core.cjs');
 const {
   VALID_PROFILES,
   getAgentToModelMapForProfile,
@@ -115,7 +115,7 @@ function buildNewProjectConfig(userChoices) {
   };
 
   // Three-level deep merge: hardcoded <- userDefaults <- choices
-  return {
+  const merged = {
     ...hardcoded,
     ...userDefaults,
     ...choices,
@@ -135,6 +135,25 @@ function buildNewProjectConfig(userChoices) {
       ...(choices.hooks || {}),
     },
   };
+
+  // For a key the READER detects, absence is not the same as the default value —
+  // absence is the state that lets the detection run. Writing the hardcoded value for
+  // one of those answers a question the user never asked, and nothing afterwards can
+  // tell "true because they chose it" from "true because a template filled it in".
+  //
+  // Only the HARDCODED source is dropped. A value from ~/.gsd/defaults.json is a
+  // declaration too — the reader never looks there, so omitting it would lose it — and
+  // a value in `choices` is the most explicit declaration there is. Both survive.
+  //
+  // The set comes from core.cjs, which owns the resolution. Restating it here is what
+  // let the writer and the reader disagree about `commit_docs` for as long as they did.
+  for (const key of DETECTED_CONFIG_KEYS) {
+    const declared = Object.prototype.hasOwnProperty.call(choices, key)
+      || Object.prototype.hasOwnProperty.call(userDefaults, key);
+    if (!declared) delete merged[key];
+  }
+
+  return merged;
 }
 
 /**

@@ -152,6 +152,19 @@ function safeReadFile(filePath) {
   }
 }
 
+// The keys whose resolution below consults something OTHER than the config file — for
+// these, "absent" is not the same as "set to the default", because absence is what lets
+// the detection run. Any writer that materializes a full config must leave these out
+// unless the user actually declared them: writing the default silently retires the
+// detection, and nothing afterwards can tell the two apart.
+//
+// This set lives here, next to the resolution it describes, and is IMPORTED by the
+// writer rather than restated there — the same rule spelled twice is the shape that
+// let this diverge in the first place. Its completeness is asserted against this
+// function's source, so a second detection added later fails the suite instead of
+// being quietly materialized.
+const DETECTED_CONFIG_KEYS = new Set(['commit_docs']);
+
 function loadConfig(cwd) {
   const configPath = path.join(planningRoot(cwd), 'config.json');
   const defaults = {
@@ -1269,6 +1282,10 @@ module.exports = {
   error,
   safeReadFile,
   loadConfig,
+  // Exported so the config WRITER omits exactly the keys this reader detects, rather
+  // than carrying its own copy of the list. A default materialized for one of these
+  // retires the detection permanently.
+  DETECTED_CONFIG_KEYS,
   isGitIgnored,
   legacyTreeDurability,
   execGit,
