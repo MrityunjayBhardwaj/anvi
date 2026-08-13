@@ -124,6 +124,26 @@ console.log('\nGROUP 2b — a globally declared value counts as declared');
     'and wins over the detection, which would have said false for this gitignored tree');
 }
 
+console.log('\nGROUP 2c — a NESTED declaration is a declaration too');
+{
+  // The reader accepts `planning.commit_docs` as well as the top-level key, and it is
+  // a documented config path. The omission deletes the TOP-LEVEL key only, so a nested
+  // declaration survives by construction rather than by being handled — which is worth
+  // pinning, because the obvious "tidier" rewrite (deleting the key wherever it
+  // appears) would silently discard a value the user really did declare.
+  const dir = repo((d, git) => {
+    write(d, '.planning/ROADMAP.md', 'x');
+    write(d, '.gitignore', '.planning/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'init');
+  });
+  cli(dir, 'config-new-project', JSON.stringify({ planning: { commit_docs: true } }));
+  const c = configOf(dir);
+  ok(c.commit_docs === undefined, 'the hardcoded top-level default is still omitted');
+  eq(c.planning && c.planning.commit_docs, true, 'and the nested declaration is written');
+  eq(loadConfig(dir).commit_docs, true,
+    'so it wins over the detection, which would have said false for this gitignored tree');
+}
+
 console.log('\nGROUP 3 — the omitted set is derived from the reader, not maintained by hand');
 {
   // Which keys are detected is a property of loadConfig's resolution. Reading it here
