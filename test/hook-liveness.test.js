@@ -21,9 +21,11 @@
 //
 // Fixtures are hermetic — a throwaway project this file builds — so the result is a
 // fact about the code, not about this machine's catalogues.
-// Run from the SHIPPED tree too (`git archive HEAD | tar -x`): the working tree
-// hides staged/unstaged splits, and such a split is exactly how a dead hook got
-// committed once already.
+// Run from the SHIPPED tree too — commit, then `git worktree add --detach <abs path>
+// <sha>` and run the suite there: the working tree hides staged/unstaged splits, and
+// such a split is exactly how a dead hook got committed once already. Not `git archive
+// | tar -x` — several checks need a real `.git` and throw without one, so an extracted
+// tarball reports harness failures a reader cannot tell from a regression.
 'use strict';
 const fs = require('fs');
 const os = require('os');

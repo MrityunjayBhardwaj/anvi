@@ -372,9 +372,16 @@ allowed to be silent in production must be loud in a test, or it has no witness.
   is precisely how the dead gate passed review.
 - **Coverage is derived from the registration table**, so a hook added to the chain
   without a witness fails the suite rather than being silently uncovered.
-- **Verify from the shipped artifact** (`git archive HEAD | tar -x` and run *that*).
+- **Verify from the shipped artifact** — commit, then
+  `git worktree add --detach <absolute path> <sha>` and run the suite in *that*.
   The working tree hides staged/unstaged splits, and such a split is how a dead hook
-  reached a commit once already.
+  reached a commit once already. A worktree cannot see uncommitted work, which is the
+  point. Give it an absolute path, or git resolves it inside the repo and leaves a
+  second checkout as untracked clutter.
+  Not `git archive HEAD | tar -x`: several checks are repo-aware and throw without a
+  real `.git`, so an extracted tarball reports failures that belong to the harness and
+  are indistinguishable from a regression. The likeliest reading of those reds is
+  "the suite is broken, ignore it", which costs more than the check was worth.
 - **Falsify, don't assert.** Break the thing each case guards and confirm it goes
   red. An integration test that has never failed is a claim, not a witness.
 
