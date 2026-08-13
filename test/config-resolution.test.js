@@ -137,6 +137,30 @@ console.log('\nGROUP 4 — a malformed config is not a crash, and not a silent t
   eq(got, false, 'and still reaches the detection');
 }
 
+console.log('\nGROUP 5 — resolving does not CREATE the file it failed to read');
+{
+  // Separating the read from the resolution moved the migration block outside the
+  // guard that used to imply "a file was read". Each migration is inert on an empty
+  // object today, so nothing is written — but that is a property of the current
+  // migrations, not of the structure, and the next one added would inherit the
+  // opposite default. A project that never wrote a config must not acquire one just
+  // by being read, least of all a gitignored tree where the new file would be
+  // untracked and invisible.
+  const dir = repo((d, git) => {
+    write(d, '.planning/ROADMAP.md', 'x');
+    write(d, '.gitignore', '.planning/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'init');
+  });
+  const before = fs.readdirSync(path.join(dir, '.planning')).sort();
+  loadConfig(dir);
+  loadConfig(dir);   // twice: a write guarded by a dirty flag can still fire once
+  const after = fs.readdirSync(path.join(dir, '.planning')).sort();
+  ok(JSON.stringify(before) === JSON.stringify(after),
+    `reading a config-less project leaves its tree alone (${before.join(',')} -> ${after.join(',')})`);
+  ok(!fs.existsSync(path.join(dir, '.planning', 'config.json')),
+    'and no config.json is conjured for it');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* intentionally empty */ }
 process.exit(fail === 0 ? 0 : 1);
