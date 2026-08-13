@@ -6,10 +6,14 @@
 # just-landed explicit commit is never clobbered by `add -A` + the terse message.
 # Run:  bash test/anvideck-checkpoint-quiet-period.test.sh
 #
-# HOOK env var overrides the hook path (used to run the SHIPPED tree via
-# `git archive HEAD` — the working tree can hide a staged/unstaged split where a
-# call and its import live in different commits, so only the shipped tree proves
-# what a user actually gets).
+# HOOK env var overrides the hook path, so this can be pointed at a SHIPPED tree —
+# `git worktree add --detach <abs path> <sha>`, then HOOK=<that>/hooks/anvideck-
+# checkpoint.js. The working tree can hide a staged/unstaged split where a call and
+# its import live in different commits, so only the shipped tree proves what a user
+# actually gets. (`git archive` also produces a usable copy for THIS test, which
+# needs one file rather than the repo-aware suite — but it is not written here,
+# because the whole suite run is where it silently fails and one method is easier
+# to remember than a rule about when each applies.)
 set -u
 HOOK="${HOOK:-$(cd "$(dirname "$0")/.." && pwd)/hooks/anvideck-checkpoint.js}"
 T=$(mktemp -d)
