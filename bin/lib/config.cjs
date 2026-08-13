@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { output, error, planningRoot, pmRel } = require('./core.cjs');
+const { output, error, planningRoot, pmRel, DETECTED_CONFIG_KEYS } = require('./core.cjs');
 const {
   VALID_PROFILES,
   getAgentToModelMapForProfile,
@@ -38,12 +38,17 @@ function validateKnownConfigKeyPath(keyPath) {
 }
 
 /**
- * Build a fully-materialized config object for a new project.
+ * Build the config object for a new project.
  *
  * Merges (increasing priority):
  *   1. Hardcoded defaults — every key that loadConfig() resolves, plus mode/granularity
  *   2. User-level defaults from ~/.gsd/defaults.json (if present)
  *   3. userChoices — the settings the user explicitly selected during /gsd:new-project
+ *
+ * Deliberately NOT fully materialized: a key in DETECTED_CONFIG_KEYS is dropped unless
+ * (2) or (3) actually supplied it. For those keys loadConfig() treats absence as a
+ * third state and measures the answer instead, so writing the hardcoded default would
+ * retire the detection permanently. See the omission loop below.
  *
  * Uses the canonical `git` namespace for branching keys (consistent with VALID_CONFIG_KEYS
  * and the settings workflow). loadConfig() handles both flat and nested formats, so this
@@ -115,7 +120,7 @@ function buildNewProjectConfig(userChoices) {
   };
 
   // Three-level deep merge: hardcoded <- userDefaults <- choices
-  return {
+  const merged = {
     ...hardcoded,
     ...userDefaults,
     ...choices,
@@ -135,14 +140,35 @@ function buildNewProjectConfig(userChoices) {
       ...(choices.hooks || {}),
     },
   };
+
+  // For a key the READER detects, absence is not the same as the default value —
+  // absence is the state that lets the detection run. Writing the hardcoded value for
+  // one of those answers a question the user never asked, and nothing afterwards can
+  // tell "true because they chose it" from "true because a template filled it in".
+  //
+  // Only the HARDCODED source is dropped. A value from ~/.gsd/defaults.json is a
+  // declaration too — the reader never looks there, so omitting it would lose it — and
+  // a value in `choices` is the most explicit declaration there is. Both survive.
+  //
+  // The set comes from core.cjs, which owns the resolution. Restating it here is what
+  // let the writer and the reader disagree about `commit_docs` for as long as they did.
+  for (const key of DETECTED_CONFIG_KEYS) {
+    const declared = Object.prototype.hasOwnProperty.call(choices, key)
+      || Object.prototype.hasOwnProperty.call(userDefaults, key);
+    if (!declared) delete merged[key];
+  }
+
+  return merged;
 }
 
 /**
- * Command: create a fully-materialized .planning/config.json for a new project.
+ * Command: create .planning/config.json for a new project.
  *
  * Accepts user-chosen settings as a JSON string (the keys the user explicitly
- * configured during /gsd:new-project). All remaining keys are filled from
- * hardcoded defaults and optional ~/.gsd/defaults.json.
+ * configured during /gsd:new-project). Remaining keys are filled from hardcoded
+ * defaults and optional ~/.gsd/defaults.json — EXCEPT the keys loadConfig() detects,
+ * which are written only when the user or ~/.gsd actually declared them. See
+ * buildNewProjectConfig().
  *
  * Idempotent: if config.json already exists, returns { created: false }.
  */
