@@ -208,6 +208,29 @@ const ignoredButTracked = () => repo((d, git) => {
   ok(held.length >= 0, 'fixture control ran');
 }
 
+console.log('\nGROUP 2c-prose — the warning agrees with the field the same call returns');
+// Conditioning the durability measurement without conditioning the sentence beside it
+// just moves the contradiction to the channel a human actually reads. A mutation that
+// pinned the warning to its "committed NOWHERE" form reddened nothing until this
+// existed — the prose was the one output no case looked at.
+{
+  const stderrOf = (dir) => {
+    const r = require('child_process').spawnSync('node', [CLI, 'commit', 'docs: test'],
+      { cwd: dir, encoding: 'utf-8', env: ENV });
+    return r.stderr || '';
+  };
+  const heldWarning = stderrOf(ignoredButTracked());
+  const nowhereWarning = stderrOf(legacyIgnored());
+  ok(/anything NEW here will not be committed/.test(heldWarning),
+    'a tracked-then-ignored tree is warned only about NEW documents');
+  ok(!/committed NOWHERE/.test(heldWarning),
+    'and is NOT told its documents are committed nowhere, which would contradict durable:true');
+  ok(/committed NOWHERE/.test(nowhereWarning),
+    'while a tree nothing holds still gets the full alarm');
+  ok(heldWarning !== nowhereWarning,
+    'the two warnings are not the same text');
+}
+
 console.log('\nGROUP 2d — the specific cause is reported, not the one detected from it');
 // The detection makes `commit_docs` false BECAUSE the tree is gitignored. If the
 // preference were consulted first, a project that never wrote a config would be told
