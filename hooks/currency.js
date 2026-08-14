@@ -263,6 +263,38 @@ function matchesDeclaredFile(decl, relPath) {
   }
 }
 
+// --- Does an entry's OWN declaration name this file? ------------------------
+// The selection predicate the point-of-use injector asks, kept here for the reason
+// every other shared predicate in this file is: two components already read `REF:`
+// and `FILES:`, and a second grammar for "does this declaration name that path"
+// would judge a different corpus while reporting the same answer (#279).
+//
+// It composes three things that already exist rather than adding a fourth: the REF
+// grammar, the FILES grammar, and the ONE relation that decides whether a declared
+// spec names a path. That last part matters most — the relation had four sites and
+// no home, and this is deliberately not a fifth.
+//
+// ⚠ WHAT THIS IS, STATED SO THE NEXT READER DOES NOT OVERCLAIM IT: `REF:` and
+// `FILES:` record PROVENANCE — where a pattern was found and where its fix landed.
+// They do not record APPLICABILITY. The two diverge exactly on the entries that
+// generalise best: the trap about a shell variable re-parsed inside a pattern
+// applies to every shell command ever written, and names two files. So this
+// predicate makes a coarse rule much sharper without making it the right rule,
+// and an entry it does not select may still apply. It is a better index over
+// provenance, not an index over applicability — that field does not exist yet.
+function entryDeclaresFile(entry, relPath) {
+  if (!entry || !relPath) return false;
+  // The same union computeCurrency grades over — REF: ∪ FILES: — so an entry is
+  // selected by exactly the paths the freshness gate already watches on its behalf.
+  // Divergence between the two would mean offering an entry whose drift nothing
+  // tracks, or tracking drift for an entry nothing offers.
+  const declared = [
+    ...extractRefFiles(entry.refField || ''),
+    ...extractFileSpecs(entry.filesField || ''),
+  ];
+  return declared.some((spec) => matchesDeclaredFile(spec, relPath));
+}
+
 // The repo's tracked files, listed once per git closure rather than once per spec.
 // Resolving a pattern now means filtering this list through the engine, where before
 // it meant one `git ls-files -- <spec>` per spec — so without the memo a catalogue
@@ -1987,6 +2019,10 @@ module.exports = {
   // rather than defining its own, which is what makes "how wide is a declared `*`" a
   // question with a single answer instead of one answer per consumer (#195).
   globBody, matchesDeclaredFile, globWidthGap,
+  // Point-of-use selection by an entry's OWN declaration. Exported for the same
+  // reason as everything above it: the injector asks this question and the report
+  // grades the same path union, and two implementations would disagree silently.
+  entryDeclaresFile,
   makeRefResolver, indexDir,
   parseVendorManifest, vendorManifestRel, readVendorFor,
   lintEntry, lineAnchoredRefs, LINT, splitBoundaries,
