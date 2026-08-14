@@ -189,6 +189,38 @@ for (const label of [DECLARED_INV, PROSE_INV]) {
      `every item on "${label.slice(0, 28)}…" carries an id`);
 }
 
+console.log('\nThe declared list is CAPPED, and the remainder is named');
+// A cap is only safe if what it drops is still visible. Build a project with more
+// declared entries than the cap and require every id past it to be PRINTED — a cap that
+// hides its own remainder is a silent truncation, and reads as "that is all there is".
+const BIG = path.join(tmp, 'big');
+fs.mkdirSync(path.join(BIG, 'src'), { recursive: true });
+fs.writeFileSync(path.join(BIG, 'src', 'qqmany.ts'), '// fixture\n');
+fs.mkdirSync(path.join(BIG, '.anvi'), { recursive: true });
+const MANY = ['# Hetvabhasa', ''];
+const N = 14;
+for (let i = 1; i <= N; i++) {
+  MANY.push(`## H9${String(i + 10)}: Entry number ${i}`,
+            '**Root cause:** one of many entries declaring the same file.',
+            '**REF:** `src/qqmany.ts`', '');
+}
+fs.writeFileSync(path.join(BIG, '.anvi', 'hetvabhasa.md'), MANY.join('\n'));
+fs.writeFileSync(path.join(BIG, '.anvi', 'dharana.md'), '# Dharana\n');
+git('init -q', BIG); git('config user.email t@example.com', BIG); git('config user.name t', BIG);
+git('add -A', BIG); git('-c commit.gpgsign=false commit -qm init', BIG);
+const rBig = spawnSync('node', [HOOK], { encoding: 'utf8', input: JSON.stringify({
+  session_id: 'decl-many', cwd: BIG, tool_input: { file_path: path.join(BIG, 'src/qqmany.ts') } }) });
+const mBig = rBig.stdout && rBig.stdout.trim() ? (JSON.parse(rBig.stdout).hookSpecificOutput.additionalContext || '') : '';
+const CAP = 10;
+const shownLine = line(mBig, DECLARED_TRAPS);
+const restLine = (mBig.split('\n').find(l => l.startsWith('\u2026and ')) || '');
+ok(shownLine.split('; ').length === CAP, `the declared line carries exactly ${CAP} summaries, not all ${N}`);
+ok(restLine !== '', 'a remainder line exists rather than the extras vanishing');
+ok(/\band 4 more\b/.test(restLine), 'the remainder line states HOW MANY were held back');
+const allIds = Array.from({ length: N }, (_, i) => `H9${i + 11}`);
+ok(allIds.every(id => mBig.includes(id)),
+   'every declared id is still printed somewhere — the cap drops prose, never entries');
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

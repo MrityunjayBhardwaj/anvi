@@ -545,10 +545,22 @@ process.stdin.on('end', () => {
         // Just the first 2 lines (root cause + detection signal)
         return `${pid}: ${entryMatch[1].trim().split('\n').slice(0, 2).join(' | ')}`;
       };
-      const declaredText = declaredErrorIds.map(summarise).filter(Boolean);
+      // ⚠ CAPPED, AND THE REMAINDER IS NAMED. Measured against the live catalogue, the
+      // declared pass is precise but not small — a hot file legitimately has 23 entries
+      // about it, and 23 summaries is the wall of text this change exists to end. So the
+      // list is bounded, and every id past the bound is still PRINTED. That is the whole
+      // difference between a cap and a silent truncation: nothing disappears, only its
+      // prose does, and the reader can see there is more and name it.
+      const DECLARED_CAP = 10;
+      const shown = declaredErrorIds.slice(0, DECLARED_CAP);
+      const rest = declaredErrorIds.slice(DECLARED_CAP);
+      const declaredText = shown.map(summarise).filter(Boolean);
       const scrapedText = scraped.map(summarise).filter(Boolean);
       if (declaredText.length) {
         errorPatterns += `\nTraps whose own REF names this file: ${declaredText.join('; ')}`;
+        if (rest.length) {
+          errorPatterns += `\n…and ${rest.length} more whose REF names this file: ${rest.join(', ')}`;
+        }
       }
       if (scrapedText.length) {
         errorPatterns += `\nAlso at this boundary (named by the boundary, not by the entry): ${scrapedText.join('; ')}`;
