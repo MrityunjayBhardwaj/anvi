@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -464,12 +464,65 @@ process.stdin.on('end', () => {
       }
     }
 
-    if (matches.length === 0) process.exit(0);
-
-    // Also read hetvabhasa for specific patterns at matched boundaries
+    // --- Error patterns: what the boundary NAMES, plus what an entry DECLARES ----
+    //
+    // Two selectors over one catalogue, deliberately not merged into one list.
+    //
+    // The boundary scrape asks "which entries does this boundary's prose mention?".
+    // It is coarse by construction — a boundary covers a whole directory — and it is
+    // the only selector this hook had, which is why editing one hook file offered 31
+    // entries with approximately none load-bearing (#279).
+    //
+    // The declaration pass asks the entry instead: does its own `REF:`/`FILES:` name
+    // this file? That is sharper, and it reaches files no boundary covers at all —
+    // which previously received NOTHING, because the exit below fired first.
+    //
+    // ⚠ DECLARED FIRST, AND SAID SO. Both populations arrive on one line, and a reader
+    // cannot tell a sharp selection from a coarse one by looking at it — the same
+    // failure the guessed-boundary notice exists to fix, one level down. So the
+    // declared ones lead and carry their own label.
+    //
+    // ⚠ AND THE COARSE ONE IS KEPT. Dropping it would be a more precise test answering
+    // on a smaller domain, whose losses land on the permissive side where nothing
+    // announces them — the boundary scrape reaches entries whose REF names a sibling
+    // file, and those are real deliveries.
     let errorPatterns = '';
+    const declaredErrorIds = [];
     const hetvabhasaPath = path.join(anviDir, 'hetvabhasa.md');
+    let hetEntries = [];
     if (fs.existsSync(hetvabhasaPath)) {
+      try {
+        hetEntries = parseEntries(fs.readFileSync(hetvabhasaPath, 'utf8'))
+          .filter((e) => /^[A-Z]{1,3}\d+$/.test(e.id));
+      } catch { hetEntries = []; }
+      for (const e of hetEntries) {
+        if (entryDeclaresFile(e, relPath)) declaredErrorIds.push(e.id);
+      }
+    }
+
+    // Read the invariants BEFORE deciding to leave. The exit below asks whether anything
+    // has something to say about this file, and the first version asked it of boundaries
+    // and ERROR entries only — so a file named by an invariant and nothing else exited
+    // here and the invariant block never ran. The asymmetry is invisible from either
+    // side: the error half looks complete, and the invariant half looks like a file
+    // nothing declares. Caught by the case that asserted an invariant-only subject
+    // arrives at all.
+    const vyaptiPath = path.join(anviDir, 'vyapti.md');
+    const vyaptiSrc = fs.existsSync(vyaptiPath) ? fs.readFileSync(vyaptiPath, 'utf8') : '';
+    let vyaptiEntries = [];
+    if (vyaptiSrc) {
+      try {
+        vyaptiEntries = parseEntries(vyaptiSrc).filter((e) => /^[A-Z]{1,3}\d+$/.test(e.id));
+      } catch { vyaptiEntries = []; }
+    }
+    const declaredInvariants = vyaptiEntries.filter((e) => entryDeclaresFile(e, relPath));
+
+    // Nothing to say: no boundary covers this file, and no entry of either kind names it.
+    if (matches.length === 0 && declaredErrorIds.length === 0 && declaredInvariants.length === 0) {
+      process.exit(0);
+    }
+
+    if (hetEntries.length) {
       const hetvabhasa = fs.readFileSync(hetvabhasaPath, 'utf8');
 
       // Extract pattern IDs referenced in matched dharana boundaries
@@ -482,23 +535,23 @@ process.stdin.on('end', () => {
         }
       }
 
-      if (patternIds.length > 0) {
-        // Extract matching hetvabhasa entries
-        const entries = [];
-        for (const pid of [...new Set(patternIds)]) {
-          const entryPattern = new RegExp(
-            `^##\\s+${pid}[:\\s](.+?)(?=\\n##\\s|$)`, 'ms'
-          );
-          const entryMatch = entryPattern.exec(hetvabhasa);
-          if (entryMatch) {
-            // Extract just the first 2 lines (root cause + detection signal)
-            const lines = entryMatch[1].trim().split('\n').slice(0, 2);
-            entries.push(`${pid}: ${lines.join(' | ')}`);
-          }
-        }
-        if (entries.length > 0) {
-          errorPatterns = '\nKnown traps: ' + entries.join('; ');
-        }
+      // Declared ids lead; boundary-scraped ids follow, minus any already delivered.
+      const declaredSet = new Set(declaredErrorIds);
+      const scraped = [...new Set(patternIds)].filter((id) => !declaredSet.has(id));
+      const summarise = (pid) => {
+        const entryPattern = new RegExp(`^##\\s+${pid}[:\\s](.+?)(?=\\n##\\s|$)`, 'ms');
+        const entryMatch = entryPattern.exec(hetvabhasa);
+        if (!entryMatch) return null;
+        // Just the first 2 lines (root cause + detection signal)
+        return `${pid}: ${entryMatch[1].trim().split('\n').slice(0, 2).join(' | ')}`;
+      };
+      const declaredText = declaredErrorIds.map(summarise).filter(Boolean);
+      const scrapedText = scraped.map(summarise).filter(Boolean);
+      if (declaredText.length) {
+        errorPatterns += `\nTraps whose own REF names this file: ${declaredText.join('; ')}`;
+      }
+      if (scrapedText.length) {
+        errorPatterns += `\nAlso at this boundary (named by the boundary, not by the entry): ${scrapedText.join('; ')}`;
       }
     }
 
@@ -510,30 +563,55 @@ process.stdin.on('end', () => {
     // point of selection. Deriving them a second way would be a second matching
     // rule, free to drift out of step with the one that built the message.
     const vyaptiIds = [];
-    const vyaptiPath = path.join(anviDir, 'vyapti.md');
-    if (fs.existsSync(vyaptiPath)) {
-      const vyapti = fs.readFileSync(vyaptiPath, 'utf8');
+    if (vyaptiSrc) {
+      // Parsed ABOVE by the SHARED parser, not by `split(/^##\s+/m)`. The split returned
+      // one more part than the file has headings, because everything BEFORE the first
+      // heading is a part too — so the file's own title line was rendered as though it
+      // were an invariant, carrying no id, which also kept it out of `vyaptiIds` and
+      // therefore out of the currency coverage this block is required to declare. Two
+      // readers of one catalogue, and only one of them knew what an entry is (#279).
+      //
+      // The parser returns FIELDS and a line span, never the entry text — so the two
+      // things below that need the prose (the name fallback, and the gap marker) must
+      // cut it from the source. Writing `e.body` instead reads as correct, yields
+      // undefined, and a `|| ''` then turns both into permanent silence: a fallback
+      // that selects nothing and a marker that never appears, neither of which shows
+      // up as an error. `lineStart` is 1-based and inclusive of the heading.
+      const vyaptiLines = vyaptiSrc.split('\n');
+      const bodyOf = (e) => vyaptiLines.slice(e.lineStart - 1, e.lineEnd).join('\n');
 
-      // Check for NOT YET IMPLEMENTED or invariants mentioning the file
+      // Ask the entry, not the path — computed above, because the exit consults it.
+      // The old rule searched the whole entry text for any path segment longer than two
+      // characters, so editing anything under `hooks/` produced the term `hooks` and
+      // selected 24 of 31 invariants — the entire catalogue, on every file, which is
+      // indistinguishable from no selection at all and trains the reader to skim.
+      const declared = declaredInvariants;
+
+      // The prose rule is DEMOTED, not deleted, and capped. It is the only thing that
+      // reaches an invariant which names no file, and removing it outright would be a
+      // sharper test answering on a smaller domain — the losses landing silently on
+      // the permissive side. Kept behind its own label so a coarse match can never be
+      // read as a declared one.
+      const declaredIds = new Set(declared.map((e) => e.id));
       const searchTerms = [fileName, ...relPath.split('/').filter(s => s.length > 2)];
-      const vyaptiEntries = vyapti.split(/^##\s+/m).filter(e => e.trim());
+      const PROSE_CAP = 5;
+      const prose = vyaptiEntries
+        .filter((e) => !declaredIds.has(e.id))
+        .filter((e) => searchTerms.some(t => bodyOf(e).toLowerCase().includes(t.toLowerCase())))
+        .slice(0, PROSE_CAP);
 
-      const relevant = vyaptiEntries.filter(entry =>
-        searchTerms.some(term => entry.toLowerCase().includes(term.toLowerCase())) ||
-        (entry.includes('NOT YET IMPLEMENTED') && matches.some(m =>
-          entry.toLowerCase().includes(m.content.substring(0, 30).toLowerCase())
-        ))
-      );
-
-      if (relevant.length > 0) {
-        const summaries = relevant.map(e => {
-          const firstLine = e.split('\n')[0].trim();
-          const idm = firstLine.match(/^([A-Z]{1,3}\d+)\b/);
-          if (idm) vyaptiIds.push(idm[1]);
-          const hasGap = e.includes('NOT YET IMPLEMENTED') ? ' [NOT YET IMPLEMENTED]' : '';
-          return firstLine + hasGap;
-        });
-        invariantWarnings = '\nInvariants at this boundary: ' + summaries.join('; ');
+      const summarise = (e) => {
+        vyaptiIds.push(e.id);
+        const head = `${e.id}: ${String(e.title || '').trim()}`.trim();
+        return head + (bodyOf(e).includes('NOT YET IMPLEMENTED') ? ' [NOT YET IMPLEMENTED]' : '');
+      };
+      if (declared.length) {
+        invariantWarnings += '\nInvariants whose own declaration names this file: '
+          + declared.map(summarise).join('; ');
+      }
+      if (prose.length) {
+        invariantWarnings += `\nInvariants mentioning this path (matched by NAME, not declared — capped at ${PROSE_CAP}): `
+          + prose.map(summarise).join('; ');
       }
     }
 
@@ -553,7 +631,12 @@ process.stdin.on('end', () => {
     // different entries both titled `B-NEW` still collapse to one label, which is the
     // catalogue's own id collision to resolve, not this line's.
     const boundaryNames = [...new Set(matches.map(m => m.label))].join(', ');
-    let message = `DHYANA: editing ${relPath} touches catalogue boundary ${boundaryNames}.`;
+    // A file can now reach this point with NO boundary — entries that name it in their
+    // own REF: are enough. The old header asserted a boundary unconditionally, which in
+    // that case would have named none and read as a truncated sentence.
+    let message = matches.length
+      ? `DHYANA: editing ${relPath} touches catalogue boundary ${boundaryNames}.`
+      : `DHYANA: editing ${relPath}. No catalogued boundary covers this file; the entries below name it themselves.`;
 
     // Say which of these were reached by guessing. A declared match (FILES:/KINDS:)
     // and a coincidental one — the filename happening to appear somewhere in the
