@@ -1,6 +1,6 @@
 # Enforcement Chain — How Grounding Is Actually Enforced
 
-Eleven hooks/mechanisms fire at different points. No single point of failure.
+Twelve hooks/mechanisms fire at different points. No single point of failure.
 
 ```
 Session starts
@@ -16,40 +16,57 @@ User message
    before Claude starts thinking.
 
   ↓
-③ Context Routing Protocol — global CLAUDE.md
+③ UserPromptSubmit — absent-warrant-check.js
+   Reads the PREVIOUS assistant turn out of the transcript and asks, of each claim
+   in it, whether the observation that licenses it is present. The firing condition
+   is an ABSENCE, not a match — which is why it works at a moment when the
+   vocabulary of the eventual catalogue entry does not exist yet.
+   Three licence rows (`hooks/warrant-rows.js`): a "verified" wants a run whose
+   OUTPUT was read rather than its exit status; a reported zero wants a positive
+   control or a denominator; a green suite wants a red predicted BEFORE the run.
+   Injects a QUESTION, never a description — a description of a known trap was
+   measured not to prevent it. Writes an instance record on EVERY outcome, silences
+   and unreadable turns included, because a store holding only the fires has no
+   denominator and reads as healthy for that reason.
+   Freshness: the transcript is written asynchronously, so when the turn it expects
+   is not in the file the verdict is `unread` and it stays silent. "Could not look"
+   is never reported as "nothing found".
+
+  ↓
+④ Context Routing Protocol — global CLAUDE.md
    Classifies message → debugging route now includes reading Ground Truth docs
    for affected boundaries.
 
   ↓
-④ /anvi:debug workflow — workflows/debug.md
+⑤ /anvi:debug workflow — workflows/debug.md
    step read_ground_truth is MANDATORY. Reads Ground Truth, passes it as
    INPUT to the debugger agent. Agent must cite file:line or declare UNGROUNDED.
    3-round limit, then "read more source" not "try more experiments."
 
   ↓
-⑤ Diagnose lens — cognitive-os/modes/diagnose.md
+⑥ Diagnose lens — cognitive-os/modes/diagnose.md
    Phase 3 Question 0: "Does Ground Truth doc exist? Read it FIRST."
    Phase 3 Question 7: "How many answers are GROUNDED vs INFERRED?"
 
   ↓
-⑥ PreToolUse:Read — catalogue-context-injector.js
+⑦ PreToolUse:Read — catalogue-context-injector.js
    Fires when READING code at catalogued boundaries.
    Matches via FILES: or KINDS: (both deterministic) or text fallback.
    Injects boundary context + Ground Truth REFs before you form opinions.
 
   ↓
-⑦ PreToolUse:Bash — experiment-protocol-guard.js
+⑧ PreToolUse:Bash — experiment-protocol-guard.js
    Fires when running diagnostic tools (tools/diagnose-*, capture, raw-osc).
    Checks for ~/.anvideck/projects/[project]/investigations/exp-*.md with hypothesis + prediction.
    "Write the prediction BEFORE running."
 
   ↓
-⑧ PreToolUse:Write|Edit — catalogue-context-injector.js
+⑨ PreToolUse:Write|Edit — catalogue-context-injector.js
    Fires when editing code at catalogued boundaries.
    Injects: boundary context, error patterns, invariants, Ground Truth REFs.
 
   ↓
-⑨ PreToolUse:Bash — catalogue-id-leak-guard.js
+⑩ PreToolUse:Bash — catalogue-id-leak-guard.js
    Fires on `gh issue|pr` and `git commit` — asked of each segment's EXECUTABLE text
    (quoted arguments, `#` comments, and QUOTED heredoc bodies removed — a `<<'X'` body
    is handed to a program verbatim, so no line of it can be the publish; an UNQUOTED
@@ -72,7 +89,7 @@ User message
    nothing about closing keywords.
 
   ↓
-⑩ PreToolUse:Bash — shell-rewrite-guard.js
+⑪ PreToolUse:Bash — shell-rewrite-guard.js
    Fires on every Bash command. Warns when THIS shell (zsh) rewrites an argument
    before the command sees it: a bare `$VAR` in a `for` list or `set --` (iterates
    ONCE, unlike bash), `$var[…]` in a quoted pattern (array subscripting), or a glob
@@ -82,7 +99,7 @@ User message
    wrapper, and `$(…)`, which DOES split in zsh.
 
   ↓
-⑪ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
+⑫ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
    Enforces the base-layer Provenance Check. Fires when a tool returns data from a
    surface that isn't scoped to this project (account-wide artifact gallery, web,
    any MCP server, or a file read in ANOTHER project's territory). Injects a one-line
@@ -96,6 +113,7 @@ User message
 |------|---------|------|
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
+| Absent-warrant check | UserPromptSubmit (a claim in the previous turn whose licensing observation is missing from that turn; silent, and recorded as `unread`, when the transcript has not caught up) | `~/.claude/hooks/absent-warrant-check.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
 | Publish-text guard (catalogue IDs; negated closing keywords) | PreToolUse:Bash (`gh issue\|pr`, `git commit`; the ID check skips the private locations, the closing-keyword check covers only a PR description and a commit message) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
@@ -444,7 +462,7 @@ Two things it checks that a plain loop would not:
 
 `~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`):
 - `SessionStart`: ground-truth-session-start.js, gsd-check-update.js
-- `UserPromptSubmit`: debug-grounding-gate.js
+- `UserPromptSubmit`: debug-grounding-gate.js, absent-warrant-check.js
 - `PreToolUse:Read`: catalogue-context-injector.js
 - `PreToolUse:Write|Edit`: catalogue-context-injector.js, gsd-prompt-guard.js
 - `PreToolUse:Bash`: experiment-protocol-guard.js, catalogue-id-leak-guard.js
