@@ -402,6 +402,29 @@ console.log('\nGROUP 7 — no project, no record, no question');
   ok(!fs.existsSync(path.join(bare, 'instances')), 'and creates nothing there');
 }
 
+// ── GROUP 7b — the store follows the catalogues, not the link to them ────────
+console.log('\nGROUP 7b — a symlinked .anvi puts the store where the catalogues REALLY live');
+{
+  // The shape this project actually has: `.anvi` in the working tree is a SYMLINK
+  // into a central store. Taking the dirname of the link puts the instance store
+  // inside the repository — untracked, beside the code, carrying excerpts of the
+  // conversation. This repository is public, so that is the case that matters.
+  const central = path.join(tmpRoot, 'central', 'someproj');
+  fs.mkdirSync(path.join(central, '.anvi'), { recursive: true });
+  fs.writeFileSync(path.join(central, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
+  const repo = path.join(tmpRoot, 'work', 'someproj');
+  fs.mkdirSync(repo, { recursive: true });
+  fs.symlinkSync(path.join(central, '.anvi'), path.join(repo, '.anvi'));
+
+  const file = H.storeFor(repo);
+  ok(file !== null, 'a project whose .anvi is a link still gets a store');
+  ok(file.startsWith(fs.realpathSync(central) + path.sep),
+    `the store follows the link into the central copy (got ${file})`);
+  ok(!file.startsWith(fs.realpathSync(repo) + path.sep),
+    'and NOT into the working tree, where it would sit untracked beside the code');
+  ok(!fs.existsSync(path.join(repo, 'instances')), 'nothing is created in the working tree');
+}
+
 // ── GROUP 8 — falsification: remove a row, redden exactly its own case ───────
 console.log('\nGROUP 8 — falsification matrix over the row table');
 {

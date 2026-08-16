@@ -301,18 +301,24 @@ function renderQuestions(fires) {
  * claims were made", and the report that reads this store has to say so.
  */
 function storeFor(cwd) {
-  let dir = null;
-  try { dir = requireDirForWrite(cwd, 'instances'); } catch { return null; }
-  if (!dir) {
-    // First run: nothing exists yet. Create it BESIDE the catalogues rather than
-    // at a path derived independently — a second resolution path for the same
-    // project is how the resolver and the ownership check came to disagree once.
-    let anviDir = null;
-    try { anviDir = requireDirForWrite(cwd, '.anvi'); } catch { return null; }
-    if (!anviDir) return null;
-    dir = path.join(path.dirname(anviDir), 'instances');
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  // ONE resolution, not two. The catalogues are the anchor: the instance store
+  // belongs wherever they do, and asking the resolver a second question about a
+  // second kind is how two answers about one project come to disagree.
+  let anviDir = null;
+  try { anviDir = requireDirForWrite(cwd, '.anvi'); } catch { return null; }
+  if (!anviDir) return null;
+
+  // ⚠ FOLLOW THE LINK. `.anvi` is commonly a SYMLINK into the central store, and
+  // the dirname of a symlink is the directory the link sits in — the repository
+  // working tree — not the directory the catalogues live in. Observed doing
+  // exactly that in this repository, whose `.anvi` is such a link: the store
+  // resolved to `<repo>/instances/`, untracked, beside the code, holding excerpts
+  // of the conversation, in a repository that is public.
+  let real = anviDir;
+  try { real = fs.realpathSync(anviDir); } catch { /* unresolvable — use it as given */ }
+
+  const dir = path.join(path.dirname(real), 'instances');
+  fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, STORE_FILE);
 }
 
