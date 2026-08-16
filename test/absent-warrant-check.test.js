@@ -195,6 +195,30 @@ console.log('\nGROUP 2 — the turn it cannot read is recorded as unread, and do
   eq(inProcess(q), null, 'stays silent when the trailing prompt is not the one it was handed');
   eq((q.records()[0] || {}).verdict, 'unread', 'recorded unread');
 
+  // A SLASH COMMAND is stored as an envelope, not as the text that was typed —
+  // observed in 79 of 819 real prompt records. Comparing the payload against the
+  // envelope matches nothing, so without the reconstruction roughly one turn in
+  // ten reports `unread` for a reason unrelated to freshness, and the turns lost
+  // are this framework's own command turns. This case is what would have caught it.
+  const cmd = project([
+    ['prompt', 'first'],
+    ['text', 'I verified the earlier change.'],
+    ['end'],
+    ['prompt', '<command-message>anvi-sess-wrap</command-message>\n'
+      + '<command-name>/anvi-sess-wrap</command-name>\n'
+      + '<command-args>we will continue in the next session</command-args>'],
+  ], '/anvi-sess-wrap we will continue in the next session');
+  ok(inProcess(cmd) !== null, 'a slash-command turn is READ, not lost to the envelope');
+  eq((cmd.records()[0] || {}).verdict, 'fired', 'and judged, not recorded unread');
+  eq(H.normalizePrompt('<command-name>/x</command-name><command-args>a b</command-args>'), '/x a b',
+    'the envelope reconstructs to the prompt that produced it');
+
+  // No turn boundary at all — a compacted transcript whose opening was trimmed.
+  // Reading the whole file as "the turn" would attribute an old claim to this one.
+  const noBoundary = project([['text', 'I verified something long ago.'], ['end']]);
+  eq(inProcess(noBoundary), null, 'a transcript with no prompt before the turn does not fire');
+  eq((noBoundary.records()[0] || {}).verdict, 'unread', 'it is unread — silent AND honest, not silent and wrong');
+
   // And the control: the SAME shape, where the trailing prompt IS the current one.
   // Without this the case above passes for a hook that never reads anything.
   const c = project([

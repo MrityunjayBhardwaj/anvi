@@ -85,6 +85,39 @@ function promptTextOf(r) {
   if (Array.isArray(c)) return c.filter((b) => b.type === 'text').map((b) => b.text || '').join('\n');
   return '';
 }
+
+/**
+ * A slash command is NOT stored as the text the user typed. Observed shape, in
+ * 79 of 819 real prompt records (9.6%):
+ *
+ *     <command-message>anvi-sess-wrap</command-message>
+ *     <command-name>/anvi-sess-wrap</command-name>
+ *     <command-args>we will continue in the next session</command-args>
+ *
+ * Comparing the payload's `prompt` against that envelope matches nothing, so
+ * roughly one turn in ten would report `unread` for a reason that has nothing to
+ * do with freshness — and the turns it would lose are the framework's own command
+ * turns. Reconstruct the typed prompt from name + args instead.
+ *
+ * ⚠ OPAQUE, and stated rather than assumed: what `payload.prompt` itself holds on
+ * a slash-command turn has NOT been observed — no such payload was ever captured.
+ * If the harness normalises the separator between namespace and command — a colon
+ * typed where a dash is stored — the reconstruction still misses. (Written as a
+ * description rather than as an example: a real command name here would be a
+ * reference to a command that does not exist, which the parity check reads as a
+ * phantom, and it caught exactly that in this comment's first draft.)
+ * That failure direction is the safe one: it records
+ * `unread` and stays quiet, which under-fires rather than judging the wrong turn.
+ */
+function normalizePrompt(text) {
+  const s = String(text || '');
+  const name = s.match(/<command-name>([^<]*)<\/command-name>/);
+  if (name) {
+    const args = s.match(/<command-args>([\s\S]*?)<\/command-args>/);
+    return `${name[1].trim()} ${args ? args[1].trim() : ''}`.trim().replace(/\s+/g, ' ');
+  }
+  return s.trim().replace(/\s+/g, ' ');
+}
 const isPlainPrompt = (r) => r.type === 'user' && !isToolResultRecord(r);
 
 /**
@@ -124,13 +157,20 @@ function readTurn(transcriptPath, currentPrompt) {
   if (prompts.length > 1) {
     return { state: 'unread', why: `${prompts.length} user prompts follow the last completed turn` };
   }
-  if (prompts.length === 1 && promptTextOf(prompts[0]).trim() !== String(currentPrompt || '').trim()) {
+  if (prompts.length === 1
+      && normalizePrompt(promptTextOf(prompts[0])) !== normalizePrompt(currentPrompt)) {
     return { state: 'unread', why: 'the trailing prompt is not this one — a turn is missing from the file' };
   }
 
-  // The turn spans from the previous user prompt up to and including k.
-  let start = 0;
+  // The turn spans from the previous user prompt up to and including k. If no
+  // prompt precedes k at all — a compacted or resumed transcript whose opening
+  // was trimmed — there is no turn boundary to find, and taking the whole file as
+  // "the turn" would attribute a claim made hours ago to the turn just finished.
+  // Measured at 0 of 801 real turns, so this changes nothing observable; it exists
+  // because the alternative failure is silent and wrong rather than silent and honest.
+  let start = -1;
   for (let i = k; i >= 0; i--) if (isPlainPrompt(convo[i])) { start = i + 1; break; }
+  if (start < 0) return { state: 'unread', why: 'no turn boundary — the transcript has no prompt before this turn' };
 
   return { state: 'read', turn: buildTurn(convo.slice(start, k + 1)) };
 }
@@ -359,7 +399,9 @@ function run(data) {
   return fires.length ? renderQuestions(fires) : null;
 }
 
-module.exports = { readTurn, buildTurn, evaluate, renderQuestions, storeFor, alreadyRecorded, run };
+module.exports = {
+  readTurn, buildTurn, evaluate, renderQuestions, storeFor, alreadyRecorded, normalizePrompt, run,
+};
 
 // A hook that is also required by tests must not start its runtime on load: the
 // stdin listener below arms a timer that calls process.exit, and a falsification
