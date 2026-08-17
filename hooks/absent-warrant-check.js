@@ -300,6 +300,52 @@ function renderQuestions(fires) {
  * store therefore means "never ran, or never permitted" — it does NOT mean "no
  * claims were made", and the report that reads this store has to say so.
  */
+/**
+ * The store path, derived from an already-resolved `.anvi` directory.
+ *
+ * ONE DERIVATION, TWO CALLERS. The writer below and the reader in
+ * `scripts/warrant-report.js` both need this path, and a reader that computes it
+ * independently is one edit away from looking somewhere the writer never wrote —
+ * which this store reports as an empty store, i.e. as "no claims were made". That
+ * is the single sentence this component must never say by accident, so the
+ * derivation lives in one place and both sides import it.
+ *
+ * `create` is the ONLY difference between the two callers and it is deliberate: a
+ * writer may make its directory, a reader may not. A reader that creates its own
+ * subject can never report that the subject is absent.
+ *
+ * ⚠ FOLLOW THE LINK. `.anvi` is commonly a SYMLINK into the central store, and the
+ * dirname of a symlink is the directory the link sits in — the repository working
+ * tree — not the directory the catalogues live in. Observed doing exactly that in
+ * this repository, whose `.anvi` is such a link: the store resolved to
+ * `<repo>/instances/`, untracked, beside the code, holding excerpts of the
+ * conversation, in a repository that is public.
+ */
+function instancePathFrom(anviDir, opts) {
+  let real = anviDir;
+  try { real = fs.realpathSync(anviDir); } catch { /* unresolvable — use it as given */ }
+
+  // The backstop for the line above, and it fails CLOSED. If `.anvi` is a link and
+  // the store still lands in the directory holding the link, the resolution did not
+  // happen — and the consequence is not a wrong path, it is conversation excerpts
+  // written into whatever tree the link sits in. That tree is a git repository here,
+  // and a public one. Refusing costs a report; not refusing costs a disclosure.
+  let linked = false;
+  try { linked = fs.lstatSync(anviDir).isSymbolicLink(); } catch { /* treat as plain */ }
+  if (linked && path.dirname(real) === path.dirname(anviDir)) {
+    const err = new Error(
+      `anvi: refusing to site the instance store beside the LINK at ${anviDir} — `
+      + 'the link was not followed, so the records would land in the linking tree.'
+    );
+    err.code = 'ANVI_STORE_IN_LINKING_TREE';
+    throw err;
+  }
+
+  const dir = path.join(path.dirname(real), 'instances');
+  if (opts && opts.create) fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, STORE_FILE);
+}
+
 function storeFor(cwd) {
   // ONE resolution, not two. The catalogues are the anchor: the instance store
   // belongs wherever they do, and asking the resolver a second question about a
@@ -307,19 +353,7 @@ function storeFor(cwd) {
   let anviDir = null;
   try { anviDir = requireDirForWrite(cwd, '.anvi'); } catch { return null; }
   if (!anviDir) return null;
-
-  // ⚠ FOLLOW THE LINK. `.anvi` is commonly a SYMLINK into the central store, and
-  // the dirname of a symlink is the directory the link sits in — the repository
-  // working tree — not the directory the catalogues live in. Observed doing
-  // exactly that in this repository, whose `.anvi` is such a link: the store
-  // resolved to `<repo>/instances/`, untracked, beside the code, holding excerpts
-  // of the conversation, in a repository that is public.
-  let real = anviDir;
-  try { real = fs.realpathSync(anviDir); } catch { /* unresolvable — use it as given */ }
-
-  const dir = path.join(path.dirname(real), 'instances');
-  fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, STORE_FILE);
+  return instancePathFrom(anviDir, { create: true });
 }
 
 // Re-firing on the same turn would inflate every figure in the report. Read only
@@ -406,7 +440,8 @@ function run(data) {
 }
 
 module.exports = {
-  readTurn, buildTurn, evaluate, renderQuestions, storeFor, alreadyRecorded, normalizePrompt, run,
+  readTurn, buildTurn, evaluate, renderQuestions, storeFor, instancePathFrom,
+  alreadyRecorded, normalizePrompt, run, terminal, mainline, isPlainPrompt,
 };
 
 // A hook that is also required by tests must not start its runtime on load: the
