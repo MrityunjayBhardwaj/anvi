@@ -257,6 +257,9 @@ function evaluate(turn) {
       searched: row.searched,
       found: licensed,
       question: row.question,
+      // A row may be RECORDED without being ASKED. The verdict is unchanged — the
+      // claim really is unlicensed — but nothing is put in front of the reader.
+      silent: !!row.silent,
     });
   }
   return verdicts;
@@ -402,6 +405,9 @@ function run(data) {
     required: null,
     searched: null,
     found: null,
+    // Whether a question was actually put in front of the reader. Null on records
+    // that carry no claim; false on a claim from a row that records without asking.
+    asked: null,
     // Filled in later by whoever reads the store back:
     // warrant_obtained | contested | proceeded_past.
     outcome: null,
@@ -424,6 +430,14 @@ function run(data) {
     return null;
   }
 
+  // ⚠ `asked` IS NOT COSMETIC — it is what keeps the measurement honest. The store
+  // exists to answer "does asking change behaviour", so the arm that figure is
+  // computed over must contain exactly the claims a question was actually put in
+  // front of. A silent row still fires — the claim really is unlicensed — and
+  // folding those into the same arm would measure the effect of asking over a
+  // population that was never asked, diluting a real effect toward zero.
+  const asked = new Set(verdicts.filter((v) => v.verdict === 'fired' && !v.silent));
+
   record(file, verdicts.map((v) => ({
     ...base,
     turn_ref: turn.ref,
@@ -433,10 +447,10 @@ function run(data) {
     required: v.required,
     searched: v.searched,
     found: v.found,
+    asked: asked.has(v),
   })));
 
-  const fires = verdicts.filter((v) => v.verdict === 'fired');
-  return fires.length ? renderQuestions(fires) : null;
+  return asked.size ? renderQuestions([...asked]) : null;
 }
 
 module.exports = {

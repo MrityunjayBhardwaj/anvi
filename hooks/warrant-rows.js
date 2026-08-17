@@ -121,6 +121,27 @@ const ROWS = [
 
   {
     kind: 'suite',
+    // ⚠ RECORDED, NOT ASKED — and the reason is a measurement, not a preference.
+    //
+    // This row fires on 81 of the 83 claims it detects across 807 real turns. A row
+    // that fires on 98% of what it sees carries almost no information: it is not a
+    // check, it is a constant, and a constant that speaks every time is the fastest
+    // way to teach a reader to stop reading.
+    //
+    // The cause is known and is POSITIONAL rather than semantic. Of those turns, 45
+    // pair a prediction with a test run and only 8 have the prediction in a text
+    // block earlier than the run — predictions are usually written up after the run,
+    // stated in the previous turn, or made while thinking, which this reader excludes
+    // by design. So the row is right about what licenses a green suite and wrong
+    // about where the licence is allowed to sit.
+    //
+    // Until that is repaired, asking would spend the mechanism's whole credibility on
+    // the one row we already believe is mis-specified — and the trial measures whether
+    // people ACT on the questions, so noise from a known defect would return "ignored"
+    // for a reason that has nothing to do with the hypothesis. Staying silent keeps the
+    // row measuring: it still detects, still writes an instance record, and its figures
+    // still accumulate for the repair.
+    silent: true,
     claim: [
       /\b(?:tests?|suite|everything|all)\s+(?:are\s+|is\s+)?(?:still\s+)?green\b/i,
       /\bgreen\s+(?:across the board|everywhere)\b/i,

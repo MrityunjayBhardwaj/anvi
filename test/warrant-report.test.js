@@ -389,8 +389,20 @@ console.log('\nGROUP 7 — the pre-intervention baseline is computable without a
     'and every replayed record carries a verdict the reader understands');
   ok(replayed.records.every((r) => r.turn_ref), 'and names the turn it came from');
 
+  // A turn making a claim from the row that records without asking. The baseline
+  // must split its arms exactly as the live store does — if a silent row counted as
+  // asked here and not there, the two halves of the comparison would be computed
+  // over different populations, which is the one thing a baseline exists to prevent.
+  writeTranscript(dir, 'b-3', [
+    { steps: [['tool', 'Bash', { command: 'npm test' }, 'ok'], ['text', 'All tests pass.']] },
+    { steps: [['text', 'Next.']] },
+  ]);
+
   const b = R.baseline({ transcriptDir: dir, transcriptRoots: [TMP] });
-  eq(b.summary.turns, 5, 'the turn count matches what was built');
+  eq(b.summary.turns, 7, 'the turn count matches what was built');
+  eq(b.summary.recorded_only.n, 1, 'the baseline puts a silent row\'s firing in the recorded-only bucket');
+  ok(b.summary.fired.items.every((i) => i.rec.claim_kind !== 'suite'),
+    'and never in the asked arm — the two halves split on the same rule');
   ok(/PRE-INTERVENTION BASELINE/.test(b.text), 'the output says plainly that no question was asked');
   eq(b.summary.fired.contested, 0, 'and nothing is contested, because nothing was asked');
 
@@ -427,6 +439,48 @@ console.log('\nGROUP 7 — the pre-intervention baseline is computable without a
   const s = R.summarise([], R.makeTranscriptFinder([TMP]));
   ok(/--baseline/.test(R.render(s, 'x', 5)), 'the live report names the baseline mode it must be read against');
   ok(/not exchangeable/i.test(R.render(s, 'x', 5)), 'and says why');
+}
+
+// ── GROUP 9 — a firing is not automatically an asking ───────────────────────
+console.log('\nGROUP 9 — records from a row that does not ask stay out of the arm that measures asking');
+{
+  const dir = mk('t-asked');
+  const finder = R.makeTranscriptFinder([TMP]);
+  const refsA = writeTranscript(dir, 'k-asked', [CLAIM_UNLICENSED, LICENSING_TURN]);
+  const refsS = writeTranscript(dir, 'k-silent', [CLAIM_UNLICENSED, LICENSING_TURN]);
+  const refsL = writeTranscript(dir, 'k-lic', [CLAIM_UNLICENSED, NON_LICENSING_TURN]);
+
+  const asked = rec({ session_id: 'k-asked', turn_ref: refsA[0], verdict: 'fired', claim_kind: 'verified', asked: true });
+  const silent = rec({ session_id: 'k-silent', turn_ref: refsS[0], verdict: 'fired', claim_kind: 'verified', asked: false });
+  const lic = rec({ session_id: 'k-lic', turn_ref: refsL[0], verdict: 'licensed', claim_kind: 'verified' });
+
+  const s = R.summarise([asked, silent, lic], finder);
+  eq(s.fired.n, 1, 'only the asked firing is in the fired arm');
+  eq(s.recorded_only.n, 1, 'the silent firing is reported in its own bucket');
+  eq(s.control.n, 1, 'and the control arm is untouched');
+
+  // THE ASSERTION THAT MATTERS. The silent record's successor licenses, exactly like
+  // the asked one's — so folding it in would move nothing here, and a weaker test
+  // would pass either way. It is the DENOMINATOR that must not move: the gap is
+  // computed over claims a question was actually put in front of.
+  const withoutSilent = R.summarise([asked, lic], finder);
+  eq(R.gapOf(s), R.gapOf(withoutSilent),
+    'adding a silent firing does not move the gap — the effect of asking is not averaged '
+    + 'against a population that was never asked');
+  eq(s.fired.scorable, withoutSilent.fired.scorable, 'and the asked arm has the same denominator either way');
+
+  // Back-compatibility, stated rather than assumed: records written before the field
+  // existed came from a build where every firing asked. `undefined` means asked.
+  // `false` never does, and the two must not be merged.
+  const legacy = R.summarise([rec({ session_id: 'k-asked', turn_ref: refsA[0], verdict: 'fired', claim_kind: 'verified' }), lic], finder);
+  eq(legacy.fired.n, 1, 'a record with no `asked` key counts as asked');
+  eq(legacy.recorded_only.n, 0, 'and does not land in the recorded-only bucket');
+
+  // The row table says which rows do not ask, so a reader of the report can tell a
+  // row that never fires from a row that fires and stays quiet.
+  const silentRows = R.summarise([], finder).by_row.filter((r) => r.silent).map((r) => r.kind);
+  eq(silentRows.join(','), 'suite', 'the report names which row records without asking');
+  ok(/·silent/.test(R.render(s, 'x', 5)), 'and marks it in the per-row table');
 }
 
 // ── GROUP 8 — the source stays greppable ────────────────────────────────────
