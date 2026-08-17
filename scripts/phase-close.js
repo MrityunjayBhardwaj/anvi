@@ -286,7 +286,12 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
     return {
       ok: false,
       reason: 'already-exists',
-      path: path.join(phaseDir, existing[0]),
+      // `path` answers "which file is the record", and where there are two that
+      // question HAS no answer — so it is null rather than the first one sorted.
+      // Returning an arbitrary member here would be the JSON arm quietly choosing
+      // between two disagreeing records, which is the exact behaviour the
+      // human-readable arm above exists to refuse.
+      path: existing.length === 1 ? path.join(phaseDir, existing[0]) : null,
       existing,
       multiple: existing.length > 1,
     };

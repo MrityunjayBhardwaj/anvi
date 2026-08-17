@@ -354,6 +354,8 @@ console.log('\na record written under either accepted name is seen');
      'the hand-written record is untouched');
   ok(out.existing.includes('01-first-SUMMARY.md'), 'the refusal names the record it found');
   eq(out.multiple, false, 'and does not claim there is more than one');
+  has(out.path, '01-first-SUMMARY.md',
+      'and with exactly one record `path` DOES name it — the null above is the two-record state, not a blanket');
 }
 
 console.log('\ntwo records for one phase are reported, never silently chosen between');
@@ -368,6 +370,8 @@ console.log('\ntwo records for one phase are reported, never silently chosen bet
   const out = JSON.parse(r.stdout);
   eq(out.multiple, true, 'the refusal says there is more than one record');
   eq(out.existing.length, 2, 'and reports both of them');
+  eq(out.path, null,
+     'and `path` is null — with two records "which file is the record" has no answer, and answering it anyway would be the JSON arm choosing quietly');
 
   // The human-readable arm must say it too — the JSON is not what a person reads.
   const human = run(p.cwd, ['phase-close', '1'], 3);
