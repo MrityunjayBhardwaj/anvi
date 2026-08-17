@@ -294,8 +294,18 @@ console.log('\nGROUP 3 — each row: a turn that must fire and a turn that must 
     ['text', 'All tests pass.'],
     ['end'],
   ]);
-  ok(inProcess(sFire) !== null, 'suite: fires on a green with no prediction');
-  eq((sFire.records()[0] || {}).claim_kind, 'suite', 'attributed to the right row');
+  // ⚠ RECORDED, NOT ASKED. `suite` fires on 81 of the 83 claims it detects across
+  // 807 real turns, and the cause is positional rather than semantic — a prediction
+  // usually sits after the run, in the previous turn, or in a thinking block. Until
+  // that is repaired the row records without injecting, so the two halves are
+  // asserted separately: the verdict must still be a firing, and the payload must
+  // still be silent. A case that only checked the payload would pass identically if
+  // the row had been deleted outright.
+  eq(inProcess(sFire), null, 'suite: asks nothing — the row records without injecting');
+  const sRec = sFire.records()[0] || {};
+  eq(sRec.claim_kind, 'suite', 'attributed to the right row');
+  eq(sRec.verdict, 'fired', 'and the verdict is still a firing: the claim really is unlicensed');
+  eq(sRec.asked, false, 'recorded as NOT asked, so it never enters the arm that measures asking');
 
   const sOk = project([
     ['prompt', 'go'],
@@ -315,7 +325,10 @@ console.log('\nGROUP 3 — each row: a turn that must fire and a turn that must 
     ['text', 'I would have predicted injector-field-shapes goes red. All tests pass.'],
     ['end'],
   ]);
-  ok(inProcess(sAfter) !== null, 'suite: fires when the prediction comes AFTER the run');
+  eq(inProcess(sAfter), null, 'suite: still asks nothing');
+  eq((sAfter.records()[0] || {}).verdict, 'fired',
+    'suite: but the VERDICT still fires when the prediction comes AFTER the run — '
+    + 'the ordering rule is what the row is about, and silencing must not weaken it');
 }
 
 // ── GROUP 4 — the store records every outcome ───────────────────────────────
@@ -367,8 +380,13 @@ console.log('\nGROUP 5 — the injected text is a QUESTION, asserted, not assume
   ]);
   const msg = inProcess(p);
   ok(msg !== null, 'three rows fire on one turn');
+  // Three rows fire; two of them ask. The record count and the bullet count are
+  // asserted separately and must NOT agree — that disagreement is the silent row
+  // working, and a case that checked only one of them could not see it.
+  eq(p.records().length, 3, 'all three firings are recorded');
+  eq(p.records().filter((r) => r.asked === false).length, 1, 'exactly one of them asked nothing');
   const bullets = msg.split('\n').filter((l) => l.trim().startsWith('•'));
-  eq(bullets.length, 3, 'one bullet per firing');
+  eq(bullets.length, 2, 'one bullet per ASKED firing, and the silent row contributes none');
   ok(bullets.every((l) => l.trim().endsWith('?')), 'every bullet ENDS in a question mark');
   ok(!/\b[HV]\d+\b/.test(msg), 'no catalogue index key appears in the injected text');
   ok(!/hetvabhasa|vyapti|krama|dharana/i.test(msg), 'no catalogue is named');
@@ -440,10 +458,22 @@ console.log('\nGROUP 8 — falsification matrix over the row table');
   const kinds = ROWS.map((r) => r.kind);
   eq(kinds.length, 3, 'the table holds exactly the three rows v1 ships');
 
+  // ⚠ THE OBSERVABLE IS THE FIRING RECORD, NOT THE INJECTED TEXT. A row may be
+  // configured to record without asking, and against such a row "did anything get
+  // injected?" is false whether the row is present or absent — so a matrix built on
+  // the payload would show that row's removal as reddening nothing and report a
+  // load-bearing row as dead code. The record is what every row produces regardless
+  // of the ask policy, so it is the observable that stays honest across both.
+  const firedKind = (steps, kind) => {
+    const p = project(steps);
+    inProcess(p);
+    return p.records().some((r) => r.claim_kind === kind && r.verdict === 'fired');
+  };
+
   // Control FIRST, and immediately before the mutations: every case must fire
   // while the table is whole, or a green below proves nothing.
   const baseline = {};
-  for (const k of kinds) baseline[k] = inProcess(project(CASES[k])) !== null;
+  for (const k of kinds) baseline[k] = firedKind(CASES[k], k);
   ok(kinds.every((k) => baseline[k]), `CONTROL: all ${kinds.length} cases fire with the table intact`);
 
   for (const drop of kinds) {
@@ -451,7 +481,7 @@ console.log('\nGROUP 8 — falsification matrix over the row table');
     eq(removed.length, 1, `mutation applied: '${drop}' removed`);
     eq(ROWS.length, kinds.length - 1, `  and the table shrank by exactly one`);
     const results = {};
-    for (const k of kinds) results[k] = inProcess(project(CASES[k])) !== null;
+    for (const k of kinds) results[k] = firedKind(CASES[k], k);
     ok(results[drop] === false, `  '${drop}' goes silent — the row was load-bearing for its own case`);
     const collateral = kinds.filter((k) => k !== drop && results[k] !== baseline[k]);
     ok(collateral.length === 0,

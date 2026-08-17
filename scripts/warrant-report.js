@@ -207,11 +207,21 @@ function scoreRecord(rec, findTranscript, convoCache) {
  * THE ARMS ARE NOT EXCHANGEABLE, AND THAT IS MEASURED, NOT FEARED.
  *
  * The control above assumes a firing and a licensing differ only in whether a
- * question was asked. Replaying the rows over 807 real turns from BEFORE the hook
- * existed — where no question was ever injected — the fired arm's successors
- * satisfied their row 51% of the time and the licensed arm's 65%: a gap of −14pp
- * with no intervention at all to explain it. A turn that made an unlicensed claim
- * is simply followed by turns that make unlicensed claims.
+ * question was asked. Replaying the rows over 815 real turns from BEFORE the hook
+ * existed — where no question was ever injected — the asked arm's successors
+ * satisfied their row 79% of the time and the licensed arm's 65%: a gap of +14pp
+ * with no intervention at all to explain it.
+ *
+ * ⚠ AND THAT NUMBER IS A PROPERTY OF THE CONFIGURATION, NOT A CONSTANT. Measured on
+ * the same 815 turns while `suite` still asked, the very same gap was **−14pp** —
+ * because that row's licence is satisfied by 0 of 77 successors, which dragged the
+ * whole arm down. Marking one row silent moved the baseline by 28 percentage points
+ * and flipped its sign. So a baseline is only valid for the row table and ask policy
+ * it was measured under, and MUST be re-measured whenever either changes.
+ *
+ * Read either figure as the effect of asking and you get a confident wrong answer,
+ * in opposite directions: the first manufactures a strong negative result, the
+ * second an equally strong positive one. Neither is about asking at all.
  *
  * So the raw difference between the two arms is NOT the effect of asking. The
  * effect is the difference between the live gap and this pre-intervention gap, and
@@ -243,7 +253,17 @@ function replayRecords(transcriptDir) {
         const verdicts = check.evaluate(turn);
         if (!verdicts.length) out.push({ ...base, verdict: 'no_claims', claim_kind: null });
         else for (const v of verdicts) {
-          out.push({ ...base, verdict: v.verdict, claim_kind: v.kind, claim_text: v.claim_text });
+          // The baseline must split its arms EXACTLY as the live store does. If a
+          // silent row counted as asked here and as not-asked there, the two halves
+          // of the comparison would be computed over different populations — which
+          // is the one thing a baseline exists to prevent.
+          out.push({
+            ...base,
+            verdict: v.verdict,
+            claim_kind: v.kind,
+            claim_text: v.claim_text,
+            asked: v.verdict === 'fired' && !v.silent,
+          });
         }
         start = i + 1;
       } else if (isPlainPrompt(convo[i])) {
@@ -292,8 +312,21 @@ function summarise(records, findTranscript) {
 
   const scored = claims.map((rec) => ({ rec, score: scoreRecord(rec, findTranscript, convoCache) }));
 
-  const arm = (verdict) => {
-    const mine = scored.filter((s) => s.rec.verdict === verdict);
+  // ⚠ A FIRING IS NOT AUTOMATICALLY AN ASKING. A row may be configured to record
+  // without injecting — `suite` is, because it fires on 98% of what it detects and
+  // the cause is a known positional defect in the row rather than a finding about
+  // the work. Those claims are genuinely unlicensed, so their verdict stays `fired`,
+  // but no question was ever put in front of anyone. Counting them in the arm that
+  // measures the effect of asking would average a real effect against a population
+  // that was never treated, pulling any effect toward zero.
+  //
+  // Records written before this field existed have no `asked` key. They came from a
+  // build where every firing was asked, so `undefined` means asked — but `false`
+  // never does, and the two are kept apart on purpose.
+  const wasAsked = (r) => r.asked !== false;
+
+  const arm = (verdict, filter) => {
+    const mine = scored.filter((s) => s.rec.verdict === verdict && (!filter || filter(s.rec)));
     const ok = mine.filter((s) => s.score.state === 'scored');
     return {
       n: mine.length,
@@ -313,6 +346,7 @@ function summarise(records, findTranscript) {
     const licOk = licArm.filter((s) => s.score.state === 'scored');
     return {
       kind: row.kind,
+      silent: !!row.silent,
       claims: mine.length,
       fired: firedArm.length,
       licensed: licArm.length,
@@ -332,7 +366,8 @@ function summarise(records, findTranscript) {
     unread,
     no_claims: noClaims,
     claims_detected: claims.length,
-    fired: arm('fired'),
+    fired: arm('fired', wasAsked),
+    recorded_only: arm('fired', (r) => !wasAsked(r)),
     control: arm('licensed'),
     by_row: byRow,
     scored,
@@ -378,7 +413,8 @@ function render(s, storeFile, limit) {
   say(`   turns declined as unread  ${String(s.unread).padStart(6)}   the hook could not read the turn — not a silence`);
   say(`   turns with no claim       ${String(s.no_claims).padStart(6)}`);
   say(`   claims detected           ${String(s.claims_detected).padStart(6)}   across ${ROWS.length} licence rows`);
-  say(`   firings                   ${String(s.fired.n).padStart(6)}   ${s.turns ? (s.fired.n / s.turns).toFixed(2) : '—'} per recorded turn`);
+  say(`   firings, ASKED            ${String(s.fired.n).padStart(6)}   ${s.turns ? (s.fired.n / s.turns).toFixed(2) : '—'} questions per recorded turn`);
+  say(`   firings, recorded only    ${String(s.recorded_only.n).padStart(6)}   unlicensed, but from a row that does not ask`);
   say(`   licensed (silences)       ${String(s.control.n).padStart(6)}`);
   say();
 
@@ -388,16 +424,27 @@ function render(s, storeFile, limit) {
   say('   arm                          n   scored   satisfied   rate');
   say(`   fired (a question was asked) ${pad(s.fired.n, 5)}   ${pad(s.fired.scorable, 6)}   ${pad(s.fired.licensed_next, 9)}   ${pct(s.fired.licensed_next, s.fired.scorable)}   ← UPPER BOUND`);
   say(`   licensed (control, no ask)   ${pad(s.control.n, 5)}   ${pad(s.control.scorable, 6)}   ${pad(s.control.licensed_next, 9)}   ${pct(s.control.licensed_next, s.control.scorable)}   ← base rate`);
+  if (s.recorded_only.n) {
+    say(`   fired but NOT asked          ${pad(s.recorded_only.n, 5)}   ${pad(s.recorded_only.scorable, 6)}   ${pad(s.recorded_only.licensed_next, 9)}   ${pct(s.recorded_only.licensed_next, s.recorded_only.scorable)}   ← reported, NOT a control`);
+    say('     (unlicensed claims from a row that records without asking. Tempting to read');
+    say('      as the ideal control — same population, no treatment — but it is not: the');
+    say('      rows differ, so their licence predicates differ, and this arm\'s rate is a');
+    say('      fact about that predicate rather than about the absence of a question.)');
+  }
   const gap = gapOf(s);
   say(`   ${' '.repeat(46)}─────`);
   say(`   gap between the arms        ${pp(gap)}`);
   say();
-  say('   ⚠ THAT GAP IS NOT THE EFFECT OF ASKING. Replayed over 807 real turns from');
+  say('   ⚠ THAT GAP IS NOT THE EFFECT OF ASKING. Replayed over 815 real turns from');
   say('     before this hook existed — no question injected anywhere — the same two arms');
-  say('     already differed by −14pp: a turn that made an unlicensed claim is followed');
-  say('     by turns that make unlicensed claims. The arms are not exchangeable.');
-  say('     The effect is this gap MINUS the pre-intervention gap over the same');
-  say('     transcripts, which `--baseline <transcript-dir>` computes.');
+  say('     already differed by +14pp. The arms are not exchangeable, so the effect is');
+  say('     this gap MINUS the pre-intervention one over the same transcripts, which');
+  say('     `--baseline <transcript-dir>` computes.');
+  say('     And that baseline is a property of the ROW TABLE AND ASK POLICY, not a');
+  say('     constant: on those same turns it was −14pp while `suite` still asked, so');
+  say('     silencing one row moved it 28 points and flipped its sign. Re-measure the');
+  say('     baseline whenever a row or its ask policy changes; a stale one is worse');
+  say('     than none, because it is subtracted with confidence.');
   say();
   say(`   contested (fired arm)       ${pad(s.fired.contested, 5)}   detected from prose, and it UNDER-detects;`);
   say('                                       an undetected contestation is counted proceeded_past,');
@@ -432,7 +479,7 @@ function render(s, storeFile, limit) {
   say('4. THE ROWS — a row that never fires is dead OR untested, and those differ');
   say('   kind         claims   fired  licensed    fired→obtained   control→obtained');
   for (const r of s.by_row) {
-    say(`   ${r.kind.padEnd(12)} ${pad(r.claims, 6)}  ${pad(r.fired, 6)}  ${pad(r.licensed, 8)}    `
+    say(`   ${(r.kind + (r.silent ? ' ·silent' : '')).padEnd(12)} ${pad(r.claims, 6)}  ${pad(r.fired, 6)}  ${pad(r.licensed, 8)}    `
       + `${pad(r.fired_obtained, 6)}/${pad(r.fired_scorable, -1)} ${pct(r.fired_obtained, r.fired_scorable).padStart(5)}   `
       + `${pad(r.control_obtained, 5)}/${pad(r.control_scorable, -1)} ${pct(r.control_obtained, r.control_scorable).padStart(5)}`);
   }
@@ -594,7 +641,13 @@ if (bIdx >= 0) {
     console.error(`cannot read transcripts in ${dir}`);
     process.exit(EXIT.NO_BASELINE_DIR);
   }
-  console.log(asJson ? JSON.stringify({ ...b.summary, scored: undefined, fired: { ...b.summary.fired, items: undefined }, control: { ...b.summary.control, items: undefined } }, null, 2) : b.text);
+  console.log(asJson ? JSON.stringify({
+    ...b.summary,
+    scored: undefined,
+    fired: { ...b.summary.fired, items: undefined },
+    recorded_only: { ...b.summary.recorded_only, items: undefined },
+    control: { ...b.summary.control, items: undefined },
+  }, null, 2) : b.text);
   process.exit(0);
 }
 
@@ -614,11 +667,15 @@ const out = report({
   limit: Number.isFinite(limit) ? limit : 25,
 });
 if (asJson) {
-  const { scored, fired, control, ...rest } = out.summary;
+  // `items` carry the claim excerpts — conversation text. The JSON form is the one
+  // most likely to be piped somewhere else, so the excerpts are dropped from it and
+  // kept only in the human report, which is read where it is printed.
+  const { scored, fired, control, recorded_only: recordedOnly, ...rest } = out.summary;
   console.log(JSON.stringify({
     ...rest,
     store: found.storeFile,
     fired: { ...fired, items: undefined },
+    recorded_only: { ...recordedOnly, items: undefined },
     control: { ...control, items: undefined },
   }, null, 2));
 } else {

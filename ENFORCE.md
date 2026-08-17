@@ -28,6 +28,15 @@ User message
    measured not to prevent it. Writes an instance record on EVERY outcome, silences
    and unreadable turns included, because a store holding only the fires has no
    denominator and reads as healthy for that reason.
+   ⚠ A ROW MAY RECORD WITHOUT ASKING. `suite` is marked `silent`: it fires on 81 of
+   the 83 claims it detects across 807 real turns, and the cause is positional — of
+   the 45 turns pairing a prediction with a test run, only 8 state the prediction
+   before it. A row that fires on 98% of what it sees is a constant, not a check,
+   and spending the mechanism's credibility on the one row already known to be
+   mis-specified would return "ignored" for a reason unrelated to the hypothesis.
+   It still detects and still records, so its figures keep accumulating. Each record
+   carries `asked`, and the report's arms split on it — a firing nobody was shown
+   must never enter the arm that measures the effect of being shown one.
    Freshness: the transcript is written asynchronously, so when the turn it expects
    is not in the file the verdict is `unread` and it stays silent. "Could not look"
    is never reported as "nothing found".
@@ -810,14 +819,30 @@ operation reading as continued value.
   "ran something and happened to satisfy the row". So the raw fired rate is labelled
   an UPPER BOUND, and the `licensed` records, where no question was injected, are
   scored by the identical predicate as the base rate.
-- **⚠ The two arms are NOT exchangeable, and that is measured.** Replayed over 807
+- **⚠ The two arms are NOT exchangeable, and that is measured.** Replayed over 815
   real turns predating the hook — no question injected anywhere — the arms already
-  differed by **−14pp** (fired 51%, licensed 65%): a turn that made an unlicensed
-  claim is followed by turns that make unlicensed claims. The live gap therefore is
-  not the effect of asking; the effect is the live gap minus the pre-intervention
-  one. `--baseline <transcript-dir>` computes the second half, standalone and with
-  no store. Without it the first day of live data would have read as a strong
-  negative result produced entirely by a missing control.
+  differed by **+14pp** (asked 79%, licensed 65%). The live gap therefore is not the
+  effect of asking; the effect is the live gap minus the pre-intervention one.
+  `--baseline <transcript-dir>` computes the second half, standalone and with no
+  store.
+- **⚠ A baseline belongs to a ROW TABLE AND AN ASK POLICY, and must be re-measured
+  when either changes.** On those same 815 turns the gap was **−14pp** while `suite`
+  still asked, because that row's licence is satisfied by 0 of 77 successors and it
+  dragged the whole arm down. Marking one row silent moved the baseline 28 points
+  and flipped its sign. Read either figure as the effect of asking and you get a
+  confident wrong answer in opposite directions — a strong negative result, then an
+  equally strong positive one, neither about asking. A stale baseline is worse than
+  none, because it gets subtracted with confidence.
+- **A firing is not automatically an asking.** Records carry `asked`, and the arms
+  split on it: a claim from a `silent` row is genuinely unlicensed and keeps the
+  `fired` verdict, but nobody was shown a question, so it goes to its own
+  `recorded_only` bucket. Folding it into the treated arm would average a real
+  effect against a population that was never treated. That bucket is *reported and
+  explicitly not offered as a control* — it is tempting to read as the ideal one
+  (unlicensed claims, no treatment), but the rows differ, so their licence
+  predicates differ, and its rate is a fact about the predicate rather than about
+  the absence of a question. A record with no `asked` key predates the field and
+  counts as asked; `false` never does.
 - **Turns that cannot be scored are listed, never folded in** — `transcript_gone`,
   `turn_gone`, `no_next_turn`. Same discipline as the hook's `unread`.
 - **Contestation is detected on the ACT, never the topic.** A first draft matched
