@@ -154,6 +154,21 @@ const payloadFor = (hook, dir) => {
       return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'node tools/diagnose-rate.js' } };
     case 'catalogue-id-leak-guard.js':
       return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: "git commit -m 'fix H91 and V77'" } };
+    case 'absent-warrant-check.js': {
+      // This door judges a TURN, so it needs one. Written per caller directory,
+      // carrying a deliberately unlicensed claim — a licensed one would make the
+      // hook silent for a reason unrelated to the refusal under test, and a
+      // silence that means the wrong thing is exactly what this suite guards.
+      const t = path.join(dir, 'previous-turn.jsonl');
+      fs.writeFileSync(t, [
+        JSON.stringify({ type: 'user', isSidechain: false, uuid: 'u1', message: { role: 'user', content: 'go' } }),
+        JSON.stringify({
+          type: 'assistant', isSidechain: false, uuid: 'a1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'I verified the engine change.' }], stop_reason: 'end_turn' },
+        }),
+      ].join('\n') + '\n');
+      return { hook_event_name: 'UserPromptSubmit', prompt: 'carry on', transcript_path: t };
+    }
     case 'provenance-guard.js':
       return { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: path.join(sp, '.anvi', 'hetvabhasa.md') } };
     default:

@@ -111,6 +111,7 @@ const COVERED = new Set([
   'provenance-guard.js',
   'ground-truth-session-start.js',
   'debug-grounding-gate.js',
+  'absent-warrant-check.js',      // witnessed below, plus test/absent-warrant-check.test.js
   'experiment-protocol-guard.js',
   'catalogue-id-leak-guard.js',
   'shell-rewrite-guard.js',        // witnessed below, plus test/shell-rewrite-guard.test.js
@@ -156,6 +157,46 @@ r = fire('debug-grounding-gate.js', {
   cwd: P, hook_event_name: 'UserPromptSubmit', prompt: 'add a docstring to the readme',
 });
 ok(r.ctx === '', 'stays quiet on a non-debugging prompt (liveness ≠ firing always)');
+
+// --- 3b. absent-warrant-check -----------------------------------------------
+// Contract: a claim in the PREVIOUS turn whose licensing observation is missing
+// from that turn earns a question. Dead-hook risk is the highest of any hook here,
+// because its input is a file written by someone else at a time it does not
+// control: a renamed transcript field, a changed record shape, or a stricter
+// freshness rule all collapse into permanent, plausible silence.
+console.log('absent-warrant-check (UserPromptSubmit)');
+const TRANSCRIPT = path.join(P, 'previous-turn.jsonl');
+const turn = (text) => [
+  JSON.stringify({ type: 'user', isSidechain: false, uuid: 'u1', message: { role: 'user', content: 'go' } }),
+  JSON.stringify({
+    type: 'assistant', isSidechain: false, uuid: 'a1',
+    message: { role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' },
+  }),
+].join('\n') + '\n';
+
+fs.writeFileSync(TRANSCRIPT, turn('I verified the renamed parameter reaches the runtime.'));
+r = fire('absent-warrant-check.js', {
+  cwd: P, hook_event_name: 'UserPromptSubmit', session_id: 'liveness-1',
+  transcript_path: TRANSCRIPT, prompt: 'carry on',
+});
+ok(r.exit === 0, 'exits 0');
+ok(/\?/.test(r.ctx) && r.ctx.length > 0, 'ALIVE: asks a question about an unlicensed claim');
+ok(/output/i.test(r.ctx), 'names the observation the claim wanted');
+ok(!/\b[HV]\d+\b/.test(r.ctx), 'and injects no catalogue index key');
+// The record is half the feature: a firing that leaves no trace cannot be measured.
+const WARRANTS = path.join(P, 'instances', 'warrants.jsonl');
+ok(fs.existsSync(WARRANTS), 'ALIVE: wrote an instance record');
+
+// Correctly quiet: a licensed claim earns silence, and the silence is recorded.
+// Without this pair a hook that fired on every turn would pass the case above.
+fs.writeFileSync(TRANSCRIPT, turn('Nothing surprising in the parameter table this time.'));
+r = fire('absent-warrant-check.js', {
+  cwd: P, hook_event_name: 'UserPromptSubmit', session_id: 'liveness-2',
+  transcript_path: TRANSCRIPT, prompt: 'carry on',
+});
+ok(r.ctx === '', 'stays quiet on a turn that makes no such claim');
+ok(fs.readFileSync(WARRANTS, 'utf8').includes('no_claims'),
+  'and RECORDS that silence — a store of fires alone has no denominator');
 
 // --- 4. experiment-protocol-guard -------------------------------------------
 // Contract: running a diagnostic tool with no grounded protocol gets a reminder.
@@ -349,7 +390,7 @@ ok(r.ctx === '', 'silent on 4 distinct id-shaped tokens (SHA1/MD5/CRC32/UTF8) �
 console.log('degradation (the never-block contract)');
 const ALL = ['ground-truth-session-start.js', 'debug-grounding-gate.js',
   'experiment-protocol-guard.js', 'provenance-guard.js', 'catalogue-id-leak-guard.js',
-  'anvi-route-logger.js', 'catalogue-context-injector.js'];
+  'anvi-route-logger.js', 'catalogue-context-injector.js', 'absent-warrant-check.js'];
 for (const h of ALL) {
   const bad = spawnSync('node', [path.join(HOOKS, h)], { input: 'not json at all{{', encoding: 'utf8', timeout: 20000 });
   ok(bad.status === 0, `${h}: malformed stdin → exit 0, no crash`);
