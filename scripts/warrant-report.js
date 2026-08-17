@@ -279,6 +279,23 @@ function classifyDecline(reason) {
   return hits.length === 1 ? hits[0].group : null;
 }
 
+/**
+ * WHY a reason went unclassified — and these are not the same fault.
+ *
+ * No rule matched means the WRITER grew a reason this table does not know about.
+ * Two rules matched means the READER's own table overlaps and would double-count.
+ * Reporting both as "the writer drifted" blames the wrong side for the second, and
+ * pointing a fix at the wrong side is how the real one survives. The suite forbids
+ * the ambiguous case from shipping; this exists so that if it ever arrives it
+ * arrives named.
+ */
+function declineFault(reason) {
+  const hits = DECLINES.filter((d) => d.match.test(String(reason || '')));
+  if (hits.length === 0) return 'no rule matched — the writer emits a reason this reader does not enumerate';
+  if (hits.length > 1) return `${hits.length} rules matched — this reader's own table overlaps on it`;
+  return null;
+}
+
 // ── the baseline ────────────────────────────────────────────────────────────
 /**
  * THE ARMS ARE NOT EXCHANGEABLE, AND THAT IS MEASURED, NOT FEARED.
@@ -494,9 +511,11 @@ const pp = (g) => (g === null ? 'not computable' : `${g >= 0 ? '+' : ''}${g.toFi
  * Break the decline count down. Printed as sub-lines under the total rather than
  * replacing it: the total is what stays out of every rate, and that must not move.
  *
- * Every group prints even at zero. A zero here is a real reading — "the race has
- * not been seen yet" is the finding while the store is young — and a line that
- * appears only once it is non-zero is a line nobody is watching when it arrives.
+ * Every group prints even at zero, WHENEVER THERE IS A BREAKDOWN TO PRINT. A zero
+ * per group is a real reading — "the race has not been seen yet" is the finding
+ * while the store is young — and a line that appears only once it is non-zero is a
+ * line nobody is watching when it arrives. Where the whole bucket is zero there is
+ * nothing to decompose and the parent line already says so, so this prints nothing.
  */
 function renderDeclines(say, s) {
   if (!s.unread) return;
@@ -533,6 +552,15 @@ function renderDeclines(say, s) {
     const note = NOTE[g] || [];
     say(`     ${g.padEnd(DECLINE_LABEL_W)}${String(n).padStart(6)}   ${note[0] || ''}`);
     for (const line of note.slice(1)) say(`${' '.repeat(GUTTER)}${line}`);
+    // The GROUP makes the number readable; the REASON is what a fix would act on.
+    // Four distinct reasons share the race group and they fail in different shapes
+    // — a newer turn still in flight is a delay problem, a trailing prompt that is
+    // not ours is a positional one. Pooling those four would be this same defect one
+    // level down, so each contributing reason is named with its own count.
+    const inGroup = Object.entries(d.by_reason)
+      .filter(([reason]) => classifyDecline(reason) === g)
+      .sort((a, b) => b[1] - a[1]);
+    for (const [reason, count] of inGroup) say(`${' '.repeat(GUTTER - 4)}${count} × ${reason}`);
   }
   // An unrecognised reason means the writer grew one this table does not know
   // about. Named, never pooled: folding it into a group is how a new decline
@@ -540,11 +568,14 @@ function renderDeclines(say, s) {
   const unk = Object.entries(d.unclassified);
   if (unk.length) {
     say();
-    say(`  ⚠ ${unk.reduce((a, [, n]) => a + n, 0)} decline(s) whose reason this reader does not`);
-    say('    recognise. The writer declines for reasons this table enumerates; a new one');
-    say('    means the two have drifted apart, and it is named here rather than counted');
-    say('    into a group it only resembles:');
-    for (const [reason, n] of unk) say(`      ${n} × ${JSON.stringify(reason)}`);
+    say(`  ⚠ ${unk.reduce((a, [, n]) => a + n, 0)} decline(s) this reader could not place in a group.`);
+    say('    Named here rather than counted into a group they only resemble — and the');
+    say('    FAULT is named per reason, because a reason no rule matches and a reason two');
+    say('    rules match are different faults on different sides:');
+    for (const [reason, n] of unk) {
+      say(`      ${n} × ${JSON.stringify(reason)}`);
+      say(`          ${declineFault(reason)}`);
+    }
   }
 }
 
@@ -772,7 +803,7 @@ module.exports = {
   report, baseline, summarise, render, renderBaseline, locate, readStore,
   nextTurnAfter, scoreRecord, isContested, CONTESTED, replayRecords,
   makeTranscriptFinder, gapOf, EXIT,
-  DECLINES, DECLINE_GROUPS, DECLINE_LABEL_W, classifyDecline, renderDeclines,
+  DECLINES, DECLINE_GROUPS, DECLINE_LABEL_W, classifyDecline, declineFault, renderDeclines,
 };
 
 if (require.main !== module) return;

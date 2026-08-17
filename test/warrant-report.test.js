@@ -605,6 +605,49 @@ console.log('\nGROUP 10 — seven reasons a turn could not be read, grouped and 
   const none = R.summarise([rec({ session_id: 's4', verdict: 'unread' })], finder);
   eq(none.unread, 1, 'a decline with no recorded reason is still counted');
   eq(Object.values(none.declines.unclassified).reduce((a, b) => a + b, 0), 1, '  └ and named as having none');
+
+  // THE REASON, NOT ONLY THE GROUP. Four reasons share the race group and they fail
+  // in different shapes; pooling those four is this same defect one level down. This
+  // is also the red state for `by_reason`, which was otherwise computed and asserted
+  // by nothing — an unasserted field is indistinguishable from a broken one.
+  const twoRaces = R.summarise([
+    rec({ session_id: 's5', verdict: 'unread', searched: produced[2] }),  // newer turn in flight
+    rec({ session_id: 's5', verdict: 'unread', searched: produced[5] }),  // trailing prompt not ours
+    rec({ session_id: 's5', verdict: 'unread', searched: produced[5] }),
+  ], finder);
+  eq(twoRaces.declines.by_group['the freshness race'], 3, 'three races land in one group');
+  eq(twoRaces.declines.by_reason[produced[5]], 2, '  └ and by_reason keeps them apart');
+  const textRaces = R.render(twoRaces, 'x', 5);
+  ok(textRaces.includes(`2 × ${produced[5]}`), '  └ each contributing reason is printed with its count');
+  ok(textRaces.includes(`1 × ${produced[2]}`), '  └ including the one that is not the majority');
+
+  // TWO FAULTS, NOT ONE. A reason no rule matches is the WRITER drifting; a reason
+  // two rules match is the READER's table overlapping. One sentence for both points
+  // a fix at the wrong side.
+  ok(/writer/.test(R.declineFault('a reason nobody wrote a rule for')), 'an unmatched reason names the writer');
+  const unanchored = R.DECLINES[0].match.source.replace(/^\^/, '');
+  ok(R.declineFault(null) !== null, 'a missing reason is a fault, not a silence');
+  {
+    // Provoke the two-rules case rather than asserting it can't happen: the message
+    // must exist and must NOT blame the writer. Restored immediately.
+    const saved = R.DECLINES.slice();
+    R.DECLINES.push({ group: 'no turn to read', match: new RegExp(unanchored) });
+    const f = R.declineFault(produced[0]);
+    ok(/rules matched/.test(f) && !/writer/.test(f), 'an over-matched reason names the reader, not the writer');
+    R.DECLINES.length = 0;
+    R.DECLINES.push(...saved);
+    eq(R.declineFault(produced[0]), null, '  └ and the table is restored, so this leaks nothing');
+  }
+
+  // ALIGNMENT, ASSERTED FROM BOTH SIDES. The label width was derived from the parent
+  // line, so guarding only the group names leaves the other half free to drift — and
+  // a misaligned column has no red state at all unless something compares them.
+  const lines = R.render(s10, 'x', 5).split('\n');
+  const colOf = (re) => { for (const l of lines) { const m = l.match(re); if (m) return m[0].length; } return -1; };
+  const parentCol = colOf(/^ {3}turns declined as unread\s+\d+/);
+  const groupCol = colOf(/^ {5}the freshness race\s+\d+/);
+  ok(parentCol > 0, `the parent decline line is present (count ends at column ${parentCol})`);
+  eq(groupCol, parentCol, 'a sub-count ends in the SAME column as the total it decomposes');
 }
 
 // ── GROUP 8 — the source stays greppable ────────────────────────────────────
