@@ -483,6 +483,130 @@ console.log('\nGROUP 9 — records from a row that does not ask stay out of the 
   ok(/·silent/.test(R.render(s, 'x', 5)), 'and marks it in the per-row table');
 }
 
+// ── GROUP 10 — the decline reasons are not one number ───────────────────────
+console.log('\nGROUP 10 — seven reasons a turn could not be read, grouped and none pooled');
+{
+  // THE REASONS COME FROM THE SUBJECT, NEVER FROM RETYPING THEM HERE. A retyped
+  // sentence is a second copy free to drift from the original, and these carry
+  // punctuation that is easy to change without noticing — so each fixture below
+  // provokes `readTurn` into declining and the group is asserted against whatever
+  // string it actually produced.
+  const G10 = mk('g10');
+  const line = (o) => JSON.stringify(o);
+  const prompt = (text) => line({ type: 'user', isSidechain: false, uuid: u(), message: { role: 'user', content: text } });
+  const done = (text) => line({ type: 'assistant', isSidechain: false, uuid: u(), message: { role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' } });
+  const working = () => line({ type: 'assistant', isSidechain: false, uuid: u(), message: { role: 'assistant', content: [{ type: 'text', text: 'mid' }], stop_reason: 'tool_use' } });
+  const toolResult = () => line({ type: 'user', isSidechain: false, uuid: u(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: 'r', is_error: false }] } });
+  let fno = 0;
+  const write = (lines) => {
+    const p = path.join(G10, `t${++fno}.jsonl`);
+    fs.writeFileSync(p, lines.join('\n') + '\n');
+    return p;
+  };
+
+  // One fixture per decline reason, each provoking exactly the branch it names.
+  const CASES = [
+    { want: 'no turn to read', now: 'anything',
+      note: 'the transcript file does not exist',
+      path: () => path.join(G10, 'no-such-transcript.jsonl') },
+    { want: 'no turn to read', now: 'anything',
+      note: 'the file exists but holds no completed turn',
+      path: () => write([]) },
+    { want: 'the freshness race', now: 'p2',
+      note: 'a newer assistant turn is still in flight',
+      path: () => write([prompt('p1'), done('a1'), prompt('p2'), working()]) },
+    { want: 'the freshness race', now: 'p2',
+      note: "a newer turn's tool results are already written",
+      path: () => write([prompt('p1'), done('a1'), prompt('p2'), toolResult()]) },
+    { want: 'the freshness race', now: 'p3',
+      note: 'two prompts follow the last completed turn',
+      path: () => write([prompt('p1'), done('a1'), prompt('p2'), prompt('p3')]) },
+    { want: 'the freshness race', now: 'a different prompt entirely',
+      note: 'the trailing prompt is not the one we were handed',
+      path: () => write([prompt('p1'), done('a1'), prompt('p2')]) },
+    { want: 'no turn boundary', now: 'anything',
+      note: 'a completed turn with no prompt before it — a trimmed opening',
+      path: () => write([done('a1')]) },
+  ];
+
+  const produced = [];
+  for (const c of CASES) {
+    const r = check.readTurn(c.path(), c.now);
+    // Assert the fixture reached the branch at all before believing its label: a
+    // fixture that read cleanly would otherwise classify `undefined` and pass by
+    // landing in whatever bucket the empty string happens to match.
+    eq(r.state, 'unread', `declines — ${c.note}`);
+    produced.push(r.why);
+    eq(R.classifyDecline(r.why), c.want, `  └ grouped as "${c.want}"`);
+  }
+
+  // COMPLETENESS, derived from the subject rather than from this list. A reason
+  // added to the writer that no rule matches would be counted into no group, so
+  // the count of decline sites in the hook must equal the count of rules here.
+  const hookSrc = fs.readFileSync(path.join(ROOT, 'hooks', 'absent-warrant-check.js'), 'utf8');
+  const sites = (hookSrc.match(/state: 'unread', why:/g) || []).length;
+  eq(sites, R.DECLINES.length, 'every decline the writer can emit has a rule in the reader');
+  // The anchor is doing real work: the word alone appears in prose that is not a
+  // decline site, so a looser pattern over-counts. Printing both is what makes the
+  // tighter number credible rather than merely smaller.
+  const loose = (hookSrc.match(/unread/g) || []).length;
+  ok(loose > sites, `the anchor excludes prose mentions (${loose} mentions vs ${sites} sites)`);
+  eq(new Set(produced).size, R.DECLINES.length, 'and the fixtures provoke every one of them, distinctly');
+
+  // KEY UNIQUENESS, ASSERTED AND PRINTED. An ordered table whose first pattern is
+  // a prefix of a later one has cost this repository a whole survey; two rules
+  // matching one reason would double-count it silently.
+  let ambiguous = [];
+  for (const why of produced) {
+    const hits = R.DECLINES.filter((d) => d.match.test(why));
+    if (hits.length !== 1) ambiguous.push(`${JSON.stringify(why)} → ${hits.length}`);
+  }
+  eq(ambiguous.join(' | '), '', 'each reason matches EXACTLY ONE rule');
+
+  // The column is a constant because a name one character too long shifts its
+  // number out of alignment silently — the defect has no red state unless asserted.
+  const tooLong = R.DECLINE_GROUPS.filter((g) => g.length > R.DECLINE_LABEL_W);
+  eq(tooLong.join(','), '', `every group name fits the ${R.DECLINE_LABEL_W}-wide label column`);
+
+  // The breakdown DECOMPOSES the total; it must not move it, and unread must stay
+  // out of every rate exactly as before.
+  const finder = () => null;
+  const store = [
+    rec({ session_id: 's1', verdict: 'unread', searched: produced[0] }),
+    rec({ session_id: 's1', verdict: 'unread', searched: produced[2] }),
+    rec({ session_id: 's2', verdict: 'unread', searched: produced[6] }),
+    rec({ session_id: 's2', turn_ref: 't9', claim_kind: 'verified', verdict: 'licensed', found: true }),
+  ];
+  const s10 = R.summarise(store, finder);
+  eq(s10.unread, 3, 'the total decline count is unchanged by being broken down');
+  eq(s10.declines.by_group['no turn to read'], 1, 'and each group carries its own count');
+  eq(s10.declines.by_group['the freshness race'], 1, '  └ the race is counted apart');
+  eq(s10.declines.by_group['no turn boundary'], 1, '  └ so is the trimmed boundary');
+  eq(Object.keys(s10.declines.unclassified).length, 0, 'nothing unclassified for known reasons');
+  eq(s10.turns, 1, 'a declined turn is still not a recorded turn');
+  eq(s10.claims_detected, 1, 'and still not a claim');
+
+  const text10 = R.render(s10, 'x', 5);
+  ok(/the freshness race/.test(text10), 'the race has its own line in the report');
+  // A zero must PRINT. The finding while the store is young is that the race has
+  // not been seen, and a line that appears only once it is non-zero is a line
+  // nobody is watching at the moment it arrives.
+  const s10zero = R.summarise([store[0]], finder);
+  ok(/the freshness race\s+0/.test(R.render(s10zero, 'x', 5)), 'a group at zero still prints');
+
+  // AN UNRECOGNISED REASON IS NAMED, NEVER POOLED. Folding it into the group it
+  // most resembles is how a drifted writer stays invisible.
+  const odd = R.summarise([rec({ session_id: 's3', verdict: 'unread', searched: 'a reason nobody wrote a rule for' })], finder);
+  eq(odd.declines.unclassified['a reason nobody wrote a rule for'], 1, 'an unknown reason is counted as unknown');
+  eq(Object.values(odd.declines.by_group).reduce((a, b) => a + b, 0), 0, '  └ and into no group at all');
+  ok(/a reason nobody wrote a rule for/.test(R.render(odd, 'x', 5)), '  └ and is printed verbatim, not just tallied');
+
+  // A record with no reason at all must not throw and must not vanish.
+  const none = R.summarise([rec({ session_id: 's4', verdict: 'unread' })], finder);
+  eq(none.unread, 1, 'a decline with no recorded reason is still counted');
+  eq(Object.values(none.declines.unclassified).reduce((a, b) => a + b, 0), 1, '  └ and named as having none');
+}
+
 // ── GROUP 8 — the source stays greppable ────────────────────────────────────
 console.log('\nGROUP 8 — no NUL byte in the shipped source');
 {

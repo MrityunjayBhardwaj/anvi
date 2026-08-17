@@ -202,6 +202,83 @@ function scoreRecord(rec, findTranscript, convoCache) {
   };
 }
 
+/**
+ * WHY A TURN COULD NOT BE READ — three groups, and only one of them is a signal.
+ *
+ * The writer declines for seven distinct reasons and stores which one in
+ * `searched`. Pooling them under a single "could not read the turn" count puts a
+ * structural certainty and the design's central risk in the same number, and the
+ * structural one dominates:
+ *
+ *   NO TURN TO READ carries no information about the hook's health. A session's
+ *   first prompt can run before its transcript file exists, so the read throws;
+ *   observed live on the first session here that BEGAN with the hook registered.
+ *   It is NOT a fixed one-per-session floor — measured across the five projects on
+ *   this machine running this hook, three of six sessions produced no decline at
+ *   all, because a session already in flight when the hook was registered never
+ *   meets the missing-file case. With few recorded turns per session it still
+ *   dominates the bucket: this store read 1 of 3 records declined, 33%.
+ *
+ *   THE FRESHNESS RACE is the reason the freshness test exists, and it is REAL: the
+ *   transcript is written asynchronously and was measured still missing its final
+ *   message 14.4s after a turn ended, so a fast reply can land on a half-written
+ *   turn — and one has already been recorded in the wild (`the trailing prompt is
+ *   not this one`, in a sibling project's store on this machine). Note what that
+ *   implies about scope: the rate is a property of the HOOK, while every store is
+ *   per-project by design, so any one project's race count is a FLOOR.
+ *
+ * ⚠ AND THIS IS THE ONLY PLACE THAT NUMBER CAN EVER COME FROM. Every other figure
+ * in this report is re-derivable from transcripts after the fact — that is how the
+ * pre-intervention baseline was measured over 815 turns. This one is not: a SETTLED
+ * transcript cannot exhibit a mid-write state, so replaying the freshness test over
+ * finished transcripts reports zero races by construction, whatever the live rate
+ * is. Discarding `searched` does not defer the measurement, it destroys it.
+ *
+ * Grouped by what the reason SAYS, never by an inferred cause. `transcript
+ * unreadable` also covers a permissions failure or a deleted file; calling it
+ * "session start" would assert something no record establishes.
+ *
+ * Matched on anchored, distinct prefixes rather than whole sentences: the reasons
+ * carry punctuation that retyping silently changes, and a retyped sentence is a
+ * second copy free to drift from the original. One reason is templated with a
+ * count, so this cannot be equality. No pattern here is a prefix of another — an
+ * ordered alternation whose first branch prefixes a later one has cost this
+ * repository a whole survey — and the suite asserts each real reason matches
+ * EXACTLY ONE rule, so the table cannot quietly double-count.
+ */
+const DECLINES = [
+  { group: 'no turn to read', match: /^transcript unreadable/ },
+  { group: 'no turn to read', match: /^no completed assistant turn/ },
+  { group: 'the freshness race', match: /^a newer assistant turn/ },
+  { group: 'the freshness race', match: /^tool results from a newer turn/ },
+  { group: 'the freshness race', match: /^\d+ user prompts follow/ },
+  { group: 'the freshness race', match: /^the trailing prompt is not this one/ },
+  { group: 'no turn boundary', match: /^no turn boundary/ },
+];
+
+// The order the groups are printed in, so a group that happens to be empty this
+// run still shows as zero rather than vanishing. A group that disappears when it
+// is zero is a group nobody notices arriving.
+const DECLINE_GROUPS = ['no turn to read', 'the freshness race', 'no turn boundary'];
+
+// The parent line pads its label to 24 and its count to 6 from a 3-space indent,
+// so its number ends at column 35. A sub-line reproduces that column exactly. This
+// is a constant rather than a hand-count because a group name one character too
+// long shifts its number out of the column SILENTLY — the suite asserts every
+// name fits, which is the only way that stays true as names are added.
+const DECLINE_LABEL_W = 24;
+
+/**
+ * Classify one decline. Returns null for a reason no rule matches, which is
+ * COUNTED AND PRINTED rather than folded into a group — an unrecognised reason
+ * means the writer grew one this reader does not know about, and silently pooling
+ * it into the largest group is how that stays invisible.
+ */
+function classifyDecline(reason) {
+  const hits = DECLINES.filter((d) => d.match.test(String(reason || '')));
+  return hits.length === 1 ? hits[0].group : null;
+}
+
 // ── the baseline ────────────────────────────────────────────────────────────
 /**
  * THE ARMS ARE NOT EXCHANGEABLE, AND THAT IS MEASURED, NOT FEARED.
@@ -282,10 +359,24 @@ function summarise(records, findTranscript) {
   const seen = new Set();
   let unread = 0, noClaims = 0, malformed = 0, duplicates = 0;
   const claims = [];
+  // The reason is grouped AND kept verbatim. The group is what makes the number
+  // readable; the verbatim reason is what makes it checkable, and it is the only
+  // record of a state that cannot be replayed from a settled transcript.
+  const declineGroups = new Map(DECLINE_GROUPS.map((g) => [g, 0]));
+  const declineReasons = new Map();
+  const declineUnclassified = new Map();
 
   for (const rec of records) {
     if (!rec || typeof rec !== 'object') { malformed++; continue; }
-    if (rec.verdict === 'unread') { unread++; continue; }
+    if (rec.verdict === 'unread') {
+      unread++;
+      const reason = String((rec.searched === undefined || rec.searched === null) ? '(no reason recorded)' : rec.searched);
+      declineReasons.set(reason, (declineReasons.get(reason) || 0) + 1);
+      const group = classifyDecline(reason);
+      if (group) declineGroups.set(group, declineGroups.get(group) + 1);
+      else declineUnclassified.set(reason, (declineUnclassified.get(reason) || 0) + 1);
+      continue;
+    }
 
     // ⚠ THE WRITER'S DEDUPE IS KNOWN TO LEAK, so the reader does not inherit its
     // arithmetic. The hook decides "have I already recorded this turn?" by scanning
@@ -364,6 +455,11 @@ function summarise(records, findTranscript) {
     sessions: new Set(records.map((r) => r && r.session_id).filter(Boolean)).size,
     turns: turns.size,
     unread,
+    declines: {
+      by_group: Object.fromEntries(declineGroups),
+      by_reason: Object.fromEntries(declineReasons),
+      unclassified: Object.fromEntries(declineUnclassified),
+    },
     no_claims: noClaims,
     claims_detected: claims.length,
     fired: arm('fired', wasAsked),
@@ -394,6 +490,64 @@ const pp = (g) => (g === null ? 'not computable' : `${g >= 0 ? '+' : ''}${g.toFi
 
 // ── the printing ────────────────────────────────────────────────────────────
 
+/**
+ * Break the decline count down. Printed as sub-lines under the total rather than
+ * replacing it: the total is what stays out of every rate, and that must not move.
+ *
+ * Every group prints even at zero. A zero here is a real reading — "the race has
+ * not been seen yet" is the finding while the store is young — and a line that
+ * appears only once it is non-zero is a line nobody is watching when it arrives.
+ */
+function renderDeclines(say, s) {
+  if (!s.unread) return;
+  const d = s.declines;
+  // Named for what the reason SAYS. The note may identify the dominant cause but
+  // must not spell the group as that cause: `transcript unreadable` is also what a
+  // permissions failure and a deleted transcript look like, and calling the group
+  // "session start" would assert something no record establishes.
+  const NOTE = {
+    'no turn to read': [
+      `nothing existed to read, which says nothing about the hook's health.`,
+      `Dominated by a session's first prompt running before its transcript`,
+      `exists; a deleted or unreadable transcript also lands here. Not a fixed`,
+      `per-session floor — a session already running when the hook was`,
+      `registered never meets it. (${s.sessions} session(s) in this store.)`,
+    ],
+    'the freshness race': [
+      `← THE number that decides whether the hook can see what it claims to,`,
+      `and it is a FLOOR: the rate belongs to the hook, every store is`,
+      `per-project. A settled transcript cannot show a mid-write state, so`,
+      `this is not recoverable by replay — only by having recorded it live.`,
+    ],
+    'no turn boundary': [
+      `the transcript's opening was trimmed, so the turn cannot be bounded.`,
+      `Measured 0 of 801 replayed turns.`,
+    ],
+  };
+  // Aligned to the parent line's own number column (its label is padded to 24 and
+  // its count to 6, from a 3-space indent), so a sub-count reads against the total
+  // it decomposes rather than floating in a column of its own.
+  const GUTTER = 5 + DECLINE_LABEL_W + 6 + 3;
+  for (const g of DECLINE_GROUPS) {
+    const n = d.by_group[g] || 0;
+    const note = NOTE[g] || [];
+    say(`     ${g.padEnd(DECLINE_LABEL_W)}${String(n).padStart(6)}   ${note[0] || ''}`);
+    for (const line of note.slice(1)) say(`${' '.repeat(GUTTER)}${line}`);
+  }
+  // An unrecognised reason means the writer grew one this table does not know
+  // about. Named, never pooled: folding it into a group is how a new decline
+  // reason hides inside the largest bucket it happens to resemble.
+  const unk = Object.entries(d.unclassified);
+  if (unk.length) {
+    say();
+    say(`  ⚠ ${unk.reduce((a, [, n]) => a + n, 0)} decline(s) whose reason this reader does not`);
+    say('    recognise. The writer declines for reasons this table enumerates; a new one');
+    say('    means the two have drifted apart, and it is named here rather than counted');
+    say('    into a group it only resembles:');
+    for (const [reason, n] of unk) say(`      ${n} × ${JSON.stringify(reason)}`);
+  }
+}
+
 function render(s, storeFile, limit) {
   const L = [];
   const say = (t) => L.push(t === undefined ? '' : t);
@@ -411,6 +565,7 @@ function render(s, storeFile, limit) {
   say('1. THE RATE, WITH A DENOMINATOR');
   say(`   turns recorded            ${String(s.turns).padStart(6)}`);
   say(`   turns declined as unread  ${String(s.unread).padStart(6)}   the hook could not read the turn — not a silence`);
+  renderDeclines(say, s);
   say(`   turns with no claim       ${String(s.no_claims).padStart(6)}`);
   say(`   claims detected           ${String(s.claims_detected).padStart(6)}   across ${ROWS.length} licence rows`);
   say(`   firings, ASKED            ${String(s.fired.n).padStart(6)}   ${s.turns ? (s.fired.n / s.turns).toFixed(2) : '—'} questions per recorded turn`);
@@ -617,6 +772,7 @@ module.exports = {
   report, baseline, summarise, render, renderBaseline, locate, readStore,
   nextTurnAfter, scoreRecord, isContested, CONTESTED, replayRecords,
   makeTranscriptFinder, gapOf, EXIT,
+  DECLINES, DECLINE_GROUPS, DECLINE_LABEL_W, classifyDecline, renderDeclines,
 };
 
 if (require.main !== module) return;
