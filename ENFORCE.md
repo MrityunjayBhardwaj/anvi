@@ -31,6 +31,9 @@ User message
    Freshness: the transcript is written asynchronously, so when the turn it expects
    is not in the file the verdict is `unread` and it stays silent. "Could not look"
    is never reported as "nothing found".
+   The records are read back by `scripts/warrant-report.js` — see §"Absent-Warrant
+   Instances". Without that reader the store accumulates and the question it exists
+   to answer stays unanswerable, which is this component's own failure mode.
 
   ↓
 ④ Context Routing Protocol — global CLAUDE.md
@@ -771,3 +774,61 @@ been right for the wrong reason.
   live in `~/.anvideck` and `.anvi` is a gitignored symlink, so there is no
   `dharana.md` in a fresh clone; every case builds its own boundary text and tree,
   and the suite means the same thing in CI as it does on the author's machine.
+
+## Absent-Warrant Instances — the store has a reader, and it refuses rather than counts
+
+`absent-warrant-check.js` writes an instance record on every outcome. Until this
+existed, nothing read them back — so the four figures the design registered as its
+own test were not computable, the kill criterion could not be evaluated, and the
+mechanism would have gone on running while the question it exists to answer stayed
+open. That is the failure this whole component was written against: continued
+operation reading as continued value.
+
+- **Report:** `node ~/.claude/anvi/scripts/warrant-report.js [project-dir]`
+  (`--json` for the figures alone, `--limit N` for how many firings to list, `0` for
+  all). Default target is the cwd. Read-only.
+- **It refuses in five distinguishable ways and NONE of them prints a figure.** No
+  catalogues (2), catalogues withheld by the binding check (3), no store (4), an
+  empty store (5), a store that would be sited in the tree holding the catalogue
+  symlink (6). An absent or empty store means *the hook never ran, or was never
+  permitted* — not *no claims were made* — and every rate over it would have a zero
+  denominator. Stdout stays empty; the reason goes to stderr.
+- **The store path is derived ONCE, by `instancePathFrom`, and both the writer and
+  this reader import it.** The two differ only in that the writer may create the
+  directory and the reader may not: a reader that creates its own subject can never
+  report the subject absent. The derivation follows the `.anvi` symlink and refuses
+  outright if the result would still land beside the link — that mis-siting once put
+  conversation excerpts in this public repository.
+- **`outcome` is DERIVED here, never stored.** `warrant_obtained | contested |
+  proceeded_past` is a fact about the turn AFTER a firing, and the rule for reading
+  it is the part most likely to be wrong. A judgment written at firing time cannot
+  be corrected; a derived one re-scores all history when the rule improves. Same
+  lesson as the stored commit shas a squash invalidated.
+- **The estimator is biased and is therefore paired with a control.** It re-applies
+  the same licence row to the following turn — structural, and the exact predicate
+  whose absence caused the firing — but it cannot tell "ran it because asked" from
+  "ran something and happened to satisfy the row". So the raw fired rate is labelled
+  an UPPER BOUND, and the `licensed` records, where no question was injected, are
+  scored by the identical predicate as the base rate.
+- **⚠ The two arms are NOT exchangeable, and that is measured.** Replayed over 807
+  real turns predating the hook — no question injected anywhere — the arms already
+  differed by **−14pp** (fired 51%, licensed 65%): a turn that made an unlicensed
+  claim is followed by turns that make unlicensed claims. The live gap therefore is
+  not the effect of asking; the effect is the live gap minus the pre-intervention
+  one. `--baseline <transcript-dir>` computes the second half, standalone and with
+  no store. Without it the first day of live data would have read as a strong
+  negative result produced entirely by a missing control.
+- **Turns that cannot be scored are listed, never folded in** — `transcript_gone`,
+  `turn_gone`, `no_next_turn`. Same discipline as the hook's `unread`.
+- **Contestation is detected on the ACT, never the topic.** A first draft matched
+  `false positive`, which hit 33 of those 807 turns — every one a turn discussing the
+  concept, on transcripts where nothing had been asked and nothing could be
+  contested. It inflated the one category whose job is to argue a row is too tight.
+  With it removed the detector is silent across all 807, which is the correct answer
+  for prose predating the mechanism.
+- **Tests:** `node test/warrant-report.test.js` — fixtures and real hook processes on
+  a temp `HOME`. Falsified by a 13-mutation matrix, one mutation per decision, the
+  control re-run green immediately before each and every diff verified non-empty;
+  13 of 13 reddened their predicted assertion. The harness treats a non-zero exit
+  with no failure markers as its own third outcome, because a crash prints no marker
+  and would otherwise be graded as an undetected mutation.
