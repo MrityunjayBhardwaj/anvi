@@ -845,6 +845,38 @@ operation reading as continued value.
   counts as asked; `false` never does.
 - **Turns that cannot be scored are listed, never folded in** — `transcript_gone`,
   `turn_gone`, `no_next_turn`. Same discipline as the hook's `unread`.
+- **⚠ AND `unread` ITSELF IS BROKEN DOWN, because its seven reasons are not one
+  thing.** The writer declines for seven distinct reasons and records which in
+  `searched`; pooling them put a structural case and the design's central risk in one
+  number, where the structural one crowds out the signal. **No turn to read** is
+  uninformative by construction — a session's first prompt can run before its
+  transcript file exists, so the read throws, observed live on the first session here
+  that *began* with the hook registered. **The freshness race** is why the freshness
+  test exists at all. This store read *1 of 3 records declined, 33%*, with its own
+  race count at zero.
+- **⚠ THE RACE IS REAL, AND ONE STORE CANNOT SEE HOW OFTEN.** Across the five
+  projects on this machine running this same hook — 21 records, 6 sessions — the
+  declines are one *no turn to read* (here) and one **genuine race** (`the trailing
+  prompt is not this one`, in another project's store). So the race is not
+  hypothetical, and the rate is a property of the **hook**, not of a project, while
+  every store is per-project by design. Any single project's race count is therefore
+  a floor. Two things this refutes, both of which were written down before being
+  checked: that *no turn to read* is a fixed one-per-session floor — three of those
+  five sessions produced no decline at all, because a session already in flight when
+  the hook was registered never met the missing-file case — and that the race count
+  was zero.
+- **This is the only figure in the report that cannot be recovered later.** Every
+  other one is re-derivable from transcripts, which is how the baseline above was
+  measured over 815 turns. A *settled* transcript cannot exhibit a mid-write state,
+  so replaying the freshness test over finished transcripts reports zero races by
+  construction, whatever the live rate is. Discarding the reason does not defer that
+  measurement, it destroys it. Groups are named for what the reason **says**, never
+  for an inferred cause — `transcript unreadable` is also a permissions failure or a
+  deleted file, so calling the group "session start" would assert what no record
+  establishes. A reason the reader does not recognise is **named verbatim, never
+  pooled into the group it most resembles**, and every group prints at zero, since a
+  line that appears only once it is non-zero is a line nobody is watching when it
+  arrives.
 - **Contestation is detected on the ACT, never the topic.** A first draft matched
   `false positive`, which hit 33 of those 807 turns — every one a turn discussing the
   concept, on transcripts where nothing had been asked and nothing could be
