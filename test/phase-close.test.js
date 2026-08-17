@@ -258,6 +258,45 @@ console.log('\ncited entry ids are withheld when the record is not in the privat
   has(priv, 'H12', 'CONTROL — the same plan text DOES yield ids in a private tree');
 }
 
+// ── unreadable history is not "no work" ─────────────────────────────────────
+console.log('\ngit history that cannot be read is reported, not counted as zero work');
+{
+  // Found in self-review: `git log` failing and `git log` returning nothing both
+  // produced an empty commit list, so a project with no history would have been
+  // recorded as a phase that did no work — the same silence #301 repaired one
+  // directory over.
+  //
+  // The plan must be committed SOMEWHERE for a work window to exist at all, so
+  // the planning tree gets its own repo and the project does not.
+  const cwd = path.join(TMP, 'no-history');
+  const pm = path.join(cwd, '.anvi', 'project_management');
+  const phaseDir = path.join(pm, 'phases', '01-first');
+  write(path.join(phaseDir, 'PLAN.md'), '# Plan\n');
+  git(pm, 'init', '-q');
+  git(pm, 'config', 'user.email', 't@example.com');
+  git(pm, 'config', 'user.name', 'Test');
+  git(pm, 'add', '-A');
+  git(pm, 'commit', '-q', '-m', 'plan only');
+
+  // Fixture control: the PROJECT dir must genuinely have no readable history,
+  // or this case asserts nothing.
+  const probe = spawnSync('git', ['log', '-1'], { cwd, stdio: 'pipe', encoding: 'utf8' });
+  ok(probe.status !== 0, 'the project has no readable git history (fixture control)');
+
+  const r = run(cwd, ['phase-close', '1', '--raw']);
+  const out = JSON.parse(r.stdout);
+  eq(out.work_history_available, false, 'the record says the history could not be read');
+  const text = fs.readFileSync(path.join(phaseDir, 'SUMMARY.md'), 'utf8');
+  has(text, 'Git history could not be read', 'and says so in prose rather than showing a zero');
+  hasNot(text, 'work_commits: 0', 'it does NOT report zero commits, which would read as "no work"');
+
+  // CONTROL: a project WITH history reports available:true, so the false above is
+  // a finding about this fixture and not a field that is always false.
+  const p = makeProject('history-control');
+  const rc2 = JSON.parse(run(p.cwd, ['phase-close', '1', '--raw']).stdout);
+  eq(rc2.work_history_available, true, 'CONTROL — a project with history reports it as available');
+}
+
 // ── the two forms the phase resolver reports ────────────────────────────────
 console.log('\nthe phase directory is resolved for BOTH layouts the resolver reports');
 {

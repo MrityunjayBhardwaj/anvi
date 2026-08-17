@@ -90,14 +90,24 @@ function utc(iso) {
  *  shares the plan commit's second, and because in the two-repo case the store
  *  sha simply will not match anything here, which is the correct no-op. */
 function commitsSince(repo, since, excludeShas = []) {
-  if (!since) return [];
+  if (!since) return { commits: [], available: true };
   const r = git(repo, ['log', `--since=${since}`, '--format=%H%x1f%aI%x1f%s']);
-  if (r.code !== 0 || !r.out) return [];
+  // A repo git cannot read (not a repository, no HEAD, unreadable) is NOT a repo
+  // with no commits, and returning [] for both would report "this phase did no
+  // work" for a project that simply has no history to consult — the same silence
+  // this whole area was just repaired for (anvi #301). git exits non-zero for the
+  // former and zero-with-empty-output for the latter, so the two are separable
+  // here and are kept separate all the way into the record.
+  if (r.code !== 0) return { commits: [], available: false, error: r.err.split('\n')[0].slice(0, 120) };
+  if (!r.out) return { commits: [], available: true };
   const skip = new Set(excludeShas.filter(Boolean));
-  return r.out.split('\n').filter(Boolean).map(l => {
-    const [sha, date, subject] = l.split('\x1f');
-    return { sha, date: utc(date), subject };
-  }).filter(c => !skip.has(c.sha));
+  return {
+    available: true,
+    commits: r.out.split('\n').filter(Boolean).map(l => {
+      const [sha, date, subject] = l.split('\x1f');
+      return { sha, date: utc(date), subject };
+    }).filter(c => !skip.has(c.sha)),
+  };
 }
 
 function filesChanged(repo, shas) {
@@ -137,7 +147,8 @@ function renderSummary(f) {
   lines.push(`generated_by: phase-close`);
   lines.push(`plan_files:${yamlList(f.planFiles)}`);
   lines.push(`plan_committed_at: ${f.planCommittedAt || 'null  # the plan is not committed — no "stated before the work" anchor exists'}`);
-  lines.push(`work_commits: ${f.workCommits.length}`);
+  lines.push(`work_commits: ${f.workAvailable === false ? 'null  # git history could not be read — NOT the same as no work' : f.workCommits.length}`);
+  lines.push(`work_history_available: ${f.workAvailable !== false}`);
   lines.push(`work_window_start: ${f.planCommittedAt || 'null'}`);
   lines.push(`work_window_end: ${f.closedAt}`);
   lines.push(`work_window_is_approximate: true  # joined across two repos by TIME; overlapping phases over-attribute`);
@@ -157,7 +168,13 @@ function renderSummary(f) {
 
   lines.push('## What happened');
   lines.push('');
-  if (!f.workCommits.length) {
+  if (f.workAvailable === false) {
+    lines.push('**Git history could not be read** for this project' + (f.workError ? ` (${f.workError})` : '') + '.');
+    lines.push('');
+    lines.push('That is not the same as a phase that did no work, and this record does not');
+    lines.push('claim it is. Nothing below was derived; the counts are withheld rather than');
+    lines.push('reported as zero.');
+  } else if (!f.workCommits.length) {
     lines.push('_No commits found in the work window._ Either the phase did no committed');
     lines.push('work, or the plan is uncommitted so the window has no start. Both are real');
     lines.push('states and neither is "the phase went to plan".');
@@ -241,7 +258,8 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
     if (at && (!planCommittedAt || at < planCommittedAt)) planCommittedAt = at;
   }
 
-  const workCommits = commitsSince(cwd, planCommittedAt, planShas);
+  const work = commitsSince(cwd, planCommittedAt, planShas);
+  const workCommits = work.commits;
   const filesTouched = filesChanged(cwd, workCommits.map(c => c.sha));
 
   let predictions = null;
@@ -260,6 +278,8 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
     planFiles,
     planCommittedAt,
     workCommits,
+    workAvailable: work.available,
+    workError: work.error || null,
     filesTouched,
     predictions,
   });
@@ -271,6 +291,7 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
     plan_files: planFiles.length,
     plan_committed_at: planCommittedAt,
     work_commits: workCommits.length,
+    work_history_available: work.available,
     files_touched: filesTouched.length,
     predictions_recorded: predictions === null ? null : predictions.length,
     predictions_withheld: predictions === null,
