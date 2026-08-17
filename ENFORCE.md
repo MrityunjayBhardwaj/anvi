@@ -125,7 +125,6 @@ User message
 |------|---------|------|
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
-| Absent-warrant check | UserPromptSubmit (a claim in the previous turn whose licensing observation is missing from that turn; silent, and recorded as `unread`, when the transcript has not caught up) | `~/.claude/hooks/absent-warrant-check.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
 | Publish-text guard (catalogue IDs; negated closing keywords) | PreToolUse:Bash (`gh issue\|pr`, `git commit`; the ID check skips the private locations, the closing-keyword check covers only a PR description and a commit message) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
@@ -785,6 +784,32 @@ been right for the wrong reason.
   and the suite means the same thing in CI as it does on the author's machine.
 
 ## Absent-Warrant Instances — the store has a reader, and it refuses rather than counts
+
+> **⛔ BUILT, TESTED, AND DELIBERATELY NOT REGISTERED.** This hook ships (the installer globs
+> `hooks/*.js`) but is **absent from the registrar on purpose**, so no install activates it.
+> It was registered on 2026-08-17 and un-registered the same day. **Do not re-add it to
+> `scripts/register-hooks.cjs` without meeting the condition below** — the removal is a
+> result, not an oversight, and re-adding it silently reverses a decision taken on evidence.
+>
+> **Two reasons, both measured.** First, the weakest part is the *trigger*, and it is
+> unmaintainable: detection is 17 hand-written regexes over prose, and the licence table has
+> **no currency mechanism**. The sentence *"no orphans found"* matches nothing, because the
+> zero-claim noun list is closed and domain nouns are absent — so every rate this store reports
+> silently means *"claims those patterns can see"*, and that recall has never been measured.
+> Second, **running it consumes the control population**: the pre-intervention baseline was
+> measured over 815 turns from before the hook existed and is clean and unspent, and every turn
+> that runs while a row is asking is a turn that can never serve as a control again — spent
+> feeding a row table that is frozen. One row's ask policy already moved that baseline 28
+> points and flipped its sign.
+>
+> **The condition for re-enabling:** a trigger that is not a hand-maintained pattern table,
+> plus a measured recall figure for it. Until both exist the store adds nothing replay cannot
+> produce — detection is replayable from transcripts (801 turns were measured that way with no
+> store written) and `outcome` is derived at read time, never stored.
+>
+> Everything below still describes the mechanism as built, and the code, the reader and the
+> suite are all retained: it is the reference implementation of a receipt check, which the
+> per-phase receipt work will need. Tracking: anvi #299.
 
 `absent-warrant-check.js` writes an instance record on every outcome. Until this
 existed, nothing read them back — so the four figures the design registered as its
