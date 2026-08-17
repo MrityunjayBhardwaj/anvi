@@ -294,8 +294,17 @@ function cmdPhaseClose(cwd, phase, raw) {
   if (!result.ok) {
     // Each refusal gets its own token AND its own exit status: "already exists"
     // must never read the same as "there was no plan to close".
+    // A phase holding TWO records is not the same refusal as one holding a single
+    // record, and it must not be reported as though it were: the two disagree by
+    // definition, and which one a later reader picks decides whether a scored
+    // judgement or an unscored placeholder is what gets read (anvi #305).
     const msg = result.reason === 'already-exists'
-      ? `A summary already exists: ${result.path}\nThis record is append-only — add a dated entry under ## Deviations rather than regenerating it.`
+      ? (result.multiple
+        ? `This phase already holds ${result.existing.length} outcome records:\n` +
+          result.existing.map(f => `  - ${f}`).join('\n') +
+          `\nThey cannot both be the record of what happened. Resolve them into one — ` +
+          `nothing was written, and this command will keep refusing until there is a single record.`
+        : `A summary already exists: ${result.path}\nThis record is append-only — add a dated entry under ## Deviations rather than regenerating it.`)
       : `No plan document in ${result.phaseDir} — there is no prediction side to close against.`;
     if (raw) console.log(JSON.stringify({ ok: false, ...result }));
     else console.error(msg);

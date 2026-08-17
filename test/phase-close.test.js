@@ -2,7 +2,8 @@
 // Test for `anvi-tools phase-close` — the derivation of a phase's outcome side.
 //
 // WHY THIS FILE EXISTS: the outcome side of a phase was specified in the executor
-// agent and produced 5 times in 106 (anvi #298). The fix is to DERIVE what can be
+// agent and produced 4 times in 106 (anvi #298 — first published as 5, which was
+// measured with a looser predicate than any consumer uses). The fix is to DERIVE what can be
 // derived so producing the record costs almost nothing, and to leave the parts
 // that cannot be derived visible as unanswered rather than absent.
 //
@@ -27,8 +28,18 @@ const { execFileSync, spawnSync } = require('child_process');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
 const eq = (a, b, msg) => ok(a === b, `${msg} (got ${JSON.stringify(a)})`);
-const has = (hay, needle, msg) => ok(String(hay).includes(needle), `${msg} (missing ${JSON.stringify(needle)})`);
-const hasNot = (hay, needle, msg) => ok(!String(hay).includes(needle), `${msg} (unexpectedly found ${JSON.stringify(needle)})`);
+// The "(missing …)" / "(unexpectedly found …)" suffix is attached only when the
+// check actually FAILED. Unconditionally, a passing line reads `✓ … (missing "x")`,
+// which is a green result wearing the words of a red one — the same confident
+// wrong signal this suite exists to catch, sitting in the harness that reports it.
+const has = (hay, needle, msg) => {
+  const yes = String(hay).includes(needle);
+  ok(yes, yes ? msg : `${msg} (missing ${JSON.stringify(needle)})`);
+};
+const hasNot = (hay, needle, msg) => {
+  const no = !String(hay).includes(needle);
+  ok(no, no ? msg : `${msg} (unexpectedly found ${JSON.stringify(needle)})`);
+};
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-phaseclose-')));
 const CLI = path.join(__dirname, '..', 'bin', 'anvi-tools.cjs');
@@ -320,6 +331,97 @@ console.log('\nthe prediction extractor finds ids without inventing them');
   eq(MOD.citedEntries('no identifiers here at all').length, 0, 'CONTROL — prose with no ids yields none');
   eq(MOD.citedEntries('the word HTML and V8 engines').join(','), 'V8',
      'a bare capital-letter word is not mistaken for an id');
+}
+
+// ── one name for a record, shared with the readers (anvi #305) ──────────────
+// The guard used to test the single literal `SUMMARY.md`. Every record that
+// actually exists in the fleet store uses the OTHER accepted form, so the guard
+// had never once been in a position to fire and a second, competing record was
+// written beside the first — with nothing overwritten, so the append-only
+// promise stayed true while the phase ended up with two disagreeing records.
+console.log('\na record written under either accepted name is seen');
+{
+  const p = makeProject('suffix-form');
+  const existing = path.join(p.phaseDir, '01-first-SUMMARY.md');
+  fs.writeFileSync(existing, 'HAND WRITTEN, SUFFIX FORM — must survive\n');
+
+  const r = run(p.cwd, ['phase-close', '1', '--raw'], 3);
+  const out = JSON.parse(r.stdout);
+  eq(out.reason, 'already-exists', 'the suffix form is recognised as an existing record');
+  ok(!fs.existsSync(path.join(p.phaseDir, 'SUMMARY.md')),
+     'and NO second record was written beside it');
+  eq(fs.readFileSync(existing, 'utf8'), 'HAND WRITTEN, SUFFIX FORM — must survive\n',
+     'the hand-written record is untouched');
+  ok(out.existing.includes('01-first-SUMMARY.md'), 'the refusal names the record it found');
+  eq(out.multiple, false, 'and does not claim there is more than one');
+}
+
+console.log('\ntwo records for one phase are reported, never silently chosen between');
+{
+  const p = makeProject('two-records');
+  // One scored, one not — the pairing that makes silent selection dangerous:
+  // picking the generated one converts a filled-in judgement into "no findings".
+  fs.writeFileSync(path.join(p.phaseDir, 'SUMMARY.md'), '---\noutcomes_scored: 0\n---\n');
+  fs.writeFileSync(path.join(p.phaseDir, '01-first-SUMMARY.md'), '---\noutcomes_scored: 3\n---\n');
+
+  const r = run(p.cwd, ['phase-close', '1', '--raw'], 3);
+  const out = JSON.parse(r.stdout);
+  eq(out.multiple, true, 'the refusal says there is more than one record');
+  eq(out.existing.length, 2, 'and reports both of them');
+
+  // The human-readable arm must say it too — the JSON is not what a person reads.
+  const human = run(p.cwd, ['phase-close', '1'], 3);
+  has(human.stderr, '01-first-SUMMARY.md', 'the message names the first record');
+  has(human.stderr, 'SUMMARY.md', 'and the second');
+  has(human.stderr, 'cannot both be', 'and says why that is a state someone must resolve');
+}
+
+console.log('\nthe predicate is exactly the readers\' predicate, and is not widened');
+{
+  ok(MOD.isRecordName('SUMMARY.md'), 'the bare name is a record');
+  ok(MOD.isRecordName('01-first-SUMMARY.md'), 'the suffix form is a record');
+  ok(!MOD.isRecordName('SUMMARY-S1.md'),
+     'a name with the word in FRONT is not — the readers count it unmatched, and widening one end of a producer/consumer pair is what opened this gap');
+  ok(!MOD.isRecordName('MY_SUMMARY.md'), 'CONTROL — an underscore is not the separator');
+  ok(!MOD.isRecordName('PLAN.md'), 'CONTROL — a plan is not a record');
+  eq(MOD.findRecords(['b-SUMMARY.md', 'PLAN.md', 'SUMMARY.md']).join(','), 'SUMMARY.md,b-SUMMARY.md',
+     'findRecords filters and sorts, and takes the listing it is given');
+}
+
+console.log('\na name the readers cannot see does not block the generator either');
+{
+  const p = makeProject('prefix-form');
+  fs.writeFileSync(path.join(p.phaseDir, 'SUMMARY-S1.md'), 'not a record by the shared predicate\n');
+  run(p.cwd, ['phase-close', '1', '--raw'], 0);
+  ok(fs.existsSync(path.join(p.phaseDir, 'SUMMARY.md')),
+     'the record is written — producer and reader agree this file is not a record');
+}
+
+// ── PARITY: the two ends cannot drift apart without this going red ───────────
+// Asserted BEHAVIOURALLY, through the shipped reader, rather than by requiring
+// the reader's internal predicate: it is not exported, and a test that re-derived
+// it from source would be comparing this file against a copy of itself.
+console.log('\nthe generator and the shipped reader classify the same files identically');
+{
+  const p = makeProject('parity');
+  // No case-variant here on purpose: macOS is case-insensitive by default, so
+  // `summary.md` and `SUMMARY.md` would be ONE file there and TWO on Linux, and
+  // the fixture would be measuring the filesystem rather than the predicate.
+  const names = ['SUMMARY.md', '01-first-SUMMARY.md', 'SUMMARY-S1.md', 'MY_SUMMARY.md'];
+  for (const n of names) fs.writeFileSync(path.join(p.phaseDir, n), 'x\n');
+
+  const stats = JSON.parse(run(p.cwd, ['stats', 'json', '--raw'], 0).stdout);
+  const mine = MOD.findRecords(fs.readdirSync(p.phaseDir));
+  const unmatchedByMe = fs.readdirSync(p.phaseDir)
+    .filter(f => /SUMMARY/i.test(f) && !MOD.isRecordName(f)).length;
+
+  eq(stats.total_summaries, mine.length,
+     'the reader counts as records exactly what this module counts as records');
+  eq(stats.summaries_unmatched, unmatchedByMe,
+     'and the two agree on which summary-shaped files are NOT records');
+  // Without this the parity above could pass vacuously on an all-matching set.
+  ok(unmatchedByMe > 0 && mine.length > 0,
+     `CONTROL — the fixture actually exercises both sides (${mine.length} records, ${unmatchedByMe} unmatched)`);
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });
