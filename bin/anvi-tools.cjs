@@ -25,6 +25,13 @@
  *   catalogue-review                  Show catalogue stats
  *
  *   cognitive-state                   Display current cognitive state
+ *
+ *   phase-close <phase>               Derive a phase's SUMMARY.md from git
+ *     Writes the outcome side of a phase: which commit introduced the plan,
+ *     what followed it, what it touched. The four outcome verdicts cannot be
+ *     derived and are written as explicit nulls for a human to fill in.
+ *     Never overwrites — exits 3 if a summary already exists, 4 if the phase
+ *     has no plan, 2 if the phase or this module cannot be found.
  */
 
 const fs = require('fs');
@@ -220,6 +227,90 @@ ${checkpoint.warnings.length > 0
     console.log(JSON.stringify({ ok: true, path: target }));
   } else {
     console.log(`Tattva checkpoint saved: ${target}`);
+  }
+}
+
+// Same two-layout problem as the resolver above, same answer, for the phase-close
+// derivation (#298). Loaded LAZILY inside the command rather than at module scope:
+// a newly shipped sibling can be absent while this caller is already live (a copy
+// install updated halfway, a dev tree mid-pull), and a top-level require would
+// take down EVERY command in this CLI, not just this one.
+function loadPhaseClose() {
+  const candidates = [
+    path.join(__dirname, '..', 'scripts', 'phase-close.js'),
+    path.join(os.homedir(), '.claude', 'anvi', 'scripts', 'phase-close.js'),
+  ];
+  for (const c of candidates) {
+    try { return require(c); } catch (e) {
+      // A module that exists but throws while loading is a DIFFERENT failure from
+      // one that is not installed, and reporting them alike would send the reader
+      // to reinstall over a syntax error.
+      if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
+    }
+  }
+  return null;
+}
+
+function cmdPhaseClose(cwd, phase, raw) {
+  const core = gsdCore();
+  if (!phase) error('phase required: anvi-tools phase-close <phase>');
+
+  const mod = loadPhaseClose();
+  if (!mod) {
+    // Refusal, not absence: exit 2 so a caller can tell "not installed" from
+    // "ran and found nothing to close".
+    console.error('phase-close is not installed (scripts/phase-close.js not found). Re-run install.sh --sync.');
+    process.exit(2);
+  }
+
+  const found = core.findPhaseInternal(cwd, phase);
+  if (!found) {
+    console.error(`No phase directory matches "${phase}".`);
+    process.exit(2);
+  }
+
+  // `directory` is repo-relative for a project-local tree and ABSOLUTE for a
+  // centrally-stored one (see anvi #104). Resolved in the module rather than
+  // here, so the rule has a unit test with a red state — every end-to-end
+  // fixture is project-local, so an inline version's absolute branch would be
+  // unreachable and untested.
+  const phaseDir = mod.resolvePhaseDir(cwd, found.directory);
+
+  // Entry ids are private index keys. They may be extracted into the record ONLY
+  // when the record lands in the store; on a legacy (in-repo) planning tree the
+  // summary is committed to the PROJECT repo, which may be public.
+  const isPrivate = core.planningTreeState(cwd) === 'migrated';
+
+  const result = mod.closePhase({
+    cwd,
+    phaseDir,
+    phaseNum: found.phase_number || phase,
+    phaseName: found.phase_name || '',
+    storeRepo: core.planningRoot(cwd),
+    isPrivate,
+    now: new Date().toISOString(),
+  });
+
+  if (!result.ok) {
+    // Each refusal gets its own token AND its own exit status: "already exists"
+    // must never read the same as "there was no plan to close".
+    const msg = result.reason === 'already-exists'
+      ? `A summary already exists: ${result.path}\nThis record is append-only — add a dated entry under ## Deviations rather than regenerating it.`
+      : `No plan document in ${result.phaseDir} — there is no prediction side to close against.`;
+    if (raw) console.log(JSON.stringify({ ok: false, ...result }));
+    else console.error(msg);
+    process.exit(result.reason === 'already-exists' ? 3 : 4);
+  }
+
+  if (raw) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(`Phase ${found.phase_number} closed: ${result.path}`);
+    console.log(`  derived: ${result.work_commits} commit(s), ${result.files_touched} file(s) touched`);
+    console.log(`  plan committed at: ${result.plan_committed_at || 'NOT COMMITTED — no "stated before the work" anchor'}`);
+    console.log(result.predictions_withheld
+      ? '  predictions: withheld (planning tree is not in the private store)'
+      : `  predictions: ${result.predictions_recorded} recorded, 0 scored — the verdicts are yours to fill in`);
   }
 }
 
@@ -420,7 +511,7 @@ async function main() {
 
   if (!command) {
     console.error('Usage: anvi-tools <command> [args] [--raw] [--cwd <path>]');
-    console.error('Commands: all GSD commands + tattva-checkpoint, catalogue-append, catalogue-review, cognitive-state');
+    console.error('Commands: all GSD commands + tattva-checkpoint, catalogue-append, catalogue-review, cognitive-state, phase-close');
     process.exit(1);
   }
 
@@ -438,6 +529,11 @@ async function main() {
         eliminated: elimIdx !== -1 ? JSON.parse(args[elimIdx + 1]) : [],
         warnings: warnIdx !== -1 ? JSON.parse(args[warnIdx + 1]) : [],
       }, raw);
+      return;
+    }
+
+    case 'phase-close': {
+      cmdPhaseClose(cwd, args[1], raw);
       return;
     }
 
