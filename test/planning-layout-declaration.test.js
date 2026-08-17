@@ -106,6 +106,19 @@ const tooDeep = project('d-too-deep', pm => {
   write(path.join(deep, 'PLAN.md'), '# Buried past the descent limit\n');
 });
 
+// E: a phase directory that exists and cannot be read. Found in self-review:
+// the first version of this change skipped such a directory with a bare
+// `continue`, which reproduced — one level down, inside the fix — the exact
+// silence the change exists to remove. Its plans vanish from the totals and
+// the phase list looks complete, so this loss is less visible than any other
+// state here, not more.
+const unreadableDir = project('e-unreadable-phase-dir', pm => {
+  write(path.join(pm, 'phases', '01-readable', 'PLAN.md'), '# Plan\n');
+  const locked = path.join(pm, 'phases', '02-locked');
+  write(path.join(locked, 'PLAN.md'), '# Plan the reader will never see\n');
+  fs.chmodSync(locked, 0o000);
+});
+
 // C2: the expected layout with nothing anomalous. CONTROL — must be silent.
 // Deliberately carries a plan AND a matching summary, so the silence is not an
 // artifact of the directory being empty: this fixture exercises the counting
@@ -170,6 +183,29 @@ for (const cmd of ['progress', 'stats']) {
   eq(run(noTree, cmd).notice, null, `${cmd}: CONTROL — a project with no tree says nothing`);
 }
 
+console.log('\na phase directory that cannot be read is reported, not skipped');
+// POSITIVE CONTROL FOR THE FIXTURE ITSELF: chmod 000 does not stop a root
+// process, so on a root runner this directory would be perfectly readable and
+// every assertion below would test nothing while passing. Establish that the
+// fixture actually blocks a read before believing anything derived from it.
+let lockHolds = true;
+try {
+  fs.readdirSync(path.join(unreadableDir, '.anvi', 'project_management', 'phases', '02-locked'));
+  lockHolds = false;
+} catch { /* expected: the lock holds */ }
+ok(lockHolds, 'the locked fixture is genuinely unreadable by this process (fixture control)');
+
+for (const cmd of lockHolds ? ['progress', 'stats'] : []) {
+  const e = run(unreadableDir, cmd);
+  eq(e.phase_dirs_unreadable, 1, `${cmd}: the locked directory is counted`);
+  eq(e.total_plans, 1, `${cmd}: only the readable plan is in the total — the loss is real`);
+  ok(e.notice && /could not be read/.test(e.notice),
+    `${cmd}: and the notice says so rather than letting the total pass for complete`);
+  // CONTROL: the same field must be 0 where nothing is locked, or the assertion
+  // above passes for any project and witnesses nothing.
+  eq(run(clean, cmd).phase_dirs_unreadable, 0, `${cmd}: CONTROL — nothing unreadable in a clean tree`);
+}
+
 console.log('\nthe counts the readers already published did not change');
 for (const cmd of ['progress', 'stats']) {
   const c = run(conformant, cmd);
@@ -180,6 +216,8 @@ for (const cmd of ['progress', 'stats']) {
 }
 
 // ── cleanup & report ────────────────────────────────────────────────────────
+// Restore the locked fixture's mode first, or the tree cannot be removed.
+try { fs.chmodSync(path.join(unreadableDir, '.anvi', 'project_management', 'phases', '02-locked'), 0o755); } catch { /* already gone */ }
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

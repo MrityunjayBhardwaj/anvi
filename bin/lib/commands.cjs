@@ -695,9 +695,15 @@ function describePhaseLayout(cwd) {
  * nothing to declare — a project that has simply not started must not be made
  * noisy, or the notice stops being read at the projects that need it.
  */
-function layoutNotice(desc) {
+function layoutNotice(desc, unreadablePhaseDirs = 0) {
   if (desc.layout === 'unreadable') {
     return `Cannot read ${desc.phasesDir} (${desc.readError}) — this is a read failure, not an empty tree.`;
+  }
+  // A phase directory that could not be read is reported ahead of the layout
+  // notices: its plans are missing from the totals below, and unlike the other
+  // states here that loss is invisible in the phase list itself.
+  if (unreadablePhaseDirs > 0) {
+    return `${unreadablePhaseDirs} phase director(ies) exist but could not be read — their plans are missing from the counts below.`;
   }
   if (desc.layout === 'no-phases-dir' && desc.outside.count > 0) {
     return `No phases/ directory in this planning tree; ${desc.outside.count} plan document(s) sit outside the layout this report reads and are not counted.`;
@@ -720,6 +726,7 @@ function cmdProgressRender(cwd, format, raw) {
   let totalPlans = 0;
   let totalSummaries = 0;
   let totalUnmatchedSummaries = 0;
+  let unreadablePhaseDirs = 0;
 
   const layoutDesc = describePhaseLayout(cwd);
 
@@ -734,6 +741,10 @@ function cmdProgressRender(cwd, format, raw) {
       try {
         phaseFiles = fs.readdirSync(path.join(phasesDir, dir));
       } catch {
+        // A phase directory that exists and cannot be read is not an empty one.
+        // Skipping it silently would reproduce, one level down, the exact defect
+        // this function was changed to remove.
+        unreadablePhaseDirs++;
         continue;
       }
       const plans = phaseFiles.filter(isPlanFile).length;
@@ -759,7 +770,7 @@ function cmdProgressRender(cwd, format, raw) {
   }
 
   const percent = totalPlans > 0 ? Math.min(100, Math.round((totalSummaries / totalPlans) * 100)) : 0;
-  const notice = layoutNotice(layoutDesc);
+  const notice = layoutNotice(layoutDesc, unreadablePhaseDirs);
 
   if (format === 'table') {
     // Render markdown table
@@ -798,6 +809,7 @@ function cmdProgressRender(cwd, format, raw) {
       plans_outside_layout: layoutDesc.outside.count,
       plans_outside_layout_partial: layoutDesc.outside.partial,
       summaries_unmatched: totalUnmatchedSummaries,
+      phase_dirs_unreadable: unreadablePhaseDirs,
       notice,
     }, raw);
   }
@@ -1025,6 +1037,7 @@ function cmdStats(cwd, format, raw) {
   let totalPlans = 0;
   let totalSummaries = 0;
   let totalUnmatchedSummaries = 0;
+  let unreadablePhaseDirs = 0;
 
   const layoutDesc = describePhaseLayout(cwd);
 
@@ -1057,6 +1070,8 @@ function cmdStats(cwd, format, raw) {
       try {
         phaseFiles = fs.readdirSync(path.join(phasesDir, dir));
       } catch {
+        // See cmdProgressRender: unreadable is not empty, and must not be silent.
+        unreadablePhaseDirs++;
         continue;
       }
       const plans = phaseFiles.filter(isPlanFile).length;
@@ -1151,7 +1166,8 @@ function cmdStats(cwd, format, raw) {
     plans_outside_layout: layoutDesc.outside.count,
     plans_outside_layout_partial: layoutDesc.outside.partial,
     summaries_unmatched: totalUnmatchedSummaries,
-    notice: layoutNotice(layoutDesc),
+    phase_dirs_unreadable: unreadablePhaseDirs,
+    notice: layoutNotice(layoutDesc, unreadablePhaseDirs),
   };
 
   if (format === 'table') {
