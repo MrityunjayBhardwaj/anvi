@@ -605,6 +605,112 @@ async function cmdWebsearch(query, options, raw) {
   }
 }
 
+const isPlanFile = f => f === 'PLAN.md' || f.endsWith('-PLAN.md');
+const isSummaryFile = f => f === 'SUMMARY.md' || f.endsWith('-SUMMARY.md');
+
+/**
+ * Count plan documents that live under the planning root but OUTSIDE the one
+ * layout the readers below understand (`<planningRoot>/phases/<dir>/<plan>`).
+ *
+ * Returns `{ count, partial }`. `partial` is true when some directory could not
+ * be read, because a count that silently dropped part of its corpus is the very
+ * failure this helper exists to expose — reporting a smaller number with no
+ * flag would repeat the defect one level down.
+ */
+function countPlansOutsideLayout(root, phasesDir) {
+  let count = 0;
+  let partial = false;
+  const walk = (dir, depth) => {
+    if (depth > 6) { partial = true; return; }
+    let ents;
+    try {
+      ents = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      partial = true;
+      return;
+    }
+    for (const e of ents) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name !== '.git' && e.name !== 'node_modules') walk(p, depth + 1);
+      } else if (isPlanFile(e.name)) {
+        const rel = path.relative(phasesDir, p);
+        // inside the layout == exactly phases/<oneDir>/<file>
+        if (rel.startsWith('..') || rel.split(path.sep).length !== 2) count++;
+      }
+    }
+  };
+  walk(root, 0);
+  return { count, partial };
+}
+
+/**
+ * Classify what the phase reader can actually see, so that "this project has no
+ * phases" and "this project's tree is laid out in a way I do not read" stop
+ * sharing one observable (an empty phase list at exit 0).
+ *
+ * Both readers below previously wrapped their `readdirSync` in `catch {}`, which
+ * collapsed a missing `phases/` directory, a permissions failure and a genuinely
+ * empty tree into the same silence. The fleet migration relocated planning trees
+ * without creating that directory level, so two projects holding sixteen plans
+ * between them reported zero phases and nothing said why (anvi #301).
+ *
+ * `layout` is the distinguishing channel:
+ *   'phases'           — the expected directory exists and was read
+ *   'no-planning-root' — no planning tree at all; genuinely nothing to report
+ *   'no-phases-dir'    — a planning tree, but not the layout these readers walk
+ *   'unreadable'       — the directory exists and could not be read (code in `error`)
+ */
+function describePhaseLayout(cwd) {
+  const phasesDir = planningPaths(cwd).phases;
+  const root = planningRoot(cwd);
+
+  let dirs = [];
+  let layout;
+  let readError = null;
+
+  try {
+    dirs = fs.readdirSync(phasesDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => e.name);
+    layout = 'phases';
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      layout = fs.existsSync(root) ? 'no-phases-dir' : 'no-planning-root';
+    } else {
+      layout = 'unreadable';
+      readError = (err && err.code) || String(err && err.message);
+    }
+  }
+
+  const outside = layout === 'no-planning-root'
+    ? { count: 0, partial: false }
+    : countPlansOutsideLayout(root, phasesDir);
+
+  return { phasesDir, dirs, layout, readError, outside };
+}
+
+/**
+ * The human-facing half of `describePhaseLayout`. Returns null when there is
+ * nothing to declare — a project that has simply not started must not be made
+ * noisy, or the notice stops being read at the projects that need it.
+ */
+function layoutNotice(desc) {
+  if (desc.layout === 'unreadable') {
+    return `Cannot read ${desc.phasesDir} (${desc.readError}) — this is a read failure, not an empty tree.`;
+  }
+  if (desc.layout === 'no-phases-dir' && desc.outside.count > 0) {
+    return `No phases/ directory in this planning tree; ${desc.outside.count} plan document(s) sit outside the layout this report reads and are not counted.`;
+  }
+  if (desc.layout === 'no-phases-dir') {
+    return 'No phases/ directory in this planning tree — no plan documents were read.';
+  }
+  if (desc.outside.count > 0) {
+    return `${desc.outside.count} plan document(s) sit outside phases/ and are not counted.`;
+  }
+  return null;
+}
+
 function cmdProgressRender(cwd, format, raw) {
   const phasesDir = planningPaths(cwd).phases;
   const roadmapPath = planningPaths(cwd).roadmap;
@@ -613,21 +719,34 @@ function cmdProgressRender(cwd, format, raw) {
   const phases = [];
   let totalPlans = 0;
   let totalSummaries = 0;
+  let totalUnmatchedSummaries = 0;
 
-  try {
-    const entries = fs.readdirSync(phasesDir, { withFileTypes: true });
-    const dirs = entries.filter(e => e.isDirectory()).map(e => e.name).sort((a, b) => comparePhaseNum(a, b));
+  const layoutDesc = describePhaseLayout(cwd);
+
+  {
+    const dirs = layoutDesc.dirs.slice().sort((a, b) => comparePhaseNum(a, b));
 
     for (const dir of dirs) {
       const dm = dir.match(/^(\d+(?:\.\d+)*)-?(.*)/);
       const phaseNum = dm ? dm[1] : dir;
       const phaseName = dm && dm[2] ? dm[2].replace(/-/g, ' ') : '';
-      const phaseFiles = fs.readdirSync(path.join(phasesDir, dir));
-      const plans = phaseFiles.filter(f => f.endsWith('-PLAN.md') || f === 'PLAN.md').length;
-      const summaries = phaseFiles.filter(f => f.endsWith('-SUMMARY.md') || f === 'SUMMARY.md').length;
+      let phaseFiles;
+      try {
+        phaseFiles = fs.readdirSync(path.join(phasesDir, dir));
+      } catch {
+        continue;
+      }
+      const plans = phaseFiles.filter(isPlanFile).length;
+      const summaries = phaseFiles.filter(isSummaryFile).length;
+      // Files that name themselves a summary but do not match the predicate above
+      // (e.g. `SUMMARY-S1.md`, which puts the word in front). Counted, never
+      // silently folded in: widening the predicate to chase names is the move
+      // that produced this gap in the first place.
+      const unmatched = phaseFiles.filter(f => /SUMMARY/i.test(f) && !isSummaryFile(f)).length;
 
       totalPlans += plans;
       totalSummaries += summaries;
+      totalUnmatchedSummaries += unmatched;
 
       let status;
       if (plans === 0) status = 'Pending';
@@ -637,9 +756,10 @@ function cmdProgressRender(cwd, format, raw) {
 
       phases.push({ number: phaseNum, name: phaseName, plans, summaries, status });
     }
-  } catch { /* intentionally empty */ }
+  }
 
   const percent = totalPlans > 0 ? Math.min(100, Math.round((totalSummaries / totalPlans) * 100)) : 0;
+  const notice = layoutNotice(layoutDesc);
 
   if (format === 'table') {
     // Render markdown table
@@ -648,6 +768,7 @@ function cmdProgressRender(cwd, format, raw) {
     const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barWidth - filled);
     let out = `# ${milestone.version} ${milestone.name}\n\n`;
     out += `**Progress:** [${bar}] ${totalSummaries}/${totalPlans} plans (${percent}%)\n\n`;
+    if (notice) out += `> **Note:** ${notice}\n\n`;
     out += `| Phase | Name | Plans | Status |\n`;
     out += `|-------|------|-------|--------|\n`;
     for (const p of phases) {
@@ -658,8 +779,9 @@ function cmdProgressRender(cwd, format, raw) {
     const barWidth = 20;
     const filled = Math.round((percent / 100) * barWidth);
     const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barWidth - filled);
-    const text = `[${bar}] ${totalSummaries}/${totalPlans} plans (${percent}%)`;
-    output({ bar: text, percent, completed: totalSummaries, total: totalPlans }, raw, text);
+    let text = `[${bar}] ${totalSummaries}/${totalPlans} plans (${percent}%)`;
+    if (notice) text += `\n${notice}`;
+    output({ bar: text, percent, completed: totalSummaries, total: totalPlans, layout: layoutDesc.layout, notice }, raw, text);
   } else {
     // JSON format
     output({
@@ -669,6 +791,14 @@ function cmdProgressRender(cwd, format, raw) {
       total_plans: totalPlans,
       total_summaries: totalSummaries,
       percent,
+      // What this report could and could not see. `phases: []` alone cannot tell
+      // an empty tree from an unread layout, so the distinction travels as its
+      // own field rather than as a log line the caller can absorb.
+      layout: layoutDesc.layout,
+      plans_outside_layout: layoutDesc.outside.count,
+      plans_outside_layout_partial: layoutDesc.outside.partial,
+      summaries_unmatched: totalUnmatchedSummaries,
+      notice,
     }, raw);
   }
 }
@@ -894,6 +1024,9 @@ function cmdStats(cwd, format, raw) {
   const phasesByNumber = new Map();
   let totalPlans = 0;
   let totalSummaries = 0;
+  let totalUnmatchedSummaries = 0;
+
+  const layoutDesc = describePhaseLayout(cwd);
 
   try {
     const roadmapContent = extractCurrentMilestone(fs.readFileSync(roadmapPath, 'utf-8'), cwd);
@@ -910,11 +1043,9 @@ function cmdStats(cwd, format, raw) {
     }
   } catch { /* intentionally empty */ }
 
-  try {
-    const entries = fs.readdirSync(phasesDir, { withFileTypes: true });
-    const dirs = entries
-      .filter(e => e.isDirectory())
-      .map(e => e.name)
+  {
+    const dirs = layoutDesc.dirs
+      .slice()
       .filter(isDirInMilestone)
       .sort((a, b) => comparePhaseNum(a, b));
 
@@ -922,9 +1053,15 @@ function cmdStats(cwd, format, raw) {
       const dm = dir.match(/^(\d+[A-Z]?(?:\.\d+)*)-?(.*)/i);
       const phaseNum = dm ? dm[1] : dir;
       const phaseName = dm && dm[2] ? dm[2].replace(/-/g, ' ') : '';
-      const phaseFiles = fs.readdirSync(path.join(phasesDir, dir));
-      const plans = phaseFiles.filter(f => f.endsWith('-PLAN.md') || f === 'PLAN.md').length;
-      const summaries = phaseFiles.filter(f => f.endsWith('-SUMMARY.md') || f === 'SUMMARY.md').length;
+      let phaseFiles;
+      try {
+        phaseFiles = fs.readdirSync(path.join(phasesDir, dir));
+      } catch {
+        continue;
+      }
+      const plans = phaseFiles.filter(isPlanFile).length;
+      const summaries = phaseFiles.filter(isSummaryFile).length;
+      totalUnmatchedSummaries += phaseFiles.filter(f => /SUMMARY/i.test(f) && !isSummaryFile(f)).length;
 
       totalPlans += plans;
       totalSummaries += summaries;
@@ -944,7 +1081,7 @@ function cmdStats(cwd, format, raw) {
         status,
       });
     }
-  } catch { /* intentionally empty */ }
+  }
 
   const phases = [...phasesByNumber.values()].sort((a, b) => comparePhaseNum(a.number, b.number));
   const completedPhases = phases.filter(p => p.status === 'Complete').length;
@@ -1008,6 +1145,13 @@ function cmdStats(cwd, format, raw) {
     git_commits: gitCommits,
     git_first_commit_date: gitFirstCommitDate,
     last_activity: lastActivity,
+    // See cmdProgressRender: what this report could and could not see, carried
+    // as its own fields so an unread layout cannot pass for an empty one.
+    layout: layoutDesc.layout,
+    plans_outside_layout: layoutDesc.outside.count,
+    plans_outside_layout_partial: layoutDesc.outside.partial,
+    summaries_unmatched: totalUnmatchedSummaries,
+    notice: layoutNotice(layoutDesc),
   };
 
   if (format === 'table') {
@@ -1015,6 +1159,7 @@ function cmdStats(cwd, format, raw) {
     const filled = Math.round((percent / 100) * barWidth);
     const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barWidth - filled);
     let out = `# ${milestone.version} ${milestone.name} \u2014 Statistics\n\n`;
+    if (result.notice) out += `> **Note:** ${result.notice}\n\n`;
     out += `**Progress:** [${bar}] ${completedPhases}/${phases.length} phases (${percent}%)\n`;
     if (totalPlans > 0) {
       out += `**Plans:** ${totalSummaries}/${totalPlans} complete (${planPercent}%)\n`;
