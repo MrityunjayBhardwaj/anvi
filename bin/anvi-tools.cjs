@@ -270,6 +270,23 @@ function loadPhaseClose() {
  * Every way of not knowing is REPORTED, in its own state, with a sentence.
  */
 function priorPhaseBlock(cwd, phase) {
+  try {
+    return priorPhaseBlockInner(cwd, phase);
+  } catch (err) {
+    // This value is computed as an ARGUMENT to the planning command, so anything
+    // thrown here would take the whole command down — turning a nice-to-have into
+    // the one thing this feature promises never to be. Caught, but NOT swallowed:
+    // a silent catch would make a broken reader indistinguishable from a phase
+    // with no record, which is the defect this file exists to remove.
+    return {
+      previous_phase: { state: 'unreadable', phase: null, records: [], error: String((err && err.message) || err) },
+      previous_phase_notice: `The previous phase's outcome record could not be looked up (${String((err && err.message) || err)}). ` +
+        `That is not the same as there being none — planning is continuing without it.`,
+    };
+  }
+}
+
+function priorPhaseBlockInner(cwd, phase) {
   const none = state => ({ previous_phase: state, previous_phase_notice: null });
   const mod = loadPhaseClose();
   if (!mod || typeof mod.readRecord !== 'function') {
