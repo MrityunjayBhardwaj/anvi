@@ -381,6 +381,32 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
  */
 const RECORD_STATES = ['scored', 'unscored', 'no-predictions', 'unstructured', 'absent', 'multiple', 'unreadable', 'none'];
 
+/** WHAT THIS READER DELIBERATELY DOES NOT LOOK AT (anvi #309).
+ *
+ *  Only inside the phase's own directory. Records sitting beside a milestone's
+ *  other documents are not read, and that is a decision rather than an oversight.
+ *
+ *  Measured across the store on 2026-08-18, and recorded as an artifact beside
+ *  this decision (`instances/baseline-phase-records-2026-08-18.txt`): every
+ *  outcome record that exists in the fleet lives in a planning tree with exactly
+ *  ONE commit — the migration that imported it from the previous tool. Those
+ *  trees have not been written to since. Inside a phase directory, where this
+ *  reader and `closePhase` both work, there were zero, against 80 plans in the
+ *  two trees that are still being written to.
+ *
+ *  So the two candidate widenings were both refused:
+ *    - moving those records into phase directories would mean CREATING
+ *      directories for phases that exist nowhere in the live tree, to make a
+ *      number move;
+ *    - teaching this reader the milestone level would mean a permanent second
+ *      lookup surface plus a rule for guessing which phase a loose record
+ *      belongs to, in order to read an archive that will never grow.
+ *
+ *  If a milestone-level record is ever WRITTEN by something live, this comment is
+ *  the thing that is out of date, and the baseline artifact says how to re-take
+ *  the measurement that would show it.
+ */
+
 /** Read a phase's outcome record.
  *
  *  Every failure to read is REPORTED, never returned as an empty result: this
