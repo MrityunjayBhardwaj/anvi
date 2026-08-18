@@ -42,6 +42,13 @@ const args = process.argv.slice(2);
 const staleOnly = args.includes('--stale');
 const lintOnly = args.includes('--lint');
 const proposeOnly = args.includes('--propose');
+// `--json` emits the SAME verdicts this report prints, as data. It exists so a
+// second tool can consume them without parsing prose or recomputing them — two
+// instruments answering one question is how they come to disagree, and the
+// subtleties here (withheld areas, partial verdicts) are exactly what a
+// reimplementation would drop. Applies to the default verdict report only.
+const jsonOnly = args.includes('--json');
+const say = (...a) => { if (!jsonOnly) console.log(...a); };
 const target = args.filter(a => !a.startsWith('--'))[0] || process.cwd();
 const cwd = path.resolve(target);
 
@@ -532,19 +539,20 @@ const fileExt = extensionsFrom(git, refResolver ? refResolver.files : []);
 
 const SYMBOL = { GREEN: '🟢', YELLOW: '🟡', RED: '🔴', GRAY: '⚪', REFERENCE: '🔵', WITHHELD: '🚫' };
 const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0, REFERENCE: 0, WITHHELD: 0 };
+const rows = [];  // one per entry, for --json
 let shown = 0;
 let partialCount = 0;
 
-console.log(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
+say(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
 // Say it before the verdicts, not after: every unknown below is read in the light
 // of whether the report could look everywhere it was asked to.
 if (withheldKinds.length) {
-  console.log(`⚠ REFERENCE AREAS WITHHELD: ${withheldKinds.join(', ')} — these were not read, so`);
-  console.log('  pointers into them could not be followed. Verdicts below are computed over less');
-  console.log('  than this project holds, and the file kinds those areas contribute are missing');
-  console.log('  from classification, which can affect entries that do not point there at all.');
-  for (const n of withheldNotice) console.log(`  ${n}`);
-  console.log('');
+  say(`⚠ REFERENCE AREAS WITHHELD: ${withheldKinds.join(', ')} — these were not read, so`);
+  say('  pointers into them could not be followed. Verdicts below are computed over less');
+  say('  than this project holds, and the file kinds those areas contribute are missing');
+  say('  from classification, which can affect entries that do not point there at all.');
+  for (const n of withheldNotice) say(`  ${n}`);
+  say('');
 }
 for (const cat of CATALOGUES) {
   const p = path.join(anviDir, cat);
@@ -578,6 +586,17 @@ for (const cat of CATALOGUES) {
     const partial = Boolean(heldArea) && !withheld;
     if (withheld) counts.WITHHELD++; else counts[v.status]++;
     if (partial) partialCount++;
+    // The same verdict the row below prints, kept as data for `--json`. Recorded
+    // HERE rather than rebuilt afterwards so the two can never diverge: a summary
+    // derived a second time is a second instrument.
+    rows.push({
+      catalogue: cat.replace('.md', ''),
+      id: e.id || null,
+      status: withheld ? 'WITHHELD' : v.status,
+      partial,
+      gone: gone || null,
+      drifted: v.files.filter(f => f.changedCommits > 0).map(f => f.file),
+    });
     // --stale is the deliberate "what should I re-verify?" worklist. It normally
     // hides GREEN (nothing to do) and REFERENCE (settled — drifts only on an upstream
     // refresh this repo can't see). EXCEPTION (#61, option A): a source that OPTED IN
@@ -627,7 +646,7 @@ for (const cat of CATALOGUES) {
     lines.push(`  ${SYMBOL[withheld ? 'WITHHELD' : v.status]} ${e.id.padEnd(6)} ${kind.padEnd(10)} [${anchor}]  ${detail}`);
     shown++;
   }
-  if (lines.length) { console.log(`${cat}`); console.log(lines.join('\n')); console.log(''); }
+  if (lines.length) { say(`${cat}`); say(lines.join('\n')); say(''); }
 }
 
 const total = counts.GREEN + counts.YELLOW + counts.RED + counts.GRAY + counts.REFERENCE + counts.WITHHELD;
@@ -643,7 +662,7 @@ const withheldTally = counts.WITHHELD ? `  ${SYMBOL.WITHHELD} ${counts.WITHHELD}
 // over all of it. Counting them is what keeps the fresh tally from overstating.
 const partialTally = partialCount ? `
    ${partialCount} of these were graded with a withheld area set aside — PARTIAL verdicts.` : '';
-console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ` +
+say(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YELLOW} ${counts.YELLOW} drifted  ` +
   `${SYMBOL.RED} ${counts.RED} dangling  ${SYMBOL.REFERENCE} ${counts.REFERENCE} reference-grounded  ` +
   `${SYMBOL.GRAY} ${counts.GRAY} unknown${withheldTally}${partialTally}`);
 // What "fresh" is a claim ABOUT (#214). Stated once, beside the number that invites the
@@ -658,8 +677,23 @@ console.log(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${S
 // that depth, nothing here revisits it. Saying so does not close the gap — it makes it
 // visible, which is the whole of what this line is for.
 if (counts.GREEN) {
-  console.log(`   ${SYMBOL.GREEN} fresh = no cited file changed since that entry's anchor. That is a claim about`);
-  console.log('     commits, not about whether the citation still lands on anything: a reference that');
-  console.log('     was wrong when it was stamped stays fresh indefinitely. Re-read, don\'t re-trust.');
+  say(`   ${SYMBOL.GREEN} fresh = no cited file changed since that entry's anchor. That is a claim about`);
+  say('     commits, not about whether the citation still lands on anything: a reference that');
+  say('     was wrong when it was stamped stays fresh indefinitely. Re-read, don\'t re-trust.');
 }
-if (staleOnly && shown === 0) console.log('(no stale entries — all fresh)');
+if (staleOnly && shown === 0) say('(no stale entries — all fresh)');
+
+if (jsonOnly) {
+  // Denominators travel WITH the counts. A bare `{RED: 0}` cannot be told from a
+  // run that examined nothing, and this output exists to be read by a machine that
+  // will not notice the difference unless it is made explicit.
+  process.stdout.write(JSON.stringify({
+    project: path.basename(cwd),
+    catalogues_dir: anviDir,
+    examined: rows.length,
+    counts,
+    partial: partialCount,
+    withheld_kinds: withheldKinds,
+    entries: rows,
+  }) + '\n');
+}
