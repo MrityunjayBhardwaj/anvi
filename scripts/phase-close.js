@@ -83,6 +83,25 @@ const isRecordName = f => f === 'SUMMARY.md' || f.endsWith('-SUMMARY.md');
  *  this change exists to remove. */
 const findRecords = entries => entries.filter(isRecordName).sort();
 
+/** Files that call themselves a summary but are NOT record names — the case the
+ *  predicate above deliberately excludes, kept rather than dropped.
+ *
+ *  The counting readers already report this number (`summaries_unmatched`), and
+ *  the reason the predicate stays narrow is precisely that such files are counted
+ *  separately instead of folded in. This reader honoured the first half of that
+ *  contract and not the second: it filtered them out and returned `absent`, so a
+ *  directory holding a summary named in the word-first shape was reported the
+ *  same as an empty one, and
+ *  the notice offered to generate a record without mentioning the file sitting
+ *  there. Not counted as a record, and then not counted at all (#310).
+ *
+ *  The rule is stated here rather than imported because the counting copies live
+ *  in vendored code, and record-shape knowledge is anvi-owned — vendored may
+ *  carry it, not define it. That leaves the rule written in more than one place;
+ *  it is the same one-line test in each, and the narrow predicate they all defer
+ *  to has a test of its own. */
+const findUnmatched = entries => entries.filter(f => /SUMMARY/i.test(f) && !isRecordName(f)).sort();
+
 function git(cwd, args) {
   const r = spawnSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf-8' });
   return { code: r.status ?? 1, out: (r.stdout ?? '').toString().trim(), err: (r.stderr ?? '').toString().trim() };
@@ -396,6 +415,9 @@ function readRecord(phaseDir) {
     return {
       state: 'unreadable',
       records: [],
+      // The listing itself failed, so there is nothing to have matched or missed.
+      // Empty here means "could not look", which the state already says.
+      unmatched: [],
       error: (err && err.code) || String(err && err.message),
       outcomes_scored: null,
       predictions_recorded: null,
@@ -405,11 +427,12 @@ function readRecord(phaseDir) {
   }
 
   const records = findRecords(entries);
+  const unmatched = findUnmatched(entries);
   if (!records.length) {
-    return { state: 'absent', records: [], error: null, outcomes_scored: null, predictions_recorded: null, outcomes: [], unpredicted: [] };
+    return { state: 'absent', records: [], unmatched, error: null, outcomes_scored: null, predictions_recorded: null, outcomes: [], unpredicted: [] };
   }
   if (records.length > 1) {
-    return { state: 'multiple', records, error: null, outcomes_scored: null, predictions_recorded: null, outcomes: [], unpredicted: [] };
+    return { state: 'multiple', records, unmatched, error: null, outcomes_scored: null, predictions_recorded: null, outcomes: [], unpredicted: [] };
   }
 
   const file = records[0];
@@ -420,6 +443,7 @@ function readRecord(phaseDir) {
     return {
       state: 'unreadable',
       records,
+      unmatched,
       error: (err && err.code) || String(err && err.message),
       outcomes_scored: null,
       predictions_recorded: null,
@@ -438,6 +462,7 @@ function readRecord(phaseDir) {
     return {
       state: 'unstructured',
       records,
+      unmatched,
       error: null,
       file,
       // NOT 0. A count is a claim, and no count was taken here.
@@ -458,6 +483,7 @@ function readRecord(phaseDir) {
   return {
     state,
     records,
+    unmatched,
     error: null,
     file,
     outcomes_scored: scored.length,
@@ -530,6 +556,19 @@ function resolvePhaseDir(cwd, directory) {
  *  original failure exactly — the outcome side went unwritten for a hundred
  *  phases and nothing ever said so.
  */
+/** The sentence that names files which call themselves summaries but are not
+ *  record names — appended rather than replacing, because their presence changes
+ *  what the reader should DO without changing what the state means. Empty string
+ *  when there are none, so a directory that is genuinely empty reads exactly as
+ *  it did before. */
+function unmatchedSuffix(prev) {
+  const u = (prev && prev.unmatched) || [];
+  if (!u.length) return '';
+  return ` Note: ${u.length} file(s) here name themselves a summary without being record names (${u.join(', ')}). ` +
+         `They are NOT read as records — the record name is \`SUMMARY.md\` or \`<something>-SUMMARY.md\` — but they may be what you are looking for, ` +
+         `and generating a record will not replace them.`;
+}
+
 function recordNotice(prev) {
   if (!prev) return null;
   switch (prev.state) {
@@ -539,7 +578,12 @@ function recordNotice(prev) {
       return null;
     case 'absent':
       return `Phase ${prev.phase} has no outcome record. Its predictions were never scored, so nothing here is informed by whether they held. ` +
-             `Run \`anvi-tools phase-close ${prev.phase}\` — it derives the record from git — then fill in the verdicts.`;
+             `Run \`anvi-tools phase-close ${prev.phase}\` — it derives the record from git — then fill in the verdicts.` +
+             // An empty directory and one holding a file that calls itself a summary are
+             // different situations, and only the second has something to read. Saying
+             // "no record" over such a file, with no mention of it, is true by the
+             // predicate and misleading to the person standing in the directory (#310).
+             unmatchedSuffix(prev);
     case 'unscored':
       return `Phase ${prev.phase} has an outcome record with ${prev.predictions_recorded} prediction(s) and NONE of them scored. ` +
              `That is not "it found nothing" — it is a generated record nobody has answered yet. Read it before planning against it.`;
@@ -565,6 +609,6 @@ function recordNotice(prev) {
 
 module.exports = {
   closePhase, renderSummary, citedEntries, introducingCommit, commitsSince,
-  resolvePhaseDir, utc, VERDICTS, isRecordName, findRecords,
+  resolvePhaseDir, utc, VERDICTS, isRecordName, findRecords, findUnmatched,
   readRecord, parseOutcomes, outcomesSection, recordNotice, RECORD_STATES,
 };
