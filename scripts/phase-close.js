@@ -5,9 +5,15 @@
  *
  * WHY THIS EXISTS (anvi #298). The executor is instructed to write SUMMARY.md and
  * STATE.md at the end of every phase. Measured across the fleet store: 106 plan
- * documents, 5 summaries, all five in one project of nineteen; zero STATE.md.
+ * documents, 4 summaries, all four in one project of nineteen; zero STATE.md.
  * So the prediction side of every phase is richly produced and the outcome side
  * is not, and nothing can be scored against what a phase actually did.
+ *
+ * (That count was first published as 5. It was measured by matching any filename
+ * containing "summary", which is looser than the predicate the readers use; the
+ * fifth file puts the word in front of the separator, which no consumer can see. Under the consumer's
+ * own predicate it is 4. Same conclusion, slightly stronger — and the discrepancy
+ * is the whole subject of the guard below.)
  *
  * THREE EXPLANATIONS WERE TESTED AND TWO WERE REFUTED, which is why this is a
  * generator and not a scaffold or a louder instruction:
@@ -50,6 +56,32 @@ const VERDICTS = [
   'bit-and-nobody-predicted-it',
   'slice-changed-prediction-no-longer-applies',
 ];
+
+/** What counts as this phase's outcome record.
+ *
+ *  ONE predicate, and it is deliberately the one the READERS already use
+ *  (`bin/lib/commands.cjs`, twice). The generator previously tested one literal
+ *  filename against an ecosystem that writes two, so it could not see a record
+ *  written in the suffix form — which on real data is the ONLY form in use:
+ *  4 of 4 records in the fleet store are
+ *  `<something>-SUMMARY.md`, and none is the bare name the guard tested. The
+ *  guard was therefore never once in a position to fire, and a second, competing
+ *  record was written beside the first (anvi #305).
+ *
+ *  NOT WIDENED to chase names. A file that puts the word in FRONT — `SUMMARY-`
+ *  with a suffix after it — stays outside this predicate on purpose: the readers
+ *  count such files separately as unmatched rather than folding them in, and
+ *  widening one end of a producer / consumer pair is what opened this gap. If the
+ *  predicate is ever to grow it has to grow at both ends at once, which the parity
+ *  test forces.
+ */
+const isRecordName = f => f === 'SUMMARY.md' || f.endsWith('-SUMMARY.md');
+
+/** Every outcome record already present in a phase directory, sorted.
+ *  Takes the directory listing the caller has ALREADY read: adding a second
+ *  read here would add a second way to fail silently, which is the exact defect
+ *  this change exists to remove. */
+const findRecords = entries => entries.filter(isRecordName).sort();
 
 function git(cwd, args) {
   const r = spawnSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf-8' });
@@ -243,8 +275,26 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
   }
 
   const target = path.join(phaseDir, 'SUMMARY.md');
-  if (fs.existsSync(target)) {
-    return { ok: false, reason: 'already-exists', path: target };
+
+  // Refuse if a record exists under EITHER accepted name, not just the one this
+  // generator happens to write. `existing` is returned in full: where a phase
+  // already holds more than one record they disagree by definition, and that is
+  // a state for a person to resolve — choosing one quietly is how an unscored
+  // record comes to stand in for a scored one.
+  const existing = findRecords(entries);
+  if (existing.length) {
+    return {
+      ok: false,
+      reason: 'already-exists',
+      // `path` answers "which file is the record", and where there are two that
+      // question HAS no answer — so it is null rather than the first one sorted.
+      // Returning an arbitrary member here would be the JSON arm quietly choosing
+      // between two disagreeing records, which is the exact behaviour the
+      // human-readable arm above exists to refuse.
+      path: existing.length === 1 ? path.join(phaseDir, existing[0]) : null,
+      existing,
+      multiple: existing.length > 1,
+    };
   }
 
   // Plan anchor: the earliest introducing commit across the phase's plans.
@@ -317,4 +367,4 @@ function resolvePhaseDir(cwd, directory) {
   return path.isAbsolute(directory) ? directory : path.join(cwd, directory);
 }
 
-module.exports = { closePhase, renderSummary, citedEntries, introducingCommit, commitsSince, resolvePhaseDir, utc, VERDICTS };
+module.exports = { closePhase, renderSummary, citedEntries, introducingCommit, commitsSince, resolvePhaseDir, utc, VERDICTS, isRecordName, findRecords };
