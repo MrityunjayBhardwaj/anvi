@@ -11,10 +11,12 @@
 // it whether or not any prose remembers to ask.
 //
 // WHAT IS ASSERTED HARDEST. Not that the record is read — that a record which
-// CANNOT be read is never mistaken for a phase that had nothing to say. Six of
-// the seven states are ways of not knowing, and each has to stay distinguishable
+// CANNOT be read is never mistaken for a phase that had nothing to say. Seven of
+// the eight states are ways of not knowing, and each has to stay distinguishable
 // from the others; folding any two together rebuilds the exact defect the whole
-// arc exists to remove.
+// arc exists to remove — which is how `unstructured` came to be an eighth state
+// rather than a seventh (#308): it had been folded into `no-predictions`, and the
+// fold reported a measured zero for every record in the fleet store.
 //
 // THE EXPECTED STATE LIST IS LITERAL, NOT DERIVED FROM THE MODULE. A check that
 // takes its enumeration from the code under test shrinks when the code shrinks:
@@ -79,7 +81,7 @@ const table = rows => '---\n---\n## Outcomes\n\n| prediction | verdict | evidenc
  *  that way: removing the injection crashed this file instead of reddening it. */
 const prev = j => (j && j.previous_phase) || {};
 
-// ── the seven states, each reached through the shipped command ───────────────
+// ── the eight states, each reached through the shipped command ───────────────
 console.log('\nevery way of not knowing has its own state, reached end to end');
 const seen = new Set();
 {
@@ -127,6 +129,29 @@ const seen = new Set();
      'a record whose plan predicted nothing is NOT the same as one nobody answered');
   has(j.previous_phase_notice, 'zero rather than missing',
       'and the notice distinguishes an empty denominator from a missing one');
+  seen.add(prev(j).state);
+}
+{
+  // unstructured — a hand-written record with no outcomes table at all. This is
+  // the shape of every record that exists in the fleet store today: the table is
+  // written by `renderSummary` and by nothing else, so a record a person wrote
+  // never has one. Folded into `no-predictions` it reported a denominator of zero
+  // for all 4 of 4, each with a sentence saying there was nothing to carry
+  // forward — while the records carried pages of findings (#308).
+  const p = makeProject('unstructured');
+  fs.writeFileSync(path.join(p.prevDir, '01-first-SUMMARY.md'),
+    '# Phase 01\n\n## Goal\n\nShip it.\n\n## Boundary surprises\n\nThe receiver renamed the field.\n\n' +
+    '## Cognitive Discoveries\n\nA guard that cannot fire is not a guard.\n');
+  const j = initPlanPhase(p.cwd);
+  eq(prev(j).state, 'unstructured',
+     'a record with no outcomes table reports that it cannot be scored');
+  eq(prev(j).predictions_recorded, null,
+     'and reports NO denominator — a zero here would be a count nobody took');
+  eq(prev(j).outcomes_scored, null, 'nor a numerator');
+  has(j.previous_phase_notice, 'NOT the same as it having predicted nothing',
+      'and the notice refuses the reading that made this a defect');
+  has(j.previous_phase_notice, '01-first-SUMMARY.md',
+      'and names the file, so the record that cannot be scored can still be read');
   seen.add(prev(j).state);
 }
 {
@@ -203,9 +228,9 @@ console.log('\nthe state list is complete, and every state is exercised above');
   // LITERAL, from the specification — not read out of the module. If the module
   // loses a state this must fail; deriving the list would delete the expectation
   // along with the state and stay green.
-  const EXPECTED = ['scored', 'unscored', 'no-predictions', 'absent', 'multiple', 'unreadable', 'none'];
+  const EXPECTED = ['scored', 'unscored', 'no-predictions', 'unstructured', 'absent', 'multiple', 'unreadable', 'none'];
   eq(MOD.RECORD_STATES.slice().sort().join(','), EXPECTED.slice().sort().join(','),
-     'the module publishes exactly the seven specified states');
+     'the module publishes exactly the eight specified states');
   for (const s of EXPECTED) ok(seen.has(s), `state "${s}" was reached by an observed run, not just declared`);
   eq(seen.size, EXPECTED.length, 'and no state went unexercised');
 }
@@ -213,7 +238,7 @@ console.log('\nthe state list is complete, and every state is exercised above');
 // ── a notice exists for every state that is a gap ────────────────────────────
 console.log('\nevery state that means "do not proceed as if this were answered" says so');
 {
-  for (const state of ['absent', 'unscored', 'no-predictions', 'multiple', 'unreadable']) {
+  for (const state of ['absent', 'unscored', 'no-predictions', 'unstructured', 'multiple', 'unreadable']) {
     const notice = MOD.recordNotice({ state, phase: '07', records: ['a', 'b'], predictions_recorded: 2, error: 'EACCES' });
     ok(notice && notice.length > 20, `"${state}" produces a notice`);
     has(notice, '07', `and the "${state}" notice names the phase`);
@@ -235,6 +260,15 @@ console.log('\nthe outcomes parser reads the record, not the prose around it');
   eq(rows[0].verdict, 'predicted-and-it-bit', 'and the verdict is unwrapped from its backticks');
   eq(MOD.parseOutcomes('# no outcomes section here\n').length, 0,
      'CONTROL — a record with no Outcomes section yields no rows rather than throwing');
+
+  // The rows alone cannot tell the two apart — both yield none — so the state is
+  // decided by a SEPARATE question, and that question has to be askable.
+  eq(MOD.outcomesSection('# no outcomes section here\n'), null,
+     'a record with no Outcomes section is reported as having none');
+  ok(MOD.outcomesSection('## Outcomes\n\n_nothing cited._\n') !== null,
+     'CONTROL — an EMPTY Outcomes section is still a section, and still present');
+  eq(MOD.parseOutcomes('## Outcomes\n\n_nothing cited._\n').length, 0,
+     'CONTROL — with the same zero rows, which is why the row count cannot decide the state');
 }
 
 // ── the injection must not damage what the command already returned ──────────

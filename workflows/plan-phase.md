@@ -55,6 +55,11 @@ command to run, and nothing to remember to fetch. Act on them:
 - **`state: "unscored"`** → the record exists and nobody has answered it. This is
   **not** "the last phase found nothing". Read the record and fill in the
   verdicts, or say plainly that this plan is being made without that input.
+- **`state: "unstructured"`** → the previous phase left a record, but it has no
+  outcomes table, so nothing can be scored from it. This is what a hand-written
+  summary looks like, and it is the common case. **Read the record** — it is
+  usually full of what happened — and do not report it as "predicted nothing";
+  no count was taken. `outcomes` is empty here because it is unknown, not zero.
 - **`state: "absent"`** → offer `anvi-tools phase-close <prev>`, which derives the
   record from git in one command. Do not block on it; say what is missing.
 - **`state: "multiple"` / `"unreadable"`** → do not choose between records and do
