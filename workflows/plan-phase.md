@@ -41,6 +41,27 @@ Also load cognitive state:
 - Read `.anvi/krama.md` — known lifecycles (planner must sequence correctly)
 </step>
 
+<step name="read_previous_phase_outcome">
+`INIT` already carries `previous_phase` and `previous_phase_notice` — no extra
+command to run, and nothing to remember to fetch. Act on them:
+
+- **`previous_phase_notice` is non-null → say it to the user, before planning.**
+  It means the previous phase's outcome is missing, unanswered, contested, or
+  unknown. Do not plan silently past it.
+- **`state: "scored"`** → read `outcomes`. Every row with
+  `bit-and-nobody-predicted-it` is the most informative line available to this
+  plan: it is what actually bit that the last plan did not see coming. Shape the
+  new plan's pre-mortem around those first.
+- **`state: "unscored"`** → the record exists and nobody has answered it. This is
+  **not** "the last phase found nothing". Read the record and fill in the
+  verdicts, or say plainly that this plan is being made without that input.
+- **`state: "absent"`** → offer `anvi-tools phase-close <prev>`, which derives the
+  record from git in one command. Do not block on it; say what is missing.
+- **`state: "multiple"` / `"unreadable"`** → do not choose between records and do
+  not treat "cannot tell" as "nothing there". Surface it and let the user resolve.
+- **`state: "none"`** → there is no previous phase. Nothing to do.
+</step>
+
 <step name="check_existing_context">
 Check for existing CONTEXT.md from /anvi:discuss-phase:
 ```bash
