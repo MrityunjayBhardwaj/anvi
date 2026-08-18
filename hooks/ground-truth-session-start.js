@@ -26,6 +26,47 @@ function emit(message) {
 // sessions. Matches the ~1500-line trigger codified in references/*-template.md.
 const COMPACTION_THRESHOLD = 1500;
 
+/**
+ * What a catalogue's Compaction Log actually says, as FOUR outcomes that must
+ * never be folded together (anvi #313):
+ *
+ *   'no log section'   — the heading is absent, so nothing could ever have been
+ *                        recorded here. 46 of the 57 catalogues in the store are
+ *                        in this state, and reading their silence as "no pass has
+ *                        run" is how a filed issue came to report zero recorded
+ *                        compactions while two are recorded in full.
+ *   'no pass recorded' — a log exists and is empty. THIS is the state that means
+ *                        nobody has compacted, and it is worth distinguishing
+ *                        from the one above precisely because they look alike.
+ *   'last pass <date>' — at least one pass is recorded.
+ *   'log unreadable'   — the heading is there and no row could be read from it.
+ *                        Not emptiness: one says nothing happened, the other says
+ *                        we cannot tell.
+ *
+ * ⚠ THE SECTION MUST BE BOUNDED BY THE NEXT HEADING. The log is documented as
+ * living at the bottom of the file, and in 8 of the 11 catalogues that have one
+ * it does not — entries were appended after it. Slicing from the log heading to
+ * end-of-file would swallow those entries and match the dates inside them, so a
+ * catalogue with no recorded pass would report one.
+ */
+function compactionState(content) {
+  const m = /^## Compaction Log\b/m.exec(content);
+  if (!m) return 'no log section';
+  const rest = content.slice(m.index + m[0].length);
+  const next = /^## /m.exec(rest);
+  const section = next ? rest.slice(0, next.index) : rest;
+
+  // A recorded pass is dated, either as a `### YYYY-MM-DD` heading or as the
+  // first cell of a table row. Both forms occur in the store.
+  const dates = (section.match(/^\s*(?:###\s*|\|\s*)(\d{4}-\d{2}-\d{2})/gm) || [])
+    .map(l => (l.match(/\d{4}-\d{2}-\d{2}/) || [])[0])
+    .filter(Boolean)
+    .sort();
+  if (dates.length) return `last pass ${dates[dates.length - 1]}`;
+  if (/\(none yet\)/.test(section)) return 'no pass recorded';
+  return 'log unreadable';
+}
+
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -60,7 +101,7 @@ process.stdin.on('end', () => {
     let grounded = 0;
     let ungrounded = 0;
     const ungroundedList = [];
-    const oversized = []; // catalogues past COMPACTION_THRESHOLD lines
+    const oversized = []; // catalogues past COMPACTION_THRESHOLD lines, each with its log state
 
     for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md']) {
       const catPath = path.join(anviDir, cat);
@@ -69,7 +110,7 @@ process.stdin.on('end', () => {
 
       const lineCount = content.split('\n').length;
       if (lineCount > COMPACTION_THRESHOLD) {
-        oversized.push(`${cat.replace('.md', '')} (${lineCount}L)`);
+        oversized.push(`${cat.replace('.md', '')} (${lineCount}L, ${compactionState(content)})`);
       }
 
       // Split into entries by ## headers with IDs
@@ -144,7 +185,14 @@ process.stdin.on('end', () => {
     }
 
     if (oversized.length > 0) {
-      message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD}L — see Compaction Log in each catalogue`;
+      // Names a command rather than a section. The previous text sent the reader to
+      // the Compaction Log, which does not exist in 46 of the 57 catalogues in the
+      // store — a banner that fires every session and points at nothing is how a
+      // banner stops being read. The one recorded pass concluded the threshold had
+      // fired on live grounded knowledge and that the real finding was reference
+      // drift, so drift is what this points at. Removal stays human-invoked.
+      message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD}L` +
+        ` — run /anvi:currency first (the one recorded pass found drift, not bloat); removal stays human-invoked`;
     }
 
     if (ungrounded > 0 && ungroundedList.length <= 3) {
