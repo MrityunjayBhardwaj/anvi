@@ -251,6 +251,89 @@ function loadPhaseClose() {
   return null;
 }
 
+/**
+ * The PREVIOUS phase's outcome record, for injection into `init plan-phase`
+ * (anvi #304).
+ *
+ * WHY IT IS COMPUTED HERE AND ATTACHED TO THAT COMMAND. Three explanations for
+ * why the outcome side of a phase went unwritten a hundred times were tested;
+ * two were refuted. "It exists if the CLI can scaffold it" — refuted. "It exists
+ * if workflows name it" — refuted, and inversely. What survived is "it exists if
+ * a RUNNING mechanism consumes it". `init plan-phase` is the one thing that runs
+ * unconditionally before a phase is planned, so the record arrives there whether
+ * or not any prose remembers to ask for it. Adding a line to the workflow instead
+ * would have built the mechanism the measurement already killed.
+ *
+ * It never throws and never blocks: a record that is expensive to obtain is the
+ * reason the instruction failed, and a planning step that refuses to start
+ * because a previous phase was untidy would be worse than the gap it closes.
+ * Every way of not knowing is REPORTED, in its own state, with a sentence.
+ */
+function priorPhaseBlock(cwd, phase) {
+  try {
+    return priorPhaseBlockInner(cwd, phase);
+  } catch (err) {
+    // This value is computed as an ARGUMENT to the planning command, so anything
+    // thrown here would take the whole command down — turning a nice-to-have into
+    // the one thing this feature promises never to be. Caught, but NOT swallowed:
+    // a silent catch would make a broken reader indistinguishable from a phase
+    // with no record, which is the defect this file exists to remove.
+    return {
+      previous_phase: { state: 'unreadable', phase: null, records: [], error: String((err && err.message) || err) },
+      previous_phase_notice: `The previous phase's outcome record could not be looked up (${String((err && err.message) || err)}). ` +
+        `That is not the same as there being none — planning is continuing without it.`,
+    };
+  }
+}
+
+function priorPhaseBlockInner(cwd, phase) {
+  const none = state => ({ previous_phase: state, previous_phase_notice: null });
+  const mod = loadPhaseClose();
+  if (!mod || typeof mod.readRecord !== 'function') {
+    // The reader is missing, which is not the same as the previous phase having
+    // no record — say which, or an install fault reads as a clean history.
+    const st = { state: 'unreadable', phase: null, records: [], error: 'phase-close reader not installed' };
+    return {
+      previous_phase: st,
+      previous_phase_notice: 'The prior-phase reader is not installed, so it is not known whether the previous phase has an outcome record. Re-run install.sh --sync.',
+    };
+  }
+
+  const commands = gsd('commands');
+  const core = gsdCore();
+  const desc = commands.describePhaseLayout(cwd);
+
+  if (desc.layout !== 'phases') {
+    // #301/#302: a planning tree need not have a `phases/` level at all, and two
+    // real projects reported zero phases at exit 0 because of it. Reporting "no
+    // previous phase" here would be that same clean zero, one command over.
+    const st = { state: 'unreadable', phase: null, records: [], layout: desc.layout, error: desc.readError || desc.layout };
+    const why = desc.layout === 'no-planning-root'
+      ? 'there is no planning tree here'
+      : desc.layout === 'no-phases-dir'
+        ? 'this planning tree has no phases/ directory, so phases cannot be enumerated'
+        : `the phases directory could not be read (${desc.readError})`;
+    return { previous_phase: st, previous_phase_notice: `No previous phase could be identified: ${why}. This is not the same as there being none.` };
+  }
+
+  const normalized = core.normalizePhaseName(phase);
+  // "Everything ordered before this one" rather than "the entry before this one
+  // in the list": when a phase is being planned its own directory usually does
+  // not exist yet, so an index-of lookup would find nothing and report no
+  // previous phase for the commonest case there is.
+  const before = desc.dirs
+    .filter(d => core.comparePhaseNum(d, normalized) < 0)
+    .sort((a, b) => core.comparePhaseNum(a, b));
+
+  if (!before.length) return none({ state: 'none', phase: null, records: [] });
+
+  const prevDir = before[before.length - 1];
+  const prevPhase = core.normalizePhaseName(prevDir);
+  const record = mod.readRecord(path.join(desc.phasesDir, prevDir));
+  const st = { ...record, phase: prevPhase, phase_dir: prevDir };
+  return { previous_phase: st, previous_phase_notice: mod.recordNotice(st) };
+}
+
 function cmdPhaseClose(cwd, phase, raw) {
   const core = gsdCore();
   if (!phase) error('phase required: anvi-tools phase-close <phase>');
@@ -853,7 +936,10 @@ async function main() {
     case 'init': {
       const wf = args[1];
       if (wf === 'execute-phase') init.cmdInitExecutePhase(cwd, args[2], raw);
-      else if (wf === 'plan-phase') init.cmdInitPlanPhase(cwd, args[2], raw);
+      // The prior phase's outcome record rides along with the data plan-phase
+      // already fetches, so the planner receives it without anything having to
+      // remember to ask (anvi #304).
+      else if (wf === 'plan-phase') init.cmdInitPlanPhase(cwd, args[2], raw, priorPhaseBlock(cwd, args[2]));
       else if (wf === 'new-project') init.cmdInitNewProject(cwd, raw);
       else if (wf === 'new-milestone') init.cmdInitNewMilestone(cwd, raw);
       else if (wf === 'quick') init.cmdInitQuick(cwd, args.slice(2).join(' '), raw);

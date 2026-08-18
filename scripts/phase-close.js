@@ -348,6 +348,159 @@ function closePhase({ cwd, phaseDir, phaseNum, phaseName, storeRepo, isPrivate, 
   };
 }
 
+/** The states a phase's outcome record can be in, from the point of view of
+ *  something about to READ it. They are deliberately eight and not two: the whole
+ *  reason the outcome side was empty is that "there is nothing here" was allowed
+ *  to stand in for seven different situations, only one of which means the phase
+ *  genuinely had nothing to say (anvi #304).
+ *
+ *    scored         — a record exists and carries at least one filled-in verdict
+ *    unscored       — a record exists with rows, and every verdict is still
+ *                     `null`. NOT "no findings": it is a generated record nobody
+ *                     has answered yet, and reading it as "no findings" converts
+ *                     an unanswered question into a false answer.
+ *    no-predictions — a record exists, it HAS an outcomes table, and that table
+ *                     is empty, so its plan cited nothing and there is nothing to
+ *                     score. Distinct from `unscored`: the denominator is zero
+ *                     rather than unanswered, and calling it unscored would
+ *                     report a pending judgement that nobody owes.
+ *    unstructured   — a record exists and has no outcomes table at all, so
+ *                     whether it made predictions cannot be read from it. NOT
+ *                     `no-predictions`: an absent table is an unknown, and
+ *                     reporting it as a denominator of zero states a count
+ *                     nobody measured. This is the shape every hand-written
+ *                     record has — the table is written by `renderSummary`
+ *                     alone — so it is the common case, not the exotic one
+ *                     (anvi #308).
+ *    absent         — the phase directory was read and holds no record at all
+ *    multiple       — two or more records, which disagree by definition (see #305)
+ *    unreadable     — the directory could not be read. NOT the same as absent:
+ *                     one says the phase had no outcome, the other says we
+ *                     cannot tell which.
+ *    none           — there IS no previous phase. The only state that is not a gap.
+ */
+const RECORD_STATES = ['scored', 'unscored', 'no-predictions', 'unstructured', 'absent', 'multiple', 'unreadable', 'none'];
+
+/** Read a phase's outcome record.
+ *
+ *  Every failure to read is REPORTED, never returned as an empty result: this
+ *  function exists because an unread record was indistinguishable from a phase
+ *  that found nothing, and rebuilding that ambiguity one level down is the
+ *  defect this repo has now committed three times inside its own fixes.
+ */
+function readRecord(phaseDir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(phaseDir);
+  } catch (err) {
+    return {
+      state: 'unreadable',
+      records: [],
+      error: (err && err.code) || String(err && err.message),
+      outcomes_scored: null,
+      predictions_recorded: null,
+      outcomes: [],
+      unpredicted: [],
+    };
+  }
+
+  const records = findRecords(entries);
+  if (!records.length) {
+    return { state: 'absent', records: [], error: null, outcomes_scored: null, predictions_recorded: null, outcomes: [], unpredicted: [] };
+  }
+  if (records.length > 1) {
+    return { state: 'multiple', records, error: null, outcomes_scored: null, predictions_recorded: null, outcomes: [], unpredicted: [] };
+  }
+
+  const file = records[0];
+  let text;
+  try {
+    text = fs.readFileSync(path.join(phaseDir, file), 'utf-8');
+  } catch (err) {
+    return {
+      state: 'unreadable',
+      records,
+      error: (err && err.code) || String(err && err.message),
+      outcomes_scored: null,
+      predictions_recorded: null,
+      outcomes: [],
+      unpredicted: [],
+    };
+  }
+
+  // An absent outcomes table and an empty one are different facts, and only the
+  // second has a denominator. Every record written by hand lacks the table —
+  // `renderSummary` is the only thing that emits the heading — so folding the two
+  // together does not mis-report an edge case, it mis-reports every record that
+  // exists (measured: 4 of 4 in the fleet store, each one full of findings, all
+  // four described as having "nothing to carry forward"). #308.
+  if (outcomesSection(text) === null) {
+    return {
+      state: 'unstructured',
+      records,
+      error: null,
+      file,
+      // NOT 0. A count is a claim, and no count was taken here.
+      outcomes_scored: null,
+      predictions_recorded: null,
+      outcomes: [],
+      unpredicted: [],
+    };
+  }
+
+  const outcomes = parseOutcomes(text);
+  // The verdicts in the table are the ground truth, not the frontmatter count:
+  // a person filling the table in by hand will not think to update a number in
+  // the header, and a record whose header disagrees with its own body must not
+  // be read through the header. `outcomes_scored` is reported as DERIVED here.
+  const scored = outcomes.filter(o => o.verdict && o.verdict !== 'null');
+  const state = outcomes.length === 0 ? 'no-predictions' : (scored.length ? 'scored' : 'unscored');
+  return {
+    state,
+    records,
+    error: null,
+    file,
+    outcomes_scored: scored.length,
+    predictions_recorded: outcomes.length,
+    outcomes,
+    // The row a new plan should be shaped by: what bit that nobody saw coming.
+    unpredicted: scored.filter(o => o.verdict === 'bit-and-nobody-predicted-it'),
+  };
+}
+
+/** The record's `## Outcomes` section, or `null` if it has none.
+ *
+ *  Extracted so that "is there a table?" and "what is in the table?" are answered
+ *  by the same rule. Two copies of this test would eventually disagree, and the
+ *  disagreement would present as a record reporting a denominator of zero for a
+ *  table the parser could not find — which is the defect this split exists to
+ *  make impossible to reintroduce.
+ */
+function outcomesSection(text) {
+  const section = text.split(/^## /m).find(s => s.startsWith('Outcomes'));
+  return section === undefined ? null : section;
+}
+
+/** The rows of the record's `## Outcomes` table, as `{ prediction, verdict, note }`.
+ *  Scoped to that section so a table appearing under `## Deviations` cannot be
+ *  mistaken for a verdict. A verdict cell of `null` means unanswered. */
+function parseOutcomes(text) {
+  const section = outcomesSection(text);
+  if (section === null) return [];
+  const rows = [];
+  for (const line of section.split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    const cells = t.split('|').slice(1, -1).map(c => c.trim());
+    if (cells.length < 2) continue;
+    const prediction = cells[0];
+    if (/^-+$/.test(prediction) || prediction.toLowerCase() === 'prediction') continue; // header / separator
+    const verdict = cells[1].replace(/`/g, '').trim();
+    rows.push({ prediction, verdict, note: cells[2] || '' });
+  }
+  return rows;
+}
+
 /**
  * Resolve the phase directory the resolver reported.
  *
@@ -367,4 +520,51 @@ function resolvePhaseDir(cwd, directory) {
   return path.isAbsolute(directory) ? directory : path.join(cwd, directory);
 }
 
-module.exports = { closePhase, renderSummary, citedEntries, introducingCommit, commitsSince, resolvePhaseDir, utc, VERDICTS, isRecordName, findRecords };
+/** The human half of `readRecord` — what the next step must be TOLD, in one
+ *  sentence, at the moment it acts.
+ *
+ *  Returns null only for `scored`, where the record speaks for itself. Every
+ *  other state returns text: the requirement this exists to meet is that a
+ *  missing or unanswered record is VISIBLE where the next phase is planned, not
+ *  recorded somewhere for later. A silent null on a gap would reproduce the
+ *  original failure exactly — the outcome side went unwritten for a hundred
+ *  phases and nothing ever said so.
+ */
+function recordNotice(prev) {
+  if (!prev) return null;
+  switch (prev.state) {
+    case 'scored':
+      return null;
+    case 'none':
+      return null;
+    case 'absent':
+      return `Phase ${prev.phase} has no outcome record. Its predictions were never scored, so nothing here is informed by whether they held. ` +
+             `Run \`anvi-tools phase-close ${prev.phase}\` — it derives the record from git — then fill in the verdicts.`;
+    case 'unscored':
+      return `Phase ${prev.phase} has an outcome record with ${prev.predictions_recorded} prediction(s) and NONE of them scored. ` +
+             `That is not "it found nothing" — it is a generated record nobody has answered yet. Read it before planning against it.`;
+    case 'no-predictions':
+      return `Phase ${prev.phase}'s record carries an outcomes table and that table is empty, so its plan cited no catalogue entries ` +
+             `and made no recorded prediction. The denominator is zero rather than missing — there is nothing to score.`;
+    case 'unstructured':
+      return `Phase ${prev.phase} has a record (${prev.file || 'unnamed'}) with no outcomes table, so whether its predictions held cannot be read from it. ` +
+             `That is NOT the same as it having predicted nothing — no count was taken. Read the record itself before planning against it, ` +
+             `and run \`anvi-tools phase-close ${prev.phase}\` if you want its outcomes scored.`;
+    case 'multiple':
+      return `Phase ${prev.phase} holds ${prev.records.length} outcome records (${prev.records.join(', ')}), which cannot both be what happened. ` +
+             `Resolve them into one before planning against either.`;
+    case 'unreadable':
+      return `Phase ${prev.phase}'s directory could not be read (${prev.error}). This is NOT the same as it having no record — ` +
+             `it is not known whether one exists, and that uncertainty must not be planned around as if it were an answer.`;
+    default:
+      // A state nobody wrote a sentence for is itself worth saying out loud,
+      // rather than falling through to silence and reading as "nothing to report".
+      return `Phase ${prev.phase}'s outcome record is in an unrecognised state (${prev.state}).`;
+  }
+}
+
+module.exports = {
+  closePhase, renderSummary, citedEntries, introducingCommit, commitsSince,
+  resolvePhaseDir, utc, VERDICTS, isRecordName, findRecords,
+  readRecord, parseOutcomes, outcomesSection, recordNotice, RECORD_STATES,
+};

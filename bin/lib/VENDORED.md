@@ -77,8 +77,11 @@ against a pristine copy of 1.27.0, counting insertions + deletions
 (`git diff --no-index --numstat`), **642 differing lines** across the eleven patched
 modules. Upstream has not moved from 1.27.0, so all of the divergence is ours.
 
-`commands.cjs` has been patched again since that measurement, so its count — and the
-stated total — are low by roughly the size of that commit. Re-deriving them needs the
+`commands.cjs` and `init.cjs` have both been patched again since that measurement, so
+their counts — and the stated total — are low by roughly the size of those commits. The
+numbers above are deliberately NOT adjusted by hand: they are the output of one dated
+measurement, and editing them to account for later patches would turn a measurement into
+an estimate while keeping a measurement's authority. Re-deriving them needs the
 pristine 1.27.0 bytes, which is the `--upstream` run; the state and the commit list come
 from history alone and are current on every run, which is the whole reason only the line
 counts carry a date.

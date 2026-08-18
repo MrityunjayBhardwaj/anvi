@@ -127,7 +127,13 @@ function cmdInitExecutePhase(cwd, phase, raw) {
   output(withProjectRoot(cwd, result), raw);
 }
 
-function cmdInitPlanPhase(cwd, phase, raw) {
+/** `extra` (anvi #304) is merged into the emitted object. It carries the PREVIOUS
+ *  phase's outcome record, computed by the caller so that the record's shape stays
+ *  owned by anvi's own module rather than being re-derived here. It is injected
+ *  rather than fetched because this init command is the one thing that runs
+ *  unconditionally before a phase is planned — an artifact gets produced when a
+ *  running mechanism consumes it, and this is that mechanism. */
+function cmdInitPlanPhase(cwd, phase, raw, extra = {}) {
   if (!phase) {
     error('phase required for init plan-phase');
   }
@@ -221,7 +227,7 @@ function cmdInitPlanPhase(cwd, phase, raw) {
     } catch { /* intentionally empty */ }
   }
 
-  output(withProjectRoot(cwd, result), raw);
+  output(withProjectRoot(cwd, { ...result, ...extra }), raw);
 }
 
 function cmdInitNewProject(cwd, raw) {

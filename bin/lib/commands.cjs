@@ -1219,4 +1219,10 @@ module.exports = {
   cmdTodoMatchPhase,
   cmdScaffold,
   cmdStats,
+  // anvi #304: exported so the prior-phase reader can ask THIS module where the
+  // phases are, rather than growing a third copy of the layout rules. The whole
+  // point of #301/#302 was that one place knows a planning tree may not have a
+  // `phases/` level at all; a second place deriving it would silently disagree.
+  describePhaseLayout,
+  isSummaryFile,
 };
