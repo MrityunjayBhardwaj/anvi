@@ -222,6 +222,52 @@ console.log('\na tree that cannot be enumerated is not a tree with no previous p
   ok(prev(j).state !== 'none', 'and still does not claim there is simply no previous phase');
 }
 
+// ── a name the predicate rejects is kept, not dropped ───────────────────────
+// The narrow record predicate is deliberate and stays. What did NOT hold up its
+// end was this reader: it filtered such files out and reported `absent`, so a
+// directory holding one read exactly like an empty one, while the counting
+// readers were reporting `summaries_unmatched: 1` about that same directory.
+// Not counted as a record, and then not counted at all (#310).
+console.log('\na name that is not a record name is still reported, not dropped');
+{
+  const p = makeProject('unmatched');
+  fs.writeFileSync(path.join(p.prevDir, 'SUMMARY-S1.md'), '# a summary a person wrote\n');
+  const j = initPlanPhase(p.cwd);
+  eq(prev(j).state, 'absent', 'a file that is not a record name does not become a record');
+  eq((prev(j).unmatched || []).join(','), 'SUMMARY-S1.md',
+     'but it is REPORTED, rather than filtered into silence');
+  has(j.previous_phase_notice, 'SUMMARY-S1.md',
+      'and the notice names it, so the file in the directory is not contradicted by the sentence');
+  has(j.previous_phase_notice, 'will not replace them',
+      'and says generating a record leaves it alone');
+  ok(!MOD.isRecordName('SUMMARY-S1.md'),
+     'CONTROL — the predicate itself did NOT move; this is reporting, not widening');
+}
+{
+  // CONTROL — the genuinely empty case must read exactly as it did before. A
+  // suffix that appears when there is nothing to report would make every absent
+  // notice noisier and teach readers to skip it.
+  const p = makeProject('unmatched-control');
+  const j = initPlanPhase(p.cwd);
+  eq((prev(j).unmatched || []).length, 0, 'an empty phase directory reports nothing unmatched');
+  ok(!String(j.previous_phase_notice).includes('name themselves a summary'),
+     'CONTROL — and its notice gains no sentence about files that are not there');
+}
+{
+  // Carried on states OTHER than absent. If it rode only on `absent` the field
+  // would vanish exactly when a record and an unmatched name sit side by side,
+  // which is the case where knowing about both matters most.
+  const p = makeProject('unmatched-beside-record');
+  fs.writeFileSync(path.join(p.prevDir, 'SUMMARY.md'), table('| A1 | `null` | |'));
+  fs.writeFileSync(path.join(p.prevDir, 'SUMMARY-S1.md'), '# an older hand-written one\n');
+  const j = initPlanPhase(p.cwd);
+  eq(prev(j).state, 'unscored', 'the real record still decides the state');
+  eq((prev(j).unmatched || []).join(','), 'SUMMARY-S1.md',
+     'and the unmatched name is carried alongside it, not only when nothing was found');
+  eq((prev(j).records || []).join(','), 'SUMMARY.md',
+     'CONTROL — and the two lists stay disjoint');
+}
+
 // ── the enumeration itself ──────────────────────────────────────────────────
 console.log('\nthe state list is complete, and every state is exercised above');
 {
