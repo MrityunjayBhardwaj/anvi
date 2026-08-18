@@ -65,6 +65,11 @@ command to run, and nothing to remember to fetch. Act on them:
 - **`state: "multiple"` / `"unreadable"`** → do not choose between records and do
   not treat "cannot tell" as "nothing there". Surface it and let the user resolve.
 - **`state: "none"`** → there is no previous phase. Nothing to do.
+
+Records are read from the phase's own directory only. A summary sitting beside a
+milestone's other documents is not read — those are imported from the previous
+tool and their trees are frozen, so nothing live writes there. If you find one
+that matters, say so rather than assuming the reader saw it.
 </step>
 
 <step name="check_existing_context">
