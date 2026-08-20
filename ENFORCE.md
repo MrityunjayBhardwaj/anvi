@@ -482,6 +482,22 @@ Two things it checks that a plain loop would not:
 - `PostToolUse:Artifact` / `WebFetch|WebSearch` / `mcp__.*` / `Read|Grep|Glob`: provenance-guard.js
 - `Stop`: anvideck-checkpoint.js
 
+`~/Library/LaunchAgents/com.anvi.catalogue-health.plist` — the weekly catalogue-health
+run (wired by `scripts/schedule-health.sh --apply`, removed by `--remove`):
+- Mondays 09:00 local → `node scripts/catalogue-health.js --write`
+- Writes one dated snapshot into the store; the `Stop` checkpoint hook commits it. The
+  job itself never commits and never mutates a catalogue.
+- The interpreter is recorded as the **stable** `node` symlink, deliberately, not as
+  `readlink -f` of it: the resolved path points into a versioned Cellar directory that
+  the next `brew upgrade node` deletes, and launchd has no `PATH` to recover with.
+- **This registration has no witness in the suite, and cannot have one.** No test can
+  establish that launchd fired last week, and because a quiet week is one line by
+  design, a job that stopped firing is indistinguishable from a week where nothing
+  moved. What separates them is on disk — every run leaves a dated artifact, so the
+  age of the newest `health-*.json` tells the three cases apart. Nothing reads it yet;
+  that gap is open and tracked, and is the reason this entry says so here rather than
+  leaving the schedule looking as covered as the hooks above it.
+
 Registration says the harness will RUN a hook. It does not say the hook can LOAD what it
 imports, and those are different questions once hooks share modules. After registering,
 `register-hooks.cjs` asks the second one (`scripts/hook-imports.cjs`): for every registered
