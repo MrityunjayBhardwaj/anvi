@@ -708,6 +708,12 @@ function planningRoot(cwd) {
             `      Remove the leftover directory — run: anvi update\n`;
         }
 
+        // Three states here, not the sibling branch's four: "none committed" and
+        // "some committed" are collapsed, deliberately. There the question is
+        // "is this tree safe where it sits", which partial durability answers
+        // differently. Here the tree is leaving either way and the only fact
+        // that changes what you do is how much of it exists nowhere else —
+        // which `total - tracked` states directly for both cases.
         const body = `      Reading ${PM_RELATIVE}; the ${LEGACY_PM_RELATIVE} tree is being IGNORED.\n`;
         const tail = `      Finish the migration or remove the leftover tree — run: anvi update\n`;
         if (tracked === total) {
