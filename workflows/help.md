@@ -85,6 +85,8 @@
   /anvi:currency        Check catalogue freshness — which entries have drifted
                         from the code they point at — and re-validate them
                         Flags: --stale (worklist only), --lint (grounding gaps)
+                        --fleet: snapshot health across EVERY project in the
+                        store and report what MOVED since the last snapshot
 
 ## Meta
   /anvi:help            This help

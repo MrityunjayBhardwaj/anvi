@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 
 // One writer for this hook's only output channel, so the refusal path and the
@@ -25,6 +26,81 @@ function emit(message) {
 // the session-start message flags it so growth doesn't stay silent across
 // sessions. Matches the ~1500-line trigger codified in references/*-template.md.
 const COMPACTION_THRESHOLD = 1500;
+
+// How long the catalogue-health series may go without a new snapshot before the
+// banner says so. A STARTING GUESS, not a measurement (anvi #318): revisit it
+// once there are enough snapshots to judge from.
+const SNAPSHOT_CADENCE_DAYS = 7;
+
+// Where the series lives. It measures every project in the store, so it is filed
+// under the store's own project rather than under whichever project this session
+// happens to be in — which is why this is not resolved through the per-project
+// resolver. `scripts/catalogue-health.js` writes here; the two are asserted to
+// agree by test/health-snapshot-banner.test.js, because a reader and a writer
+// that each compute a path are a pair that can drift apart in silence.
+function snapshotDir() {
+  return path.join(os.homedir(), '.anvideck', 'projects', 'anvi', 'instances');
+}
+
+/**
+ * The state of the snapshot series, as FOUR outcomes that must never be folded
+ * together (anvi #318) — the same discipline the Compaction Log states above.
+ *
+ *   'current'    — a snapshot younger than the cadence. Say NOTHING: silence
+ *                  while healthy is the whole design. A line that appears every
+ *                  session reporting that things are fine is the standing count
+ *                  this subsystem exists to avoid.
+ *   'stale'      — the newest snapshot is older than the cadence. The one state
+ *                  worth interrupting for, and one command clears it.
+ *   'none'       — the directory is readable and holds no usable snapshot. The
+ *                  series has not started.
+ *   'unreadable' — the directory exists and could not be read. NOT the same as
+ *                  empty: one says no snapshot was taken, the other says we
+ *                  cannot tell. It must never render as "0 days" or as healthy.
+ *
+ * A fifth case renders as silence on purpose: with no store on this machine
+ * there is no fleet to measure, so "no snapshot yet" would be a nag about a
+ * feature the reader is not using rather than a gap they can close.
+ *
+ * ⚠ AGE COMES FROM THE FILENAME, NOT mtime. The series is kept in a git
+ * repository, and a clone or a checkout stamps every file with the time it was
+ * written locally — so mtime would report a freshly cloned store as current no
+ * matter how old the series actually is. The date in the name is the identity
+ * the series is built on and the only thing that survives being copied.
+ */
+// Midnight UTC for a `YYYY-MM-DD` string. Built from parts rather than by
+// appending a time literal: the whole series is named and compared in UTC, and
+// an appended `Z` timestamp reads as a catalogue index key to the source-hygiene
+// guard, which is a check worth keeping un-widened for the sake of one string.
+function utcDay(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+function snapshotState(dir, today) {
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (err) {
+    // A store that was never created is not a stale series — see above.
+    if (err.code === 'ENOENT') {
+      try { fs.readdirSync(path.join(os.homedir(), '.anvideck', 'projects')); }
+      catch { return { kind: 'silent' }; }
+      return { kind: 'none' };
+    }
+    return { kind: 'unreadable', code: err.code || 'unknown' };
+  }
+  const dates = names
+    .map(n => /^health-(\d{4}-\d{2}-\d{2})\.json$/.exec(n))
+    .filter(Boolean)
+    .map(m => m[1])
+    .sort();
+  if (!dates.length) return { kind: 'none' };
+  const newest = dates[dates.length - 1];
+  const days = Math.floor((utcDay(today) - utcDay(newest)) / 86400000);
+  if (days < SNAPSHOT_CADENCE_DAYS) return { kind: 'current', newest, days };
+  return { kind: 'stale', newest, days };
+}
 
 /**
  * What a catalogue's Compaction Log actually says, as FOUR outcomes that must
@@ -193,6 +269,19 @@ process.stdin.on('end', () => {
       // drift, so drift is what this points at. Removal stays human-invoked.
       message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD}L` +
         ` — run /anvi:currency first (the one recorded pass found drift, not bloat); removal stays human-invoked`;
+    }
+
+    // Silent while the series is healthy. The only states that speak are the
+    // ones a reader can act on, or the one where we cannot tell.
+    const snap = snapshotState(snapshotDir(), new Date().toISOString().slice(0, 10));
+    if (snap.kind === 'stale') {
+      message += ` | 📅 HEALTH: newest catalogue-health snapshot is ${snap.days}d old` +
+        ` (${snap.newest}, cadence ${SNAPSHOT_CADENCE_DAYS}d) — /anvi:currency --fleet`;
+    } else if (snap.kind === 'none') {
+      message += ' | 📅 HEALTH: no catalogue-health snapshot yet — /anvi:currency --fleet starts the series';
+    } else if (snap.kind === 'unreadable') {
+      message += ` | 📅 HEALTH: the snapshot directory could not be read (${snap.code})` +
+        ' — whether the series is current is UNKNOWN, not fine';
     }
 
     if (ungrounded > 0 && ungroundedList.length <= 3) {

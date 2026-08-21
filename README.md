@@ -165,6 +165,7 @@ The everyday loop:
 | `/anvi:orient` | Where am I? What's known / unknown / assumed? |
 | `/anvi:sess-wrap` | Harvest the session's lessons into the catalogues |
 | `/anvi:currency` | Which catalogue entries have drifted from the code they cite |
+| `/anvi:currency --fleet` | Snapshot catalogue health across the store — what moved since last time |
 | `/anvi:ground` | Establish three-layer grounding (catalogues → Ground Truth → source) |
 
 **⚡ Quick execution**
