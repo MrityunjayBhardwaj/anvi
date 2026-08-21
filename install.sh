@@ -548,7 +548,7 @@ install_owned_dir() {
 # Cognitive OS (base layer, lenses, translation, context rot)
 install_owned_dir "$SCRIPT_DIR/cognitive-os"
 
-# Workflows (39 workflow definitions)
+# Workflows (the command bodies every skill points at)
 install_owned_dir "$SCRIPT_DIR/workflows"
 
 # Templates (debug session + future templates)
