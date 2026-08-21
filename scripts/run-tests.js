@@ -102,6 +102,18 @@ function clusters(failures) {
   return out;
 }
 
+// The two tallies a suite prints are read the SAME way — the last match wins (#323).
+// They used to disagree: failures took the last match, passes the first, so any number
+// a suite printed on its way won over the tally it finished with. That is not
+// hypothetical — this repo's own reporting test prints a sentence containing the words
+// `67 passed`, and the runner displayed 67 for a file that reported 31. Neither number
+// is the verdict (the exit code is), but a count nobody can trust is worse than no
+// count, because the column still gets scanned.
+const lastTally = (out, word) => {
+  const m = [...out.matchAll(new RegExp(`(\\d+)\\s+${word}`, 'g'))].pop();
+  return m ? Number(m[1]) : null;
+};
+
 // A timeout that fired far past its own cap is a fact about the runner, not the test.
 function overruns(failures, capMs = PER_FILE_TIMEOUT_MS) {
   return failures
@@ -193,16 +205,14 @@ function main() {
     // depend on wording. The tally is still read, but only to catch the one case the
     // exit code cannot express: a suite that REPORTS failures and exits 0 anyway,
     // which is a test harness that has lost the ability to fail.
-    const tally = [...out.matchAll(/(\d+)\s+failed/g)].pop();
-    const reportedFailures = tally ? Number(tally[1]) : null;
+    const reportedFailures = lastTally(out, 'failed');
     const verdict = classify({ error: r.error, status: r.status, reportedFailures });
 
     results.push({ file, secs, out, reportedFailures, ...verdict });
 
     const shown = secs.toFixed(1);
-    const summary = verdict.ok
-      ? (out.match(/(\d+)\s+passed/) || [, '?'])[1] + ' passed'
-      : verdict.summary;
+    const passes = lastTally(out, 'passed');
+    const summary = verdict.ok ? `${passes === null ? '?' : passes} passed` : verdict.summary;
     console.log(`  ${verdict.ok ? '✓' : '✗'} ${file.padEnd(42)} ${summary.padEnd(34)} ${shown}s`);
     if (VERBOSE || !verdict.ok) {
       const tail = out.trimEnd().split('\n').slice(-12);
@@ -225,6 +235,6 @@ function main() {
 
 if (require.main === module) main();
 module.exports = {
-  classify, clusters, overruns, verdictLines,
+  classify, clusters, overruns, verdictLines, lastTally,
   PER_FILE_TIMEOUT_MS, OVERRUN_FACTOR, CLUSTER_MIN_SECS, CLUSTER_MAX_REL_SPREAD,
 };

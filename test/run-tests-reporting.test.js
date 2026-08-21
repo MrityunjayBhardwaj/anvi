@@ -23,7 +23,7 @@
 'use strict';
 const path = require('path');
 const {
-  classify, clusters, overruns, verdictLines,
+  classify, clusters, overruns, verdictLines, lastTally,
   PER_FILE_TIMEOUT_MS, CLUSTER_MIN_SECS,
 } = require(path.join(__dirname, '..', 'scripts', 'run-tests.js'));
 
@@ -129,6 +129,23 @@ console.log('\noverruns — the cap that did not hold gets recorded');
      'a timeout landing just past its cap is not an overrun');
   ok(overruns([{ file: 'a', kind: 'exit 1', secs: 900 }], 300000).length === 0,
      'a slow ordinary failure is not an overrun — only timeouts can outlive a cap');
+}
+
+// ── lastTally: the tally a suite FINISHED with, not the first number it printed ──
+console.log('\nlastTally — a decoy count earlier in the output must not win');
+{
+  // This is the real output shape that produced #323, found by observing a suite run
+  // rather than by reading the code: THIS file prints a sentence quoting `67 passed`
+  // while reporting a different number of its own, and the runner displayed the 67.
+  const decoyed = [
+    '  ✓ the headline no longer reads "67 passed, 5 failed"',
+    '  ✓ something else',
+    '',
+    '31 passed, 0 failed',
+  ].join('\n');
+  ok(lastTally(decoyed, 'passed') === 31, 'the closing tally wins over a count quoted in prose above it');
+  ok(lastTally(decoyed, 'failed') === 0, 'and the failure count is read the same way, from the same line');
+  ok(lastTally('no numbers here', 'passed') === null, 'output with no tally reports nothing rather than a zero');
 }
 
 // ── verdictLines: the summary that misled ───────────────────────────────────────
