@@ -55,8 +55,8 @@ const RUNNERS = { '.js': 'node', '.sh': 'bash' };
 const isTest = f => /\.test\.(js|sh)$/.test(f);
 
 // ── Reporting rules, kept pure so they can be witnessed ───────────────────────
-// These three functions are the whole of #316's fix, and they are exported for
-// `test/run-tests-reporting.test.js`. Leaving them inline would have made the rule
+// Everything below down to `main()` is the whole of the reporting fix, and it is
+// exported for `test/run-tests-reporting.test.js`. Leaving it inline would have made the rule
 // unfalsifiable without spawning a 900-second hang to order — which is precisely the
 // condition that is not reproducible on demand. A rule nothing can redden is a claim.
 
@@ -236,5 +236,5 @@ function main() {
 if (require.main === module) main();
 module.exports = {
   classify, clusters, overruns, verdictLines, lastTally,
-  PER_FILE_TIMEOUT_MS, OVERRUN_FACTOR, CLUSTER_MIN_SECS, CLUSTER_MAX_REL_SPREAD,
+  PER_FILE_TIMEOUT_MS, CLUSTER_MIN_SECS,
 };
