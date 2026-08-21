@@ -461,6 +461,37 @@ if [ "$MODE" = "interactive" ] && [ -z "$ONLY_ARG" ]; then
   echo ""
 fi
 
+# ─── What counts as an installable skill ────────────────────────────────────
+# A skill IS its SKILL.md. The directory is packaging; the manifest is the thing
+# Claude Code reads, and a directory without one would deploy a command with no
+# body — the same dead-pointer shape the skill→workflow check exists to catch,
+# one layer further out.
+#
+# Both install modes call this, which is the point. They used to disagree: copy
+# mode ran an unguarded `cp "$skill_dir/SKILL.md"` and, under `set -euo
+# pipefail`, took the whole install down with it — AFTER the framework, the
+# hooks, their settings registrations and every agent had been written. So the
+# outcome was a machine carrying anvi's hooks and none of its commands: a
+# half-installed state rather than a refused one. Dev mode, meanwhile, symlinked
+# such a directory happily and counted it, so the two modes shipped different
+# answers to the same question. That divergence is exactly what the owned-
+# directory comment further down warns about, arrived at from the other side.
+#
+# Skipped rather than fatal, following the precedent set by the hook-import
+# audit (scripts/hook-imports.cjs): a diagnosis must not abort an otherwise
+# healthy install. But loudly, and NOT counted as installed — a silent skip
+# would leave the summary claiming commands the user does not have, and a count
+# over a quietly shrinking set is the most reassuring output an installer can
+# produce.
+SKILL_SKIPPED=0
+skill_installable() {
+  [ -f "$1/SKILL.md" ] && return 0
+  echo "  ⚠ skills/$(basename "$1")/ has no SKILL.md — skipped, not installed."
+  echo "    A skill is its manifest; this directory would deploy a command with no body."
+  SKILL_SKIPPED=$((SKILL_SKIPPED + 1))
+  return 1
+}
+
 # --dev mode: symlink repo dirs instead of copying
 if [ "$MODE" = "dev" ]; then
   echo "DEV MODE: symlinking repo → live installation"
@@ -472,13 +503,15 @@ if [ "$MODE" = "dev" ]; then
   echo "  ✓ ${ANVI_DIR} → ${SCRIPT_DIR}"
 
   # Symlink skills
+  SKILL_COUNT=0
   for skill_dir in "$SCRIPT_DIR/skills/"anvi*/; do
     [ -d "$skill_dir" ] || continue
+    skill_installable "$skill_dir" || continue
     skill_name=$(basename "$skill_dir")
     rm -rf "$SKILLS_DIR/$skill_name"
     ln -sf "$skill_dir" "$SKILLS_DIR/$skill_name"
+    SKILL_COUNT=$((SKILL_COUNT + 1))
   done
-  SKILL_COUNT=$(ls -d "$SCRIPT_DIR/skills/"anvi*/ 2>/dev/null | wc -l | tr -d ' ')
   echo "  ✓ ${SKILL_COUNT} skills symlinked"
 
   # Symlink agents
@@ -645,6 +678,7 @@ if [ "$INSTALL_CLAUDE" = true ]; then
   echo "Installing skills to ${SKILLS_DIR}..."
   for skill_dir in "$SCRIPT_DIR/skills/"anvi*/; do
     [ -d "$skill_dir" ] || continue
+    skill_installable "$skill_dir" || continue
     skill_name=$(basename "$skill_dir")
     mkdir -p "$SKILLS_DIR/$skill_name"
     cp "$skill_dir/SKILL.md" "$SKILLS_DIR/$skill_name/"
@@ -691,6 +725,10 @@ echo "  CLI:        ${ANVI_DIR}/bin/anvi-tools.cjs"
 if [ "$INSTALL_CLAUDE" = true ]; then
   echo "  Agents:     ${AGENT_COUNT} in ${AGENTS_DIR}"
   echo "  Skills:     ${SKILL_COUNT} in ${SKILLS_DIR}"
+  # Named in the summary as well as inline, because the summary is the part people
+  # read. Only when non-zero: the inline warning above already fires unconditionally,
+  # so silence here is backed by a louder silence there rather than standing alone.
+  [ "$SKILL_SKIPPED" -gt 0 ] && echo "  Skipped:    ${SKILL_SKIPPED} skill director$([ "$SKILL_SKIPPED" -eq 1 ] && echo y || echo ies) with no SKILL.md — see above"
 fi
 [ "$INSTALL_COPILOT" = true ] && echo "  Copilot compat: ${ANVI_DIR}/copilot-compat/ (templates: copy copilot-compat/templates/.github/ into a project)"
 echo ""
