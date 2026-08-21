@@ -23,6 +23,7 @@
 //   node scripts/catalogue-health.js            report against the last snapshot
 //   node scripts/catalogue-health.js --write     ... and save this run as one
 //   node scripts/catalogue-health.js --dir <d>  snapshot directory (default: store)
+//   node scripts/catalogue-health.js --where   print the snapshot directory and exit
 
 'use strict';
 const fs = require('fs');
@@ -36,6 +37,12 @@ const dirArg = args.indexOf('--dir');
 const STORE = path.join(os.homedir(), '.anvideck');
 const SNAP_DIR = dirArg >= 0 ? path.resolve(args[dirArg + 1]) : path.join(STORE, 'projects', 'anvi', 'instances');
 const REPORT = path.join(__dirname, 'currency-report.js');
+
+// `--where` prints the snapshot directory and exits, so a reader can ASK the
+// writer where the series lives instead of computing the path a second time.
+// Two definitions of one location are a pair that drifts apart in silence; the
+// banner that reports the series' age is tested against this answer.
+if (args.includes('--where')) { console.log(SNAP_DIR); process.exit(0); }
 // UTC, and labelled as such in the output. A local date would make a snapshot
 // taken late in the evening carry tomorrow's name on one machine and today's on
 // another, and the whole series is compared by name.
