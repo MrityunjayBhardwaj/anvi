@@ -16,6 +16,11 @@ Full prose spec: ENFORCE.md §Currency.
 
 <inputs>
 $ARGUMENTS — optional scope. Examples:
+- `--fleet`   → EVERY project in the store, and the product is what MOVED since
+                the last snapshot rather than a worklist. Execute
+                `~/.claude/anvi/workflows/refresh.md` for this mode and stop
+                here; it reports only and hands back for one project.
+                Costs about four minutes — say so before starting.
 - `--stale`   → only the worklist (RED / YELLOW / GRAY), skipping fresh + reference.
 - `--lint`    → the grounding-completeness view (a pure function of catalogue
                 text: no-computable-ref, no-validated, line-anchored-ref) — asks

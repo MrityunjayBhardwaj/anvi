@@ -82,7 +82,7 @@ console.log('\nan aged series says how old, and names the command that clears it
   const r = healthLine(home('stale', [`health-${iso(12)}.json`]));
   has(r.line, '12d old', 'it reports the age');
   has(r.line, iso(12), 'and names the snapshot it measured from');
-  has(r.line, '/anvi:refresh', 'and names the command');
+  has(r.line, '/anvi:currency --fleet', 'and names the mode that clears it');
 }
 {
   // The NEWEST wins: an old snapshot sitting beside a recent one is not staleness.

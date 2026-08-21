@@ -7,14 +7,17 @@ not merely pause it — the next diff widens. Thirteen lines a week is a thing
 someone reads; a quarter's worth in one wall is the wallpaper this report was
 built to replace.
 
-This is NOT a second freshness check. `/anvi:currency` already answers "which
-entries in THIS project drifted, and re-validate them", and two instruments
-answering one question is how they come to disagree. The boundary:
+This is the `--fleet` MODE of `/anvi:currency`, not a command of its own, and
+that is deliberate. It is one question — "is the catalogue still real?" — asked
+at two scopes, and the fleet report is built ON that gate: it shells out to
+`currency-report.js --json` rather than computing verdicts of its own. Two
+instruments answering one question is how they come to disagree, and two
+commands answering it is the same failure one layer up.
 
-  /anvi:refresh    every project — what MOVED since last time. Reports only.
-  /anvi:currency   one project — the worklist, re-confirmation, stamping.
+  /anvi:currency --fleet   every project — what MOVED since last time. Reports only.
+  /anvi:currency           one project — the worklist, re-confirmation, stamping.
 
-So this command ends by handing off, not by acting.
+So this mode ends by handing back, not by acting.
 
 Full prose spec: ENFORCE.md §Currency. The instrument is
 `scripts/catalogue-health.js`, which shells out to `currency-report.js --json`

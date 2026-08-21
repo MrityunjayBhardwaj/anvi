@@ -124,7 +124,7 @@ Additional routing refinements (first match within type):
 | "all phases", "autonomous", "run everything" | `/anvi:autonomous` |
 | "tests", "add tests", "test coverage" | `/anvi:add-tests` |
 | "catalogue drift", "what's stale", "re-validate entries", "is this entry still real" | `/anvi:currency` |
-| "refresh", "catalogue health", "what moved", "fleet health", "take a snapshot" | `/anvi:refresh` |
+| "refresh", "catalogue health", "what moved", "fleet health", "take a snapshot" | `/anvi:currency --fleet` |
 | "update anvi", "upgrade anvi", "migrate my anvi install", "am I on the latest anvi", "bring anvi up to date", "update anvi to <version>", "what anvi versions are there", "list anvi versions" | `/anvi:update` |
 </step>
 

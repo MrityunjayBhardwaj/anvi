@@ -184,7 +184,6 @@ Complete structural map of the cognitive operating system.
 ║  /anvi:rq           /anvi:lens          /anvi:orient                 ║
 ║  /anvi:explore      /anvi:sess-wrap     /anvi:currency               ║
 ║  /anvi:ground       /anvi:audit         /anvi:ship                   ║
-║  /anvi:refresh                                                       ║
 ║  /anvi:help         — see /anvi:help for the full set                ║
 ╚══════════════════════════════════════════════════════════════════════╝
          │ backed by

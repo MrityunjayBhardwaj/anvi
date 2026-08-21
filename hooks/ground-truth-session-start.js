@@ -276,9 +276,9 @@ process.stdin.on('end', () => {
     const snap = snapshotState(snapshotDir(), new Date().toISOString().slice(0, 10));
     if (snap.kind === 'stale') {
       message += ` | 📅 HEALTH: newest catalogue-health snapshot is ${snap.days}d old` +
-        ` (${snap.newest}, cadence ${SNAPSHOT_CADENCE_DAYS}d) — /anvi:refresh`;
+        ` (${snap.newest}, cadence ${SNAPSHOT_CADENCE_DAYS}d) — /anvi:currency --fleet`;
     } else if (snap.kind === 'none') {
-      message += ' | 📅 HEALTH: no catalogue-health snapshot yet — /anvi:refresh starts the series';
+      message += ' | 📅 HEALTH: no catalogue-health snapshot yet — /anvi:currency --fleet starts the series';
     } else if (snap.kind === 'unreadable') {
       message += ` | 📅 HEALTH: the snapshot directory could not be read (${snap.code})` +
         ' — whether the series is current is UNKNOWN, not fine';
