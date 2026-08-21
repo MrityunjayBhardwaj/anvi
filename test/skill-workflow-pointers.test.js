@@ -83,11 +83,16 @@ for (const rel of tracked) {
 // that quietly became empty is the most reassuring output this suite can produce, and
 // it is the defect the runner's own discovery count exists to prevent. Floors rather
 // than equalities: a fixed number would go stale the day a skill is added, quietly.
-const skillFiles = tracked.filter(f => /^skills\/[^/]+\/SKILL\.md$/.test(f));
+// `anvi*` is install.sh's own glob (install.sh:646). Matching it here means the two
+// sides agree by construction: a directory the installer would deploy is a directory
+// this check reads. Deriving it differently would leave a class the installer ships and
+// nothing verifies — every directory happens to match today, which is exactly the kind
+// of agreement that stops being true without anyone noticing.
+const skillFiles = tracked.filter(f => /^skills\/anvi[^/]*\/SKILL\.md$/.test(f));
 const skillDirs = fs.readdirSync(path.join(ROOT, 'skills'), { withFileTypes: true })
-  .filter(d => d.isDirectory()).length;
+  .filter(d => d.isDirectory() && d.name.startsWith('anvi')).length;
 ok(skillFiles.length === skillDirs,
-   `every one of the ${skillDirs} skill directories contributed a tracked SKILL.md`);
+   `every one of the ${skillDirs} skill directories the installer deploys contributed a tracked SKILL.md`);
 ok(pointers.size >= skillFiles.length,
    `${pointers.size} distinct pointers found across ${tracked.length} executed files — the corpus is not empty`);
 
@@ -99,6 +104,12 @@ const inst = spawnSync('bash', [path.join(ROOT, 'install.sh'), '--only=all'], {
 });
 const ANVI = path.join(HOME, '.claude', 'anvi');
 ok(inst.status === 0, 'install.sh succeeded into a throwaway HOME');
+if (inst.status !== 0) {
+  // Every pointer assertion below resolves against this tree, so a failed install would
+  // otherwise report 75 broken pointers and bury its own cause under them.
+  const tail = ((inst.stdout || '') + (inst.stderr || '')).trimEnd().split('\n').slice(-6);
+  console.log(tail.map(l => `      │ ${l}`).join('\n'));
+}
 ok(fs.existsSync(ANVI), 'and produced the ~/.claude/anvi tree the pointers are written against');
 
 const exists = p => { try { fs.statSync(p); return true; } catch { return false; } };
@@ -128,6 +139,25 @@ console.log('\nforward — every pointer resolves where it is written to resolve
   // filed about. Without this it could pass by finding no workflow pointers at all.
   const wf = [...pointers.keys()].filter(t => t.startsWith('workflows/'));
   ok(wf.length > 0, `and ${wf.length} of them are workflow pointers — the case this was filed for`);
+}
+
+// ── The pointer must be written in the shape this check can see ────────────────
+// The forward check matches only FULLY QUALIFIED `~/.claude/anvi/...` paths, so a skill
+// whose instruction named a bare `<name>.md` would be invisible to it — a blind spot,
+// not a pass. 47 of the skills carry the "Execute the workflow" instruction and every
+// one of them qualifies its path; that convention is what makes the check total, so it
+// is asserted rather than assumed. State the limitation or close it: this closes it.
+console.log('\nshape — the instruction is written the way the check can follow');
+{
+  const unqualified = skillFiles.filter(f => {
+    const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    return /execute the workflow/i.test(text) && !text.includes('~/.claude/anvi/workflows/');
+  });
+  const instructing = skillFiles.filter(f =>
+    /execute the workflow/i.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+  ok(instructing.length > 0, `${instructing.length} of ${skillFiles.length} skills carry the workflow instruction`);
+  ok(unqualified.length === 0, 'and every one of them qualifies its path, so none is invisible to the check above');
+  for (const f of unqualified) console.log(`      │ ${f} — instructs a workflow without a ~/.claude/anvi/ path`);
 }
 
 // ── Reverse: every workflow must be reachable from a command ───────────────────
