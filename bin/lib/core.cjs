@@ -681,10 +681,44 @@ function planningRoot(cwd) {
   if (hasCurrent) {
     if (hasLegacy) {
       // Half-migrated: content in the old tree is now invisible to every command.
-      warnOnce(cwd, 'both',
-        `anvi: both ${PM_RELATIVE} and ${LEGACY_PM_RELATIVE} exist in ${cwd}.\n` +
-        `      Reading ${PM_RELATIVE}; the ${LEGACY_PM_RELATIVE} tree is being IGNORED.\n` +
-        `      Finish the migration or remove the leftover tree — run: anvi update\n`);
+      //
+      // "Is being IGNORED" is a claim about CONTENT, and it used to be made
+      // unconditionally — so a project that finished its migration and left an
+      // empty directory shell behind was told, on every process, that a tree
+      // was being ignored when there was nothing in it to ignore. A warning
+      // whose severity does not track the thing it describes is how people
+      // learn to skip warnings; and the one case here that genuinely matters —
+      // a leftover holding files that exist nowhere else — was worded
+      // identically to the case that does not matter at all.
+      //
+      // The sibling branch below already separates these states. This uses the
+      // SAME helper rather than counting a second way, because two counters for
+      // one quantity is how they come to disagree — the exact split
+      // legacyTreeDurability() was written to close. The thunk keeps the walk
+      // lazy, so an empty leftover costs a readdir only when the notice fires.
+      warnOnce(cwd, 'both', () => {
+        const { total, tracked } = legacyTreeDurability(cwd);
+        const head = `anvi: both ${PM_RELATIVE} and ${LEGACY_PM_RELATIVE} exist in ${cwd}.\n`;
+
+        // Nothing to lose, so nothing to warn about losing. Still worth saying:
+        // the directory is real and the next reader would ask the same question.
+        if (total === 0) {
+          return head +
+            `      The ${LEGACY_PM_RELATIVE} tree is EMPTY — nothing is being ignored or lost.\n` +
+            `      Remove the leftover directory — run: anvi update\n`;
+        }
+
+        const body = `      Reading ${PM_RELATIVE}; the ${LEGACY_PM_RELATIVE} tree is being IGNORED.\n`;
+        const tail = `      Finish the migration or remove the leftover tree — run: anvi update\n`;
+        if (tracked === total) {
+          return head + body +
+            `      Its ${total} file(s) ARE committed to this repo, so they survive in history —\n` +
+            `      but no command reads them where they are.\n` + tail;
+        }
+        return head + body +
+          `      ${total - tracked} of its ${total} file(s) are committed NOWHERE, so they exist\n` +
+          `      only on this machine and no command reads them.\n` + tail;
+      });
     }
     return current;
   }

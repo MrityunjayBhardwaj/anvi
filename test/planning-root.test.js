@@ -109,13 +109,63 @@ console.log('\n— resolution —');
   eq(usesLegacyPlanning(dir), true, 'the legacy layout is detectable for the conformance report');
 }
 
+// BOTH TREES PRESENT. Three states, and they are not the same news — which is the
+// whole point of this block. The message used to be one unconditional sentence, and
+// this very case asserted it against a fixture whose leftover was an EMPTY directory.
+// So the wrong wording was under test: `basher` is fully migrated, with 114 live files
+// and a leftover holding nothing, and it was told on every process that a tree "is
+// being IGNORED" — a claim about content, made where there is none. A test that pins
+// the wrong sentence is worse than no test, because it makes the sentence look decided.
+//
+// The sibling legacy-only branch had already separated empty / not-durable / partial /
+// durable. These assert that this branch now separates them too, and — the load-bearing
+// half — that the alarming wording is ABSENT from the harmless case. Asserting only
+// that the right words appear would pass on a message that says everything at once.
+const { execFileSync: exec329 } = require('child_process');
+const repoWithBoth = (name, files, commit) => {
+  const dir = path.join(TMP, name);
+  fs.mkdirSync(path.join(dir, PM_RELATIVE), { recursive: true });
+  fs.mkdirSync(path.join(dir, LEGACY_PM_RELATIVE), { recursive: true });
+  exec329('git', ['init', '-q', '.'], { cwd: dir, stdio: 'pipe' });
+  exec329('git', ['config', 'user.email', 't@t'], { cwd: dir, stdio: 'pipe' });
+  exec329('git', ['config', 'user.name', 't'], { cwd: dir, stdio: 'pipe' });
+  for (const f of files) fs.writeFileSync(path.join(dir, LEGACY_PM_RELATIVE, f), 'x\n');
+  if (commit && files.length) {
+    exec329('git', ['add', '-A'], { cwd: dir, stdio: 'pipe' });
+    exec329('git', ['commit', '-qm', 'seed'], { cwd: dir, stdio: 'pipe' });
+  }
+  return dir;
+};
+
 {
-  const dir = project({ current: true, legacy: true });   // half-migrated
+  const dir = project({ current: true, legacy: true });   // leftover is an EMPTY shell
   const r = capture(() => planningRoot(dir));
   eq(r.value, path.join(dir, PM_RELATIVE), 'both present → the current tree wins');
   eq(r.out, '', 'the half-migrated notice also stays off stdout');
-  has(r.err, 'IGNORED', 'a half-migrated project is told its leftover tree is invisible, not merely that both exist');
+  has(r.err, 'EMPTY', 'an empty leftover is named as empty');
+  has(r.err, 'nothing is being ignored or lost', 'and the project is told nothing is at risk');
+  noMatch(r.err, 'IGNORED', 'the alarming wording is ABSENT — nothing is being ignored when there is nothing in it');
+  noMatch(r.err, 'file(s)', 'and no file count is quoted for a tree that holds none');
+  has(r.err, 'anvi update', 'the remedy is still named — the directory is real and should go');
   eq(usesLegacyPlanning(dir), false, 'half-migrated is not "legacy" — the current tree is authoritative');
+}
+
+{
+  const dir = repoWithBoth('both-uncommitted', ['a.md', 'b.md'], false);
+  const r = capture(() => planningRoot(dir));
+  eq(r.value, path.join(dir, PM_RELATIVE), 'the current tree still wins');
+  has(r.err, 'IGNORED', 'a leftover holding real content IS reported as ignored');
+  has(r.err, '2 of its 2 file(s) are committed NOWHERE',
+     'and the count says how much exists only on this machine — the case that matters');
+  noMatch(r.err, 'EMPTY', 'the harmless wording is absent from the case that is not harmless');
+}
+
+{
+  const dir = repoWithBoth('both-committed', ['a.md'], true);
+  const r = capture(() => planningRoot(dir));
+  has(r.err, 'IGNORED', 'a committed leftover is still invisible to every command');
+  has(r.err, 'ARE committed to this repo', 'but is not described as data that exists only here');
+  noMatch(r.err, 'committed NOWHERE', 'the not-durable wording is absent when the files are durable');
 }
 
 console.log('\n— the centralized layout, where `.anvi` is not under the project —');
