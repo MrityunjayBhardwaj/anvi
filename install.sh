@@ -728,7 +728,15 @@ if [ "$INSTALL_CLAUDE" = true ]; then
   # Named in the summary as well as inline, because the summary is the part people
   # read. Only when non-zero: the inline warning above already fires unconditionally,
   # so silence here is backed by a louder silence there rather than standing alone.
-  [ "$SKILL_SKIPPED" -gt 0 ] && echo "  Skipped:    ${SKILL_SKIPPED} skill director$([ "$SKILL_SKIPPED" -eq 1 ] && echo y || echo ies) with no SKILL.md — see above"
+  #
+  # Spelled as if/then rather than a `&&` list. Under `set -e` a trailing `&&` list
+  # whose test fails is exempt only because the failing command is not the last in the
+  # list — true here, and true until someone appends to the line. An if/then does not
+  # depend on that rule holding.
+  if [ "$SKILL_SKIPPED" -gt 0 ]; then
+    if [ "$SKILL_SKIPPED" -eq 1 ]; then SKIPPED_NOUN="directory"; else SKIPPED_NOUN="directories"; fi
+    echo "  Skipped:    ${SKILL_SKIPPED} skill ${SKIPPED_NOUN} with no SKILL.md — see above"
+  fi
 fi
 [ "$INSTALL_COPILOT" = true ] && echo "  Copilot compat: ${ANVI_DIR}/copilot-compat/ (templates: copy copilot-compat/templates/.github/ into a project)"
 echo ""
