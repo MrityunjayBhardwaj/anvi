@@ -63,6 +63,17 @@ for (const [kind, n] of Object.entries(INVENTORY)) {
   ok(n > 0, `${kind} resolves to a real count (got ${n})`);
 }
 
+// The near-miss, pinned BY NAME rather than left to be inferred from a count that comes
+// out wrong. `skills/anvi/` is the single directory an `anvi-*` glob drops, and dropping
+// it is the mistake that nearly forced a correct 55 down to a wrong 54. Without this,
+// switching the glob reddens only the site comparisons — which name a symptom three
+// times over and never once name the cause.
+ok(fs.existsSync(path.join(ROOT, 'skills', 'anvi', 'SKILL.md')),
+   'skills/anvi/ is a real, deployable skill — the one an `anvi-*` glob silently drops');
+eq(INVENTORY.skills,
+   ls('skills').filter(e => e.isDirectory() && /^anvi-/.test(e.name)).length + 1,
+   'the skills count is the hyphenated command skills PLUS the session-activation skill');
+
 // ── every declared count, wherever it is stated ──────────────────────────────
 // The corpus is scanned rather than a list of line numbers being kept here: a site
 // added later is covered automatically, and a site that MOVES does not silently stop
