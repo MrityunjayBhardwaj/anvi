@@ -490,5 +490,50 @@ console.log('\n— the planning-root command, spawned as workflows invoke it —
   eq(ntc.durable, nt.durable, 'and both surfaces give the same durability answer');
 }
 
+console.log('\n— a notice can never break the command it describes —');
+
+{
+  // The guard used to wrap only `process.stderr.write`, while BOTH callers that
+  // reach it pass thunks that walk a directory and shell out to git — so the
+  // part most likely to fail was the part left outside. A string cannot throw,
+  // which is why a test that only passes strings passes on the broken code too:
+  // the single input that separates the two versions is a thunk that throws.
+  const dir = path.join(TMP, 'warnonce-throws');
+  let calls = 0;
+  const boom = () => { calls++; throw new Error('the tree walk failed'); };
+
+  let threw = null;
+  const r = capture(() => {
+    try { C.warnOnce(dir, 'boom', boom); return 'returned'; }
+    catch (e) { threw = e; return 'threw'; }
+  });
+  // `threw` itself would print as `{}` — JSON.stringify renders an Error with no
+  // own enumerable keys — so the one assertion most likely to fail would report
+  // nothing about what failed. Compare the message instead.
+  eq(threw && threw.message || null, null,
+     'a thunk that throws does not escape warnOnce — evaluation is inside the guard');
+  eq(r.value, 'returned', 'and the caller reaches its own return value rather than unwinding');
+  eq(r.err, '', 'a notice that could not be built emits nothing');
+  eq(r.out, '', 'and stdout stays the clean data channel, as for every other notice here');
+  eq(calls, 1, 'the failing thunk ran once');
+
+  // Pins the ordering decision warnOnce documents: seen is marked BEFORE the
+  // text is built, so a message that fails is not retried. The reasoning lives
+  // there, next to the code it governs — restating it here would give one
+  // decision two copies of its rationale, free to drift apart.
+  const again = capture(() => C.warnOnce(dir, 'boom', boom));
+  eq(calls, 1, 'and is NOT retried on the next lookup — a failed notice stays failed, cheaply');
+  eq(again.err, '', 'so the second lookup is silent too, at no cost');
+
+  // Controls, both directions: the empty stderr above has to mean "this thunk
+  // threw", not "warnOnce has gone mute" or "only thunks are broken now".
+  const good = capture(() => C.warnOnce(path.join(TMP, 'warnonce-works'), 'boom',
+                                        () => 'a notice that builds fine\n'));
+  has(good.err, 'a notice that builds fine', 'a thunk that returns normally still reaches stderr');
+  const str = capture(() => C.warnOnce(path.join(TMP, 'warnonce-string'), 'boom',
+                                       'a plain string notice\n'));
+  has(str.err, 'a plain string notice', 'and the third caller\'s shape, a plain string, is emitted unchanged');
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} planning-root: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
