@@ -604,14 +604,29 @@ function anviDirFor(cwd) {
  * `planningRoot` is on the hot path — every `pmRel` call reaches it — so a
  * message whose text costs a directory walk must not be built for a notice that
  * is about to be dropped.
+ *
+ * A notice can never break the command it is describing. That covers BUILDING
+ * the text as well as writing it: the thunks here walk a directory and shell
+ * out to git, so evaluation is the part most likely to fail, and a guard that
+ * stopped at the write left the likelier failure uncovered. What makes a
+ * diagnostic safe to add on a hot path is that being wrong about it costs
+ * nothing — so a notice that cannot be produced is dropped, exactly as one that
+ * cannot be written already was.
  */
 function warnOnce(cwd, key, message) {
   const seen = `${key}:${cwd}`;
   if (legacyNoticeShown.has(seen)) return;
+  // Marked seen BEFORE the text is built, and that ordering is a decision, not
+  // an artifact: a message that fails must not be retried. Every `pmRel` call
+  // reaches here, so retrying would re-run a failing directory walk and a
+  // failing `git ls-files` once per lookup, for the rest of the process, to
+  // produce silence every time. One attempt, then quiet.
   legacyNoticeShown.add(seen);
-  const text = typeof message === 'function' ? message() : message;
-  // stderr, never stdout: stdout is a JSON data channel that callers parse.
-  try { process.stderr.write(text); } catch { /* never let a notice break a command */ }
+  try {
+    const text = typeof message === 'function' ? message() : message;
+    // stderr, never stdout: stdout is a JSON data channel that callers parse.
+    process.stderr.write(text);
+  } catch { /* never let a notice break a command */ }
 }
 
 /**
@@ -1328,6 +1343,10 @@ module.exports = {
   DETECTED_CONFIG_KEYS,
   isGitIgnored,
   legacyTreeDurability,
+  // Exported so the "a notice can never break a command" contract can be
+  // exercised with a thunk that throws — the only input that distinguishes a
+  // guard around evaluation from one around the write alone.
+  warnOnce,
   execGit,
   normalizeMd,
   escapeRegex,
