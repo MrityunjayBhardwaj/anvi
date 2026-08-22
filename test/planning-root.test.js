@@ -507,16 +507,20 @@ console.log('\n— a notice can never break the command it describes —');
     try { C.warnOnce(dir, 'boom', boom); return 'returned'; }
     catch (e) { threw = e; return 'threw'; }
   });
-  eq(threw, null, 'a thunk that throws does not escape warnOnce — evaluation is inside the guard');
+  // `threw` itself would print as `{}` — JSON.stringify renders an Error with no
+  // own enumerable keys — so the one assertion most likely to fail would report
+  // nothing about what failed. Compare the message instead.
+  eq(threw && threw.message || null, null,
+     'a thunk that throws does not escape warnOnce — evaluation is inside the guard');
   eq(r.value, 'returned', 'and the caller reaches its own return value rather than unwinding');
   eq(r.err, '', 'a notice that could not be built emits nothing');
   eq(r.out, '', 'and stdout stays the clean data channel, as for every other notice here');
   eq(calls, 1, 'the failing thunk ran once');
 
-  // Marked seen BEFORE evaluation, and that is a decision: planningRoot is on
-  // the path of every pmRel call, so retrying would re-run a failing directory
-  // walk and a failing `git ls-files` once per lookup, for the rest of the
-  // process, to produce silence every time.
+  // Pins the ordering decision warnOnce documents: seen is marked BEFORE the
+  // text is built, so a message that fails is not retried. The reasoning lives
+  // there, next to the code it governs — restating it here would give one
+  // decision two copies of its rationale, free to drift apart.
   const again = capture(() => C.warnOnce(dir, 'boom', boom));
   eq(calls, 1, 'and is NOT retried on the next lookup — a failed notice stays failed, cheaply');
   eq(again.err, '', 'so the second lookup is silent too, at no cost');
