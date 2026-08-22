@@ -143,35 +143,40 @@ Complete structural map of the cognitive operating system.
          │ agents are spawned by
          ▼
 ╔══════════════════════════════════════════════════════════════════════╗
-║                   WORKFLOW LAYER (41 workflows)                     ║
+║                    WORKFLOW LAYER (52 workflows)                     ║
 ║                                                                      ║
-║  ┌─ Cognitive (Anvi-native) ───────────────────────────────────┐   ║
-║  │  debug         rq            lens         assume            │    ║
-║  │  why           teach         contrast     reframe           │    ║
-║  │  blind-spots   boundary      trace                          │    ║
-║  └─────────────────────────────────────────────────────────────┘    ║
-║  ┌─ Planning ──────────────────────────────────────────────────┐   ║
-║  │  new-project   new-milestone discuss-phase plan-phase       │    ║
-║  │  research-phase add-phase    insert-phase  remove-phase     │    ║
-║  │  list-phase-assumptions      plan-milestone-gaps            │    ║
-║  └─────────────────────────────────────────────────────────────┘    ║
-║  ┌─ Execution ─────────────────────────────────────────────────┐   ║
-║  │  execute-phase execute-plan  do     quick     fast          │    ║
-║  │  autonomous                                                  │    ║
-║  └─────────────────────────────────────────────────────────────┘    ║
-║  ┌─ Verification ─────────────────────────────────────────────┐    ║
-║  │  verify-work   verify-phase  add-tests   audit-uat          │    ║
-║  │  audit-milestone validate-phase review                      │    ║
-║  └─────────────────────────────────────────────────────────────┘    ║
-║  ┌─ Lifecycle ─────────────────────────────────────────────────┐   ║
-║  │  progress      pause-work    resume-project                 │    ║
-║  │  complete-milestone          session-report                 │    ║
-║  └─────────────────────────────────────────────────────────────┘    ║
-║  ┌─ Utility ───────────────────────────────────────────────────┐   ║
-║  │  note  add-todo  check-todos  plant-seed  next  help       │    ║
-║  │  health  settings  stats  cleanup  ship  pr-branch          │    ║
-║  │  map-codebase  ui-phase  ui-review                          │    ║
-║  └─────────────────────────────────────────────────────────────┘    ║
+║  ┌─ Cognitive (Anvi-native) ────────────────────────────────────┐    ║
+║  │  debug         rq            lens                            │    ║
+║  └──────────────────────────────────────────────────────────────┘    ║
+║  ┌─ Planning ───────────────────────────────────────────────────┐    ║
+║  │  new-project             new-milestone                       │    ║
+║  │  discuss-phase           plan-phase                          │    ║
+║  │  research-phase          add-phase                           │    ║
+║  │  insert-phase            remove-phase                        │    ║
+║  │  list-phase-assumptions  plan-milestone-gaps                 │    ║
+║  └──────────────────────────────────────────────────────────────┘    ║
+║  ┌─ Execution ──────────────────────────────────────────────────┐    ║
+║  │  execute-phase  execute-plan   do                            │    ║
+║  │  quick          fast           autonomous                    │    ║
+║  └──────────────────────────────────────────────────────────────┘    ║
+║  ┌─ Verification ───────────────────────────────────────────────┐    ║
+║  │  verify-work      verify-phase     add-tests                 │    ║
+║  │  audit-uat        audit-milestone  validate-phase            │    ║
+║  │  review           currency         refresh                   │    ║
+║  │  ground                                                      │    ║
+║  └──────────────────────────────────────────────────────────────┘    ║
+║  ┌─ Lifecycle ──────────────────────────────────────────────────┐    ║
+║  │  progress            pause-work                              │    ║
+║  │  resume-project      complete-milestone                      │    ║
+║  │  session-report      orient                                  │    ║
+║  │  sess-wrap                                                   │    ║
+║  └──────────────────────────────────────────────────────────────┘    ║
+║  ┌─ Utility ────────────────────────────────────────────────────┐    ║
+║  │  note          add-todo      check-todos   plant-seed        │    ║
+║  │  next          help          health        settings          │    ║
+║  │  stats         cleanup       ship          pr-branch         │    ║
+║  │  map-codebase  ui-phase      ui-review     update            │    ║
+║  └──────────────────────────────────────────────────────────────┘    ║
 ╚══════════════════════════════════════════════════════════════════════╝
          │ invoked via
          ▼
