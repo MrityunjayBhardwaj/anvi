@@ -51,13 +51,20 @@ const trimEnd = p => p.replace(/[.,`)]+$/, '');
 const CORPUS_DIRS = ['skills', 'workflows', 'cognitive-os', 'agents'];
 
 // ── Unreachable workflows: stated, never silent ────────────────────────────────
-// One entry, with its reason and the issue deciding its fate (#325). This is the single
-// place the reverse check can be weakened into meaninglessness, so its size is asserted
-// below rather than left to grow.
-const ALLOWED_UNREACHABLE = new Map([
-  ['workflows/execute-plan.md',
-   'no skill names it and no workflow executes it — quick.md only cross-references it in prose. Wire it or retire it: #325'],
-]);
+// EMPTY, and bounded at ZERO (#325). Its one entry was `workflows/execute-plan.md`, held
+// here while its fate was decided. It was retired; every workflow is now reachable.
+//
+// The machinery stays deliberately. This is the single place the reverse check can be
+// weakened into meaninglessness, and an empty hatch bounded at zero means adding an
+// exception costs TWO deliberate acts — writing the entry AND raising the bound past it.
+// Deleting the mechanism instead would make the next unreachable workflow cost one act:
+// silence.
+//
+// Before adding to this: an unreachable workflow is usually not one that needs an
+// exception. execute-plan.md read like a strong candidate — substantial, coherent, not a
+// stub — but its content had been inlined into `agents/anvi-executor.md`, so nothing was
+// lost by retiring it. Ask whether the thing it does is already done somewhere that RUNS.
+const ALLOWED_UNREACHABLE = new Map([]);
 
 // ── Corpus, derived ────────────────────────────────────────────────────────────
 let tracked;
@@ -192,8 +199,8 @@ console.log('\nreverse — no workflow is stranded where nothing can run it');
   // The exception list is measured, not trusted. It is small, and it does not carry
   // entries that have stopped being true — an exception for a reachable workflow would
   // sit there forever excusing a hole nobody remembers opening.
-  ok(ALLOWED_UNREACHABLE.size <= 2,
-     `the unreachable exception list holds ${ALLOWED_UNREACHABLE.size} entry — small enough to still mean something`);
+  ok(ALLOWED_UNREACHABLE.size === 0,
+     `the unreachable exception list is EMPTY (holds ${ALLOWED_UNREACHABLE.size}) — every workflow is reachable from a command, and adding an exception has to move this bound too`);
   for (const w of ALLOWED_UNREACHABLE.keys()) {
     ok(unreachable.includes(w), `the exception for ${w} is still earning its place (it is still unreachable)`);
     ok(onDisk.includes(w), `and ${w} still exists — a stale exception is a hole with a note on it`);

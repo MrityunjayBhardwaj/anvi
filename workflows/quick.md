@@ -107,7 +107,7 @@ Agent(
 )
 ```
 
-With cognitive integration: executor applies base layer checks per-task (see execute-plan.md).
+With cognitive integration: executor applies base layer checks per-task (agents/anvi-executor.md).
 Do NOT update ROADMAP.md (quick tasks are separate from planned phases).
 </step>
 
