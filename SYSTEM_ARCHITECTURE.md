@@ -143,7 +143,7 @@ Complete structural map of the cognitive operating system.
          │ agents are spawned by
          ▼
 ╔══════════════════════════════════════════════════════════════════════╗
-║                    WORKFLOW LAYER (52 workflows)                     ║
+║                    WORKFLOW LAYER (51 workflows)                     ║
 ║                                                                      ║
 ║  ┌─ Cognitive (Anvi-native) ────────────────────────────────────┐    ║
 ║  │  debug  rq  lens                                             │    ║
@@ -155,8 +155,7 @@ Complete structural map of the cognitive operating system.
 ║  │  plan-milestone-gaps                                         │    ║
 ║  └──────────────────────────────────────────────────────────────┘    ║
 ║  ┌─ Execution ──────────────────────────────────────────────────┐    ║
-║  │  execute-phase  execute-plan  do  quick  fast                │    ║
-║  │  autonomous                                                  │    ║
+║  │  execute-phase  do  quick  fast  autonomous                  │    ║
 ║  └──────────────────────────────────────────────────────────────┘    ║
 ║  ┌─ Verification ───────────────────────────────────────────────┐    ║
 ║  │  verify-work      verify-phase    add-tests  audit-uat       │    ║
