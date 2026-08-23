@@ -95,7 +95,8 @@ ok(iLive !== -1 && iPos !== -1 && iLive < iPos,
 const liveBlock = orient.slice(iLive, iPos);
 ok(/rather than omitting/.test(liveBlock),
    '/anvi:orient is told to REPORT an unavailable live source rather than omit it');
-const renderBlock = orient.slice(orient.indexOf('<step name="render">'));
+const iRender = orient.indexOf('<step name="render">');
+const renderBlock = orient.slice(iRender, orient.indexOf('</step>', iRender));
 ok(/unavailable/.test(renderBlock),
    'the rendered map has a place to say a live source was unavailable');
 
