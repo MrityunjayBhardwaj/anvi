@@ -19,20 +19,73 @@ Orient first. Then act with clarity.
 
 <process>
 
+<step name="live_state">
+**What has changed while I was not looking?**
+
+This runs FIRST, and it is not optional. `PROJECT_MANAGEMENT.md` §11 ① is explicit
+about why: *concurrent sessions are real, and a handoff note froze when it was written.*
+Every source below is live; none of them is a note.
+
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+
+git branch --show-current                 # which branch is this tree actually on?
+git status --porcelain                    # uncommitted work, including someone else's
+gh pr list --state open                   # PRs opened or left open by another session
+gh issue list --state open --limit 20     # what is filed and still standing
+```
+
+Read the board last, because it is the surface a human is most likely to have moved:
+
+```bash
+gh project item-list <N> --owner <OWNER> --limit 300 --format json
+```
+
+Projection is one-way (§10, and invariant 8). The board is **read** here and never
+written back from working state.
+
+If `gh` is unavailable, unauthenticated, or the repo has no board, say so in the output
+rather than omitting the line. A source that silently reports nothing is
+indistinguishable from a source that reports "nothing to report" — and only one of those
+is information.
+
+Output:
+```
+Branch:  {branch} {clean | N uncommitted}
+PRs:     {open PRs, or "none"}
+Issues:  {count} open — {the ones touching current work}
+Board:   {counts by status, or "unavailable: {reason}"}
+```
+</step>
+
 <step name="position">
 **Where am I?**
 
 Read current context to determine position:
 
+The planning tree's location is **resolved, never spelled** (invariant 2) — a project
+on the legacy layout keeps its documents in `.planning/`, and a spelled path silently
+misses every one of them:
+
+```bash
+PM="$(node "$CLI_PATH" planning-root --raw)"
+```
+
 ```
 Sources (check in order):
 1. $ARGUMENTS — user specified a focus area
-2. .anvi/project_management/STATE.md — current phase, plan, task
-3. .anvi/project_management/debug/*.md — active debug sessions
-4. .anvi/project_management/.continue-here.md — resuming from pause
-5. git log --oneline -3 — recent activity
-6. Current conversation context — what we've been discussing
+2. $PM/STATE.md — current phase, plan, task
+3. $PM/debug/*.md — active debug sessions
+4. $PM/.continue-here.md — resuming from pause (written by /anvi:pause-work
+   through the same resolver, so read it through the resolver too)
+5. Live state from the step above — branch, PRs, issues, board
+6. git log --oneline -3 — recent activity
+7. Current conversation context — what we've been discussing
 ```
+
+Sources 2–4 are frequently absent, and that is a normal state rather than an error: a
+project that has never run a phase has no `STATE.md`. Absent is not the same as unread —
+if the resolver announced a legacy tree, say which tree was consulted.
 
 Output:
 ```
@@ -191,6 +244,14 @@ Format:
  Position:  {where you are}
  Activity:  {what you're doing}
  Lens:      {active} + {sister}     Recover: {status}
+
+ ── Live state ─────────────────────────────────
+
+ Branch:    {branch} {clean | N uncommitted}
+ PRs:       {open PRs, or "none"}
+ Issues:    {count} open — {relevant ones}
+ Board:     {counts by status, or "unavailable: {reason}"}
+ Tree:      {resolved planning root, and whether it is the legacy one}
 
  ── Grounding ─────────────────────────────────
 
@@ -375,6 +436,9 @@ Format:
 </examples>
 
 <success_criteria>
+- [ ] Live state read FIRST: branch, open PRs, open issues, board (§11 ①)
+- [ ] An unavailable live source is REPORTED as unavailable, never omitted
+- [ ] Planning paths resolved via `planning-root`, never spelled
 - [ ] Position detected from context
 - [ ] Active lens and recover status shown
 - [ ] Grounding status checked (REF coverage, staleness, hotspots)
