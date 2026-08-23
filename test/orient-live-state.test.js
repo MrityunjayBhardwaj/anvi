@@ -121,5 +121,32 @@ if (/\.continue-here\.md/.test(orient)) {
      'orient reads `.continue-here.md` from the resolved tree, the way pause-work writes it');
 }
 
+// ── the board number is derived, never pasted ──────────────────────────────
+// The board read shipped first as `gh project item-list <N> --owner <OWNER>`: the one
+// instruction in the step an agent could not execute, and an invitation to paste an id
+// from a previous session's notes — the exact habit the board work exists to remove.
+// A board is linked to its repo, so the repo can be asked which board is its own.
+ok(!/item-list <N>|--owner <OWNER>/.test(orient),
+   'the board read has no placeholder id left to be filled in by hand');
+ok(/projectsV2/.test(liveBlock),
+   'the board number is derived from the repository, not pasted');
+
+// ── the variable is defined in the block that uses it ──────────────────────
+// Each fenced block is run as its own shell; CLI_PATH was set in the live_state block and
+// used in the position block, where it would have been empty.
+const posBlock = orient.slice(iPos, orient.indexOf('<step name="lens_compass">'));
+ok(!/planning-root/.test(posBlock) || /CLI_PATH=/.test(posBlock),
+   'the block that runs `planning-root` also defines CLI_PATH');
+
+// ── the worked examples show what the criteria demand ──────────────────────
+// Three example maps predated the Live state section and rendered output the success
+// criteria now reject. Documentation showing non-conforming output teaches the old shape.
+const examples = orient.slice(orient.indexOf('<examples>'), orient.indexOf('</examples>'));
+const lensLines = (examples.match(/^ Lens:/gm) || []).length;
+const liveLines = (examples.match(/── Live state ──/g) || []).length;
+ok(lensLines >= 3, `the examples section parses to the known example maps (got ${lensLines})`);
+ok(lensLines === liveLines,
+   `every worked example shows live state (${lensLines} maps, ${liveLines} with live state)`);
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} orient-live-state: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

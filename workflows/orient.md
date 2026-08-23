@@ -27,19 +27,32 @@ about why: *concurrent sessions are real, and a handoff note froze when it was w
 Every source below is live; none of them is a note.
 
 ```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-
 git branch --show-current                 # which branch is this tree actually on?
 git status --porcelain                    # uncommitted work, including someone else's
 gh pr list --state open                   # PRs opened or left open by another session
 gh issue list --state open --limit 20     # what is filed and still standing
 ```
 
-Read the board last, because it is the surface a human is most likely to have moved:
+Read the board last, because it is the surface a human is most likely to have moved.
+**Derive its number from the repository — never paste one.** A board is linked to its
+repo (§10), so the repo can be asked which board is its own; a number carried over from
+a previous session's notes goes stale silently and cannot be told from a correct one:
 
 ```bash
-gh project item-list <N> --owner <OWNER> --limit 300 --format json
+read -r OWNER REPO <<<"$(gh repo view --json owner,name \
+  --jq '.owner.login + " " + .name')"
+
+BOARD=$(gh api graphql -f owner="$OWNER" -f name="$REPO" -f query='
+  query($owner:String!,$name:String!){
+    repository(owner:$owner,name:$name){
+      projectsV2(first:10){ nodes { number title } }
+    }
+  }' --jq '.data.repository.projectsV2.nodes[0].number')
+
+gh project item-list "$BOARD" --owner "$OWNER" --limit 300 --format json
 ```
+
+If the repo has no linked board, `$BOARD` is empty — report that, do not guess a number.
 
 Projection is one-way (§10, and invariant 8). The board is **read** here and never
 written back from working state.
@@ -68,6 +81,7 @@ on the legacy layout keeps its documents in `.planning/`, and a spelled path sil
 misses every one of them:
 
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PM="$(node "$CLI_PATH" planning-root --raw)"
 ```
 
@@ -308,6 +322,14 @@ Format:
  Activity:  debugging (1st attempt)
  Lens:      DIAGNOSE + DESIGN (sister)   Recover: dormant
 
+ ── Live state ─────────────────────────────────
+
+ Branch:    fix/canvas-overflow — 2 uncommitted
+ PRs:       none
+ Issues:    3 open — #41 touches this file
+ Board:     Todo 5 · In Progress 1 · Done 12
+ Tree:      .anvi/project_management
+
  ── Landscape ──────────────────────────────────────
 
  KNOWN:
@@ -349,6 +371,14 @@ Format:
  Position:  Phase 3, Plan 1 — JWT auth middleware
  Activity:  executing
  Lens:      DESIGN (active)              Recover: dormant
+
+ ── Live state ─────────────────────────────────
+
+ Branch:    feat/jwt-auth — clean
+ PRs:       #58 open (another session)
+ Issues:    7 open — #52 is this phase
+ Board:     unavailable: gh not authenticated
+ Tree:      .planning (legacy — migrate with `anvi update`)
 
  ── Landscape ──────────────────────────────────────
 
@@ -396,6 +426,14 @@ Format:
  Position:  Debugging — WebSocket disconnect on deploy
  Activity:  debugging (3rd attempt)
  Lens:      DIAGNOSE                     Recover: ⚠ ACTIVE
+
+ ── Live state ─────────────────────────────────
+
+ Branch:    main — clean
+ PRs:       none
+ Issues:    2 open
+ Board:     Todo 3 · In Progress 0 · Done 9
+ Tree:      .anvi/project_management
 
  ⚠ RECOVER TRIGGERED — 3 failed attempts
    Attempt 1: increased timeout → still disconnects
