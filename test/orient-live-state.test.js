@@ -86,8 +86,18 @@ ok(iLive !== -1 && iPos !== -1 && iLive < iPos,
 // ── an unavailable source must announce itself ─────────────────────────────
 // `gh` can be missing, unauthenticated, or pointed at a repo with no board. A source that
 // silently reports nothing cannot be told from one that reports "nothing to report".
-ok(/unavailable/.test(orient),
-   '/anvi:orient is told to report an unavailable live source rather than omit it');
+//
+// ⚠ This was written as `/unavailable/.test(orient)` and did NOT witness its own claim.
+// The word also appears in the render block's `"unavailable: {reason}"` placeholder, so
+// deleting the instruction left the assertion green — the fixture sat outside the region
+// the mutation changed. Falsification caught it. Two claims live here, not one, so each
+// is now scoped to the region that actually carries it and mutated separately.
+const liveBlock = orient.slice(iLive, iPos);
+ok(/rather than omitting/.test(liveBlock),
+   '/anvi:orient is told to REPORT an unavailable live source rather than omit it');
+const renderBlock = orient.slice(orient.indexOf('<step name="render">'));
+ok(/unavailable/.test(renderBlock),
+   'the rendered map has a place to say a live source was unavailable');
 
 // ── the planning tree is resolved, never spelled (invariant 2) ─────────────
 ok(/planning-root --raw/.test(orient),
