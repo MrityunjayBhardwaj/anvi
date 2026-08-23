@@ -128,7 +128,7 @@ if (/\.continue-here\.md/.test(orient)) {
 // A board is linked to its repo, so the repo can be asked which board is its own.
 ok(!/item-list <N>|--owner <OWNER>/.test(orient),
    'the board read has no placeholder id left to be filled in by hand');
-ok(/projectsV2/.test(liveBlock),
+ok(/projectsV2\s*\(/.test(liveBlock),
    'the board number is derived from the repository, not pasted');
 
 // ── the variable is defined in the block that uses it ──────────────────────
