@@ -172,6 +172,23 @@ function applyEdit(m) {
 const matches = (expect, msg) =>
   expect instanceof RegExp ? expect.test(msg) : msg.includes(String(expect));
 
+// ── the key coverage is counted on ───────────────────────────────────────────
+// An assertion message routinely carries the value it observed — `(got 3)` — and that
+// value is precisely what CHANGES when the assertion reddens. So the red text and the
+// control text are different strings for the same assertion, exact matching never
+// pairs them, and every such assertion is reported as never-exercised.
+//
+// Found by this tool run against itself: it listed `a dirty tree is REFUSED with exit 2
+// (got 2)` as never reddened in the same report that graded the mutation reddening it
+// as WITNESSED. Two statements about one assertion that cannot both be true — which is
+// the whole failure shape this tool exists to stop, arriving in the tool.
+//
+// Parentheticals are collapsed rather than stripped, so `x (got 1)` and `x (got 2)` pair
+// while `reads "a" (got 1)` and `reads "b" (got 1)` still do not. Where the collapse DOES
+// make two distinct assertions identical the count is not decidable, and the report says
+// so rather than crediting both.
+const coverageKey = msg => msg.replace(/\([^)]*\)/g, '(…)').trim();
+
 // ── grading one mutation ─────────────────────────────────────────────────────
 function grade(m, run) {
   // A mutation that crashes the test prints no ✗ at all. Counting reds would call
@@ -291,7 +308,7 @@ function main() {
 
     const run = runTest(spec.test);
     const g = grade(m, run);
-    run.red.forEach(a => everRed.add(a.msg));
+    run.red.forEach(a => everRed.add(coverageKey(a.msg)));
     results.push({ m, ...g, run });
 
     if (verbose) {
@@ -322,12 +339,23 @@ function main() {
   // The answer to the enumeration gap: assertions no mutation ever reddened. A matrix
   // written from the author's model of the code rather than from its branches leaves
   // exactly this trace, and it is derivable from data already in hand.
-  const never = controlBefore.assertions.map(a => a.msg).filter(msg => !everRed.has(msg));
+  const never = controlBefore.assertions.map(a => a.msg).filter(msg => !everRed.has(coverageKey(msg)));
   console.log(`\n— coverage — ${controlBefore.total - never.length}/${controlBefore.total} assertions were reddened by some mutation`);
   if (never.length) {
     console.log('  never reddened (no mutation in this matrix exercises these):');
     never.forEach(msg => console.log(`    · ${msg}`));
   }
+  // Where two assertions collapse to one key, "was it reddened" has no answer for either.
+  const byKey = new Map();
+  for (const a of controlBefore.assertions) {
+    const k = coverageKey(a.msg);
+    if (!byKey.has(k)) byKey.set(k, new Set());
+    byKey.get(k).add(a.msg);
+  }
+  const collided = [...byKey.values()].filter(v => v.size > 1);
+  if (collided.length)
+    console.log(`  ⚠ ${collided.length} group(s) of assertions differ only inside parentheses — ` +
+                `coverage cannot tell them apart, so those rows are not decidable`);
 
   // ── the verdict on the instrument itself ──────────────────────────────────
   const problems = instrumentProblems(controlBefore, controlAfter);
@@ -348,6 +376,6 @@ function main() {
   process.exit(0);
 }
 
-module.exports = { parseRun, applyEdit, grade, matches, instrumentProblems, ASSERTION_RE, SUMMARY_RE };
+module.exports = { parseRun, applyEdit, grade, matches, instrumentProblems, coverageKey, ASSERTION_RE, SUMMARY_RE };
 
 if (require.main === module) main();

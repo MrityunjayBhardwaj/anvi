@@ -48,7 +48,7 @@ const path = require('path');
 const s = require(path.join(__dirname, '..', 'subject.js'));
 let pass = 0, fail = 0;
 const ok = (c, m) => c ? (pass++, console.log(\`  ✓ \${m}\`)) : (fail++, console.log(\`  ✗ \${m}\`));
-ok(s.LIMIT === 5, 'the limit is five');
+ok(s.LIMIT === 5, \`the limit is five (got \${s.LIMIT})\`);
 ok(s.NAME === 'alpha', 'the name is alpha');
 ok(s.cap(9) === 5, 'cap clamps to the limit');
 console.log(\`\\n\${fail === 0 ? '✓' : '✗'} probe: \${pass} passed, \${fail} failed\`);
@@ -155,6 +155,20 @@ ok(/1\/3 assertions were reddened/.test(good.out),
 ok(/· the limit is five/.test(good.out) && /· cap clamps to the limit/.test(good.out),
    'and it names the assertions the matrix never reached, by their own text');
 
+// ⚠ THIS IS THE FLAW THE TOOL FOUND IN ITSELF, and it is the reason the section above
+// can be trusted. An assertion message routinely carries the value it observed —
+// `(got 2)` — and that value is what CHANGES when the assertion goes red. Matching red
+// text against control text therefore never pairs them, so every such assertion was
+// listed as never-exercised. The tool's first self-run graded a mutation WITNESSED and
+// listed the assertion it reddened as never reddened, in the same report.
+{
+  const { coverageKey } = require(FALSIFY);
+  ok(coverageKey('exits 2 (got 2)') === coverageKey('exits 2 (got 1)'),
+     'two runs of one assertion pair even though the value inside the parentheses differs');
+  ok(coverageKey('reads "a" (got 1)') !== coverageKey('reads "b" (got 1)'),
+     'but two different assertions do not pair just because their parentheses match');
+}
+
 // ── mode 5: a mutation that truncates its own subject ───────────────────────
 // The recorded instance emptied the file (`open(p,"w").write(open(p).read()…)` evaluates
 // the truncating open FIRST) and the matrix reported nine entangled assertions — which
@@ -208,6 +222,10 @@ ok(/2 red, ceiling 1/.test(broad.out),
    'and the breadth is 2 — the two assertions that read LIMIT');
 ok(!/3 red/.test(broad.out),
    'NOT 3: the probe\'s own `✗ probe: 1 passed, 2 failed` summary is excluded from the count');
+ok(/2\/3 assertions were reddened/.test(broad.out),
+   'the coverage count credits both assertions this mutation reddened');
+ok(!/· the limit is five/.test(broad.out),
+   'including the one whose message carries the value it observed — it reads `(got 6)` when red, not `(got 5)`');
 
 {
   const { parseRun } = require(FALSIFY);
