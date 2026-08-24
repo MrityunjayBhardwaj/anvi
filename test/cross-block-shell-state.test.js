@@ -66,12 +66,19 @@ const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++
 // report on it.
 const DIRS = ['workflows', 'agents', 'skills'];
 
+// The root documents are in the corpus too, and one of them is the reason: the design
+// doc's worked example of this very convention showed the broken form. A document that
+// TEACHES a pattern is the last place it should survive in, and it is the first place a
+// reader copies from. Widening cost nothing — it added exactly one site, that one.
+
 const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => {
   const p = path.join(d, e.name);
   return e.isDirectory() ? walk(p) : (e.isFile() && p.endsWith('.md') ? [p] : []);
 });
 
-const files = DIRS.flatMap(d => walk(path.join(ROOT, d))).sort();
+const files = DIRS.flatMap(d => walk(path.join(ROOT, d)))
+  .concat(fs.readdirSync(ROOT).filter(f => f.endsWith('.md')).map(f => path.join(ROOT, f)))
+  .sort();
 ok(files.length >= 100, `the corpus resolves to a plausible size (got ${files.length} file(s))`);
 
 // ── fences ───────────────────────────────────────────────────────────────────

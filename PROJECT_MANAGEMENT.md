@@ -105,6 +105,7 @@ will see it.
 **In workflows and agents** — ask, do not assume (`bin/lib/commands.cjs:53`):
 
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"   # every block defines what it uses
 PM=$(node "$CLI_PATH" planning-root --raw)     # → .anvi/project_management
 ls "$PM"/phases/
 ```
