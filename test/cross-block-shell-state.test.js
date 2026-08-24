@@ -119,7 +119,27 @@ const code = body => body.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
 // pseudo-code blocks.
 const SHELL_TAG = /^(bash|sh|shell|zsh)$/;
 const ASSIGN_LINE = /^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_]*=/m;
-const isShell = b => SHELL_TAG.test(b.lang) || (b.lang === '' && ASSIGN_LINE.test(b.body.join('\n')));
+
+// ⚠ THAT RULE ALONE IS CIRCULAR, AND THE CIRCLE IS EXACTLY THE DEFECT (issue #353).
+// The bug is a block that USES a variable without ASSIGNING it. So deciding whether to
+// scan an untagged fence by looking for an assignment decides *whether to check for a
+// missing assignment* by *looking for an assignment* — a block that has the defect and
+// carries no other assignment is filed as prose BECAUSE it has the defect. Measured: a
+// new untagged fence whose whole content is `node "$CLI_PATH" planning-root --raw` left
+// all assertions green, against a witnessed control in the same run.
+//
+// So classification runs in two passes, and the order is load-bearing rather than
+// incidental:
+//
+//   seed  — the rule above: tagged, or untagged with an assignment line.
+//   names — which names are shell state, derived FROM THE SEED ONLY.
+//   final — the seed, plus any untagged fence that uses one of those names.
+//
+// `names` must come off the seed. Deriving it from the final set would be the circle
+// again, one level out. The fixpoint is asserted below rather than argued: re-deriving
+// from the final set must produce the same names, and if it ever does not, the guard
+// says so instead of silently depending on which pass ran first.
+const isShellSeed = b => SHELL_TAG.test(b.lang) || (b.lang === '' && ASSIGN_LINE.test(b.body.join('\n')));
 
 // Names the surrounding environment provides — never state a block was expected to set.
 const AMBIENT = new Set(['HOME', 'PATH', 'PWD', 'USER', 'SHELL', 'ARGUMENTS', 'TMPDIR', 'EDITOR',
@@ -135,6 +155,44 @@ for (const f of files) {
     blocks.push({ ...b, file: rel });
   }
 }
+// Pass 1 — the seed, and the names it establishes. `shellVarsFrom` is a function so the
+// same derivation can be re-run against the final set for the fixpoint check.
+const seedBlocks = blocks.filter(isShellSeed);
+const namesIn = bs => {
+  const every = new Set();
+  for (const b of blocks) for (const v of NAMES(code(b.body.join('\n')))) every.add(v);
+  return new Set([...every].filter(v =>
+    !AMBIENT.has(v) && bs.some(b => assigns(code(b.body.join('\n')), v))));
+};
+const SEED_VARS = namesIn(seedBlocks);
+
+// Pass 2 — an untagged fence joins the shell set when it BOTH uses an established shell
+// name AND contains a line that starts with a command. Both conditions are required, and
+// the second one was added because the first alone is measurably wrong.
+//
+// ⚠ "USES A SHELL NAME" ALONE FLAGS EIGHT PROSE BLOCKS AND ZERO REAL ONES. Measured, not
+// predicted: it reddens an output template in `skills/anvi-init/SKILL.md` that shows the
+// user `[absolute $STORE_DIR]`, and six `Agent(prompt = …)` templates that mention
+// `$PM/STATE.md` inside a quoted string. Those are read by a model, not run by a shell,
+// and flagging them makes the guard unpassable for a reason unrelated to the bug — the
+// opposite error the header warns about, arrived at from the other side.
+//
+// The line-initial command is what separates a block someone RUNS from a block someone
+// READS. It is an allowlist, which is an enumeration, and enumerations from the author's
+// model are exactly what this repo keeps getting wrong — so note the direction it fails
+// in: a command missing from this list means an untagged fence is not scanned, which is
+// the behaviour before this change. A wrong entry would make the guard unpassable. The
+// list errs toward silence, never toward noise.
+//
+// Measured across the corpus: exactly one untagged fence contains a line-initial command
+// (`STORAGE.md`, `node scripts/bind-store.js --apply <dir>`), and it uses no shell-state
+// name, so it stays prose on the first condition. The two conditions are independent
+// enough to be worth both.
+const CMD_LINE = /^\s*(node|git|gh|cd|ls|cat|mkdir|rm|cp|mv|echo|bash|sh|zsh|npm|npx|jq|grep|sed|awk|find|readlink|pwd|source|export|chmod|ln|touch|diff|wc|head|tail|python3?)\b/m;
+const usesSeedVar = b => [...NAMES(code(b.body.join('\n')))].some(v => SEED_VARS.has(v));
+const looksRun = b => CMD_LINE.test(code(b.body.join('\n')));
+const isShell = b => isShellSeed(b) || (b.lang === '' && usesSeedVar(b) && looksRun(b));
+
 const shellBlocks = blocks.filter(isShell);
 const proseBlocks = blocks.filter(b => !isShell(b));
 
@@ -142,12 +200,22 @@ ok(blocks.length > 100, `the fence matcher finds blocks at all (got ${blocks.len
 ok(shellBlocks.length > 50, `shell fences resolve to a plausible population (got ${shellBlocks.length} of ${blocks.length})`);
 ok(unclosed === 0, `every fence in the corpus is closed (got ${unclosed} unclosed)`);
 
-// Which names are shell state? Asked of the whole corpus, once — see the header.
+// Which names are shell state? Asked of the whole corpus, once — see the header. Taken
+// from the SEED, for the reason stated where the two passes are defined.
 const everyName = new Set();
 for (const b of blocks) for (const v of NAMES(code(b.body.join('\n')))) everyName.add(v);
-const SHELL_VARS = new Set([...everyName].filter(v =>
-  !AMBIENT.has(v) && shellBlocks.some(b => assigns(code(b.body.join('\n')), v))));
+const SHELL_VARS = SEED_VARS;
 const PLACEHOLDERS = [...everyName].filter(v => !AMBIENT.has(v) && !SHELL_VARS.has(v)).sort();
+
+// The fixpoint, asserted rather than reasoned about. A pass-2 block has no line-initial
+// assignment — that is what kept it out of the seed — but `assigns` is deliberately wider
+// than `ASSIGN_LINE` (it accepts `;`, `&&`, `for`, `read`), so a mid-line assignment could
+// in principle add a name on the second pass. If that ever happens the two passes stop
+// agreeing and the classification depends on evaluation order, which is the thing this
+// structure exists to remove.
+const refined = namesIn(shellBlocks);
+ok(refined.size === SHELL_VARS.size && [...refined].every(v => SHELL_VARS.has(v)),
+   `the shell-name set is a fixpoint — re-deriving it from the widened block set adds nothing (seed ${SHELL_VARS.size}, refined ${refined.size})`);
 
 ok(SHELL_VARS.size > 0, `some names are assigned by a shell fence (got ${SHELL_VARS.size}: ${[...SHELL_VARS].sort().join(', ')})`);
 ok(PLACEHOLDERS.length > 0, `some names are assigned nowhere (got ${PLACEHOLDERS.length}) — proves the rule discriminates rather than merely finding nothing`);
@@ -210,11 +278,34 @@ if (violations.length > 60) console.log(`      … and ${violations.length - 60}
 // CLI_PATH assignment — a block that exists only to hand shell state to shells that
 // cannot receive it. What the tag is allowed to keep doing is unaffected.
 console.log('\n— the dead half of <cli_resolution> is retired —');
-const DEAD = /<cli_resolution>\s*```(?:bash)?\s*CLI_PATH="[^"\n]*"\s*```\s*<\/cli_resolution>/;
+// ⚠ THE VALUE'S QUOTING IS NOT PART OF THE DEFECT (issue #352). The first version of this
+// matcher required the double-quoted spelling, because that is the spelling that happened
+// to be in the tree. Reintroducing the very block this change removes, written unquoted,
+// left all assertions green — an absence assertion answering about one spelling of the
+// thing it is meant to forbid. Unquoted is what gets written when the pattern is copied
+// from memory rather than from a file, which is the situation the retirement addresses.
+const DEAD = /<cli_resolution>\s*```(?:bash)?\s*CLI_PATH=(?:"[^"\n]*"|'[^'\n]*'|[^\s`'"][^\s`\n]*)\s*```\s*<\/cli_resolution>/;
 const dead = files.filter(f => DEAD.test(fs.readFileSync(f, 'utf8')));
 ok(dead.length === 0,
    `no <cli_resolution> exists only to set CLI_PATH for other shells (got ${dead.length})`);
 for (const f of dead) console.log(`      ${path.relative(ROOT, f)}`);
+
+// The matcher is pinned against FIXTURES, not only against the corpus. A corpus with no
+// instances cannot tell "the rule holds" from "the rule matches nothing any more" — the
+// exact failure above. These three are the same dead block in the three spellings a
+// person writes, so each is named and each can redden on its own.
+const DEAD_FIXTURES = {
+  'double-quoted': '<cli_resolution>\n```bash\nCLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"\n```\n</cli_resolution>',
+  'single-quoted': "<cli_resolution>\n```bash\nCLI_PATH='$HOME/.claude/anvi/bin/anvi-tools.cjs'\n```\n</cli_resolution>",
+  'unquoted': '<cli_resolution>\n```bash\nCLI_PATH=$HOME/.claude/anvi/bin/anvi-tools.cjs\n```\n</cli_resolution>',
+};
+for (const [spelling, fixture] of Object.entries(DEAD_FIXTURES))
+  ok(DEAD.test(fixture), `a dead <cli_resolution> is recognised when its value is ${spelling}`);
+
+// And the other direction, so the matcher cannot be widened into flagging the live ones:
+// a block that also resolves PM is doing real work and must not read as dead.
+ok(!DEAD.test('<cli_resolution>\n```bash\nCLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"\nPM="$(node "$CLI_PATH" planning-root --raw)"\n```\n</cli_resolution>'),
+   'a <cli_resolution> that also resolves PM is NOT dead — the matcher stays narrow enough to leave working blocks alone');
 
 // The surviving uses are asserted to still exist, both of them by kind. An assertion that
 // something is ABSENT goes green the moment the matcher breaks; pairing it with one that
