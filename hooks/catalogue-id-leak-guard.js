@@ -119,6 +119,42 @@ function projectCatalogue(cwd) {
   return { ids, refused: false, notice: null };
 }
 
+// ── Where GitHub renders CODE rather than prose (#346) ───────────────────────
+// A closing keyword inside a code span is not prose, so GitHub's linker never registers
+// it: the body reads as though it closes an issue, the issue stays OPEN, and the board
+// item that moves on CLOSURE stays put. One mistake, two downstream failures, no error
+// anywhere. Measured in this repo on one day with the same merge method — the keyword
+// written as prose registered its reference; the identical keyword wrapped in a span
+// returned nothing.
+//
+// Returns a boolean mask over `text` so a match can be asked whether it lands in code.
+// A mask rather than a stripped copy, deliberately: the negation check strips these same
+// characters to normalise emphasis, which DESTROYS exactly the information this needs.
+// Two questions of one text, and only one of them may throw the marks away.
+// True when any part of [start, end) is rendered as code. Asked over the whole matched
+// text rather than one position: a negation can sit outside the span that swallows the
+// keyword it governs.
+function maskedAnywhere(mask, start, end) {
+  for (let i = start; i < end && i < mask.length; i++) if (mask[i]) return true;
+  return false;
+}
+
+function codeMask(text) {
+  const mask = new Array(text.length).fill(false);
+  const mark = (start, end) => { for (let i = start; i < end && i < mask.length; i++) mask[i] = true; };
+  // Fences first. Finding inline spans first would pair one fence's backticks with the
+  // next fence's, and swallow the prose between two unrelated blocks.
+  const fenced = /(^|\n)[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|$)/g;
+  let m;
+  while ((m = fenced.exec(text))) mark(m.index, m.index + m[0].length);
+  const inline = /(`+)[\s\S]*?\1/g;
+  while ((m = inline.exec(text))) {
+    if (mask[m.index]) continue;                  // already inside a fence
+    mark(m.index, m.index + m[0].length);
+  }
+  return mask;
+}
+
 // Pull the text of any file referenced by --body-file / -F / --body-file=… / -m FILE,
 // so a body authored outside the command string is scanned too. Best-effort: an
 // unreadable or inline (`-m "literal"`) arg contributes nothing extra — the literal is
@@ -277,7 +313,13 @@ process.stdin.on('end', () => {
       : isCommit ? 'this commit message' : null;
     let closingFinding = '';
     if (closingSurface) {
-      const prose = scanned.replace(/[*_~`]/g, '').replace(/[ \t]+/g, ' ');
+      // INDEX-PRESERVING: each stripped mark becomes a space rather than vanishing, so a
+      // match found here can be located in `scanned` and asked whether it sits in code.
+      // Deleting them instead — which this did — makes the two lengths diverge and the
+      // question unanswerable, which is why a negated keyword inside a span used to be
+      // reported as a closure that would happen. Emphasis still normalises: `_not_`
+      // becomes ` not `, which is what the boundary needed in the first place.
+      const prose = scanned.replace(/[*_~`]/g, ' ');
       // A keyword adjacent to a reference — what the parser matches, and the
       // DENOMINATOR. A count of negated hits alone cannot be read: zero found out of
       // zero examined is a body with no closures in it, and zero out of nine is a
@@ -291,9 +333,30 @@ process.stdin.on('end', () => {
       // separately: in "not a full fix, but closes #12" the negation governs the
       // clause before the contrast and the closure is genuinely intended.
       const NEG = String.raw`(?:\b(?:not|never|nor|no longer)\b|\b\w+n['’]t\b|\bcannot\b)`;
+      // ── Which of those references can link at all (#346) ────────────────────
+      // Asked of the ORIGINAL text, not `prose`: the strip above removes the very
+      // backticks that decide this. A keyword in a code span is not prose, so the
+      // linker never sees it.
+      const mask = codeMask(scanned);
+      const raw = [...scanned.matchAll(new RegExp(String.raw`\b${KEYWORD}\b:?\s+(${REF})`, 'gi'))];
+      const linkable = new Set(raw.filter(m => !mask[m.index]).map(m => m[1]));
+      const spanned = raw.filter(m => mask[m.index]);
+      // Only a reference with NO working occurrence anywhere in the text. A body that
+      // closes correctly and also quotes the construct — this project's own writing
+      // about the defect — is silent, which is the false positive this shape avoids.
+      const unlinkable = spanned.filter(m => !linkable.has(m[1]));
+      const unlinkableRefs = new Set(unlinkable.map(m => m[1]));
+
       const negated = [...prose.matchAll(
         new RegExp(String.raw`${NEG}([^.;:!?\n]{0,32}?)\b${KEYWORD}\b:?\s+(${REF})`, 'gi'))]
-        .filter(m => !/\bbut\b/i.test(m[1]));
+        .filter(m => !/\bbut\b/i.test(m[1]))
+        // One rule, applied to both halves: the parser reads prose, and code is not
+        // prose. A negated keyword sitting in a span closes nothing, so warning that it
+        // "WILL close" would be a second statement about the same reference that
+        // contradicts the first. Asked per OCCURRENCE, not per reference — a body may
+        // close correctly in prose and quote the construct elsewhere.
+        .filter(m => !maskedAnywhere(mask, m.index, m.index + m[0].length))
+        .filter(m => !unlinkableRefs.has(m[2]));
       if (negated.length) {
         const quoted = [...new Set(negated.map(m => m[0].trim()))].map(s => `"${s}"`).join(', ');
         const refs = [...new Set(negated.map(m => m[2]))].join(', ');
@@ -307,6 +370,23 @@ process.stdin.on('end', () => {
           `→ Phrase it so the keyword never touches the number — "this is not the answer ` +
           `to ${refs.split(', ')[0]}". Rewording the negation is not enough; the keyword ` +
           `has to move away from the reference.`;
+      }
+
+      if (unlinkable.length) {
+        const quoted = [...new Set(unlinkable.map(m => m[0].trim()))].map(t => `"${t}"`).join(', ');
+        const refs = [...new Set(unlinkable.map(m => m[1]))].join(', ');
+        const spanFinding =
+          `CLOSING-KEYWORD CHECK: ${closingSurface} writes ${quoted} as CODE, not prose. ` +
+          `GitHub's linker reads prose, so this will NOT close ${refs} — the issue stays ` +
+          `open, and any board automation that fires on closure stays put with it.\n` +
+          `Examined ${examined.length} closing reference${examined.length === 1 ? '' : 's'} ` +
+          `in this text; ${unlinkable.length} cannot link.\n` +
+          `→ Write the keyword as prose. Backticking an identifier is the right habit for ` +
+          `shas, paths and field names, which is exactly why this one slips through — a ` +
+          `closing keyword is the only token whose meaning depends on NOT being code.\n` +
+          `The tell afterwards is an empty closingIssuesReferences on a body that plainly ` +
+          `says it closes something.`;
+        closingFinding = closingFinding ? `${closingFinding}\n\n${spanFinding}` : spanFinding;
       }
     }
 
