@@ -255,6 +255,19 @@ ok(proseBlocks.some(b => !b.lang && /Agent\(/.test(b.body.join('\n'))),
 ok(shellBlocks.some(b => b.file === 'agents/anvi-debugger.md'),
    'agents/anvi-debugger.md contributes a shell fence — named because it is untagged AND assigns CLI_PATH zero times, so it is the site both halves of a naive rule drop');
 
+// The classifier pinned against FIXTURES, both directions, for the same reason the
+// retirement matcher is: the corpus currently contains no untagged call template that
+// names a shell variable, so the corpus cannot tell "the exclusion holds" from "the
+// exclusion was deleted". These two can, and they redden independently of what anyone
+// happens to have written in `workflows/`.
+const asBlock = (lang, text) => ({ lang, body: text.split('\n'), file: '<fixture>', start: 0 });
+ok(!isShell(asBlock('', 'Agent(\n  subagent_type="anvi-planner",\n  prompt="read $PM/STATE.md first"\n)')),
+   'an untagged call template naming a shell variable is prose — a keyword argument is not an assignment');
+ok(isShell(asBlock('', 'CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"\nDEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug')),
+   'an untagged fence of real assignments is shell — the exclusion is narrow enough to leave the debugger protocol scanned');
+ok(isShell(asBlock('', 'node "$CLI_PATH" planning-root --raw')),
+   'an untagged fence that only USES a shell variable in command position is shell — the gap this change closes');
+
 // ── nothing may inherit shell state across a fence ───────────────────────
 console.log('\n— every shell block is self-contained —');
 const violations = [];
