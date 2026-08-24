@@ -36,6 +36,15 @@
 // shell variable because twenty other files assign it, and that fact does not stop being
 // true inside the one file that forgot to.
 //
+// ⚠ A CONSEQUENCE OF ASKING IT CORPUS-WIDE, WHICH IS DESIGNED RATHER THAN OVERLOOKED:
+// a name's classification is global, so ONE edit can move many sites. Measured — adding
+// `PHASE=1` to a single fence flips `${PHASE}` from placeholder to shell state for the
+// whole corpus and produces 14 violations in blocks nobody touched. That is the correct
+// answer if `PHASE` really has become shell state, since those fourteen uses really are
+// ambiguous then. But it is an undeclared constraint on the corpus unless it is written
+// down, so: a name may not be a placeholder in one file and a shell variable in another,
+// and the day someone breaks that rule the failure surfaces fourteen files from the edit.
+//
 // `CLI_PATH` reads as the second, so it is passed through verbatim instead of being
 // filled in. A guard for the literal string `CLI_PATH` would be a guard for one name —
 // the very thing #344 criticises about the fix that closed #338 — and the next variable
