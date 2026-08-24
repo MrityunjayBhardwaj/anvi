@@ -52,8 +52,15 @@ git commit -m "{type}: {concise description}"
 NEVER `git add .` or `git add -A`.
 </step>
 
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+
 <step name="log_to_state">
-If `.anvi/project_management/STATE.md` exists and has a "Quick Tasks Completed" table, append:
+If `$PM/STATE.md` exists and has a "Quick Tasks Completed" table, append:
 
 ```
 | fast-{timestamp} | {description} | {date} | {commit-hash} | done | inline |

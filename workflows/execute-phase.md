@@ -57,8 +57,15 @@ If present: execute plans inline with user checkpoints between tasks.
 Otherwise: spawn executor agents (default).
 </step>
 
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+
 <step name="handle_branching">
-Same as GSD: create/checkout branch if configured in .anvi/project_management/config.json.
+Same as GSD: create/checkout branch if configured in `$PM/config.json`.
 </step>
 
 <step name="validate_phase">
@@ -85,7 +92,7 @@ For each wave:
 For each plan:
 ```
 Agent(
-  prompt = "Execute this plan: {plan_path}\n\n<files_to_read>\n- {plan_path}\n- .anvi/project_management/STATE.md\n</files_to_read>",
+  prompt = "Execute this plan: {plan_path}\n\n<files_to_read>\n- {plan_path}\n- $PM/STATE.md\n</files_to_read>",
   subagent_type = "anvi-executor",  // falls back to gsd-executor if not registered
   description = "Execute: {plan_name}"
 )

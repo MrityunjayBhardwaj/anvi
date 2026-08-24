@@ -11,6 +11,7 @@ CLI=~/.claude/anvi/bin/anvi-tools.cjs
 <cli_resolution>
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
 ```
 </cli_resolution>
 
@@ -67,8 +68,8 @@ Agent(
   </cognitive_context>
 
   <files_to_read>
-  - .anvi/project_management/ROADMAP.md
-  - .anvi/project_management/STATE.md
+  - $PM/ROADMAP.md
+  - $PM/STATE.md
   - {CONTEXT.md if exists}
   </files_to_read>
   """,

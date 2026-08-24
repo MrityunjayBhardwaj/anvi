@@ -2,7 +2,13 @@
 
 <process>
 <step name="parse">Extract todo description from $ARGUMENTS or conversation context.</step>
-<step name="create">Write to `.anvi/project_management/todos/pending/{slug}.md`.</step>
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+<step name="create">Write to `$PM/todos/pending/{slug}.md`.</step>
 <step name="commit">
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"

@@ -9,6 +9,12 @@ Agent(subagent_type="anvi-codebase-mapper", description="Map: {focus}", prompt="
 ```
 Fallback to gsd-codebase-mapper.
 </step>
-<step name="collect">Collect outputs to `.anvi/project_management/codebase/`.</step>
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+<step name="collect">Collect outputs to `$PM/codebase/`.</step>
 <step name="commit">Commit codebase analysis.</step>
 </process>

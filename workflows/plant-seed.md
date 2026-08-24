@@ -2,6 +2,12 @@
 
 <process>
 <step name="parse">Extract seed idea and trigger conditions from $ARGUMENTS.</step>
-<step name="create">Write to `.anvi/project_management/seeds/{slug}.md` with trigger conditions.</step>
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+<step name="create">Write to `$PM/seeds/{slug}.md` with trigger conditions.</step>
 <step name="commit">Commit seed file.</step>
 </process>

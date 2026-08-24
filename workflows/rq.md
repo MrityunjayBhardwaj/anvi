@@ -21,13 +21,20 @@ ranks questions by how much uncertainty answering them would collapse.
 
 <process>
 
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+
 <step name="read_context">
 Gather current context from 5 sources:
 
 **1. What are you working on?**
-- `.anvi/project_management/STATE.md` — current phase, plan, task
-- `.anvi/project_management/.continue-here.md` — if resuming
-- Active debug sessions in `.anvi/project_management/debug/`
+- `$PM/STATE.md` — current phase, plan, task
+- `$PM/.continue-here.md` — if resuming
+- Active debug sessions in `$PM/debug/`
 - Recent git log (last 5 commits)
 - $ARGUMENTS if provided (focus area)
 

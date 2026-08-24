@@ -44,7 +44,9 @@ If branching configured: create quick-task branch.
 
 <step name="create_task_directory">
 ```bash
-mkdir -p .anvi/project_management/phases/${quick_dir}
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+mkdir -p "$PM"/phases/${quick_dir}
 ```
 </step>
 
@@ -118,7 +120,7 @@ Spawn verifier to check must_haves.
 </step>
 
 <step name="update_state">
-If `.anvi/project_management/STATE.md` exists, append to "Quick Tasks Completed" table:
+If `$PM/STATE.md` exists, append to "Quick Tasks Completed" table:
 ```
 | {quick_id} | {description} | {date} | {commit} | {status} | {directory} |
 ```

@@ -6,10 +6,17 @@ over `~/.claude/settings.json` `cleanupPeriodDays`.
 
 <process>
 
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+
 <step name="show_current">
 Display current settings from BOTH scopes:
 
-1. Project config — read `.anvi/project_management/config.json` (if present): workflow toggles
+1. Project config — read `$PM/config.json` (if present): workflow toggles
    + model profile.
 
 2. Session retention — read `~/.claude/settings.json` and show `cleanupPeriodDays`
