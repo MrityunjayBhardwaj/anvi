@@ -139,7 +139,22 @@ const ASSIGN_LINE = /^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_]*=/m;
 // again, one level out. The fixpoint is asserted below rather than argued: re-deriving
 // from the final set must produce the same names, and if it ever does not, the guard
 // says so instead of silently depending on which pass ran first.
-const isShellSeed = b => SHELL_TAG.test(b.lang) || (b.lang === '' && ASSIGN_LINE.test(b.body.join('\n')));
+//
+// ⚠ AND A CALL TEMPLATE'S KEYWORD ARGUMENT IS INDISTINGUISHABLE FROM A SHELL ASSIGNMENT.
+// `subagent_type="anvi-ui-researcher",` inside an untagged `Agent(…)` block matches
+// ASSIGN_LINE exactly, so eight pseudo-code fences enter the seed as shell. That is
+// currently harmless only because none of them happens to name a shell variable — the
+// moment an agent prompt quotes `$PM/STATE.md`, a prose template becomes a violation and
+// the guard is unpassable for a reason unrelated to the bug. Found by probing the
+// false-positive direction, where a reddened assertion is the failure rather than the
+// pass.
+//
+// A fence whose line is bare `Identifier(` is a call template being shown, not a command
+// being run. Written as a shape rather than as the literal `Agent`, so the next template
+// helper is covered without an edit.
+const PSEUDO_CALL = /^\s*[A-Za-z_][A-Za-z0-9_]*\(\s*$/m;
+const isPseudo = b => b.lang === '' && PSEUDO_CALL.test(b.body.join('\n'));
+const isShellSeed = b => SHELL_TAG.test(b.lang) || (b.lang === '' && !isPseudo(b) && ASSIGN_LINE.test(b.body.join('\n')));
 
 // Names the surrounding environment provides — never state a block was expected to set.
 const AMBIENT = new Set(['HOME', 'PATH', 'PWD', 'USER', 'SHELL', 'ARGUMENTS', 'TMPDIR', 'EDITOR',
@@ -191,7 +206,7 @@ const SEED_VARS = namesIn(seedBlocks);
 const CMD_LINE = /^\s*(node|git|gh|cd|ls|cat|mkdir|rm|cp|mv|echo|bash|sh|zsh|npm|npx|jq|grep|sed|awk|find|readlink|pwd|source|export|chmod|ln|touch|diff|wc|head|tail|python3?)\b/m;
 const usesSeedVar = b => [...NAMES(code(b.body.join('\n')))].some(v => SEED_VARS.has(v));
 const looksRun = b => CMD_LINE.test(code(b.body.join('\n')));
-const isShell = b => isShellSeed(b) || (b.lang === '' && usesSeedVar(b) && looksRun(b));
+const isShell = b => isShellSeed(b) || (b.lang === '' && !isPseudo(b) && usesSeedVar(b) && looksRun(b));
 
 const shellBlocks = blocks.filter(isShell);
 const proseBlocks = blocks.filter(b => !isShell(b));
