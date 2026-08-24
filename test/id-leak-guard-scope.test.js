@@ -83,6 +83,14 @@ fs.mkdirSync(LOOKALIKE, { recursive: true });
 
 const MSGFILE = path.join(TMP, 'msg.txt');
 
+// Bodies that need REAL newlines — a fence pattern cannot match a literal backslash-n.
+let bodyN = 0;
+const bodyFile = (text) => {
+  const f = path.join(TMP, `body-${bodyN++}.md`);
+  fs.writeFileSync(f, text);
+  return f;
+};
+
 let probeN = 0;
 function fired(command, cwd) {
   const payload = JSON.stringify({
@@ -118,7 +126,13 @@ function context(command, cwd) {
   try { return JSON.parse(r.stdout || '{}').hookSpecificOutput.additionalContext || ''; }
   catch { return ''; }
 }
-const closes = (command, cwd) => /CLOSING-KEYWORD CHECK/.test(context(command, cwd));
+// ⚠ BOTH closing-keyword findings open with `CLOSING-KEYWORD CHECK`, so matching that
+// prefix can no longer say WHICH fired — and every case below that means to witness the
+// negation would be satisfied by the span finding instead. Each helper matches the
+// sentence only its own finding produces. Same reason `fired()` was split into
+// `context()` above, one check earlier.
+const closes = (command, cwd) => /despite saying it does not/.test(context(command, cwd));
+const spans = (command, cwd) => /as CODE, not prose/.test(context(command, cwd));
 const leaks = (command, cwd) => /CATALOGUE-ID LEAK CHECK/.test(context(command, cwd));
 
 // Three id-bearing texts, so no case is silent merely for lack of anything to find.
@@ -338,6 +352,66 @@ ok(!leaks(`git -C ${STORE_DIR} commit -m "${bothText}"`, REPO),
 // shown to be independent rather than one masking the other.
 ok(closes(`git commit -m "${bothText}"`) && leaks(`git commit -m "${bothText}"`),
   'outside the store the same text produces both findings');
+
+console.log('\nFIRES — a closing keyword that cannot link, because it is CODE:');
+// The recorded failure: a PR body opening with the keyword in a code span. It merged
+// clean, CI green, branch deleted — and the issue stayed OPEN, which also stranded its
+// board item, because the automation that moves an item to Done fires on CLOSURE.
+// Backticking an identifier is the right habit for shas, paths and field names, which is
+// exactly why this slips through: a closing keyword is the only token whose meaning
+// depends on NOT being code.
+ok(spans('gh pr create --title x --body "`closes #338`"'),
+  'the recorded shape: an inline code span in a PR description');
+// ⚠ THROUGH A FILE, WITH REAL NEWLINES. The same fixture written inline carries a
+// literal backslash-n, so the fence pattern — which needs a line — never matches, and the
+// case passes for the INLINE reason while claiming to test fences. It read as covered and
+// was not: a mutation removing the fence pass left it green.
+ok(spans(`gh pr create --title x --body-file ${bodyFile('intro\n\n```\ncloses #338\n```\n')}`),
+  'a fenced block — a keyword there links nothing either');
+// The case the fence pass is the ONLY thing catching. A closed fence is already handled by
+// the inline pass, which pairs on backtick COUNT; an unterminated fence has no closing run
+// to pair, and GitHub renders it as code to the end of the body.
+ok(spans(`gh pr create --title x --body-file ${bodyFile('intro\n\n```\ncloses #338\nstill inside the block\n')}`),
+  'an UNTERMINATED fence — code to the end of the body, invisible to the inline pass');
+// The other side of that pass: it must not swallow the prose BETWEEN two blocks.
+ok(!spans(`gh pr create --title x --body-file ${bodyFile('```\nsample a\n```\n\nCloses #338.\n\n```\nsample b\n```\n')}`),
+  'a real closure between two fenced blocks is left alone');
+ok(spans('git commit -m "wip: `closes #12`"'),
+  'a commit message — the other surface the linker reads');
+const spanDenom = context('gh pr create --title x --body "Closes #1 and `closes #2`"');
+ok(/Examined 2 closing references in this text; 1 cannot link/.test(spanDenom),
+  'the finding states the denominator — how many were examined, not only how many failed');
+
+console.log('\nONE BODY, AND THE TWO CHECKS MUST NOT CONTRADICT EACH OTHER:');
+// Before this check existed the guard said `does not \`close #244\`` WILL close #244.
+// It will not — the span is why. Reporting both would put two statements about one
+// reference in one message, only one of which can be true.
+const bothWays = 'gh pr create --title x --body "This does not `close #244`."';
+ok(spans(bothWays), 'a negated AND spanned reference is reported as unlinkable');
+ok(!closes(bothWays), 'and NOT as a closure that will happen anyway — the span decides');
+
+console.log('\nSILENT — code that is quoting rather than closing:');
+// The false positive this shape is built to avoid. This project writes about the defect,
+// so its own bodies carry the construct on purpose. A reference that ALSO appears
+// unspanned somewhere in the text is closing correctly, and the quote is just a quote.
+ok(!spans('gh pr create --title x --body "Closes #338. The form that does not work is `closes #338`."'),
+  'the same reference closes in prose elsewhere — the quote is not the closure');
+ok(!closes('gh pr create --title x --body "Closes #338. The form that does not work is `closes #338`."'),
+  'and the negation check is silent on it too');
+ok(!spans('gh pr create --title x --body "Fixes the parser.\n\nCloses #244"'),
+  'an ordinary intended closure has nothing in code');
+// ⚠ THE WITNESS FOR THE INDEX-PRESERVING STRIP, and it needs enough emphasis ahead of the
+// span to matter. A mark deleted rather than blanked shifts every later position left;
+// with few marks the shifted position still lands inside the span and the check answers
+// correctly by luck. These move it clear, and the negation then fires on a body that
+// closes correctly — which is exactly what preserving the positions prevents.
+ok(!closes('gh pr create --title x --body "Closes #338. **a** **b** **c** **d** **e** **f** **g** The form that does not work is `closes #338`."'),
+  'emphasis ahead of a quoted keyword does not shift the position the span test reads');
+ok(!spans('gh issue create --title x --body "`closes #338`"'),
+  'an issue body — keywords there link nothing, so an unlinkable one is not news');
+// The paired control: the identical text on the surface that DOES link.
+ok(spans('gh pr create --title x --body "`closes #338`"'),
+  'CONTROL: the same body as a PR description does fire');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
