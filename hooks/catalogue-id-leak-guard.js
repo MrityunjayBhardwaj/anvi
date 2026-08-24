@@ -142,8 +142,12 @@ function maskedAnywhere(mask, start, end) {
 function codeMask(text) {
   const mask = new Array(text.length).fill(false);
   const mark = (start, end) => { for (let i = start; i < end && i < mask.length; i++) mask[i] = true; };
-  // Fences first. Finding inline spans first would pair one fence's backticks with the
-  // next fence's, and swallow the prose between two unrelated blocks.
+  // Fences first — and MEASURED, because the obvious justification is wrong. The inline
+  // pass below matches on backtick COUNT, so it already pairs ``` with ``` and handles a
+  // closed fence on its own; removing this loop leaves every closed-fence case green.
+  // What it is actually for is an UNTERMINATED fence, which GitHub renders as code to the
+  // end of the body and the inline pass cannot see at all, having no closing run to pair.
+  // That is the one case this loop is the only thing catching, and the test says so.
   const fenced = /(^|\n)[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|$)/g;
   let m;
   while ((m = fenced.exec(text))) mark(m.index, m.index + m[0].length);

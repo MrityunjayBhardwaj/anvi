@@ -83,6 +83,14 @@ fs.mkdirSync(LOOKALIKE, { recursive: true });
 
 const MSGFILE = path.join(TMP, 'msg.txt');
 
+// Bodies that need REAL newlines — a fence pattern cannot match a literal backslash-n.
+let bodyN = 0;
+const bodyFile = (text) => {
+  const f = path.join(TMP, `body-${bodyN++}.md`);
+  fs.writeFileSync(f, text);
+  return f;
+};
+
 let probeN = 0;
 function fired(command, cwd) {
   const payload = JSON.stringify({
@@ -354,8 +362,20 @@ console.log('\nFIRES — a closing keyword that cannot link, because it is CODE:
 // depends on NOT being code.
 ok(spans('gh pr create --title x --body "`closes #338`"'),
   'the recorded shape: an inline code span in a PR description');
-ok(spans('gh pr create --title x --body "intro\n```\ncloses #338\n```\n"'),
+// ⚠ THROUGH A FILE, WITH REAL NEWLINES. The same fixture written inline carries a
+// literal backslash-n, so the fence pattern — which needs a line — never matches, and the
+// case passes for the INLINE reason while claiming to test fences. It read as covered and
+// was not: a mutation removing the fence pass left it green.
+ok(spans(`gh pr create --title x --body-file ${bodyFile('intro\n\n```\ncloses #338\n```\n')}`),
   'a fenced block — a keyword there links nothing either');
+// The case the fence pass is the ONLY thing catching. A closed fence is already handled by
+// the inline pass, which pairs on backtick COUNT; an unterminated fence has no closing run
+// to pair, and GitHub renders it as code to the end of the body.
+ok(spans(`gh pr create --title x --body-file ${bodyFile('intro\n\n```\ncloses #338\nstill inside the block\n')}`),
+  'an UNTERMINATED fence — code to the end of the body, invisible to the inline pass');
+// The other side of that pass: it must not swallow the prose BETWEEN two blocks.
+ok(!spans(`gh pr create --title x --body-file ${bodyFile('```\nsample a\n```\n\nCloses #338.\n\n```\nsample b\n```\n')}`),
+  'a real closure between two fenced blocks is left alone');
 ok(spans('git commit -m "wip: `closes #12`"'),
   'a commit message — the other surface the linker reads');
 const spanDenom = context('gh pr create --title x --body "Closes #1 and `closes #2`"');
@@ -380,6 +400,13 @@ ok(!closes('gh pr create --title x --body "Closes #338. The form that does not w
   'and the negation check is silent on it too');
 ok(!spans('gh pr create --title x --body "Fixes the parser.\n\nCloses #244"'),
   'an ordinary intended closure has nothing in code');
+// ⚠ THE WITNESS FOR THE INDEX-PRESERVING STRIP, and it needs enough emphasis ahead of the
+// span to matter. A mark deleted rather than blanked shifts every later position left;
+// with few marks the shifted position still lands inside the span and the check answers
+// correctly by luck. These move it clear, and the negation then fires on a body that
+// closes correctly — which is exactly what preserving the positions prevents.
+ok(!closes('gh pr create --title x --body "Closes #338. **a** **b** **c** **d** **e** **f** **g** The form that does not work is `closes #338`."'),
+  'emphasis ahead of a quoted keyword does not shift the position the span test reads');
 ok(!spans('gh issue create --title x --body "`closes #338`"'),
   'an issue body — keywords there link nothing, so an unlinkable one is not news');
 // The paired control: the identical text on the surface that DOES link.
