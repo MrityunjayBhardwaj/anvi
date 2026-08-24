@@ -116,7 +116,7 @@ for (const v of violations) console.log(`      ${v.file}:${v.line}  ${v.text.tri
 // never both. Without it, a bug in the exemption matching could drop sites out of both
 // sets and the guard would go green over the population it stopped seeing.
 ok(exemptLines.size + violations.length === sites.length,
-   `every site is accounted for: ${exemptLines.size} prose + ${violations.length} operative = ${sites.length} total`);
+   `every site is accounted for (${exemptLines.size} prose + ${violations.length} operative = ${sites.length} total)`);
 
 // ── deliberately NOT asked here ──────────────────────────────────────────────
 // A neighbouring question — does the block calling `planning-root` also DEFINE the
