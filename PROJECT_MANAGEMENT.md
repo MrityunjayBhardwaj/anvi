@@ -444,12 +444,18 @@ nothing can say which is real.
    The "before" number, dated. The only thing that makes progress subtractable.
 
 ④ ISSUE → BRANCH → FIX, one observation per fix
-   Commit BEFORE falsifying: a restore-based falsify loop targets HEAD and
-   destroys uncommitted work by design.
+   Commit BEFORE falsifying: a restore-based falsify loop targets HEAD by
+   design. The runner refuses to start on a dirty tree rather than eating it.
 
 ⑤ FALSIFY every guard
    Break it; require its own assertions to go red and nothing else.
    A test that has never failed is a claim, not a witness.
+   `node scripts/falsify.js <spec.js>` is the scaffold: clean-tree precondition,
+   a control at BOTH ends compared by assertion count, proof each edit landed,
+   and a parse of which NAMED assertions reddened. What stays yours is the
+   judgement — which mutations to write, the assertion each must redden, and its
+   breadth ceiling. That is deliberately not automated: a generator would emit
+   edits that match nothing, which is the oldest way this instrument has lied.
 
 ⑥ SHIP, then ask what you missed
    Self-review is not "ready to merge?" — it is an audit of the diff for gaps,
