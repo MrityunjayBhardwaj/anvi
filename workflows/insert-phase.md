@@ -10,6 +10,7 @@ node "$CLI_PATH" phase insert "${AFTER_PHASE}" "${DESCRIPTION}"
 </step>
 <step name="commit">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs: insert phase after ${AFTER_PHASE}" --files "$(node "$CLI_PATH" planning-root --raw)"/ROADMAP.md
 ```
 </step>

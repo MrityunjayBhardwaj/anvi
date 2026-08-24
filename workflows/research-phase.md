@@ -19,6 +19,7 @@ PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invari
 
 <step name="resolve_model">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 MODEL=$(node "$CLI_PATH" resolve-model researcher)
 ```
 </step>
@@ -26,6 +27,7 @@ MODEL=$(node "$CLI_PATH" resolve-model researcher)
 <step name="validate_phase">
 Load phase from ROADMAP.md:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PHASE_INFO=$(node "$CLI_PATH" roadmap get-phase "${PHASE}")
 ```
 </step>
@@ -33,6 +35,7 @@ PHASE_INFO=$(node "$CLI_PATH" roadmap get-phase "${PHASE}")
 <step name="check_existing">
 Check for existing RESEARCH.md:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 ls "$(node "$CLI_PATH" planning-root --raw)"/phases/*/RESEARCH.md 2>/dev/null
 ```
 If exists: offer to skip or redo.

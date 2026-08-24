@@ -10,6 +10,7 @@ node "$CLI_PATH" phase add "${DESCRIPTION}"
 </step>
 <step name="commit">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs: add phase — ${DESCRIPTION}" --files "$(node "$CLI_PATH" planning-root --raw)"/ROADMAP.md
 ```
 </step>

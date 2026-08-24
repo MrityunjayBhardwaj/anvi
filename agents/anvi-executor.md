@@ -233,6 +233,7 @@ Only include discoveries from bugs diagnosed in one pass.
 Same as GSD: advance plan, update progress, record metrics, add decisions, record session.
 
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" state advance-plan
 node "$CLI_PATH" state update-progress
 node "$CLI_PATH" state record-metric --phase "${PHASE}" --plan "${PLAN}" --duration "${DURATION}"

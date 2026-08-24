@@ -23,17 +23,12 @@ Cognitive integration happens at the orchestrator level:
 - After completion (catalogue update)
 </core_principle>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <process>
 
 <step name="initialize">
 Load config:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init execute-phase "${PHASE}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -79,6 +74,7 @@ Plans: {list}
 <step name="discover_and_group_plans">
 Use phase-plan-index to discover plans and group by wave:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" phase-plan-index "${PHASE}"
 ```
 Group plans by wave number. Plans in the same wave can run in parallel.

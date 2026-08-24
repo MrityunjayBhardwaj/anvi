@@ -81,9 +81,12 @@ scoped to this project only, gitignored, reversible. Then run the extracted scri
 (idempotent; refuses if the settings file is git-tracked; preserves any existing settings):
 
 ```bash
-if [ -z "$INSIDE_STORE" ]; then
-  bash "$HOME/.claude/anvi/scripts/grant-catalogue-access.sh" --apply "$PWD"
-fi
+# Re-derived, not inherited: this is a separate shell from the block that set up the
+# store, so the INSIDE_STORE flag it computed is gone. The condition is the cheap half.
+case "$(pwd)/" in
+  "$HOME/.anvideck/"*) : ;;   # already inside the store — nothing to grant
+  *) bash "$HOME/.claude/anvi/scripts/grant-catalogue-access.sh" --apply "$PWD" ;;
+esac
 ```
 
 **Bind the store project to this repository's identity.** A store project is reached by
@@ -152,7 +155,10 @@ has just been told their knowledge lives somewhere outside their repo needs to b
 `ls` it. Resolve them first, and print what comes back:
 
 ```bash
-STORE_DIR="$(cd "$STORE" && pwd -P)"        # where the catalogues really are
+# Resolved through ./.anvi rather than through the $STORE this shell never saw. It is the
+# better question anyway: this reports where the catalogues ARE, not where a previous
+# block intended to put them.
+STORE_DIR="$(cd .anvi && pwd -P)"           # where the catalogues really are
 LINK_TGT="$(readlink .anvi 2>/dev/null)"    # what ./.anvi points at
 ```
 

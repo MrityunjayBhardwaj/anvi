@@ -10,6 +10,7 @@ node "$CLI_PATH" stats table
 <step name="cognitive_stats">
 Also display cognitive stats:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" cognitive-state
 ```
 </step>

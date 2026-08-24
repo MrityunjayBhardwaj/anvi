@@ -39,6 +39,7 @@ PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invari
 
 <step name="load_execution_state">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init resume)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
