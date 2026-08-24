@@ -10,6 +10,7 @@ CLI=~/.claude/anvi/bin/anvi-tools.cjs
 <cli_resolution>
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
 ```
 </cli_resolution>
 

@@ -118,6 +118,26 @@ for (const v of violations) console.log(`      ${v.file}:${v.line}  ${v.text.tri
 ok(exemptLines.size + violations.length === sites.length,
    `every site is accounted for (${exemptLines.size} prose + ${violations.length} operative = ${sites.length} total)`);
 
+// ── a reference that resolves to nothing is not a fix ────────────────────────
+// The sweep that converted these files missed this on four of them: the spelled path was
+// replaced by `$PM/…` and no `PM=` was ever added, so the reference expanded to nothing
+// and the read became an absolute `/HANDOFF.json`. That is WORSE than the spelled path
+// it replaced — the original was at least a valid relative path — and the guard as first
+// written went green over all four, because it only ever asked whether anything was
+// spelled. Converting a site and resolving one are two different claims.
+console.log('\n— every $PM is defined before it is used —');
+let usingPM = 0;
+for (const f of files) {
+  const lines = fs.readFileSync(path.join(WF, f), 'utf8').split('\n');
+  const defs = lines.map((l, i) => /^PM=/.test(l) ? i : -1).filter(i => i >= 0);
+  const uses = lines.map((l, i) => l.includes('$PM') && !/^PM=/.test(l) ? i : -1).filter(i => i >= 0);
+  if (!uses.length) continue;
+  usingPM++;
+  ok(defs.length > 0 && Math.min(...defs) < Math.min(...uses),
+     `${f} — defines PM before the first $PM reference (first use line ${Math.min(...uses) + 1})`);
+}
+ok(usingPM > 0, `some workflow actually uses $PM (got ${usingPM}) — a zero would make the block above vacuous`);
+
 // ── deliberately NOT asked here ──────────────────────────────────────────────
 // A neighbouring question — does the block calling `planning-root` also DEFINE the
 // CLI_PATH it uses? — is a real defect in 34 blocks across 16 files, filed as #344. It
