@@ -63,6 +63,7 @@ New ungrounded observations: {observations about external system behavior not ye
 
 Also use CLI if available:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" tattva-checkpoint "$(node "$CLI_PATH" planning-root --raw)"/HANDOFF-cognitive.md \
   --classification "{type}" \
   --insight "{compressed insight}"
@@ -110,6 +111,7 @@ Write `$PM/.continue-here.md` (human-readable):
 
 <step name="wip_commit">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "wip: pause at phase ${PHASE} plan ${PLAN}" --files "$(node "$CLI_PATH" planning-root --raw)"/HANDOFF.json "$(node "$CLI_PATH" planning-root --raw)"/.continue-here.md
 ```
 </step>

@@ -7,17 +7,12 @@ Forked from GSD complete-milestone.md.
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
 </paths>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <process>
 
 <step name="verify_readiness">
 Check all phases are complete:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" roadmap analyze
 ```
 If incomplete phases exist: warn and confirm user wants to proceed.
@@ -37,6 +32,7 @@ Collect milestone statistics:
 
 Review cognitive growth during this milestone:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" catalogue-review
 ```
 
@@ -62,6 +58,7 @@ Prepare for next milestone structure.
 
 <step name="archive">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" milestone complete "${VERSION}" --name "${MILESTONE_NAME}" --archive-phases
 ```
 </step>
@@ -75,6 +72,7 @@ Confirm before pushing.
 
 <step name="commit_and_report">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs: complete milestone ${VERSION}" --files "$(node "$CLI_PATH" planning-root --raw)"/ PROJECT.md
 ```
 

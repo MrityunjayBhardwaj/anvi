@@ -276,6 +276,7 @@ Follow the diagnose lens cognitive chain. This replaces the GSD hypothesis loop 
 
 ## File Location
 ```
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 DEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug
 DEBUG_RESOLVED_DIR=.anvi/project_management/debug/resolved
 ```

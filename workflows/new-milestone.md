@@ -7,16 +7,11 @@ Forked from GSD new-milestone.md. Context → goals → requirements → roadmap
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
 </paths>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <process>
 
 <step name="initialize">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init new-milestone)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -72,6 +67,7 @@ Agent(
 
 <step name="commit_and_offer_next">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs: start milestone ${VERSION}" --files "$(node "$CLI_PATH" planning-root --raw)"/ PROJECT.md
 ```
 Offer: `/anvi:plan-phase 1` or `/anvi:discuss-phase 1`.

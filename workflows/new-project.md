@@ -9,16 +9,11 @@ Spawns 4 parallel researchers, synthesizer, then roadmapper.
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
 </paths>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <process>
 
 <step name="initialize">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init new-project)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -129,12 +124,14 @@ Write PROJECT.md with:
 
 <step name="configure">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" config-new-project "${PROJECT_NAME}"
 ```
 </step>
 
 <step name="commit_and_offer_next">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs: initialize project" --files "$(node "$CLI_PATH" planning-root --raw)"/ .anvi/ PROJECT.md
 ```
 

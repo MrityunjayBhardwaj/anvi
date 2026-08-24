@@ -92,6 +92,7 @@ No extra context needed — base layer sufficient.
 <step name="check_project">
 For routes that need `.anvi/project_management/` (execute, plan, progress, resume, verify):
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 ls "$(node "$CLI_PATH" planning-root --raw)"/ 2>/dev/null
 ```
 If missing and the route needs it: suggest `/anvi:new-project` first.

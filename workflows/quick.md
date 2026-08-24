@@ -12,12 +12,6 @@ Supports flags:
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
 </paths>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <process>
 
 <step name="parse_flags">
@@ -32,6 +26,7 @@ If description is empty: prompt user.
 
 <step name="initialize">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init quick "${DESCRIPTION}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -129,6 +124,7 @@ If `$PM/STATE.md` exists, append to "Quick Tasks Completed" table:
 <step name="final_commit">
 Commit planning docs:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs: complete quick task ${quick_id}" --files "$(node "$CLI_PATH" planning-root --raw)"/phases/${quick_dir}/
 ```
 </step>

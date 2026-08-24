@@ -7,16 +7,11 @@ Forked from GSD progress.md with cognitive metrics display.
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
 </paths>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <process>
 
 <step name="load_context">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init progress)
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -24,6 +19,7 @@ if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 
 <step name="analyze_roadmap">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" roadmap analyze
 ```
 Get phase completion counts, current position.
@@ -32,6 +28,7 @@ Get phase completion counts, current position.
 <step name="extract_recent_work">
 Parse recent SUMMARY.md files for completed work.
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" state-snapshot
 ```
 </step>
@@ -63,6 +60,7 @@ without surfacing Sanskrit terms.
 
 <step name="check_outstanding">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" audit-uat 2>/dev/null
 node "$CLI_PATH" list-todos 2>/dev/null
 ```

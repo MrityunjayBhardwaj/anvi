@@ -9,12 +9,6 @@ User = visionary/founder. Claude = builder asking the right questions.
 CLI=~/.claude/anvi/bin/anvi-tools.cjs
 </paths>
 
-<cli_resolution>
-```bash
-CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
-```
-</cli_resolution>
-
 <core_principle>
 **Ask the right questions before building.**
 
@@ -27,6 +21,7 @@ and what happens when it expires mid-operation?"
 
 <step name="initialize">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init plan-phase "${PHASE}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -94,6 +89,7 @@ Use design lens existence check (Chesterton): understand what exists before plan
 <step name="todo_matching">
 Check backlog for items relevant to this phase:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" todo match-phase "${PHASE}" 2>/dev/null
 ```
 If matches found: present for inclusion/exclusion.
@@ -142,6 +138,7 @@ decisions: {count}
 
 Commit:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs(${PHASE}): capture phase context" --files "$(node "$CLI_PATH" planning-root --raw)"/phases/XX-name/CONTEXT.md
 ```
 </step>

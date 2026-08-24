@@ -32,6 +32,7 @@ The design lens ensures plans are grounded in structural analysis, not wishful t
 <step name="initialize">
 Load config and phase context:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 INIT=$(node "$CLI_PATH" init plan-phase "${PHASE}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
@@ -76,6 +77,7 @@ that matters, say so rather than assuming the reader saw it.
 <step name="check_existing_context">
 Check for existing CONTEXT.md from /anvi:discuss-phase:
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 ls "$(node "$CLI_PATH" planning-root --raw)"/phases/*/CONTEXT.md 2>/dev/null
 ```
 If exists: load as locked decisions for planner. User vision is sacrosanct.
@@ -205,6 +207,7 @@ Same as GSD: if frontend phase, check for UI-SPEC.md.
 
 <step name="commit_plan">
 ```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 node "$CLI_PATH" commit "docs(${PHASE}): create phase plan" --files "$(node "$CLI_PATH" planning-root --raw)"/phases/XX-name/
 ```
 </step>
