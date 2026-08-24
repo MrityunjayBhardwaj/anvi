@@ -67,13 +67,13 @@ ok(g('status', '--porcelain').stdout.trim() === '', 'the fixture repo starts cle
 // the runner's own precondition would then refuse every case — a self-inflicted trap
 // worth naming, because the natural place to put a spec is next to the thing it tests.
 let specN = 0;
-function runFalsify(mutations, extra = {}) {
+function runFalsify(mutations, opts = {}) {
   const p = path.join(TMP, `spec-${++specN}.js`);
   fs.writeFileSync(p, `module.exports = ${JSON.stringify({
-    root: FX, test: 't/probe.test.js', mutations,
+    root: FX, test: 't/probe.test.js', mutations, ...opts,
   }, (k, v) => v instanceof RegExp ? `__RE__${v.source}__${v.flags}` : v, 1)
     .replace(/"__RE__(.*?)__(\w*)"/g, (_, src, fl) => `new RegExp(${JSON.stringify(src)}, ${JSON.stringify(fl)})`)};\n`);
-  const r = spawnSync('node', [FALSIFY, p, ...(extra.args || [])], { encoding: 'utf8', cwd: TMP });
+  const r = spawnSync('node', [FALSIFY, p], { encoding: 'utf8', cwd: TMP });
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
 
@@ -284,6 +284,54 @@ console.log('\n— the controls are compared by assertion count —');
   ok(instrumentProblems(green(15), { total: 15, red: [{ msg: 'x' }], code: 1 }).length === 1,
      'a control that is red after the loop is a problem too — a mutation was not restored');
 }
+
+// ── the verdicts that had no red state ──────────────────────────────────────
+// Found by asking of the tool what it asks of everything else: which of its own
+// outcomes does no case ever produce? Five of twelve, and one of them was the most
+// valuable verdict it has.
+console.log('\n— the remaining verdicts —');
+
+// MISSED is the recorded mode where an assertion survives a mutation because its
+// FIXTURE sits outside the region the mutation changes: the suite reddens, that line
+// never does, and a matrix scoring on "did the file go red" reads it as a witness.
+// Distinguishing it from WITNESSED is the single most load-bearing thing here.
+const missed = runFalsify([{
+  label: 'a mutation graded against the wrong assertion', file: 'subject.js',
+  find: "const NAME = 'alpha';", replace: "const NAME = 'beta';",
+  expect: /limit is five/, maxRed: 2,
+}]);
+ok(/MISSED/.test(missed.out), 'a red suite whose NAMED assertion stayed green is MISSED, not WITNESSED');
+ok(/none matching the expected assertion/.test(missed.out), 'and the report says the expected assertion is not among the reds');
+ok(/reddened instead: "the name is alpha"/.test(missed.out),
+   'it names what DID redden, so the author can see the assertion they actually hit');
+
+const gone = runFalsify([{
+  label: 'a file that is not there', file: 'no-such-file.js',
+  find: 'x', replace: 'y', expect: /limit/, maxRed: 1,
+}]);
+ok(/FILE ABSENT/.test(gone.out), 'a mutation aimed at a file that does not exist is FILE ABSENT');
+
+// A mutation can leave the test exiting 0 having asserted NOTHING. Counting reds calls
+// that zero, and zero reads as "the file changed and nothing went red" — a statement
+// about the guard, when the truth is that the parse found no guard to speak about.
+const silent = runFalsify([{
+  label: 'the probe stops asserting anything', file: 't/probe.test.js',
+  find: "ok(s.LIMIT === 5, `the limit is five (got ${s.LIMIT})`);\nok(s.NAME === 'alpha', 'the name is alpha');\nok(s.cap(9) === 5, 'cap clamps to the limit');\n",
+  replace: '', expect: /limit/, maxRed: 1,
+}]);
+ok(/NO ASSERTIONS/.test(silent.out), 'a run that emits no assertion lines is NO ASSERTIONS, not a green mutation');
+ok(/parse contract does not hold/.test(silent.out), 'and it names the parse contract rather than blaming the guard');
+
+// The timeout branch, reachable in under a second because the cap is configurable.
+const hung = runFalsify([{
+  label: 'the subject never finishes loading', file: 'subject.js',
+  find: 'const LIMIT = 5;', replace: 'while (true) {}\nconst LIMIT = 5;',
+  expect: /limit/, maxRed: 1,
+}], { timeoutMs: 1500 });
+ok(/TIMED OUT/.test(hung.out), 'a mutation that hangs the test is TIMED OUT — it decided nothing');
+ok(!/NOT WITNESSED/.test(hung.out), 'and is never reported as a mutation that failed to redden anything');
+
+ok(g('status', '--porcelain').stdout.trim() === '', 'and every one of those was restored too');
 
 // ── the tree is clean when the run is over ──────────────────────────────────
 console.log('\n— the fixture survives the whole matrix —');

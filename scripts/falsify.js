@@ -72,7 +72,10 @@ const { spawnSync } = require('child_process');
 // against a throwaway fixture repo instead of mutating this one.
 const REPO_ROOT = path.join(__dirname, '..');
 let ROOT = REPO_ROOT;
-const PER_RUN_TIMEOUT_MS = 300000;
+// Per-run cap. A spec may lower it with `timeoutMs:`, which is what lets the timeout
+// branch be reddened in under a second instead of five minutes — a verdict that can
+// only be produced by waiting is a verdict nothing tests.
+let PER_RUN_TIMEOUT_MS = 300000;
 
 // ── the parse contract ───────────────────────────────────────────────────────
 // An assertion line is indented; a summary line is not. Nothing else in the suite
@@ -252,6 +255,7 @@ function main() {
   const spec = require(path.resolve(specPath));
   const mutations = spec.mutations || [];
   if (spec.root) ROOT = path.resolve(spec.root);
+  if (spec.timeoutMs) PER_RUN_TIMEOUT_MS = spec.timeoutMs;
 
   // ── precondition ──────────────────────────────────────────────────────────
   const dirty = dirtyPaths();
