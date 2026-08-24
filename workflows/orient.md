@@ -19,20 +19,87 @@ Orient first. Then act with clarity.
 
 <process>
 
+<step name="live_state">
+**What has changed while I was not looking?**
+
+This runs FIRST, and it is not optional. `PROJECT_MANAGEMENT.md` §11 ① is explicit
+about why: *concurrent sessions are real, and a handoff note froze when it was written.*
+Every source below is live; none of them is a note.
+
+```bash
+git branch --show-current                 # which branch is this tree actually on?
+git status --porcelain                    # uncommitted work, including someone else's
+gh pr list --state open                   # PRs opened or left open by another session
+gh issue list --state open --limit 20     # what is filed and still standing
+```
+
+Read the board last, because it is the surface a human is most likely to have moved.
+**Derive its number from the repository — never paste one.** A board is linked to its
+repo (§10), so the repo can be asked which board is its own; a number carried over from
+a previous session's notes goes stale silently and cannot be told from a correct one:
+
+```bash
+read -r OWNER REPO <<<"$(gh repo view --json owner,name \
+  --jq '.owner.login + " " + .name')"
+
+BOARD=$(gh api graphql -f owner="$OWNER" -f name="$REPO" -f query='
+  query($owner:String!,$name:String!){
+    repository(owner:$owner,name:$name){
+      projectsV2(first:10){ nodes { number title } }
+    }
+  }' --jq '.data.repository.projectsV2.nodes[0].number')
+
+gh project item-list "$BOARD" --owner "$OWNER" --limit 300 --format json
+```
+
+If the repo has no linked board, `$BOARD` is empty — report that, do not guess a number.
+
+Projection is one-way (§10, and invariant 8). The board is **read** here and never
+written back from working state.
+
+If `gh` is unavailable, unauthenticated, or the repo has no board, say so in the output
+rather than omitting the line. A source that silently reports nothing is
+indistinguishable from a source that reports "nothing to report" — and only one of those
+is information.
+
+Output:
+```
+Branch:  {branch} {clean | N uncommitted}
+PRs:     {open PRs, or "none"}
+Issues:  {count} open — {the ones touching current work}
+Board:   {counts by status, or "unavailable: {reason}"}
+```
+</step>
+
 <step name="position">
 **Where am I?**
 
 Read current context to determine position:
 
+The planning tree's location is **resolved, never spelled** (invariant 2) — a project
+on the legacy layout keeps its documents in `.planning/`, and a spelled path silently
+misses every one of them:
+
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"
+```
+
 ```
 Sources (check in order):
 1. $ARGUMENTS — user specified a focus area
-2. .anvi/project_management/STATE.md — current phase, plan, task
-3. .anvi/project_management/debug/*.md — active debug sessions
-4. .anvi/project_management/.continue-here.md — resuming from pause
-5. git log --oneline -3 — recent activity
-6. Current conversation context — what we've been discussing
+2. $PM/STATE.md — current phase, plan, task
+3. $PM/debug/*.md — active debug sessions
+4. $PM/.continue-here.md — resuming from pause (written by /anvi:pause-work
+   through the same resolver, so read it through the resolver too)
+5. Live state from the step above — branch, PRs, issues, board
+6. git log --oneline -3 — recent activity
+7. Current conversation context — what we've been discussing
 ```
+
+Sources 2–4 are frequently absent, and that is a normal state rather than an error: a
+project that has never run a phase has no `STATE.md`. Absent is not the same as unread —
+if the resolver announced a legacy tree, say which tree was consulted.
 
 Output:
 ```
@@ -192,6 +259,14 @@ Format:
  Activity:  {what you're doing}
  Lens:      {active} + {sister}     Recover: {status}
 
+ ── Live state ─────────────────────────────────
+
+ Branch:    {branch} {clean | N uncommitted}
+ PRs:       {open PRs, or "none"}
+ Issues:    {count} open — {relevant ones}
+ Board:     {counts by status, or "unavailable: {reason}"}
+ Tree:      {resolved planning root, and whether it is the legacy one}
+
  ── Grounding ─────────────────────────────────
 
  Catalogue entries with REFs: {X}/{Y} ({N}%)
@@ -247,6 +322,14 @@ Format:
  Activity:  debugging (1st attempt)
  Lens:      DIAGNOSE + DESIGN (sister)   Recover: dormant
 
+ ── Live state ─────────────────────────────────
+
+ Branch:    fix/canvas-overflow — 2 uncommitted
+ PRs:       none
+ Issues:    3 open — #41 touches this file
+ Board:     Todo 5 · In Progress 1 · Done 12
+ Tree:      .anvi/project_management
+
  ── Landscape ──────────────────────────────────────
 
  KNOWN:
@@ -288,6 +371,14 @@ Format:
  Position:  Phase 3, Plan 1 — JWT auth middleware
  Activity:  executing
  Lens:      DESIGN (active)              Recover: dormant
+
+ ── Live state ─────────────────────────────────
+
+ Branch:    feat/jwt-auth — clean
+ PRs:       #58 open (another session)
+ Issues:    7 open — #52 is this phase
+ Board:     unavailable: gh not authenticated
+ Tree:      .planning (legacy — migrate with `anvi update`)
 
  ── Landscape ──────────────────────────────────────
 
@@ -336,6 +427,14 @@ Format:
  Activity:  debugging (3rd attempt)
  Lens:      DIAGNOSE                     Recover: ⚠ ACTIVE
 
+ ── Live state ─────────────────────────────────
+
+ Branch:    main — clean
+ PRs:       none
+ Issues:    2 open
+ Board:     Todo 3 · In Progress 0 · Done 9
+ Tree:      .anvi/project_management
+
  ⚠ RECOVER TRIGGERED — 3 failed attempts
    Attempt 1: increased timeout → still disconnects
    Attempt 2: added reconnect logic → masks the problem
@@ -375,6 +474,9 @@ Format:
 </examples>
 
 <success_criteria>
+- [ ] Live state read FIRST: branch, open PRs, open issues, board (§11 ①)
+- [ ] An unavailable live source is REPORTED as unavailable, never omitted
+- [ ] Planning paths resolved via `planning-root`, never spelled
 - [ ] Position detected from context
 - [ ] Active lens and recover status shown
 - [ ] Grounding status checked (REF coverage, staleness, hotspots)
