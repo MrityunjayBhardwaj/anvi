@@ -24,7 +24,7 @@ CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
    - krama.md — known lifecycles
 
 2. Load tattva checkpoint if exists:
-   - `.anvi/project_management/HANDOFF-cognitive.md` or HANDOFF.json cognitive_state
+   - `$PM/HANDOFF-cognitive.md` or HANDOFF.json cognitive_state
 
 3. Present: "Resuming with {N} known error patterns, {N} validated invariants"
 
@@ -46,8 +46,8 @@ Read STATE.md for position, decisions, blockers.
 
 <step name="detect_incomplete_work">
 Check for handoff signals (in priority order):
-1. `.anvi/project_management/HANDOFF.json` — structured pause point
-2. `.anvi/project_management/.continue-here.md` — human-readable resume guide
+1. `$PM/HANDOFF.json` — structured pause point
+2. `$PM/.continue-here.md` — human-readable resume guide
 3. Interrupted agent history
 4. Uncommitted changes
 

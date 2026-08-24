@@ -67,8 +67,8 @@ Agent(
   </cognitive_context>
 
   <files_to_read>
-  - .anvi/project_management/ROADMAP.md
-  - .anvi/project_management/STATE.md
+  - $PM/ROADMAP.md
+  - $PM/STATE.md
   - {CONTEXT.md if exists}
   </files_to_read>
   """,

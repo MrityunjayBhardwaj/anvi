@@ -37,8 +37,15 @@ Include in report:
 - Recovery triggers (fewer = better cognitive performance)
 </step>
 
+<step name="resolve_tree">
+```bash
+CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+```
+</step>
+
 <step name="generate_report">
-Write `.anvi/project_management/reports/SESSION_REPORT_{timestamp}.md`:
+Write `$PM/reports/SESSION_REPORT_{timestamp}.md`:
 
 ```markdown
 # Session Report — {date}
