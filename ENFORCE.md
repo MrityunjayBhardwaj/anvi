@@ -422,6 +422,16 @@ allowed to be silent in production must be loud in a test, or it has no witness.
   "the suite is broken, ignore it", which costs more than the check was worth.
 - **Falsify, don't assert.** Break the thing each case guards and confirm it goes
   red. An integration test that has never failed is a claim, not a witness.
+  `node scripts/falsify.js <spec.js>` runs the matrix and is the part worth not
+  retyping: it refuses a dirty tree, runs the unmutated control at BOTH ends and
+  compares the assertion COUNT rather than pass/fail, proves each edit landed by
+  exact length arithmetic before believing a result, and separates assertion lines
+  from a suite's own summary line by INDENTATION — measured across the suite, and
+  the discriminator that actually holds, since the 21 summary lines are written
+  three different ways. Score on whether THAT LINE reddens by name; the runner
+  grades against the assertion you named and a breadth ceiling you set, and lists
+  every assertion no mutation ever reached, which is where an enumeration written
+  from your model of the code rather than its branches shows up.
 
 **A hook is a process per event, and that cuts both ways.** Anything a hook
 deduplicates in a module-level variable is deduplicated against nothing: the
