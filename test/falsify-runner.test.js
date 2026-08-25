@@ -333,6 +333,77 @@ ok(!/NOT WITNESSED/.test(hung.out), 'and is never reported as a mutation that fa
 
 ok(g('status', '--porcelain').stdout.trim() === '', 'and every one of those was restored too');
 
+// ── mode 7: the direction the matrix could not ask about ────────────────────
+// Every verdict above is directional — WITNESSED is good — so the matrix could only
+// establish that a guard CATCHES defects. A guard that FLAGS legitimate input was
+// invisible to it, and that is the failure that gets a guard deleted rather than merely
+// leaving the status quo. `mustNotRedden` inverts the pass condition, and the inversion
+// lives in the verdict WORDS rather than in a note asking the reader to flip one in
+// their head — a hand-applied sign flip is the step that gets skipped.
+console.log('\n— a mutation whose pass is silence —');
+
+// The comment line is the one part of the subject no assertion reads, so changing it is
+// a real edit the guard should ignore. Under the old vocabulary this same run was
+// NOT WITNESSED — a failure word for the correct outcome.
+const held = runFalsify([{
+  label: 'a comment changes, and nothing should care', file: 'subject.js',
+  find: '// a comment no assertion reads', replace: '// a comment still no assertion reads',
+  mustNotRedden: true,
+}]);
+ok(/✓ HELD/.test(held.out), 'an edit that reddens nothing is HELD — the pass word for this direction');
+ok(held.code === 0, `and the run exits 0 (got ${held.code})`);
+ok(!/NOT WITNESSED/.test(held.out),
+   'and it is NOT reported as NOT WITNESSED — the old vocabulary scored this correct outcome as a failure');
+
+// The same mutation that is WITNESSED above is a FAILURE here: it proves the assertion
+// fires on this input, which is precisely what a must-not-redden probe forbids.
+const flagged = runFalsify([{ ...NAME_MUT, expect: undefined, maxRed: undefined, mustNotRedden: true }]);
+ok(/✗ FLAGGED/.test(flagged.out), 'an edit that reddens an assertion is FLAGGED when it was required not to');
+ok(flagged.code === 1, `and the run exits 1 (got ${flagged.code})`);
+ok(/name is alpha/.test(flagged.out),
+   'and FLAGGED names the assertion that fired — "a false positive" without the assertion is not actionable');
+ok(/false positive/.test(flagged.out),
+   'and says what that means for the guard, since the reader arrives expecting reddening to be success');
+
+// Coverage is a claim about one direction only. A probe that FAILS reddens assertions,
+// and crediting those would report an assertion as exercised on the strength of it
+// firing WRONGLY — observed during development, as "1/3 reddened" beside "0 must-redden
+// mutations", two numbers from one run that cannot both be right.
+ok(/— coverage — 0\/3 assertions/.test(flagged.out),
+   'a failing must-not-redden probe contributes NOTHING to coverage — its reds are false positives, not exercise');
+ok(/must-not-redden probe/.test(flagged.out),
+   'and the coverage line says it counts one direction only, where the reader would otherwise assume both');
+
+console.log('\n— a spec must say which direction it asks about —');
+// Refused rather than defaulted, and refused BEFORE the control runs. A default silently
+// picks a direction, and the report then reads as authoritative about a question nobody
+// asked — which is the whole failure this mode exists to close.
+const both = runFalsify([{ ...NAME_MUT, mustNotRedden: true }]);
+ok(both.code === 2, `a mutation naming BOTH directions is refused with exit 2 (got ${both.code})`);
+ok(/does not say what it is asking/.test(both.out), 'and the refusal names the problem as an undecided spec, not a bad value');
+ok(/mustNotRedden and expect/.test(both.out), 'and points at the pair of fields that conflict');
+
+const neither = runFalsify([{
+  label: 'undecided', file: 'subject.js',
+  find: "const NAME = 'alpha';", replace: "const NAME = 'beta';",
+}]);
+ok(neither.code === 2, `a mutation naming NEITHER direction is refused with exit 2 (got ${neither.code})`);
+ok(/names neither expect nor mustNotRedden/.test(neither.out), 'and says which mutation failed to declare one');
+
+console.log('\n— the two kinds are counted apart —');
+// "7 witnessed, 2 held" and "9 witnessed" describe different runs, and only the first can
+// be checked against what the spec asked for.
+const mixed = runFalsify([NAME_MUT, {
+  label: 'a comment changes, and nothing should care', file: 'subject.js',
+  find: '// a comment no assertion reads', replace: '// a comment still no assertion reads',
+  mustNotRedden: true,
+}]);
+ok(/1 witnessed, 1 held/.test(mixed.out),
+   'the summary counts witnessed and held separately — a single total would hide which direction was measured');
+ok(/\(1 must redden, 1 must not\)/.test(mixed.out),
+   'and the opening line declares the split before any result is printed');
+ok(mixed.code === 0, `a run of both kinds, all passing, exits 0 (got ${mixed.code})`);
+
 // ── the tree is clean when the run is over ──────────────────────────────────
 console.log('\n— the fixture survives the whole matrix —');
 ok(g('status', '--porcelain').stdout.trim() === '',
