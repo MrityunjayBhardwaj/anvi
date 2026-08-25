@@ -475,8 +475,11 @@ nothing can say which is real.
 Rules that must hold. Violating one is a defect, not a preference.
 
 1. **One fact, one home.** Every duplicate is a future disagreement with no arbiter.
-2. **The tree's location is resolved, never spelled.** In code via the resolver; in
-   workflows via `planning-root`.
+2. **The tree's location is resolved, never spelled — and a resolved value is printed.**
+   In code via the resolver; in workflows via `planning-root`. Resolving is only half of
+   it. A block that assigns the value and exits has published nothing: measured, such a
+   block returns `exit=0, 0 bytes`, so a later step naming `$PM` in prose is reading a
+   value that never arrived. The block that resolves it prints it.
 3. **All artifact-kind resolution goes through the shared resolver**, so the CLI and the
    hooks can never disagree.
 4. **Knowledge is owned by the project that owns the FILE**, not by the session's cwd.

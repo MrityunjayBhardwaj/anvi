@@ -6,6 +6,7 @@
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+echo "$PM"                                     # the value the steps below use
 ```
 </step>
 <step name="create">Write to `$PM/seeds/{slug}.md` with trigger conditions.</step>

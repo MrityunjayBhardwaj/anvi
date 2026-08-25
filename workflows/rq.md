@@ -25,6 +25,7 @@ ranks questions by how much uncertainty answering them would collapse.
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+echo "$PM"                                     # the value the steps below use
 ```
 </step>
 

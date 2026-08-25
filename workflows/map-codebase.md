@@ -13,6 +13,7 @@ Fallback to gsd-codebase-mapper.
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+echo "$PM"                                     # the value the steps below use
 ```
 </step>
 <step name="collect">Collect outputs to `$PM/codebase/`.</step>
