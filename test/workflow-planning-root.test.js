@@ -138,6 +138,68 @@ for (const f of files) {
 }
 ok(usingPM > 0, `some workflow actually uses $PM (got ${usingPM}) — a zero would make the block above vacuous`);
 
+// ── a resolved value that is never printed never arrives ─────────────────────
+// Invariant 2 has a second half, and this is it. `PM=` being present and ordered before
+// the first use — which is all the block above asks — says the block RESOLVED the value.
+// It does not say the value reached anyone. An assignment produces no output, so running
+// the block as written yields `exit=0`, zero bytes, and the prose underneath that names
+// `$PM/ROADMAP.md` is substituting from nothing.
+//
+// Observed rather than reasoned about, at the shape every one of these files uses:
+//
+//     CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
+//     PM="$(node "$CLI_PATH" planning-root --raw)"
+//   → exit=0  bytes=0  stdout=[]
+//
+//   with `echo "$PM"` appended:
+//   → exit=0  bytes=24  stdout=[.anvi/project_management]
+//
+// ⚠ THE DENOMINATOR AGAIN, AND THE FILED PREMISE WAS WRONG ABOUT IT. The issue that
+// opened this described four `<cli_resolution>` blocks. Re-measuring found the defect in
+// SIXTEEN files and 29 uses — and that exactly ONE `$PM` use in the whole corpus sits
+// inside the fence that assigns it. The convention is substitution almost everywhere, so
+// this is not four stragglers; it is how the corpus works, with the printing step missing.
+//
+// The question is asked per FILE and by FENCE, not per line: a block that both resolves
+// and consumes the value in its own shell needs no printing, because nothing has to cross
+// a boundary. Only a value read OUTSIDE the fence that set it has to be published.
+console.log('\n— a resolved value is printed, not just assigned —');
+const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
+const spansOf = lines => {
+  const out = []; let cur = null;
+  lines.forEach((l, i) => {
+    const m = FENCE.exec(l);
+    if (m && cur === null) { cur = i; return; }
+    if (m && cur !== null && m[2].trim() === '') { out.push([cur, i]); cur = null; }
+  });
+  return out;
+};
+let needPrint = 0;
+for (const f of files) {
+  const lines = fs.readFileSync(path.join(WF, f), 'utf8').split('\n');
+  const def = lines.findIndex(l => /^PM=/.test(l));
+  if (def < 0) continue;
+  const spans = spansOf(lines);
+  const home = spans.find(([a, b]) => a < def && def < b);
+  if (!home) continue;
+  const outside = lines.some((l, i) => l.includes('$PM') && !/^PM=/.test(l) && !(i > home[0] && i < home[1]));
+  if (!outside) continue;
+  needPrint++;
+  const prints = lines.slice(home[0] + 1, home[1]).some(l => /^\s*echo\s+"\$PM"/.test(l));
+  ok(prints, `${f} — its $PM is read outside the block that sets it, so that block prints it`);
+}
+ok(needPrint > 0,
+   `some workflow consumes $PM outside the block that sets it (got ${needPrint}) — a zero would make every assertion above vacuous`);
+
+// The other direction, so the rule cannot be satisfied by the fence detection collapsing:
+// a block that keeps the value to itself is NOT required to print it. Asserted against a
+// fixture because the corpus currently contains no such file — and a corpus with no
+// instances cannot tell "the exemption holds" from "the exemption was deleted".
+const selfContained = ['```bash', 'PM="$(node x planning-root --raw)"', 'mkdir -p "$PM"/phases', '```'];
+const sc = spansOf(selfContained);
+ok(sc.length === 1 && sc[0][0] === 0 && sc[0][1] === 3,
+   'the fence finder resolves a simple block to exactly its own bounds — the measurement the rule above depends on');
+
 // ── deliberately NOT asked here ──────────────────────────────────────────────
 // A neighbouring question — does the block calling `planning-root` also DEFINE the
 // CLI_PATH it uses? — is a real defect in 34 blocks across 16 files, filed as #344. It

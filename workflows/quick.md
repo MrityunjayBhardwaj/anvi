@@ -41,6 +41,7 @@ If branching configured: create quick-task branch.
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PM="$(node "$CLI_PATH" planning-root --raw)"   # resolved, never spelled (invariant 2)
+echo "$PM"                                     # the value the steps below use
 mkdir -p "$PM"/phases/${quick_dir}
 ```
 </step>

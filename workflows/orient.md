@@ -83,6 +83,7 @@ misses every one of them:
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
 PM="$(node "$CLI_PATH" planning-root --raw)"
+echo "$PM"                                     # the value the steps below use
 ```
 
 ```
