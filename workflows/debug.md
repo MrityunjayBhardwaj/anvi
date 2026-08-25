@@ -7,7 +7,7 @@ This is not advisory — the workflow structure makes skipping impossible.
 </purpose>
 
 <paths>
-DEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug
+DEBUG_DIR=<planning-root>/debug   # resolved, never spelled — `anvi-tools planning-root --raw`
 </paths>
 
 <core_principle>
