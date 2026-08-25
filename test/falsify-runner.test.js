@@ -360,10 +360,17 @@ ok(!/NOT WITNESSED/.test(held.out),
 const flagged = runFalsify([{ ...NAME_MUT, expect: undefined, maxRed: undefined, mustNotRedden: true }]);
 ok(/✗ FLAGGED/.test(flagged.out), 'an edit that reddens an assertion is FLAGGED when it was required not to');
 ok(flagged.code === 1, `and the run exits 1 (got ${flagged.code})`);
-ok(/name is alpha/.test(flagged.out),
-   'and FLAGGED names the assertion that fired — "a false positive" without the assertion is not actionable');
-ok(/false positive/.test(flagged.out),
-   'and says what that means for the guard, since the reader arrives expecting reddening to be success');
+// ⚠ SCOPED TO THE FLAGGED LINE'S OWN DETAIL, NOT TO THE WHOLE REPORT. Grepping the full
+// output for the assertion's text passes without the detail naming anything at all: the
+// coverage section lists never-reddened assertions BY NAME, so "the name is alpha"
+// appears there regardless. Caught by a mutation that stripped the names out of the
+// FLAGGED detail and reddened nothing — the assertion was reading a different part of
+// the report than the one it is named for.
+const flaggedDetail = (flagged.out.match(/✗ FLAGGED[^\n]*\n\s+([^\n]*)/) || [])[1] || '';
+ok(/name is alpha/.test(flaggedDetail),
+   `FLAGGED's own detail names the assertion that fired — "a false positive" without the assertion is not actionable (got ${JSON.stringify(flaggedDetail.slice(0, 60))})`);
+ok(/false positive/.test(flaggedDetail),
+   'and that same line says what it means for the guard, since the reader arrives expecting reddening to be success');
 
 // Coverage is a claim about one direction only. A probe that FAILS reddens assertions,
 // and crediting those would report an assertion as exercised on the strength of it
