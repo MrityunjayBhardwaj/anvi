@@ -127,10 +127,24 @@ const OPEN_BARE = /^\s*<([a-z_][a-z0-9_]*)>\s*$/;
 const ANY_OPEN = /^\s*<[a-z_][a-z0-9_]*(\s[^>]*)?>\s*$/;   // attributes included: `<step name="…">`
 const TAG_CLOSE = /^\s*<\/([a-z_][a-z0-9_]*)>\s*$/;
 
+//
+// ⚠ A TAG OPEN INSIDE A FENCE IS NOT STRUCTURE — IT IS CONTENT BEING SHOWN. Measured: 32
+// bare tag-opens in the corpus sit inside fenced blocks, almost all of them agent-prompt
+// templates quoting the shape of a prompt (`<cognitive_context>`, `<files_to_read>`).
+// Scanning raw lines picks those up as real blocks, which both double-scans text the
+// enclosing fence already covers and puts prompt templates one classification away from
+// being reported as shell. None of the 32 classify as shell today, so nothing was broken
+// — but a guard whose false positives are latent rather than absent is the direction that
+// makes it unpassable later. So the scan carries fence state and skips what is inside one.
 function tagBlocks(src) {
   const lines = src.split('\n');
   const out = [];
+  let fence = null;
   for (let i = 0; i < lines.length; i++) {
+    const f = /^\s*(`{3,}|~{3,})(.*)$/.exec(lines[i]);
+    if (f && !fence) { fence = { ch: f[1][0], len: f[1].length }; continue; }
+    if (f && fence && f[1][0] === fence.ch && f[1].length >= fence.len && f[2].trim() === '') { fence = null; continue; }
+    if (fence) continue;
     const m = OPEN_BARE.exec(lines[i]);
     if (!m) continue;
     const body = [];
@@ -395,6 +409,13 @@ ok(tagBlocks('<paths>\n```bash\nA=1\n```\n</paths>').length === 0,
    'a tag containing a fence is not a leaf — the fence is already its own block, and counting both would double-scan it');
 ok(tagBlocks('<paths>\nA=1\n').length === 0,
    'an unclosed tag is not a block — an unterminated region must not swallow the rest of the file');
+
+// Paired, so the assertion below cannot pass by the scan having stopped working entirely.
+// Same three lines, fenced and unfenced: one is content, the other is structure.
+ok(tagBlocks('```\n<paths>\nnode "$CLI_PATH" planning-root --raw\n</paths>\n```').length === 0,
+   'a tag block shown INSIDE a fence is not a block — it is content the enclosing fence already covers');
+ok(tagBlocks('<paths>\nnode "$CLI_PATH" planning-root --raw\n</paths>').length === 1,
+   'the same three lines unfenced ARE a block — so the rule above is about the fence, not about the content');
 
 // And the population in the tree, by file rather than by count: the legend blocks are
 // present AND prose. Named so that deleting them (which would make the fixtures above the
