@@ -100,7 +100,7 @@ function fences(src) {
   let cur = null;
   for (let i = 0; i < lines.length; i++) {
     const m = /^\s*(`{3,}|~{3,})(.*)$/.exec(lines[i]);
-    if (!cur && m) { cur = { lang: m[2].trim(), ch: m[1][0], len: m[1].length, start: i + 1, body: [] }; continue; }
+    if (!cur && m) { cur = { kind: 'fence', lang: m[2].trim(), ch: m[1][0], len: m[1].length, start: i + 1, body: [] }; continue; }
     if (cur && m && m[1][0] === cur.ch && m[1].length >= cur.len && m[2].trim() === '') { out.push(cur); cur = null; continue; }
     if (cur) cur.body.push(lines[i]);
   }
@@ -108,8 +108,60 @@ function fences(src) {
   return out;
 }
 
+// ── the OTHER kind of delimited region (issue #356) ──────────────────────────
+// A fence is not the only place shell gets written in this corpus. These files delimit
+// with XML-ish tags too, and `workflows/debug.md` put a command substitution inside a
+// `<paths>` block — where this guard, whose corpus was fences, could not see it. The
+// measurement that opened #356: the line sat in the tree while this file reported 31
+// passed, 0 failed, and adding two backtick lines around that ONE line — changing nothing
+// else — produced `workflows/debug.md:10  $CLI_PATH`. The fence was the entire difference
+// between seen and unseen, which makes "is it fenced?" a formatting choice deciding
+// whether a defect is visible. That is the thing this guard's header already refuses to
+// accept about language tags, one level out.
+//
+// A tag block is taken only when it is a LEAF: opened by a bare `<tag>` on its own line,
+// closed by `</tag>` on its own, and containing no nested tag-open and no fence. The
+// restriction is what keeps `<process>` — which wraps every `<step>` and every fence in
+// the file — from being read as one enormous block whose body contains all the others.
+const OPEN_BARE = /^\s*<([a-z_][a-z0-9_]*)>\s*$/;
+const ANY_OPEN = /^\s*<[a-z_][a-z0-9_]*(\s[^>]*)?>\s*$/;   // attributes included: `<step name="…">`
+const TAG_CLOSE = /^\s*<\/([a-z_][a-z0-9_]*)>\s*$/;
+
+function tagBlocks(src) {
+  const lines = src.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = OPEN_BARE.exec(lines[i]);
+    if (!m) continue;
+    const body = [];
+    let j = i + 1, leaf = true;
+    for (; j < lines.length; j++) {
+      const c = TAG_CLOSE.exec(lines[j]);
+      if (c && c[1] === m[1]) break;
+      if (ANY_OPEN.test(lines[j]) || /^\s*(`{3,}|~{3,})/.test(lines[j])) { leaf = false; break; }
+      body.push(lines[j]);
+    }
+    if (!leaf || j >= lines.length) continue;
+    out.push({ kind: 'tag', tag: m[1], lang: '', start: i + 1, body });
+  }
+  return out;
+}
+
 // A shell assignment: `NAME=`, `export NAME=`, a `for NAME in`, or a `read NAME`. Anchored
 // so that `--flag=x` and a `$OTHER=` inside a string do not read as assignments.
+//
+// ⚠ THE `read` CASE HERE IS UNREACHABLE, FOR EVERY VARIABLE, AND ALWAYS HAS BEEN.
+// It is one alternative inside a group the pattern then requires to be followed by `=` or
+// `in`, and a `read` assignment is followed by neither — so the branch cannot match
+// anything it names. Measured against this definition rather than a retyped copy:
+// `read -r FOO` does not match `FOO`, and neither does `read FOO`.
+//
+// LEFT ALONE ON PURPOSE, and filed separately rather than repaired in passing. Fixing it
+// promotes `REPO` — which `orient.md` sets with `read -r OWNER REPO <<<"$(gh repo view …)"`
+// — to shell state for the whole corpus, and that immediately raises a different question
+// about `update.md`, where eleven `$REPO` sites are substituted by the model rather than
+// inherited by a shell, ten of them outside any fence. Deciding what `$REPO` is there is a
+// second argument, and bundling it here would have made this change carry two.
 const assigns = (body, v) =>
   new RegExp(`(^|[;&|(]|\\bexport\\s+|\\bfor\\s+|\\bread\\s+(?:-\\w+\\s+)*)\\s*${v}\\s*(?:=|\\bin\\b)`, 'm').test(body);
 const NAMES = body => new Set([...body.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\b/g)].map(m => m[1]));
@@ -128,6 +180,13 @@ const code = body => body.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
 // pseudo-code blocks.
 const SHELL_TAG = /^(bash|sh|shell|zsh)$/;
 const ASSIGN_LINE = /^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_]*=/m;
+
+// Defined here rather than beside its first use in pass 2, because the seed needs it too.
+// The list errs toward silence — see the note at pass 2 for the direction it fails in.
+const CMD_LINE = /^\s*(node|git|gh|cd|ls|cat|mkdir|rm|cp|mv|echo|bash|sh|zsh|npm|npx|jq|grep|sed|awk|find|readlink|pwd|source|export|chmod|ln|touch|diff|wc|head|tail|python3?)\b/m;
+// A command can also appear as a substitution on an assignment's right-hand side, which
+// is the exact shape the `<paths>` defect takes: `DEBUG_DIR="$(node "$CLI_PATH" …)"`.
+const CMD_SUB = /\$\((?:node|git|gh|bash|sh|cat|ls|find|readlink|pwd|echo|grep|sed|awk|jq|python3?)\b/;
 
 // ⚠ THAT RULE ALONE IS CIRCULAR, AND THE CIRCLE IS EXACTLY THE DEFECT (issue #353).
 // The bug is a block that USES a variable without ASSIGNING it. So deciding whether to
@@ -163,7 +222,24 @@ const ASSIGN_LINE = /^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_]*=/m;
 // helper is covered without an edit.
 const PSEUDO_CALL = /^\s*[A-Za-z_][A-Za-z0-9_]*\(\s*$/m;
 const isPseudo = b => b.lang === '' && PSEUDO_CALL.test(b.body.join('\n'));
-const isShellSeed = b => SHELL_TAG.test(b.lang) || (b.lang === '' && !isPseudo(b) && ASSIGN_LINE.test(b.body.join('\n')));
+// ⚠ A TAG BLOCK NEEDS A COMMAND, NOT MERELY AN ASSIGNMENT — AND THE DIFFERENCE IS
+// MEASURED, NOT PREFERRED. Applying the untagged-fence rule unchanged to tag blocks
+// admits all sixteen `<paths>` blocks, because a legend line like
+// `REPO=<the anvi git clone>   # resolved in step 1` matches ASSIGN_LINE exactly. That is
+// not an assignment; it is a glossary entry whose right-hand side is a description in
+// angle brackets. Admitting it promoted `REPO` to shell state corpus-wide and produced
+// two violations in files nobody had touched — `orient.md` and `update.md`, where `$REPO`
+// is a placeholder step 1 tells the model to resolve, and every one of its ten uses sits
+// outside any fence. Flagging those would have been the unpassable direction again.
+//
+// Requiring a COMMAND separates the two by what the block DOES rather than how it looks:
+// a legend lists names and values, a runnable block invokes something. Re-measured with
+// that rule, the widening promotes ZERO names and admits ONE tag block of 179 — the one
+// with `$(node …)` in it. The five legend blocks stay prose, which is what they are.
+const hasCommand = b => { const c = code(b.body.join('\n')); return CMD_LINE.test(c) || CMD_SUB.test(c); };
+const isShellSeed = b => SHELL_TAG.test(b.lang)
+  || (b.lang === '' && !isPseudo(b) && ASSIGN_LINE.test(b.body.join('\n'))
+      && (b.kind === 'fence' || hasCommand(b)));
 
 // Names the surrounding environment provides — never state a block was expected to set.
 const AMBIENT = new Set(['HOME', 'PATH', 'PWD', 'USER', 'SHELL', 'ARGUMENTS', 'TMPDIR', 'EDITOR',
@@ -174,10 +250,12 @@ const blocks = [];
 let unclosed = 0;
 for (const f of files) {
   const rel = path.relative(ROOT, f);
-  for (const b of fences(fs.readFileSync(f, 'utf8'))) {
+  const src = fs.readFileSync(f, 'utf8');
+  for (const b of fences(src)) {
     if (b.unclosed) unclosed++;
     blocks.push({ ...b, file: rel });
   }
+  for (const b of tagBlocks(src)) blocks.push({ ...b, file: rel });
 }
 // Pass 1 — the seed, and the names it establishes. `shellVarsFrom` is a function so the
 // same derivation can be re-run against the final set for the fixpoint check.
@@ -212,7 +290,6 @@ const SEED_VARS = namesIn(seedBlocks);
 // (`STORAGE.md`, `node scripts/bind-store.js --apply <dir>`), and it uses no shell-state
 // name, so it stays prose on the first condition. The two conditions are independent
 // enough to be worth both.
-const CMD_LINE = /^\s*(node|git|gh|cd|ls|cat|mkdir|rm|cp|mv|echo|bash|sh|zsh|npm|npx|jq|grep|sed|awk|find|readlink|pwd|source|export|chmod|ln|touch|diff|wc|head|tail|python3?)\b/m;
 const usesSeedVar = b => [...NAMES(code(b.body.join('\n')))].some(v => SEED_VARS.has(v));
 const looksRun = b => CMD_LINE.test(code(b.body.join('\n')));
 const isShell = b => isShellSeed(b) || (b.lang === '' && !isPseudo(b) && usesSeedVar(b) && looksRun(b));
@@ -269,13 +346,64 @@ ok(shellBlocks.some(b => b.file === 'agents/anvi-debugger.md'),
 // names a shell variable, so the corpus cannot tell "the exclusion holds" from "the
 // exclusion was deleted". These two can, and they redden independently of what anyone
 // happens to have written in `workflows/`.
-const asBlock = (lang, text) => ({ lang, body: text.split('\n'), file: '<fixture>', start: 0 });
+const asBlock = (lang, text) => ({ kind: 'fence', lang, body: text.split('\n'), file: '<fixture>', start: 0 });
+const asTag = (tag, text) => ({ kind: 'tag', tag, lang: '', body: text.split('\n'), file: '<fixture>', start: 0 });
 ok(!isShell(asBlock('', 'Agent(\n  subagent_type="anvi-planner",\n  prompt="read $PM/STATE.md first"\n)')),
    'an untagged call template naming a shell variable is prose — a keyword argument is not an assignment');
 ok(isShell(asBlock('', 'CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"\nDEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug')),
    'an untagged fence of real assignments is shell — the exclusion is narrow enough to leave the debugger protocol scanned');
 ok(isShell(asBlock('', 'node "$CLI_PATH" planning-root --raw')),
    'an untagged fence that only USES a shell variable in command position is shell — the gap this change closes');
+
+// ── shell written outside a fence (issue #356) ───────────────────────────────
+// The corpus is fences AND leaf tag blocks. Everything below is pinned against FIXTURES
+// rather than against the tree, and that is not belt-and-braces: `workflows/debug.md` was
+// the only tag block in the corpus that held a command, and this change fixes it. A tree
+// with no instances left cannot tell "the rule covers unfenced shell" from "the rule
+// matches nothing any more" — so the corpus assertion below only proves tag blocks are
+// SEEN, and these prove what happens to them.
+console.log('\n— a fence is not the only place shell gets written —');
+ok(blocks.some(b => b.kind === 'tag'),
+   `tag-delimited blocks are in the corpus (got ${blocks.filter(b => b.kind === 'tag').length} of ${blocks.length}) — a zero would make every fixture below decorative`);
+
+// Reddens: the shape the defect actually took. A command substitution on the right-hand
+// side of an assignment, inside a `<paths>` block, using a name the block never sets.
+ok(isShell(asTag('paths', 'DEBUG_DIR="$(node "$CLI_PATH" planning-root --raw)"/debug')),
+   'a tag block whose assignment calls a command is shell — the exact shape that sat unseen in workflows/debug.md');
+ok(isShell(asTag('paths', 'node "$CLI_PATH" planning-root --raw')),
+   'a tag block that only USES a shell variable in command position is shell — the same non-circular case pass 2 covers for fences');
+
+// Stays quiet: the four legend blocks in the tree, and the eleven declarations. These are
+// the must-not-redden direction. Admitting them was measured, not imagined — it promoted
+// `REPO` to shell state corpus-wide and produced two violations in untouched files.
+ok(!isShell(asTag('paths', 'REPO=<the anvi git clone>             # resolved in step 1')),
+   'a legend entry whose value is a description is NOT shell — the promotion that flagged two untouched files');
+ok(!isShell(asTag('paths', 'STORE=~/.anvideck                     # centralized store\nCATALOGUES=<store>/projects/<project>/.anvi/{hetvabhasa}.md')),
+   'a multi-line legend of paths is NOT shell — no command, so nothing in it is run');
+ok(!isShell(asTag('purpose', 'Orchestrate debugging with the cognitive OS.')),
+   'a prose tag block is NOT shell');
+
+// The leaf restriction, pinned in both directions. Without it `<process>` — which wraps
+// every step and every fence in a workflow — reads as ONE block whose body contains all
+// the others, and the classification of the whole file collapses into it.
+console.log('\n— only LEAF tag blocks are blocks —');
+ok(tagBlocks('<paths>\nA=1\n</paths>').length === 1,
+   'a bare tag closed on its own line is a leaf block');
+ok(tagBlocks('<process>\n<step name="1_run">\nnode x.js\n</step>\n</process>').length === 0,
+   'a tag containing a tag-with-attributes is not a leaf — `<step name="…">` counts as nesting');
+ok(tagBlocks('<paths>\n```bash\nA=1\n```\n</paths>').length === 0,
+   'a tag containing a fence is not a leaf — the fence is already its own block, and counting both would double-scan it');
+ok(tagBlocks('<paths>\nA=1\n').length === 0,
+   'an unclosed tag is not a block — an unterminated region must not swallow the rest of the file');
+
+// And the population in the tree, by file rather than by count: the legend blocks are
+// present AND prose. Named so that deleting them (which would make the fixtures above the
+// only evidence) is distinguishable from the rule changing.
+const legendFiles = ['workflows/update.md', 'workflows/currency.md', 'workflows/refresh.md', 'workflows/sess-wrap.md'];
+for (const lf of legendFiles) {
+  const b = blocks.find(x => x.kind === 'tag' && x.tag === 'paths' && x.file === lf);
+  ok(b && !isShell(b), `${lf} — its <paths> legend is in the corpus and classified prose`);
+}
 
 // ── nothing may inherit shell state across a fence ───────────────────────
 console.log('\n— every shell block is self-contained —');
@@ -285,7 +413,7 @@ for (const b of shellBlocks) {
   for (const v of NAMES(body)) {
     if (!SHELL_VARS.has(v)) continue;
     if (assigns(body, v)) continue;
-    violations.push({ file: b.file, line: b.start, v, lang: b.lang || '(untagged)' });
+    violations.push({ file: b.file, line: b.start, v, lang: b.tag ? `<${b.tag}>` : (b.lang || '(untagged fence)') });
   }
 }
 ok(violations.length === 0,
