@@ -457,6 +457,14 @@ nothing can say which is real.
    judgement — which mutations to write, the assertion each must redden, and its
    breadth ceiling. That is deliberately not automated: a generator would emit
    edits that match nothing, which is the oldest way this instrument has lied.
+   **Falsify BOTH directions for anything that classifies.** "Break it and watch it
+   go red" measures only that a guard catches defects. A guard that flags legitimate
+   input is invisible to every such mutation, and that failure is the worse one — a
+   missed defect leaves the status quo, an unpassable guard gets deleted by whoever
+   hits it next. `mustNotRedden: true` marks a mutation whose pass is SILENCE; it
+   reports HELD when the guard stays quiet and FLAGGED when it fires. Measured: a
+   guard with five all-WITNESSED mutations was flagging eight prose blocks, found by
+   one probe in the other direction.
 
 ⑥ SHIP, then ask what you missed
    Self-review is not "ready to merge?" — it is an audit of the diff for gaps,

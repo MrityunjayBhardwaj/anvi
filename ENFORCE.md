@@ -432,6 +432,14 @@ allowed to be silent in production must be loud in a test, or it has no witness.
   grades against the assertion you named and a breadth ceiling you set, and lists
   every assertion no mutation ever reached, which is where an enumeration written
   from your model of the code rather than its branches shows up.
+  **For a guard that CLASSIFIES, score both directions.** Reddening-is-success
+  mutations establish only that it catches defects; they cannot see it flagging
+  legitimate input, which is the failure that gets a guard weakened or deleted rather
+  than merely leaving the status quo. Mark such a mutation `mustNotRedden: true` — its
+  pass is silence, and it reports HELD or FLAGGED rather than asking you to read
+  WITNESSED backwards. A mutation must declare exactly one direction; both or neither
+  is refused before the control runs, because a default picks a direction silently and
+  the report then reads as authoritative about a question nobody asked.
 
 **A hook is a process per event, and that cuts both ways.** Anything a hook
 deduplicates in a module-level variable is deduplicated against nothing: the

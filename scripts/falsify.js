@@ -47,6 +47,23 @@
 //        written against the summary's wording would have missed 3 of 21. Indentation
 //        is the discriminator that is actually true.
 //
+//   7. The matrix asks only "does reddening happen?", which measures half a guard.
+//      Every verdict above is directional — WITNESSED is good — so the matrix can only
+//      establish that a guard CATCHES real defects. The opposite failure, where a guard
+//      flags legitimate input, is invisible to it: no mutation is written whose pass is
+//      silence. And the two failures are not symmetric. A missed defect leaves the
+//      status quo; a false positive makes the guard unpassable, and an unpassable guard
+//      gets weakened or deleted by whoever hits it next. Measured: a guard falsified
+//      with five all-WITNESSED mutations was flagging eight prose blocks as shell, found
+//      by one probe in the other direction.
+//      → `mustNotRedden: true` on a mutation inverts its pass condition, and gets its
+//        own verdict words — HELD when the guard stays quiet, FLAGGED when it fires.
+//        Deliberately NOT a note telling the reader to flip WITNESSED in their head: a
+//        hand-applied sign flip is a step that gets skipped, and a skipped one turns an
+//        all-green report into a confident statement of the opposite. The preconditions
+//        are not inverted with it — a crash or a timeout still means no verdict, because
+//        "silent because nothing ran" is the one reading this tool must never offer.
+//
 // Usage: node scripts/falsify.js <spec.js> [-v]
 //
 // The spec is a JS module the author writes per change and does not commit:
@@ -60,8 +77,18 @@
 //       replace:'TOLERANCE = 1.0',
 //       expect: /tolerance/i,         // the assertion that MUST redden
 //       maxRed: 2,                    // breadth ceiling; legitimate breadth varies
+//     }, {
+//       label:  'a legitimate value the guard must ignore',
+//       file:   'fixtures/ok.txt',
+//       find:   'value: 1',
+//       replace:'value: 2',
+//       mustNotRedden: true,          // pass is SILENCE — no expect, no maxRed
 //     }],
 //   };
+//
+// A mutation names exactly one direction. Both, or neither, is refused (exit 2) rather
+// than defaulted: a default silently picks a direction and the report then reads as
+// authoritative about a question nobody asked.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -204,6 +231,29 @@ function grade(m, run) {
     return { verdict: 'NO ASSERTIONS', detail: 'the run emitted no assertion lines — the parse contract does not hold for this test' };
 
   const red = run.red;
+
+  // ── the other direction (issue #354) ──────────────────────────────────────
+  // A mutation declared `mustNotRedden` asserts the guard IGNORES this input. Its pass
+  // is silence, so the sign of every line below is inverted for it — which is exactly
+  // why it gets its own verdict words rather than a note telling the reader to flip
+  // WITNESSED in their head. A hand-applied sign flip is a step that gets skipped, and
+  // when it is skipped an all-WITNESSED report reads as a clean pass while saying the
+  // opposite.
+  //
+  // The preconditions above are NOT inverted and deliberately fall through to here: a
+  // crash, a timeout or an unparseable run means the mutation did not get a verdict at
+  // all, which is not the same as the guard staying quiet. Silence because nothing ran
+  // is the one reading this tool must never offer.
+  if (m.mustNotRedden) {
+    if (red.length === 0)
+      return { verdict: 'HELD', detail: 'the file changed and the guard stayed quiet — this input does not trip it' };
+    return {
+      verdict: 'FLAGGED',
+      detail: `${red.length} red on input that must not trip the guard: ` +
+              `${red.map(a => `"${a.msg}"`).join(', ')} — a false positive, which makes the guard unpassable`,
+    };
+  }
+
   if (red.length === 0)
     return { verdict: 'NOT WITNESSED', detail: 'the file changed and every assertion stayed green — nothing here is testing this' };
 
@@ -242,6 +292,33 @@ function instrumentProblems(before, after) {
   return problems;
 }
 
+// ── the spec's own coherence ─────────────────────────────────────────────────
+// Every mutation declares exactly ONE direction. The two are not opposite settings of a
+// dial — they have different pass conditions and different verdict words — so a mutation
+// carrying both is not a conflict to resolve by precedence, it is a spec whose author
+// has not decided what they are asking. Rejected rather than defaulted, because a
+// default here silently picks a direction and the report then reads as authoritative.
+//
+// `maxRed` is refused alongside `mustNotRedden` for the same reason: a breadth ceiling
+// on a mutation whose acceptable breadth is zero is a leftover from editing one kind of
+// mutation into the other, and it is the tell that the direction was changed without the
+// expectation being rewritten.
+function specProblems(mutations) {
+  const problems = [];
+  mutations.forEach((m, i) => {
+    const where = `mutation ${i + 1} ("${m.label || '<unlabelled>'}")`;
+    if (m.mustNotRedden) {
+      if (m.expect !== undefined)
+        problems.push(`${where} sets both mustNotRedden and expect — its pass is silence, so there is no assertion to name`);
+      if (m.maxRed !== undefined)
+        problems.push(`${where} sets both mustNotRedden and maxRed — the acceptable breadth is zero, so a ceiling means nothing`);
+    } else if (m.expect === undefined) {
+      problems.push(`${where} names neither expect nor mustNotRedden — every mutation must say which direction it is asking about`);
+    }
+  });
+  return problems;
+}
+
 // ── the run ──────────────────────────────────────────────────────────────────
 function main() {
   const args = process.argv.slice(2);
@@ -271,7 +348,19 @@ function main() {
     process.exit(2);
   }
 
-  console.log(`falsifying ${spec.test} — ${mutations.length} mutation${mutations.length === 1 ? '' : 's'}\n`);
+  // Checked before the control runs: a spec that cannot be read is not worth two test
+  // runs, and reporting it beside a green control invites reading the control as partial
+  // success.
+  const specIssues = specProblems(mutations);
+  if (specIssues.length) {
+    console.error('REFUSED: the spec does not say what it is asking.\n');
+    specIssues.forEach(l => console.error('  ' + l));
+    process.exit(2);
+  }
+
+  const held = mutations.filter(m => m.mustNotRedden).length;
+  console.log(`falsifying ${spec.test} — ${mutations.length} mutation${mutations.length === 1 ? '' : 's'}` +
+              `${held ? ` (${mutations.length - held} must redden, ${held} must not)` : ''}\n`);
 
   // ── control, before ───────────────────────────────────────────────────────
   const controlBefore = runTest(spec.test);
@@ -312,7 +401,14 @@ function main() {
 
     const run = runTest(spec.test);
     const g = grade(m, run);
-    run.red.forEach(a => everRed.add(coverageKey(a.msg)));
+    // Coverage counts only the must-redden direction. A must-not-redden probe reddens
+    // nothing when it passes, and when it FAILS the assertions it tripped are false
+    // positives — crediting those as coverage would report an assertion as exercised on
+    // the strength of it firing wrongly. Observed before this line existed: a run with
+    // zero must-redden mutations printed "1/28 assertions were reddened" beside "counts
+    // the 0 must-redden mutation(s) only", two numbers from one run that cannot both be
+    // right.
+    if (!m.mustNotRedden) run.red.forEach(a => everRed.add(coverageKey(a.msg)));
     results.push({ m, ...g, run });
 
     if (verbose) {
@@ -335,16 +431,23 @@ function main() {
   // ── report ────────────────────────────────────────────────────────────────
   console.log('\n— mutations —');
   for (const r of results) {
-    const mark = r.verdict === 'WITNESSED' ? '✓' : '✗';
+    const mark = (r.verdict === 'WITNESSED' || r.verdict === 'HELD') ? '✓' : '✗';
     console.log(`  ${mark} ${r.verdict.padEnd(16)} ${r.m.label}`);
-    if (r.verdict !== 'WITNESSED' || verbose) console.log(`      ${r.detail}`);
+    if (!(r.verdict === 'WITNESSED' || r.verdict === 'HELD') || verbose) console.log(`      ${r.detail}`);
   }
 
   // The answer to the enumeration gap: assertions no mutation ever reddened. A matrix
   // written from the author's model of the code rather than from its branches leaves
   // exactly this trace, and it is derivable from data already in hand.
   const never = controlBefore.assertions.map(a => a.msg).filter(msg => !everRed.has(coverageKey(msg)));
+  // Coverage is a statement about ONE direction, and saying so is the point. A
+  // must-not-redden probe reddens nothing when it passes, so it contributes nothing here
+  // BY DESIGN — and a reader who has just seen a full coverage number is exactly the
+  // reader about to conclude the guard was measured both ways.
+  const heldCount = results.filter(r => r.m.mustNotRedden).length;
   console.log(`\n— coverage — ${controlBefore.total - never.length}/${controlBefore.total} assertions were reddened by some mutation`);
+  if (heldCount)
+    console.log(`  (counts the ${results.length - heldCount} must-redden mutation(s) only — the ${heldCount} must-not-redden probe(s) redden nothing when they pass)`);
   if (never.length) {
     console.log('  never reddened (no mutation in this matrix exercises these):');
     never.forEach(msg => console.log(`    · ${msg}`));
@@ -364,7 +467,15 @@ function main() {
   // ── the verdict on the instrument itself ──────────────────────────────────
   const problems = instrumentProblems(controlBefore, controlAfter);
 
-  const notWitnessed = results.filter(r => r.verdict !== 'WITNESSED');
+  // HELD is a pass, so it cannot sit in the failure bucket — but it is counted and
+  // printed SEPARATELY rather than added to the witnessed total. "7 witnessed, 2 held"
+  // and "9 witnessed" describe different runs, and only the first can be checked against
+  // what the spec asked for.
+  const passed = results.filter(r => r.verdict === 'WITNESSED' || r.verdict === 'HELD');
+  const witnessed = results.filter(r => r.verdict === 'WITNESSED').length;
+  const heldOk = results.filter(r => r.verdict === 'HELD').length;
+  const notWitnessed = results.filter(r => r.verdict !== 'WITNESSED' && r.verdict !== 'HELD');
+  const tally = heldOk ? `${witnessed} witnessed, ${heldOk} held` : `${witnessed} witnessed`;
 
   console.log('');
   if (problems.length) {
@@ -373,13 +484,13 @@ function main() {
     process.exit(2);
   }
   if (notWitnessed.length) {
-    console.log(`✗ falsify: ${results.length - notWitnessed.length}/${results.length} witnessed, ${notWitnessed.length} not`);
+    console.log(`✗ falsify: ${passed.length}/${results.length} conclusive (${tally}), ${notWitnessed.length} not`);
     process.exit(1);
   }
-  console.log(`✓ falsify: ${results.length}/${results.length} witnessed, controls agree at ${controlBefore.total} assertions`);
+  console.log(`✓ falsify: ${results.length}/${results.length} conclusive (${tally}), controls agree at ${controlBefore.total} assertions`);
   process.exit(0);
 }
 
-module.exports = { parseRun, applyEdit, grade, matches, instrumentProblems, coverageKey, ASSERTION_RE, SUMMARY_RE };
+module.exports = { parseRun, applyEdit, grade, matches, instrumentProblems, specProblems, coverageKey, ASSERTION_RE, SUMMARY_RE };
 
 if (require.main === module) main();
