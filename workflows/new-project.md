@@ -5,10 +5,6 @@ Forked from GSD new-project.md with design lens for project architecture.
 Spawns 4 parallel researchers, synthesizer, then roadmapper.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <process>
 
 <step name="initialize">

@@ -3,10 +3,6 @@ Restore full project context on session return.
 Forked from GSD resume-project.md. Loads cognitive state FIRST, then execution state.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <cli_resolution>
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"

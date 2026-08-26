@@ -8,10 +8,6 @@ Supports flags:
 - --full: full verification loop (planner + checker + executor + verifier)
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <process>
 
 <step name="parse_flags">

@@ -3,10 +3,6 @@ Archive completed milestone: verification → stats → evolution review → arc
 Forked from GSD complete-milestone.md.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <process>
 
 <step name="verify_readiness">

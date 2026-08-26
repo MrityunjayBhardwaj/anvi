@@ -5,10 +5,6 @@ Forked from GSD discuss-phase.md with design lens for gray area identification.
 User = visionary/founder. Claude = builder asking the right questions.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <core_principle>
 **Ask the right questions before building.**
 

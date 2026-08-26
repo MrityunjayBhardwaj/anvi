@@ -4,10 +4,6 @@ integrated research. Use this when deeper investigation is needed separately.
 Forked from GSD research-phase.md with dharana boundary scanning.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <cli_resolution>
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"
