@@ -95,16 +95,24 @@ ok(entryCount > 0, `the legend parser finds entries at all (got ${entryCount}) �
 
 // ── nothing in a legend may restate what the code sets ──────────────────────
 console.log('\n— a legend describes, it does not compete —');
-const competing = [];
-for (const f of withLegend) {
-  const src = fs.readFileSync(path.join(WF, f), 'utf8');
+// ⚠ ONE COMPARISON, USED BY BOTH THE CORPUS SCAN AND THE FIXTURES. It existed twice in
+// the first version — once here and once inside the fixture helper — and falsification
+// caught it: a mutation loosening the match reported NOT WITNESSED, because it changed
+// one copy while the other went on answering. Two spellings of one rule is the same
+// defect this whole file is about, one level up.
+const clashes = src => {
   const assigned = shellAssignments(src);
-  for (const e of legendEntries(src)) {
-    if (!e.value) continue;
-    const clash = assigned.find(a => a.value === e.value);
-    if (clash) competing.push({ file: f, legend: e.name, code: clash.name, value: e.value });
-  }
-}
+  return legendEntries(src)
+    .filter(e => e.value)
+    .map(e => ({ entry: e, clash: assigned.find(a => a.value === e.value) }))
+    .filter(x => x.clash);
+};
+const competes = src => clashes(src).length > 0;
+
+const competing = [];
+for (const f of withLegend)
+  for (const c of clashes(fs.readFileSync(path.join(WF, f), 'utf8')))
+    competing.push({ file: f, legend: c.entry.name, code: c.clash.name, value: c.entry.value });
 ok(competing.length === 0,
    `no <paths> entry restates a value the same file's shell already assigns (got ${competing.length})`);
 for (const c of competing)
@@ -147,10 +155,7 @@ ok(proseLines(fs.readFileSync(path.join(WF, 'currency.md'), 'utf8')) >= 3,
 // independently of what anyone happens to write in `workflows/`.
 console.log('\n— the discriminator, both directions —');
 const asFile = (legend, body) => `<purpose>x</purpose>\n\n<paths>\n${legend}\n</paths>\n\n${body}\n`;
-const competes = src => {
-  const a = shellAssignments(src);
-  return legendEntries(src).some(e => e.value && a.some(x => x.value === e.value));
-};
+// `competes` is defined above, with the single comparison it shares with the corpus scan.
 
 ok(competes(asFile('CLI=~/.claude/anvi/bin/anvi-tools.cjs',
                    '```bash\nCLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"\n```')),
