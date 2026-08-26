@@ -123,12 +123,21 @@ for (const lf of ['currency.md', 'refresh.md', 'sess-wrap.md', 'update.md']) {
 // a single-line regex could not match it. Quoting is also the wrong instrument: it pins
 // one wording, and rewording the guidance would redden a guard that has nothing to say
 // about wording. What matters is that a legend carries GUIDANCE and not only names.
+const asFileEarly = legend => `<purpose>x</purpose>\n\n<paths>\n${legend}\n</paths>\n\nbody\n`;
 const proseLines = src => {
   const m = /<paths>\n([\s\S]*?)\n<\/paths>/.exec(src);
   return m ? m[1].split('\n').filter(l => l.trim() && !/^[A-Z_][A-Z0-9_]*=/.test(l)).length : 0;
 };
 ok(withLegend.some(f => proseLines(fs.readFileSync(path.join(WF, f), 'utf8')) > 0),
    'at least one surviving legend carries prose as well as names — the guidance is the reason the tag earns its keep, and a legend reduced to bare declarations is the shape just retired');
+// ⚠ A ">= N" ASSERTION CANNOT FAIL WHEN THE DEFECT MAKES N BIGGER, WHICH IS WHAT THE
+// FIRST VERSION OF THIS DID. Scoring prose by "every non-empty line" instead of "every
+// line that is not a declaration" raises currency.md's count from 4 to 7, and a `>= 3`
+// assertion stays green through it. So the discriminating case is pinned as a FIXTURE
+// where the correct answer is ZERO — a legend of bare declarations carries no guidance,
+// and any rule that cannot say so is counting lines rather than reading them.
+ok(proseLines(asFileEarly('A=1\nB=2')) === 0,
+   'a legend of bare declarations carries NO prose — the shape just retired, scored as zero rather than as "at least some"');
 ok(proseLines(fs.readFileSync(path.join(WF, 'currency.md'), 'utf8')) >= 3,
    `currency.md — its legend still carries its multi-line caveat (got ${proseLines(fs.readFileSync(path.join(WF, 'currency.md'), 'utf8'))} prose line(s))`);
 
