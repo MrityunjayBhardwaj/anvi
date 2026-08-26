@@ -169,5 +169,15 @@ ok(!competes(asFile('CATALOGUES=<store>/projects/<project>/.anvi/{hetvabhasa}.md
 ok(!competes(asFile('STORE=~/.anvideck', '```bash\nOTHER="$HOME/somewhere-else"\n```')),
    'a shell block assigning a DIFFERENT value does not make a legend entry stale');
 
+// ⚠ THE COMPARISON IS EQUALITY, AND LOOSENING IT TO CONTAINMENT IS THE OVER-BROAD
+// DIRECTION. A legend naming a directory and a shell variable naming a path INSIDE that
+// directory are not two homes for one fact — they are a parent and a child, and both are
+// legitimate. Under substring matching the parent would be reported as restated by every
+// child, which condemns exactly the legends this change exists to protect. Pinned as a
+// fixture because the tree currently holds no parent/child pair, so the corpus alone
+// cannot tell equality from containment.
+ok(!competes(asFile('STORE=~/.anvideck', '```bash\nSTORE_DIR="$HOME/.anvideck/projects/anvi"\n```')),
+   'a shell path INSIDE a legend\'s directory does not compete with it — the comparison is equality, not containment');
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} paths-legend-parity: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
