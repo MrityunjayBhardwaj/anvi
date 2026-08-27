@@ -39,10 +39,10 @@ repo (§10), so the repo can be asked which board is its own; a number carried o
 a previous session's notes goes stale silently and cannot be told from a correct one:
 
 ```bash
-read -r OWNER REPO <<<"$(gh repo view --json owner,name \
+read -r OWNER REPO_NAME <<<"$(gh repo view --json owner,name \
   --jq '.owner.login + " " + .name')"
 
-BOARD=$(gh api graphql -f owner="$OWNER" -f name="$REPO" -f query='
+BOARD=$(gh api graphql -f owner="$OWNER" -f name="$REPO_NAME" -f query='
   query($owner:String!,$name:String!){
     repository(owner:$owner,name:$name){
       projectsV2(first:10){ nodes { number title } }

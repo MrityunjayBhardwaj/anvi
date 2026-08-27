@@ -38,6 +38,20 @@ CONFIG=~/.claude/anvi-config.json     # { "memorySync": true|false }
 REPO=<the anvi git clone>             # resolved in step 1 — install.sh + VERSION + .git live here
 </paths>
 
+**`REPO` is substituted by the model, not inherited by a shell.** Step 1 resolves it by
+looking at the filesystem and reasoning about what it finds — there is no command that
+assigns it, and none should be added. That is why the blocks below write `$REPO` without
+setting it first: by the time any of them runs, the value is already filled in. It is the
+same kind of name as `<project-dir>`, spelled in the shell's idiom because the lines it
+appears in are commands you can paste.
+
+The distinction matters because it is checked. Corpus-wide, a name is a placeholder when
+no shell block assigns it and shell state when some block does, and a name may not be one
+in one file and the other in another. `REPO` is a placeholder everywhere, and
+`test/cross-block-shell-state.test.js` asserts it by name so that adding a shell
+assignment for it — anywhere in `workflows/`, `agents/` or `skills/` — reddens here rather
+than silently reclassifying all thirteen uses in this file.
+
 <process>
 
 <step name="1_locate_repo">
