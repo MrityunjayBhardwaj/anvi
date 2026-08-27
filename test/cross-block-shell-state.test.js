@@ -182,6 +182,19 @@ function tagBlocks(src) {
 //     whitespace leaves the prompt's words looking exactly like variable names, so the
 //     tokeniser keeps a quoted string as one token and the flags that take an argument
 //     consume the token after them.
+//   · ⚠ `read` IS RARELY THE FIRST WORD ON ITS LINE. Found by reviewing this change's own
+//     diff, not by a test: the first version anchored `read` to a delimiter, which covers
+//     `read -r A B` and misses FIVE of the six spellings that actually get written —
+//     `while read -r line`, `while IFS= read -r line`, `IFS= read -r line`,
+//     `if read -r ans`, and the same inside a pipeline. Shipping a matcher that names
+//     `read` and does not recognise its canonical form would have reproduced the exact
+//     defect this file is fixing, one spelling along. So a `read` may be preceded by the
+//     keywords that introduce a command and by command-scoped `NAME=value` prefixes.
+//     ⚠ WHAT THAT WIDENING ADMITS WAS COUNTED ACROSS THE WHOLE CORPUS BEFORE IT WAS KEPT,
+//     because the obvious rule has twice condemned the healthy population here: it
+//     promotes ZERO new names — the shell-state set is the same thirteen before and after,
+//     and the placeholder set the same nineteen. The identifier rule below is what holds
+//     that line, so `(then read the PLAN.md)` stays prose even with `then` now allowed.
 //   · ⚠ AND THE CORPUS IS MOSTLY ENGLISH, WHERE `read` IS A VERB. Counted before the rule
 //     was written rather than after: the corpus holds ONE `read` command and SEVEN prose
 //     uses — `- Review plan: (read the PLAN.md)`, `(read it, don't assume)`. The leading
@@ -190,7 +203,7 @@ function tagBlocks(src) {
 //     discriminate. What does: a `read` names IDENTIFIERS and nothing else. `the PLAN.md)`
 //     is not an identifier, so the whole match is rejected rather than mined for names.
 //     A rule that admits seven prose lines for every real one is not a rule.
-const READ_ARGS = /(?:^|[;&|(])[ \t]*read[ \t]+([^\n;&|<>]*)/gm;
+const READ_ARGS = /(?:^|[;&|(])[ \t]*(?:(?:while|until|if|elif|do|then|else|!)[ \t]+|[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+)*read[ \t]+([^\n;&|<>]*)/gm;
 // Flags bash's `read` defines as taking an argument: -d -i -n -N -p -t -u. Written as a
 // character class over the last letter so a bundled `-rp` is covered too.
 const READ_FLAG_WITH_ARG = /^-[a-zA-Z]*[dinNptu]$/;
@@ -407,6 +420,11 @@ for (const [form, body, name] of [
   ['before a herestring', 'read -r OWNER REPO_NAME <<<"$(gh repo view)"', 'REPO_NAME'],
   ['after a prompt flag', 'read -r -p "  Repo name [x]: " VAR', 'VAR'],
   ['after a bundled -rp', 'read -rp "  Repo name: " VAR',       'VAR'],
+  ['after an IFS prefix',  'IFS= read -r line',                 'line'],
+  ['as a while condition', 'while read -r line; do',            'line'],
+  ['the canonical idiom',  'while IFS= read -r line; do',       'line'],
+  ['downstream of a pipe', 'cat f | while read -r x; do',       'x'],
+  ['as an if condition',   'if read -r ans; then',              'ans'],
 ])
   ok(assigns(body, name), `read ${form} — \`${body}\` assigns ${name}`);
 
@@ -439,6 +457,7 @@ for (const [why, body, name] of [
   ['a shouted English verb at line start',     'READ the catalogue before editing', 'the'],
   ['a mere use of the name',                   'node "$FOO" --raw',                 'FOO'],
   ['a flag that looks like a name',            'gh pr list --limit=1',              'limit'],
+  ['a command keyword before English prose',   '(then read the PLAN.md)',           'the'],
 ])
   ok(!assigns(body, name), `NOT an assignment: ${why} — \`${body}\` does not assign ${name}`);
 
