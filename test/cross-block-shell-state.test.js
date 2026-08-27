@@ -164,20 +164,65 @@ function tagBlocks(src) {
 // A shell assignment: `NAME=`, `export NAME=`, a `for NAME in`, or a `read NAME`. Anchored
 // so that `--flag=x` and a `$OTHER=` inside a string do not read as assignments.
 //
-// ⚠ THE `read` CASE HERE IS UNREACHABLE, FOR EVERY VARIABLE, AND ALWAYS HAS BEEN.
-// It is one alternative inside a group the pattern then requires to be followed by `=` or
-// `in`, and a `read` assignment is followed by neither — so the branch cannot match
-// anything it names. Measured against this definition rather than a retyped copy:
-// `read -r FOO` does not match `FOO`, and neither does `read FOO`.
+// ⚠ `read` CANNOT BE ONE ALTERNATIVE OF THAT PATTERN, WHICH IS WHY IT IS A SEPARATE
+// FUNCTION (issue #357). It was written as one, inside a group the pattern then required
+// to be followed by `=` or `in` — and a `read` assignment is followed by neither, so the
+// branch could not match anything it named, for any variable, from the day it was written.
+// The other three alternatives all put the name immediately before an operator; `read`
+// puts it in a LIST after a command and its flags. Those are different shapes, and
+// forcing them into one regex is what hid the defect: the pattern read as though it
+// handled `read`, and nothing disagreed because a branch that never matches never fails.
 //
-// LEFT ALONE ON PURPOSE, and filed separately rather than repaired in passing. Fixing it
-// promotes `REPO` — which `orient.md` sets with `read -r OWNER REPO <<<"$(gh repo view …)"`
-// — to shell state for the whole corpus, and that immediately raises a different question
-// about `update.md`, where eleven `$REPO` sites are substituted by the model rather than
-// inherited by a shell, ten of them outside any fence. Deciding what `$REPO` is there is a
-// second argument, and bundling it here would have made this change carry two.
+// Three things this has to get right, each of which is a way the obvious version is wrong:
+//
+//   · `read -r A B` assigns BOTH names. Matching only the first is the same defect one
+//     position along — the second name would be classified as a placeholder while a shell
+//     really does set it. So the names are collected by POSITION, not by pattern.
+//   · `-p` takes a PROMPT, and a prompt has spaces in it. Splitting the argument list on
+//     whitespace leaves the prompt's words looking exactly like variable names, so the
+//     tokeniser keeps a quoted string as one token and the flags that take an argument
+//     consume the token after them.
+//   · ⚠ AND THE CORPUS IS MOSTLY ENGLISH, WHERE `read` IS A VERB. Counted before the rule
+//     was written rather than after: the corpus holds ONE `read` command and SEVEN prose
+//     uses — `- Review plan: (read the PLAN.md)`, `(read it, don't assume)`. The leading
+//     `(` in those is a subshell in shell and a parenthesis in English, and this corpus
+//     genuinely uses subshells (`( cd "$REPO" && git pull )`), so the delimiter cannot
+//     discriminate. What does: a `read` names IDENTIFIERS and nothing else. `the PLAN.md)`
+//     is not an identifier, so the whole match is rejected rather than mined for names.
+//     A rule that admits seven prose lines for every real one is not a rule.
+const READ_ARGS = /(?:^|[;&|(])[ \t]*read[ \t]+([^\n;&|<>]*)/gm;
+// Flags bash's `read` defines as taking an argument: -d -i -n -N -p -t -u. Written as a
+// character class over the last letter so a bundled `-rp` is covered too.
+const READ_FLAG_WITH_ARG = /^-[a-zA-Z]*[dinNptu]$/;
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// A quoted string is ONE token — see the `-p` note above. The quoted alternatives come
+// first so an opening quote is never swallowed by the bare-word branch.
+const readTokens = s => (s.match(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+/g) || []);
+const readsInto = (body, v) => {
+  // ⚠ READ_ARGS carries /g, so it carries STATE — a match leaves lastIndex past it and
+  // the next call resumes from there. This function is called once per (block, name) pair,
+  // thousands of times per run, so without the reset the results depend on call ORDER and
+  // most lookups silently start mid-body. Not a defensive line: removing it reddens seven
+  // assertions, which is how it is known to be load-bearing rather than assumed to be.
+  READ_ARGS.lastIndex = 0;
+  let m;
+  while ((m = READ_ARGS.exec(body)) !== null) {
+    const toks = readTokens(m[1]);
+    const names = [];
+    let looksLikeRead = toks.length > 0;
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i];
+      if (t.startsWith('-')) { if (READ_FLAG_WITH_ARG.test(t)) i++; continue; }
+      if (!IDENT.test(t)) { looksLikeRead = false; break; }
+      names.push(t);
+    }
+    if (looksLikeRead && names.includes(v)) return true;
+  }
+  return false;
+};
 const assigns = (body, v) =>
-  new RegExp(`(^|[;&|(]|\\bexport\\s+|\\bfor\\s+|\\bread\\s+(?:-\\w+\\s+)*)\\s*${v}\\s*(?:=|\\bin\\b)`, 'm').test(body);
+  new RegExp(`(^|[;&|(]|\\bexport\\s+|\\bfor\\s+)\\s*${v}\\s*(?:=|\\bin\\b)`, 'm').test(body)
+  || readsInto(body, v);
 const NAMES = body => new Set([...body.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\b/g)].map(m => m[1]));
 
 // A whole-line comment is not code: the shell never expands what follows `#`, so a name
@@ -243,8 +288,10 @@ const isPseudo = b => b.lang === '' && PSEUDO_CALL.test(b.body.join('\n'));
 // not an assignment; it is a glossary entry whose right-hand side is a description in
 // angle brackets. Admitting it promoted `REPO` to shell state corpus-wide and produced
 // two violations in files nobody had touched — `orient.md` and `update.md`, where `$REPO`
-// is a placeholder step 1 tells the model to resolve, and every one of its ten uses sits
-// outside any fence. Flagging those would have been the unpassable direction again.
+// is a placeholder step 1 tells the model to resolve. Re-counted while closing #357:
+// `update.md` uses `$REPO` at THIRTEEN sites, twelve of them outside any fence, because
+// the file holds exactly one fence in 248 lines and writes its other commands as indented
+// prose. Flagging those would have been the unpassable direction again.
 //
 // Requiring a COMMAND separates the two by what the block DOES rather than how it looks:
 // a legend lists names and values, a runnable block invokes something. Re-measured with
@@ -345,6 +392,74 @@ for (const p of ['PHASE', 'DESCRIPTION', 'VERSION', 'KEY', 'VALUE', 'PLAN', 'ARG
 for (const v of ['CLI_PATH', 'PM', 'STORE'])
   ok(SHELL_VARS.has(v), `\${${v}} is shell state — some shell fence assigns it, so a block that does not is inheriting`);
 
+// ── `read` is an assignment, and it names more than one variable (issue #357) ─
+// The branch that handles it was unreachable for every variable from the day it was
+// written, so there is no history of it working to lean on — every case below is pinned
+// against a FIXTURE. The corpus holds exactly ONE `read` command, and a matcher verified
+// only against that line cannot tell a working rule from a rule that happens to match it.
+console.log('\n— `read` assigns, by position, every name it lists —');
+for (const [form, body, name] of [
+  ['bare',                'read FOO',                          'FOO'],
+  ['with a flag',         'read -r FOO',                       'FOO'],
+  ['first of two',        'read -r A B',                       'A'],
+  ['second of two',       'read -r A B',                       'B'],
+  ['third of three',      'read -r A B C',                     'C'],
+  ['before a herestring', 'read -r OWNER REPO_NAME <<<"$(gh repo view)"', 'REPO_NAME'],
+  ['after a prompt flag', 'read -r -p "  Repo name [x]: " VAR', 'VAR'],
+  ['after a bundled -rp', 'read -rp "  Repo name: " VAR',       'VAR'],
+])
+  ok(assigns(body, name), `read ${form} — \`${body}\` assigns ${name}`);
+
+// ⚠ THE OTHER DIRECTION IS THE ONE THAT DECIDES WHETHER THIS RULE IS USABLE, because the
+// corpus is mostly English and `read` is a verb in it — seven prose uses to one command.
+// A rule that admits `(read the PLAN.md)` classifies prose as an assignment and silently
+// promotes whatever it finds there, which is the unpassable direction arrived at from a
+// new side. The discriminator is that a real `read` names IDENTIFIERS and nothing else.
+//
+// ⚠ TWO OF THESE ROWS WERE FIRST WRITTEN SO THAT NOTHING COULD REDDEN THEM. The case row
+// began as `echo READ FOO`, named for the capital letters — but `echo ` in front of it
+// means the command-position anchor already rejects it, so the row would have stayed
+// green with the lowercase requirement deleted, testing a rule it was named after and
+// did not exercise. The matrix said NOT WITNESSED and that is the only reason it was
+// found. It now sits at line start, where case is the only thing standing between it and
+// a match.
+//
+// ⚠ AND THE NAME EACH ROW ASKS ABOUT IS ITSELF A CHOICE THAT CAN BE WRONG. The obvious
+// row to write for `(read the PLAN.md)` asks about `PLAN` — and it passes whatever this
+// rule does, because `PLAN.md)` is not the string `PLAN` and never becomes it. Measured
+// before the row was kept, not after: under a mutant that harvests prose, `PLAN` stays
+// green while `the` flips. So the article is the name the discriminator actually decides,
+// and it is asked about by name. A row that would pass with the rule deleted is a row
+// that proves nothing, and this file has shipped two of those before.
+for (const [why, body, name] of [
+  ['the article a lenient rule would harvest', '- Review plan: (read the PLAN.md)', 'the'],
+  ['a file name it would harvest next',        '- Review plan: (read the PLAN.md)', 'PLAN'],
+  ['a pronoun followed by a comma',            "- What does the code say (read it, don't assume)?", 'it'],
+  ['the word in another command',              'node read FOO',                     'FOO'],
+  ['a shouted English verb at line start',     'READ the catalogue before editing', 'the'],
+  ['a mere use of the name',                   'node "$FOO" --raw',                 'FOO'],
+  ['a flag that looks like a name',            'gh pr list --limit=1',              'limit'],
+])
+  ok(!assigns(body, name), `NOT an assignment: ${why} — \`${body}\` does not assign ${name}`);
+
+// ── what `$REPO` is, decided and pinned (issue #357) ─────────────────────────
+// Repairing `read` made this a live question rather than a latent one: `orient.md` sets
+// `REPO` with a `read`, and `update.md` uses `$REPO` thirteen times without setting it.
+// The two held DIFFERENT THINGS under one name — `orient.md`'s came from
+// `gh repo view --json name` and is a repository NAME, `update.md`'s is a filesystem PATH
+// to a clone. So this was a collision, not an ambiguity, and it is resolved by giving the
+// shell variable the name of what it holds. `REPO` stays what `update.md`'s legend has
+// always said it is: a placeholder step 1 resolves in prose.
+//
+// Both halves are asserted, because either alone can go green the wrong way. Without the
+// first, someone adds `REPO=$(…)` to a workflow and thirteen substituted sites silently
+// become inheriting ones. Without the second, the rename could be reverted and the
+// placeholder assertion would still pass — by the `read` branch breaking again.
+ok(!SHELL_VARS.has('REPO'),
+   '${REPO} is a placeholder — update.md resolves it in prose, and nothing in the corpus assigns it in a shell');
+ok(SHELL_VARS.has('REPO_NAME'),
+   '${REPO_NAME} is shell state — orient.md sets it with a `read`, which is only visible because that branch now works');
+
 // ── the two ways the fence selector goes wrong, pinned by site ───────────────
 console.log('\n— the fence tag is evidence, not the filter —');
 const isUntaggedShell = b => !b.lang && isShell(b);
@@ -441,6 +556,24 @@ ok(violations.length === 0,
    `no shell block depends on a variable another block assigns (got ${violations.length})`);
 for (const v of violations.slice(0, 60)) console.log(`      ${v.file}:${v.line}  $${v.v}  [${v.lang}]`);
 if (violations.length > 60) console.log(`      … and ${violations.length - 60} more`);
+
+// ⚠ THE MUST-NOT-REDDEN SITE, NAMED (issue #357). The count above going to zero is not
+// the same fact as this block being green: a zero is also what a matcher that stopped
+// finding anything produces, and repairing `read` is exactly the kind of change that can
+// break the surrounding classification. So the one block in the corpus that depends on
+// the repair is asserted three ways — it is SEEN as shell, it is FOUND self-contained,
+// and the names it sets are checked individually. `read -r OWNER REPO_NAME` sets two, and
+// a matcher that took only the first would leave the second reported as inherited while
+// the aggregate count stayed at zero for every other file.
+const orientRead = shellBlocks.find(b =>
+  b.file === 'workflows/orient.md' && /\bread\s+-r\s+OWNER\b/.test(b.body.join('\n')));
+ok(!!orientRead,
+   "workflows/orient.md's board block is classified as shell — a miss here would make the three assertions below vacuous rather than false");
+for (const v of ['OWNER', 'REPO_NAME'])
+  ok(orientRead && assigns(code(orientRead.body.join('\n')), v),
+     `workflows/orient.md's board block assigns ${v} itself — a \`read\` names every variable in its list, not just the first`);
+ok(!violations.some(v => v.file === 'workflows/orient.md'),
+   'workflows/orient.md reports no inherited state — the file the repair puts at risk, checked by name rather than by the count');
 
 // ── the convention that taught the mistake ──────────────────────────────
 // `<cli_resolution>` wrapped a fence whose entire content was `CLI_PATH=…`, placed at the
