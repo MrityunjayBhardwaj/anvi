@@ -89,8 +89,13 @@ window; committing early makes it small in the first place, and it makes the
 step 3.
 
     git -C ~/.anvideck add -- projects/<project>/.anvi/    # catalogues only; never -A
-    git -C ~/.anvideck commit -m "<what was learned, and why>"
+    git -C ~/.anvideck commit -m "<what was learned, and why>"   # prints your sha — keep it
     git -C ~/.anvideck push
+
+Keep the sha the commit prints; step 3 verifies THAT commit. Take it from the
+commit's own output rather than reading `HEAD` back afterwards — the store is one
+working tree shared with concurrent sessions, so another project's checkpoint
+can land between the two commands and hand you its sha instead of yours.
 
 Before writing the message, ask what the hook already took:
 
@@ -126,11 +131,27 @@ covers the fact.
 <step name="3_persist">
 Confirm the writes are durable (V5 — uncommitted knowledge doesn't exist).
 - Catalogue changes were committed and pushed in step 1, while the reasoning was
-  fresh and the lease was held. Verify it landed rather than assuming: the store
-  is shared with concurrent sessions, so check your own commit is there —
-  `git -C ~/.anvideck log origin/main -1 --format='%h %s'`, and if a phrase from
-  your message is missing, `git log origin/main -S"<phrase>"` finds which commit
-  swallowed it.
+  fresh and the lease was held. Verify it landed rather than assuming — and ask
+  about YOUR commit, not about the tip. The store is shared with concurrent
+  sessions, so the newest commit is routinely another project's even when yours
+  is perfectly fine:
+
+    git -C ~/.anvideck merge-base --is-ancestor <your sha> origin/main
+
+  Exit 0 means it landed, exit 1 means it did not. That question is about
+  ancestry, so nothing about where a phrase happens to live can confound it.
+  If it did NOT land, there are two different questions and they take two
+  different searches:
+  - did the MESSAGE land? →
+    `git -C ~/.anvideck log origin/main --grep="<phrase from your message>"`
+  - did the ENTRIES land under someone else's generated message — the swallowed
+    case this step exists for? →
+    `git -C ~/.anvideck log origin/main -S"<text from the entry itself>" -- projects/<project>/.anvi/`
+
+  `-S` is a pickaxe over diff CONTENT, not over messages. A phrase that lives
+  only in a commit message is in no diff, so searching for one with `-S` returns
+  zero for a healthy commit and zero for a lost one alike — it cannot tell the
+  two apart, while reading as a finding.
 - Anything still uncommitted under ~/.anvideck at this point is either another
   project you have not harvested yet or a lease you forgot to release. Check
   `anvi-tools harvest-lease live` and release what is yours.
