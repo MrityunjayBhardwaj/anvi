@@ -8,10 +8,6 @@ Cognitive integration points (per BUILD_v1.md):
 3. Post-phase catalogue update — append new patterns/invariants/lifecycles to .anvi/
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <core_principle>
 **Orchestrator coordinates, executors execute.**
 

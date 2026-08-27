@@ -3,10 +3,6 @@ Start a new milestone cycle for an existing project.
 Forked from GSD new-milestone.md. Context → goals → requirements → roadmap.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <process>
 
 <step name="initialize">

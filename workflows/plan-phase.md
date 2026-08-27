@@ -8,10 +8,6 @@ Cognitive integration points (per BUILD_v1.md):
 - Boundary scanning (dharana) in researcher prompt
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <cli_resolution>
 ```bash
 CLI_PATH="$HOME/.claude/anvi/bin/anvi-tools.cjs"

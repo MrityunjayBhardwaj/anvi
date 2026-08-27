@@ -3,10 +3,6 @@ Situational awareness: summarize recent work, current position, route to next ac
 Forked from GSD progress.md with cognitive metrics display.
 </purpose>
 
-<paths>
-CLI=~/.claude/anvi/bin/anvi-tools.cjs
-</paths>
-
 <process>
 
 <step name="load_context">
