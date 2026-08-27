@@ -143,7 +143,7 @@ Complete structural map of the cognitive operating system.
          │ agents are spawned by
          ▼
 ╔══════════════════════════════════════════════════════════════════════╗
-║                    WORKFLOW LAYER (51 workflows)                     ║
+║                    WORKFLOW LAYER (52 workflows)                     ║
 ║                                                                      ║
 ║  ┌─ Cognitive (Anvi-native) ────────────────────────────────────┐    ║
 ║  │  debug  rq  lens                                             │    ║
@@ -171,7 +171,7 @@ Complete structural map of the cognitive operating system.
 ║  │  note    add-todo   check-todos   plant-seed  next           │    ║
 ║  │  help    health     settings      stats       cleanup        │    ║
 ║  │  ship    pr-branch  map-codebase  ui-phase    ui-review      │    ║
-║  │  update                                                      │    ║
+║  │  update  update-board                                        │    ║
 ║  └──────────────────────────────────────────────────────────────┘    ║
 ╚══════════════════════════════════════════════════════════════════════╝
          │ invoked via
