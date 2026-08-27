@@ -134,6 +134,12 @@ function context(command, cwd) {
 const closes = (command, cwd) => /despite saying it does not/.test(context(command, cwd));
 const spans = (command, cwd) => /as CODE, not prose/.test(context(command, cwd));
 const leaks = (command, cwd) => /CATALOGUE-ID LEAK CHECK/.test(context(command, cwd));
+// The manifest (#348) is a THIRD thing this hook can say about one publish, and it is
+// the only one that is not a finding — so it needs its own matcher for the same reason
+// `closes` and `spans` were split apart: a case meaning to witness it must not be
+// satisfied by either warning, and the warnings must not be satisfied by it.
+const MANIFEST_RE = /CLOSING REFERENCES: (.+?) will link (\d+) closing references?(?: — ([^\n.]+))?\./;
+const manifest = (command, cwd) => MANIFEST_RE.exec(context(command, cwd));
 
 // Three id-bearing texts, so no case is silent merely for lack of anything to find.
 const CLUSTER = 'H104 and H105 and V25 together';   // 3 real own entries → cluster detector
@@ -412,6 +418,105 @@ ok(!spans('gh issue create --title x --body "`closes #338`"'),
 // The paired control: the identical text on the surface that DOES link.
 ok(spans('gh pr create --title x --body "`closes #338`"'),
   'CONTROL: the same body as a PR description does fire');
+
+// ── THE MANIFEST: WHICH REFERENCES THIS TEXT WILL LINK (#348) ───────────────
+// The two checks above look for text that is WRONG in a recognisable way. This one
+// states a fact that never looks wrong at all — a closing keyword beside an issue
+// number in prose is the intended case and the entire mechanism — so there is nothing
+// to pattern-match, and the answer is to say the number rather than add a third rule.
+//
+// A REAL newline is built with String.fromCharCode rather than typed as an escape.
+// Three separate readings during this change were wrong because a `\n` survived as a
+// literal backslash-n through a shell or a JSON.stringify, and a literal one puts a
+// word character immediately before `closes`, which suppresses the match for a reason
+// that has nothing to do with the rule under test.
+const NL = String.fromCharCode(10);
+
+console.log('\nFIRES — the manifest states what the linker will take:');
+{
+  const m = manifest('gh pr create --title x --body "Repairs the matcher. closes #357"');
+  ok(!!m, 'a body with exactly ONE intended reference gets the line — not only the suspicious ones');
+  ok(m && m[2] === '1' && /#357/.test(m[3] || ''),
+     'the count is stated even when it is one, and the reference is named');
+  ok(m && /pull request description/.test(m[1]), 'the surface is named as the description');
+}
+{
+  const m = manifest('gh pr create --title x --body "Body. closes #357 and fixes #350"');
+  ok(m && m[2] === '2' && /#357/.test(m[3]) && /#350/.test(m[3]),
+     'two references are both listed, and the count says two');
+}
+{
+  // A commit message really does close issues, and it is the surface this project
+  // publishes from most. Built with real newlines, which is the shape a body takes.
+  const m = manifest('git commit -m "fix: thing' + NL + NL + 'closes #348"');
+  ok(m && /commit message/.test(m[1]) && m[2] === '1',
+     'a multi-line commit message is examined, and named as a commit message');
+}
+
+console.log('\nTHE LIST IS THE TRUTH — code is excluded, and the count cannot disagree with it:');
+{
+  const m = manifest('gh pr create --title x --body "The broken form is `closes #338`. This closes #357"');
+  ok(m && /#357/.test(m[3] || ''), 'a reference written as prose is listed');
+  ok(m && !/#338/.test(m[3] || ''),
+     'a reference written as CODE is ABSENT from the list — not listed with a footnote');
+  ok(m && m[2] === '1',
+     'and the count excludes it too, so the line agrees with what the linker will do');
+}
+{
+  // The property asked for by name: a count and a list that can disagree are two
+  // facts, and one of them will be wrong. Asserted across every shape above rather
+  // than argued from the implementation, so a future refactor that recomputes the
+  // count separately reddens here.
+  const shapes = [
+    'gh pr create --title x --body "closes #357"',
+    'gh pr create --title x --body "closes #357 and fixes #350 and resolves #1"',
+    'gh pr create --title x --body "prose closes #357, code `closes #338`"',
+    'git commit -m "msg' + NL + NL + 'closes #348"',
+  ];
+  let agree = 0, seen = 0;
+  for (const cmd of shapes) {
+    const m = manifest(cmd);
+    if (!m) continue;
+    seen++;
+    const listed = (m[3] || '').split(',').map(t => t.trim()).filter(Boolean);
+    if (Number(m[2]) === listed.length) agree++;
+  }
+  ok(seen === shapes.length, `every shape produced a manifest (got ${seen} of ${shapes.length}) — a miss here would make the next assertion vacuous`);
+  ok(agree === seen, `the stated count equals the number of references listed, in all ${seen} shapes`);
+}
+{
+  // A negated keyword still LINKS — that is the entire finding the negation check
+  // exists for — so it belongs in the list. The two statements about one reference
+  // must agree, or the reader has to decide which to believe.
+  const m = manifest('gh pr create --title x --body "This does **not** close #244."');
+  ok(m && m[2] === '1' && /#244/.test(m[3] || ''),
+     'a NEGATED keyword is present in the list, because a negation does not stop the linker');
+  ok(closes('gh pr create --title x --body "This does **not** close #244."'),
+     'CONTROL: and the negation warning still fires on the same text — the two agree rather than compete');
+}
+{
+  // Zero is a number. A body whose only closure is unlinkable gets the line saying so,
+  // beside the finding that explains why — silence there would read as "nothing to see"
+  // on exactly the body that needs reading.
+  const m = manifest('gh pr create --title x --body "Only the quoted form: `closes #338`"');
+  ok(m && m[2] === '0', 'a body whose every closure is code says it will link ZERO — the count is not hidden');
+  ok(spans('gh pr create --title x --body "Only the quoted form: `closes #338`"'),
+     'CONTROL: the unlinkable finding fires on the same text, so the zero is explained rather than bare');
+}
+
+console.log('\nSILENT — surfaces the linker does not read, and text with nothing to state:');
+// ⚠ EVERY SILENCE BELOW IS PAIRED, per this file's header: silence witnesses nothing,
+// and a manifest broken into permanent quiet would satisfy all three at once.
+ok(!manifest('gh issue create --title x --body "closes #357"'),
+   'an ISSUE body gets no manifest — the linker does not close from one, so there is nothing to state');
+ok(!!manifest('gh pr create --title x --body "closes #357"'),
+   'CONTROL: the identical body as a PR description does get one');
+ok(!manifest('gh pr comment 361 --body "closes #357"'),
+   'a PR COMMENT gets no manifest — only the description is read');
+ok(!manifest('gh pr create --title x --body "No closure here at all."'),
+   'a body with no closing reference gets no manifest — the line states a fact, and there is no fact');
+ok(!!manifest('gh pr create --title x --body "No closure here at all. Well, closes #12."'),
+   'CONTROL: the same body with one reference added does get one');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

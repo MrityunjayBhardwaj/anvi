@@ -316,6 +316,7 @@ process.stdin.on('end', () => {
     const closingSurface = isPrBody ? 'this pull request description'
       : isCommit ? 'this commit message' : null;
     let closingFinding = '';
+    let closingManifest = '';
     if (closingSurface) {
       // INDEX-PRESERVING: each stripped mark becomes a space rather than vanishing, so a
       // match found here can be located in `scanned` and asked whether it sits in code.
@@ -391,6 +392,43 @@ process.stdin.on('end', () => {
           `The tell afterwards is an empty closingIssuesReferences on a body that plainly ` +
           `says it closes something.`;
         closingFinding = closingFinding ? `${closingFinding}\n\n${spanFinding}` : spanFinding;
+      }
+
+      // ── The manifest: which references this text WILL link (#348) ───────────
+      // Not a detector, and deliberately not shaped like one. Both checks above look
+      // for text that is wrong in a RECOGNISABLE way — a keyword carrying a negation,
+      // a keyword rendered as code. This one has nothing to pattern-match against: a
+      // closing keyword beside an issue number in ordinary prose is the normal,
+      // intended case, and it is the entire mechanism. So the answer is not a third
+      // rule. It is to state the fact, and let the author read it against what they
+      // meant.
+      //
+      // ⚠ THE COUNT AND THE LIST ARE ONE VALUE, NOT TWO. Computing a count beside a
+      // list lets them disagree, and then one of them is wrong with nothing in the
+      // output to say which — so the count IS the list's length. This is the property
+      // the issue asked for by name, and it is structural here rather than asserted:
+      // there is no second traversal that could drift.
+      //
+      // ⚠ AND IT IS SAID WHEN NOTHING IS UNUSUAL, WHICH IS THE POINT. A line that
+      // appears only when something looks odd teaches its reader that its absence
+      // means "nothing to see" — the failure mode every silent check in this repo has
+      // produced once already. So it fires on any closing surface whose text carries a
+      // closing reference at all, including a body with exactly one, correctly written.
+      //
+      // `linkable` is the right set rather than the convenient one. It is keyed on the
+      // occurrences the code mask left alone, so a keyword written as code is ABSENT
+      // from the list rather than listed with a footnote — the list has to be the
+      // truth or it becomes one more thing to interpret. A NEGATED keyword stays IN,
+      // because a negation does not stop the linker; that is the whole finding above.
+      const willLink = [...linkable];
+      if (raw.length) {
+        closingManifest =
+          `CLOSING REFERENCES: ${closingSurface} will link ${willLink.length} closing ` +
+          `reference${willLink.length === 1 ? '' : 's'}` +
+          `${willLink.length ? ` — ${willLink.join(', ')}` : ''}.\n` +
+          `Read that against what you meant. It is what GitHub's linker takes from this ` +
+          `text: a keyword written as code is absent because the linker cannot see one, ` +
+          `and a negated keyword is present because a negation does not stop it.`;
       }
     }
 
@@ -512,7 +550,9 @@ process.stdin.on('end', () => {
     // Both properties of the same publish, on the same channel. The closing-keyword
     // finding leads: it names something that WILL happen on merge, where the ID
     // findings name something already written.
-    const message = [closingFinding, finding, coverage].filter(Boolean).join('\n\n');
+    // The manifest follows the closing FINDINGS and precedes the ID ones. A problem
+    // outranks a statement of fact, and both closing properties belong together.
+    const message = [closingFinding, closingManifest, finding, coverage].filter(Boolean).join('\n\n');
     if (!message) process.exit(0);
 
     process.stdout.write(JSON.stringify({
