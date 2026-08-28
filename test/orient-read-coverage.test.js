@@ -143,6 +143,24 @@ for (const label of ['PRs', 'Issues']) {
      `the map's ${label} line can say that read hit its ceiling, rather than printing a floor as a total`);
 }
 
+console.log('\n— the worked examples show what the criteria now demand —');
+// ⚠ THIS FILE HAS HAD THIS DEFECT BEFORE. Its example maps predated the live-state
+// section and rendered output the criteria rejected, which teaches the old shape to every
+// reader who copies an example instead of reading a template. Adding a denominator to the
+// template re-opens it in a new dimension, so the examples are checked against the rule
+// rather than left to be noticed.
+const examples = src.slice(src.indexOf('<examples>'), src.indexOf('</examples>'));
+const exBoards = examples.split('\n').filter(l => /^\s*Board:/.test(l));
+ok(exBoards.length >= 3,
+   `the examples section parses to the known example maps (got ${exBoards.length} board lines)`);
+// A source that could not be read has no coverage to report, and saying so IS the
+// reporting — so "unavailable" is conforming, and a rule that condemned it would be
+// condemning the one row already doing the right thing.
+const stale = exBoards.filter(l => !/unavailable/.test(l) && !/\d+\s+of\s+\d+/.test(l));
+eq(stale.length, 0,
+   'every worked example either shows the board\'s coverage or says why it has none');
+for (const l of stale) console.log(`      ${l.trim()}`);
+
 console.log('\n— and the rule holds over every shipped workflow, not just this one —');
 // ⚠ THE POPULATION THIS RULE CONDEMNS WAS COUNTED BEFORE IT WAS WRITTEN. Across the 108
 // shipped workflow and skill documents there are exactly three list reads, all three in

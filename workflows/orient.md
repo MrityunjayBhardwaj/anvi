@@ -358,7 +358,7 @@ Format:
  Branch:    fix/canvas-overflow — 2 uncommitted
  PRs:       none
  Issues:    3 open — #41 touches this file
- Board:     Todo 5 · In Progress 1 · Done 12
+ Board:     Todo 5 · In Progress 1 · Done 12 — 18 of 18
  Tree:      .anvi/project_management
 
  ── Landscape ──────────────────────────────────────
@@ -463,7 +463,7 @@ Format:
  Branch:    main — clean
  PRs:       none
  Issues:    2 open
- Board:     Todo 3 · In Progress 0 · Done 9
+ Board:     Todo 3 · In Progress 0 · Done 9 — 12 of 12
  Tree:      .anvi/project_management
 
  ⚠ RECOVER TRIGGERED — 3 failed attempts
