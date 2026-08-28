@@ -53,8 +53,13 @@ const blocks = [...live.matchAll(/```bash\n([\s\S]*?)```/g)].map(m => m[1]);
 eq(blocks.length, 3, 'the live_state step has its three bash blocks (git, the two lists, the board)');
 
 // Shell line-continuations are folded away so each command is one line to reason about.
+// ⚠ COMMENT LINES ARE NOT COMMANDS, and leaving them in made this guard fire on input it
+// must accept — found by a probe in the must-not-redden direction, not by any mutation
+// asking "does it redden?". A `# gh issue list …` note inside a fence made the reads look
+// duplicated and unlimited at once. The corpus sweep below already skipped comments; the
+// two now agree, because a guard that flags legitimate text gets weakened by whoever hits it.
 const exec = blocks.join('\n').replace(/\\\n\s*/g, ' ');
-const execLines = exec.split('\n');
+const execLines = exec.split('\n').filter(l => !l.trim().startsWith('#'));
 // …and the prose is what is left once the executable region is removed, so a claim
 // asserted about the prose cannot be satisfied by a comment inside a command.
 const prose = live.replace(/```[\s\S]*?```/g, '');
@@ -137,6 +142,51 @@ for (const label of ['PRs', 'Issues']) {
   ok(/at least/i.test(line),
      `the map's ${label} line can say that read hit its ceiling, rather than printing a floor as a total`);
 }
+
+console.log('\n— and the rule holds over every shipped workflow, not just this one —');
+// ⚠ THE POPULATION THIS RULE CONDEMNS WAS COUNTED BEFORE IT WAS WRITTEN. Across the 108
+// shipped workflow and skill documents there are exactly three list reads, all three in
+// orient.md, and after this change all three carry a limit — so the rule forbids nothing
+// that exists and catches the first one that appears. That is the same standing this
+// repo's other corpus rules have; a rule whose population is unmeasured is as likely to
+// condemn the healthy majority as to catch anything.
+//
+// It is scoped to bash fences and skips comment lines, because a document that MENTIONS
+// `gh issue list` while explaining itself is not running it — the failure this whole file
+// is about is a measurement that could not tell those two apart.
+const SHIPPED = [];
+for (const dir of ['workflows', 'skills']) {
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.md')) SHIPPED.push(full);
+    }
+  };
+  walk(path.join(ROOT, dir));
+}
+ok(SHIPPED.length > 50,
+   `the shipped corpus was enumerated rather than assumed (got ${SHIPPED.length} documents)`);
+
+const LIST_READ = /\bgh\s+\w+(?:-\w+)*\s+(?:list|item-list)\b/;
+const unbounded = [];
+let listReads = 0;
+for (const file of SHIPPED) {
+  const body = fs.readFileSync(file, 'utf-8');
+  for (const m of body.matchAll(/```(?:bash|sh)\n([\s\S]*?)```/g)) {
+    for (const line of m[1].replace(/\\\n\s*/g, ' ').split('\n')) {
+      if (line.trim().startsWith('#')) continue;
+      if (!LIST_READ.test(line)) continue;
+      listReads++;
+      if (!/--limit/.test(line)) unbounded.push(`${path.relative(ROOT, file)}: ${line.trim()}`);
+    }
+  }
+}
+ok(listReads >= 3,
+   `the sweep found the list reads it is meant to judge (got ${listReads}) — a zero here would pass on nothing`);
+eq(unbounded.length, 0,
+   'no shipped workflow runs a gh list read without a stated limit — gh\'s unstated default is 30, and a read that hit it looks exactly like a complete one');
+for (const u of unbounded) console.log(`      ${u}`);
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — orient-read-coverage: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
