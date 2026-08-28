@@ -29,9 +29,28 @@ Every source below is live; none of them is a note.
 ```bash
 git branch --show-current                 # which branch is this tree actually on?
 git status --porcelain                    # uncommitted work, including someone else's
-gh pr list --state open                   # PRs opened or left open by another session
-gh issue list --state open --limit 20     # what is filed and still standing
 ```
+
+Both list reads below are capped, and `gh` says nothing when a cap is reached — a
+truncated list is byte-for-byte the shape of a complete one. Neither command publishes a
+total, so **the limit itself is the instrument.** Fewer rows than you allowed is the
+source's own proof that you have all of them; exactly as many as you allowed means the
+list may be longer, and the only honest count is then *at least* N. The constant is a
+ceiling on what you are willing to read, never a claim about how much exists — which is
+why raising it is not the fix, and reporting the comparison is:
+
+```bash
+LIMIT=400   # a ceiling, not an expectation — the count= line says if it was reached
+
+gh pr list --state open --limit "$LIMIT" --json number,title,headRefName \
+  --jq '"count=\(length)", (.[] | "#\(.number) \(.headRefName) — \(.title)")'
+
+gh issue list --state open --limit "$LIMIT" --json number,title \
+  --jq '"count=\(length)", (.[] | "#\(.number) \(.title)")'
+```
+
+If either `count=` equals `$LIMIT` the read hit its ceiling: report it as "at least N"
+and say the read was short. Any count below the ceiling is complete.
 
 Read the board last, because it is the surface a human is most likely to have moved.
 **Derive its number from the repository — never paste one.** A board is linked to its
@@ -49,8 +68,17 @@ BOARD=$(gh api graphql -f owner="$OWNER" -f name="$REPO_NAME" -f query='
     }
   }' --jq '.data.repository.projectsV2.nodes[0].number')
 
-gh project item-list "$BOARD" --owner "$OWNER" --limit 300 --format json
+gh project item-list "$BOARD" --owner "$OWNER" --limit 400 --format json \
+  --jq '"seen=\(.items|length) total=\(.totalCount)",
+        (.items|group_by(.status)[]|"\(.[0].status // "no status")=\(length)")'
 ```
+
+The board needs no ceiling comparison, because unlike the two lists above it publishes
+its own denominator: `--format json` returns `{items, totalCount}`, and `totalCount` is
+the board's true size **whatever limit was asked for** — at `--limit 5` on a 162-item
+board it still reads 162. So `seen` against `total` settles it outright, and a short read
+announces itself. Quote both numbers; `seen < total` means the status counts underneath
+are a sample, not a census, and they will look entirely plausible while being wrong.
 
 If the repo has no linked board, `$BOARD` is empty — report that, do not guess a number.
 
@@ -60,14 +88,16 @@ written back from working state.
 If `gh` is unavailable, unauthenticated, or the repo has no board, say so in the output
 rather than omitting the line. A source that silently reports nothing is
 indistinguishable from a source that reports "nothing to report" — and only one of those
-is information.
+is information. A source that silently reports *some* is the same defect in the
+direction that reads as healthy, so every count above travels with the denominator that
+says whether it is the whole of anything.
 
 Output:
 ```
 Branch:  {branch} {clean | N uncommitted}
-PRs:     {open PRs, or "none"}
-Issues:  {count} open — {the ones touching current work}
-Board:   {counts by status, or "unavailable: {reason}"}
+PRs:     {open PRs, or "none"} {"(at least — read hit its ceiling)" if it did}
+Issues:  {count} open {"(at least — read hit its ceiling)" if it did} — {the ones touching current work}
+Board:   {counts by status} — {seen} of {total}, or "unavailable: {reason}"
 ```
 </step>
 
@@ -263,9 +293,9 @@ Format:
  ── Live state ─────────────────────────────────
 
  Branch:    {branch} {clean | N uncommitted}
- PRs:       {open PRs, or "none"}
- Issues:    {count} open — {relevant ones}
- Board:     {counts by status, or "unavailable: {reason}"}
+ PRs:       {open PRs, or "none"} {at least, if the read hit its ceiling}
+ Issues:    {count} open {at least, if the read hit its ceiling} — {relevant ones}
+ Board:     {counts by status} — {seen} of {total}, or "unavailable: {reason}"
  Tree:      {resolved planning root, and whether it is the legacy one}
 
  ── Grounding ─────────────────────────────────
