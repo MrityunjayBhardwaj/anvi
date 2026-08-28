@@ -10,9 +10,9 @@
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-22c55e?style=for-the-badge)
 ![Standalone](https://img.shields.io/badge/standalone-self--contained-8b5cf6?style=for-the-badge)
-![Skills](https://img.shields.io/badge/skills-55-0ea5e9?style=for-the-badge)
+![Skills](https://img.shields.io/badge/skills-56-0ea5e9?style=for-the-badge)
 ![Agents](https://img.shields.io/badge/agents-17-f97316?style=for-the-badge)
-![Workflows](https://img.shields.io/badge/workflows-51-ec4899?style=for-the-badge)
+![Workflows](https://img.shields.io/badge/workflows-52-ec4899?style=for-the-badge)
 ![Cognitive OS](https://img.shields.io/badge/🧠-cognitive_OS-14b8a6?style=for-the-badge)
 
 </div>
@@ -44,7 +44,7 @@ flowchart TD
     D2(["🧩 DESIGN<br/>what SHOULD"])
     D3(["⚖️ REVIEW<br/>is it sound?"])
     KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama"]
-    SURF["⚙️ SURFACE<br/>17 agents → 51 workflows · 55 skills · anvi-tools CLI"]
+    SURF["⚙️ SURFACE<br/>17 agents → 52 workflows · 56 skills · anvi-tools CLI"]
 
     BASE --> R
     R --> D1 & D2 & D3
@@ -92,7 +92,7 @@ cd anvi
 ./install.sh
 ```
 
-The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **55 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
+The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **56 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
 
 <details>
 <summary><b>⚙️ Install modes</b></summary>
@@ -164,6 +164,7 @@ The everyday loop:
 | `/anvi:lens` | Map all lenses — active, sister, opposing, parent |
 | `/anvi:orient` | Where am I? What's known / unknown / assumed? |
 | `/anvi:sess-wrap` | Harvest the session's lessons into the catalogues |
+| `/anvi:update-board` | Put an issue on the project board and set its Status, ids derived not pasted |
 | `/anvi:currency` | Which catalogue entries have drifted from the code they cite |
 | `/anvi:currency --fleet` | Snapshot catalogue health across the store — what moved since last time |
 | `/anvi:ground` | Establish three-layer grounding (catalogues → Ground Truth → source) |
