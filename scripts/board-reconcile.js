@@ -123,7 +123,11 @@ function refuse(msg) {
   process.exit(2);
 }
 
-if (spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' }).status !== 0) {
+const authProbe = spawnSync('gh', ['auth', 'status'], { encoding: 'utf8' });
+if (authProbe.error && authProbe.error.code === 'ENOENT') {
+  refuse('gh (GitHub CLI) is not installed — this check needs it to read the board');
+}
+if (authProbe.status !== 0) {
   refuse('gh is not authenticated — run `gh auth login`');
 }
 
