@@ -55,6 +55,23 @@ console.log(\`\\n\${fail === 0 ? '✓' : '✗'} probe: \${pass} passed, \${fail}
 process.exit(fail === 0 ? 0 : 1);
 `);
 
+// A probe whose assertion message carries the observed value OUTSIDE any parentheses,
+// so its passing and failing forms cannot be keyed together by ANY rule about
+// parentheses. That is the only way to reach the orphan-key invariant from a fixture:
+// the invariant fires when a reddened key matches nothing the control ran, and with a
+// correct key on ordinary messages it never can.
+fs.writeFileSync(path.join(FX, 't', 'drifting.test.js'), `#!/usr/bin/env node
+'use strict';
+const path = require('path');
+const s = require(path.join(__dirname, '..', 'subject.js'));
+let pass = 0, fail = 0;
+const ok = (c, m) => c ? (pass++, console.log(\`  ✓ \${m}\`)) : (fail++, console.log(\`  ✗ \${m}\`));
+ok(s.LIMIT === 5, \`limit \${s.LIMIT} is five\`);
+ok(s.NAME === 'alpha', 'the name is alpha');
+console.log(\`\\n\${fail === 0 ? '✓' : '✗'} drifting: \${pass} passed, \${fail} failed\`);
+process.exit(fail === 0 ? 0 : 1);
+`);
+
 const g = (...a) => spawnSync('git', ['-C', FX, ...a], { encoding: 'utf8' });
 g('init', '-q', '-b', 'main');
 g('config', 'user.email', 'falsify@test.local');
@@ -167,6 +184,43 @@ ok(/· the limit is five/.test(good.out) && /· cap clamps to the limit/.test(go
      'two runs of one assertion pair even though the value inside the parentheses differs');
   ok(coverageKey('reads "a" (got 1)') !== coverageKey('reads "b" (got 1)'),
      'but two different assertions do not pair just because their parentheses match');
+
+  // ⚠ AND THE HALF THAT WAS MISSED THE FIRST TIME (#372). Both fixtures above carry a
+  // parenthetical in BOTH forms, so they exercise normalising its CONTENTS and say
+  // nothing about its PRESENCE — and presence is what actually varies, because every
+  // `has()`/`ok()` helper in this suite appends its diagnostic only on failure. The
+  // pass form has no parentheses at all. Keying those apart made 113 of 139 assertions
+  // across four test files unmatchable, and a real matrix reported 1/35 coverage while
+  // witnessing four mutations and listing the assertions they reddened as untested.
+  ok(coverageKey('a claim') === coverageKey('a claim (missing "x", got "")'),
+     'an assertion pairs with itself when the FAILING form adds a parenthetical the passing form has none of');
+  ok(coverageKey('a claim') !== coverageKey('another claim (missing "x", got "")'),
+     'CONTROL — and stripping the diagnostic does not pair two assertions that were never the same');
+  ok(coverageKey('a claim') === coverageKey('a claim (got "COMPACT: h (18KB, no log) past 2KB (a, b)")'),
+     'a diagnostic carrying nested parentheses is still stripped back to the bare claim');
+  // ⚠ THE CASE THAT DECIDES HOW MUCH TO CUT, and the reason removing one balanced group
+  // is not enough. 241 of the 3030 assertions in this suite end with a parenthetical
+  // that belongs to the message; when one of those fails, a second parenthetical is
+  // appended after the first, and cutting only the last leaves the two forms apart.
+  ok(coverageKey('the CLI refuses (exit 2)') === coverageKey('the CLI refuses (exit 2) (got 0)'),
+     'an assertion whose OWN message ends in a parenthetical still pairs with its failing form');
+  ok(coverageKey('the CLI refuses (exit 2)') !== coverageKey('the CLI accepts (exit 2) (got 0)'),
+     'CONTROL — and that wider cut does not pair two assertions that differ before the parenthetical');
+  ok(coverageKey('(only a parenthetical)') === '(only a parenthetical)',
+     'a message that is nothing BUT a parenthetical keeps its text — an empty key would collide every such row');
+  ok(coverageKey('weird ) trailing') === 'weird ) trailing',
+     'a message with a close paren and no open one is left alone rather than cut at a guessed position');
+  // The other direction of unbalanced, and the one that discriminates: this message HAS
+  // an open paren, so a rule that cuts at the first `(` would take it. The rule only
+  // fires on a group that reaches the end of the string, and this one does not close.
+  ok(coverageKey('weird (a trailing') === 'weird (a trailing',
+     'and so is one with an open paren that never closes — the cut needs a group reaching the end');
+  // ⚠ WHY THE CUT IS ANCHORED TO THE END. Unanchored, it would also eat a parenthetical
+  // sitting mid-message, and two assertions distinguished only by that parenthetical
+  // would collapse onto one key — the failure the collision check exists to name,
+  // manufactured by the key itself.
+  ok(coverageKey('reads (a) then x') !== coverageKey('reads (b) then x'),
+     'CONTROL — a parenthetical in the MIDDLE of a message is left in place, so it can still tell two rows apart');
 }
 
 // ── mode 5: a mutation that truncates its own subject ───────────────────────
@@ -417,6 +471,30 @@ ok(g('status', '--porcelain').stdout.trim() === '',
    'every mutation was restored: the fixture repo is clean at the end');
 ok(fs.readFileSync(path.join(FX, 'subject.js'), 'utf8').includes("const NAME = 'alpha';"),
    'and the subject is byte-for-byte the committed version');
+
+// ── mode 7: a coverage key that is not stable across an assertion's two forms ──
+// The seventh recorded failure mode, and the one this file's own guard missed for as
+// long as it existed (anvi #372). Its only symptom is a coverage number that is quietly
+// too low, plus a never-reddened list naming assertions that WERE reddened — nothing
+// about it looks like an instrument fault. The invariant that catches it is cheap:
+// every assertion a mutation reddens is one the control ran, so a reddened key that
+// matches no control key means the key is unstable.
+console.log('\n— mode 7: a reddened assertion that matches nothing the control ran —');
+{
+  const drift = runFalsify([{
+    label: 'the limit moves, and the message that reports it moves with it',
+    file: 'subject.js', find: 'const LIMIT = 5;', replace: 'const LIMIT = 6;',
+    expect: /is five/, maxRed: 2,
+  }], { test: 't/drifting.test.js' });
+  ok(/match(es)? nothing the control ran/.test(drift.out),
+     'a reddened key with no control counterpart is REPORTED, not silently dropped from coverage');
+  ok(/NOT trustworthy/.test(drift.out),
+     'and the run says the coverage figure cannot be read, rather than printing a low number as fact');
+  // The verdict is computed from the named assertion, not from the key, so it must
+  // survive intact — the warning is about the coverage figure alone.
+  ok(/✓ WITNESSED/.test(drift.out),
+     'CONTROL — the mutation is still graded WITNESSED, because verdicts do not go through the key');
+}
 
 fs.rmSync(TMP, { recursive: true, force: true });
 

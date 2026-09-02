@@ -217,7 +217,41 @@ const matches = (expect, msg) =>
 // while `reads "a" (got 1)` and `reads "b" (got 1)` still do not. Where the collapse DOES
 // make two distinct assertions identical the count is not decidable, and the report says
 // so rather than crediting both.
-const coverageKey = msg => msg.replace(/\([^)]*\)/g, '(…)').trim();
+// An assertion's identity is the text BEFORE its diagnostic.
+//
+// ⚠ THIS ONCE NORMALISED THE PARENTHETICAL'S CONTENTS AND NOT ITS PRESENCE, which is
+// the wrong half. The helpers every test file in this repo defines append a diagnostic
+// only on FAILURE — `has()` prints the bare message when it passes and
+// `${m} (missing …, got …)` when it does not — so the passing and failing forms of one
+// assertion keyed differently. Each such assertion was counted as never reddened and
+// then PRINTED in the never-reddened list, which points the reader at writing mutations
+// that already exist. `eq()` was unaffected, because it prints `(got …)` either way,
+// and that is why the failure looked like thin coverage rather than a broken instrument.
+// Measured when it was found: 113 of 139 assertions across four test files were
+// unmatchable, and a real matrix reported 1/35 while witnessing four mutations (#372).
+//
+// The cut runs from the FIRST `(` of the run that reaches the end of the string, and it
+// is greedy ON PURPOSE. Removing only the last balanced group is the tempting reading and
+// it is wrong here, because an assertion's OWN message often ends with a parenthetical
+// and then has a diagnostic appended after it:
+//
+//   passes:  the CLI refuses rather than printing a clean report (exit 2)
+//   fails:   the CLI refuses rather than printing a clean report (exit 2) (got 0)
+//
+// Cutting one group leaves those two as different keys — the same non-pairing this fix
+// is about, one notch along. 241 of the 3030 assertions in this suite end with a
+// parenthetical that belongs to the message, so it is the common case rather than an
+// edge. Cutting from the first such `(` pairs them, and two genuinely different
+// assertions still key apart because what differs is upstream of the cut. Where it does
+// collapse two distinct rows, the collision check below reports them as undecidable
+// rather than letting either read as covered.
+const coverageKey = msg => {
+  const s = String(msg).trim();
+  // A message that is NOTHING but a parenthetical keeps its whole text: an empty key
+  // would collapse every such assertion onto one row, turning a reporting gap into a
+  // false collision. An unbalanced message matches nothing and is left alone.
+  return s.replace(/\s*\(.*\)\s*$/, '').trim() || s;
+};
 
 // ── grading one mutation ─────────────────────────────────────────────────────
 function grade(m, run) {
@@ -440,6 +474,15 @@ function main() {
   // written from the author's model of the code rather than from its branches leaves
   // exactly this trace, and it is derivable from data already in hand.
   const never = controlBefore.assertions.map(a => a.msg).filter(msg => !everRed.has(coverageKey(msg)));
+
+  // THE INVARIANT THAT WOULD HAVE CAUGHT #372 THE DAY IT SHIPPED: every assertion a
+  // mutation reddened is one of the assertions the control ran, so every reddened key
+  // must be a control key. A key that matches nothing in the control means the key
+  // function is not stable across an assertion's passing and failing forms — and the
+  // only visible symptom of that is a coverage number that is quietly too low, which is
+  // exactly the shape this tool exists to refuse to report.
+  const controlKeys = new Set(controlBefore.assertions.map(a => coverageKey(a.msg)));
+  const orphanKeys = [...everRed].filter(k => !controlKeys.has(k));
   // Coverage is a statement about ONE direction, and saying so is the point. A
   // must-not-redden probe reddens nothing when it passes, so it contributes nothing here
   // BY DESIGN — and a reader who has just seen a full coverage number is exactly the
@@ -448,6 +491,12 @@ function main() {
   console.log(`\n— coverage — ${controlBefore.total - never.length}/${controlBefore.total} assertions were reddened by some mutation`);
   if (heldCount)
     console.log(`  (counts the ${results.length - heldCount} must-redden mutation(s) only — the ${heldCount} must-not-redden probe(s) redden nothing when they pass)`);
+  if (orphanKeys.length) {
+    console.log(`  ⚠ ${orphanKeys.length} reddened assertion(s) match nothing the control ran — the coverage`);
+    console.log('    figure below is NOT trustworthy: an assertion is keying differently when it');
+    console.log('    fails than when it passes. Fix the key before reading the number.');
+    orphanKeys.slice(0, 5).forEach(k => console.log(`      · ${k}`));
+  }
   if (never.length) {
     console.log('  never reddened (no mutation in this matrix exercises these):');
     never.forEach(msg => console.log(`    · ${msg}`));
