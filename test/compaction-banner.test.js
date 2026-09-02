@@ -30,14 +30,28 @@ const hasNot = (hay, n, m) => ok(!String(hay).includes(n), m);
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-banner-')));
 const HOOK = path.join(__dirname, '..', 'hooks', 'ground-truth-session-start.js');
 
-/** A catalogue over the line threshold, whose tail is whatever the case needs. */
-function project(name, tail, lines = 1600) {
+/**
+ * A catalogue whose SIZE and LINE COUNT are set independently, because the
+ * threshold changed from one to the other (anvi #139) and a fixture that varies
+ * only one of them cannot tell the two predicates apart.
+ *
+ * `lines` x `width` is the filler; every case below states both on purpose.
+ */
+function project(name, tail, { lines = 300, width = 1000, body = null } = {}) {
   const cwd = path.join(TMP, name);
   fs.mkdirSync(path.join(cwd, '.anvi'), { recursive: true });
-  const filler = Array.from({ length: lines }, (_, i) => `filler line ${i}`).join('\n');
+  const filler = body !== null
+    ? body
+    : Array.from({ length: lines }, (_, i) => `f${i}`.padEnd(width, '.')).join('\n');
   fs.writeFileSync(path.join(cwd, '.anvi', 'hetvabhasa.md'),
     `# Hetvabhasa\n## H1: x\n**REF:** src/a.js\n${filler}\n${tail}`);
   return cwd;
+}
+
+/** What the shipped hook actually weighed, so a fixture cannot lie about its own size. */
+function measured(cwd) {
+  const c = fs.readFileSync(path.join(cwd, '.anvi', 'hetvabhasa.md'), 'utf8');
+  return { bytes: Buffer.byteLength(c, 'utf8'), lines: c.split('\n').length, units: c.length };
 }
 
 /** The banner as a session actually receives it, or '' when none is emitted. */
@@ -110,8 +124,90 @@ console.log('\nthe banner names something to do, and only fires when it should')
 {
   // CONTROL — under the threshold there must be no banner at all. Without this,
   // every assertion above would still pass if the banner fired unconditionally.
-  const b = banner(project('small', '', 10));
+  const b = banner(project('small', '', { lines: 10, width: 20 }));
   eq(b, '', 'CONTROL — a catalogue under the threshold produces no compaction banner');
+}
+
+console.log('\nsize is measured in bytes, and lines are not a size (anvi #139)');
+{
+  // THE PAIR THAT SEPARATES THE TWO PREDICATES. Measured across the 60 catalogues
+  // in the store, density spans 42 to 423 bytes per line, and the two orderings
+  // cross: anvi's own vyapti is 281KB in 836 lines, struCode's krama is 139KB in
+  // 1739 lines. Under the old newline count the SMALLER file was the one that
+  // flagged. Either case alone would pass under both predicates for the wrong
+  // reason, so both are asserted, in both directions.
+  const wide = project('bytes-few-lines', '', { lines: 300, width: 1000 });
+  const mw = measured(wide);
+  ok(mw.bytes > 200 * 1024, `fixture is over the byte threshold (${mw.bytes} B)`);
+  ok(mw.lines < 1500, `and UNDER the old line threshold (${mw.lines} L)`);
+  has(banner(wide), '🗜️', 'a big catalogue written as few long lines DOES flag — the old count missed exactly this');
+
+  const narrow = project('lines-few-bytes', '', { lines: 2000, width: 8 });
+  const mn = measured(narrow);
+  ok(mn.lines > 1500, `fixture is over the old line threshold (${mn.lines} L)`);
+  ok(mn.bytes < 200 * 1024, `and UNDER the byte threshold (${mn.bytes} B)`);
+  eq(banner(narrow), '', 'CONTROL — a small catalogue written as many short lines does NOT flag');
+}
+{
+  // Bytes, not UTF-16 code units. These catalogues carry emoji and Devanagari, so
+  // `content.length` under-reports by up to 3x on the multi-byte stretches. This
+  // fixture is under the threshold by that measure and over it by the real one.
+  const line = 'न'.repeat(200);
+  const multi = project('multibyte', '', { body: Array.from({ length: 400 }, () => line).join('\n') });
+  const mm = measured(multi);
+  ok(mm.units < 200 * 1024, `fixture is under threshold counted as UTF-16 units (${mm.units})`);
+  ok(mm.bytes > 200 * 1024, `and over it counted as bytes (${mm.bytes} B)`);
+  has(banner(multi), '🗜️', 'a catalogue of multi-byte text is weighed by its bytes, not its code units');
+}
+{
+  // ⚠ THE BAND BETWEEN THE MEASURE AND THE REPORT. The banner rounds to KB; the
+  // comparison must not. A file of 205000 bytes is over the 204800-byte threshold
+  // and still rounds to "200KB", so a predicate written against the rounded figure
+  // would stay silent on a catalogue that is genuinely over. Half a KB in both
+  // directions is a small version of the bug this whole change is about: deciding
+  // on a number that is not the number you measured.
+  const PREFIX = '# Hetvabhasa\n## H1: x\n**REF:** src/a.js\n'.length + 1;
+  const edge = project('rounding-edge', '', { body: 'x'.repeat(205000 - PREFIX) });
+  const me = measured(edge);
+  eq(me.bytes, 205000, 'fixture sits just inside the rounding band');
+  ok(me.bytes > 200 * 1024, 'over the threshold exactly');
+  eq(Math.round(me.bytes / 1024), 200, 'but rounds to the threshold, so a rounded predicate would miss it');
+  has(banner(edge), '🗜️', 'the comparison is made on exact bytes, not on the rounded figure the banner prints');
+}
+{
+  // The banner states the metric it decided on. Reporting a line count beside a
+  // byte threshold is how the previous version came to make a claim about size
+  // out of a number that was not one.
+  const b = banner(project('reports-kb', ''));
+  has(b, 'KB', 'the banner reports the catalogue in KB');
+  has(b, 'past 200KB', 'and names the threshold it compared against, in the same unit');
+  hasNot(b, 'L,', 'and does NOT also report a line count — one claim, one metric');
+}
+
+console.log('\nthe templates and the hook state the same threshold');
+{
+  // ⚠ THE SEAM THIS WHOLE CHANGE IS ABOUT, one level up. The three catalogue
+  // templates carry the threshold in prose and the hook carries it as a constant,
+  // and until now nothing held them together — so when the hook counted lines the
+  // templates said "~1500 lines" and both were wrong in agreement. Agreement by
+  // luck reads exactly like agreement by construction, right up to the moment one
+  // side is edited. Whoever changes the constant next must be told which prose to
+  // change with it, by name.
+  const hookSrc = fs.readFileSync(HOOK, 'utf8');
+  const declared = /const COMPACTION_THRESHOLD_BYTES = (\d+) \* 1024;/.exec(hookSrc);
+  ok(declared, 'the hook declares its threshold in a form this guard can read');
+  const kb = declared ? Number(declared[1]) : null;
+  eq(kb, 200, 'and it is the value the templates are checked against');
+
+  const refs = path.join(__dirname, '..', 'references');
+  const templates = fs.readdirSync(refs).filter(f => /-template\.md$/.test(f) && f !== 'dharana-template.md');
+  // A denominator, so "every template agrees" cannot be produced by finding none.
+  eq(templates.length, 3, 'three catalogue templates were found to check');
+  for (const t of templates) {
+    const src = fs.readFileSync(path.join(refs, t), 'utf8');
+    has(src, `~${kb} KB`, `${t} states the same threshold the hook compares against`);
+    hasNot(src, '1500 lines', `${t} no longer states the threshold as a line count`);
+  }
 }
 
 console.log('\nthe states stay distinct');

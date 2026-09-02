@@ -10,7 +10,7 @@
 > This catalogue grows across sessions. Load at session start.
 >
 > **Maintenance — size-triggered compaction (not every-Nth-entry):**
-> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compact when the catalogue passes ~200 KB, not on a fixed line or entry count.
 > Compaction removes entries describing lifecycles of components that no longer
 > exist, or superseded by newer entries for the same component. When a lifecycle
 > changes (e.g., sync becomes async in an update), update the entry in place.
@@ -24,7 +24,7 @@
 > - **Every compaction appends to the Compaction Log** (bottom of this file):
 >   date, pre-compaction sha, and each affected ID → disposition
 >   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
-> Commit format: `🗜️ compact: krama N→M — pruned [IDs], merged [IDs]`
+> Commit format: `🗜️ compact: krama <before>KB→<after>KB — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add lifecycle patterns that
 > were verified by direct observation of execution order (debug logs,

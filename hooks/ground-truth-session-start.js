@@ -22,10 +22,34 @@ function emit(message) {
   }));
 }
 
-// Size-triggered compaction threshold. When a catalogue passes this many lines,
-// the session-start message flags it so growth doesn't stay silent across
-// sessions. Matches the ~1500-line trigger codified in references/*-template.md.
-const COMPACTION_THRESHOLD = 1500;
+// Size-triggered compaction threshold, in BYTES (anvi #139).
+//
+// ⚠ IT USED TO COUNT NEWLINES, and a newline count is not a size. Measured across
+// the 60 catalogues in the store, density spans 42 to 423 bytes per line — a 10x
+// range set purely by authoring style, since an entry written as one long prose
+// line per field costs one line and an entry written as wrapped prose costs
+// twenty. The two orderings genuinely cross, so no line threshold and no byte
+// threshold can ever agree: anvi's own vyapti (281KB, 836 lines) is TWICE the
+// size of struCode's krama (139KB, 1739 lines), and only the smaller one flagged.
+// The framework project's most-read catalogue was the one the trigger could not
+// see, which is the shape this fixes.
+//
+// THE VALUE IS CALIBRATED ON THE STORE, NOT DERIVED — like SNAPSHOT_CADENCE_DAYS
+// below, it is a starting point to revisit. 200KB keeps the flagged population the
+// same size as the old line trigger (22 of 60 catalogues) while correcting which
+// 22: anvi's and sonicPiWeb's vyapti start flagging, struCode's krama and
+// FilmPipeline's vyapti stop.
+const COMPACTION_THRESHOLD_BYTES = 200 * 1024;
+
+// ⚠ Bytes, not `String.length`. These catalogues carry emoji and Devanagari, so
+// UTF-16 code units under-report the cost of reading the file by however much
+// multi-byte text it contains — which is exactly the class of error this
+// threshold was changed to stop making.
+// Measure exactly, report roundly. Comparing a ROUNDED KB figure against the
+// threshold would make the predicate fuzzy by up to half a KB in both directions,
+// which is a smaller version of the same mistake: the number you display and the
+// number you decide on are not the same number.
+const sizeBytes = content => Buffer.byteLength(content, 'utf8');
 
 // How long the catalogue-health series may go without a new snapshot before the
 // banner says so. A STARTING GUESS, not a measurement (anvi #318): revisit it
@@ -177,16 +201,17 @@ process.stdin.on('end', () => {
     let grounded = 0;
     let ungrounded = 0;
     const ungroundedList = [];
-    const oversized = []; // catalogues past COMPACTION_THRESHOLD lines, each with its log state
+    const oversized = []; // catalogues past the byte threshold, each with its log state
 
     for (const cat of ['hetvabhasa.md', 'vyapti.md', 'krama.md']) {
       const catPath = path.join(anviDir, cat);
       if (!fs.existsSync(catPath)) continue;
       const content = fs.readFileSync(catPath, 'utf8');
 
-      const lineCount = content.split('\n').length;
-      if (lineCount > COMPACTION_THRESHOLD) {
-        oversized.push(`${cat.replace('.md', '')} (${lineCount}L, ${compactionState(content)})`);
+      const bytes = sizeBytes(content);
+      if (bytes > COMPACTION_THRESHOLD_BYTES) {
+        const kb = Math.round(bytes / 1024);
+        oversized.push(`${cat.replace('.md', '')} (${kb}KB, ${compactionState(content)})`);
       }
 
       // Split into entries by ## headers with IDs
@@ -267,7 +292,7 @@ process.stdin.on('end', () => {
       // banner stops being read. The one recorded pass concluded the threshold had
       // fired on live grounded knowledge and that the real finding was reference
       // drift, so drift is what this points at. Removal stays human-invoked.
-      message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD}L` +
+      message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD_BYTES / 1024}KB` +
         ` — run /anvi:currency first (the one recorded pass found drift, not bloat); removal stays human-invoked`;
     }
 
