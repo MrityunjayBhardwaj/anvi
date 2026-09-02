@@ -21,7 +21,7 @@
 > - **Every compaction appends to the Compaction Log** (bottom of this file):
 >   date, pre-compaction sha, and each affected ID → disposition
 >   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
-> Commit format: `🗜️ compact: hetvabhasa N→M — pruned [IDs], merged [IDs]`
+> Commit format: `🗜️ compact: hetvabhasa <before>KB→<after>KB — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add entries from high-quality
 > diagnoses — bugs where the root cause was correctly identified in one pass

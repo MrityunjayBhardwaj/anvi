@@ -25,7 +25,7 @@
 > - **Every compaction appends to the Compaction Log** (bottom of this file):
 >   date, pre-compaction sha, and each affected ID → disposition
 >   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
-> Commit format: `🗜️ compact: vyapti N→M — pruned [IDs], merged [IDs]`
+> Commit format: `🗜️ compact: vyapti <before>KB→<after>KB — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add invariants that were
 > confirmed by direct observation (Lokāyata-verified), not by inference

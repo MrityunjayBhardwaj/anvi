@@ -184,6 +184,32 @@ console.log('\nsize is measured in bytes, and lines are not a size (anvi #139)')
   hasNot(b, 'L,', 'and does NOT also report a line count — one claim, one metric');
 }
 
+console.log('\nthe templates and the hook state the same threshold');
+{
+  // ⚠ THE SEAM THIS WHOLE CHANGE IS ABOUT, one level up. The three catalogue
+  // templates carry the threshold in prose and the hook carries it as a constant,
+  // and until now nothing held them together — so when the hook counted lines the
+  // templates said "~1500 lines" and both were wrong in agreement. Agreement by
+  // luck reads exactly like agreement by construction, right up to the moment one
+  // side is edited. Whoever changes the constant next must be told which prose to
+  // change with it, by name.
+  const hookSrc = fs.readFileSync(HOOK, 'utf8');
+  const declared = /const COMPACTION_THRESHOLD_BYTES = (\d+) \* 1024;/.exec(hookSrc);
+  ok(declared, 'the hook declares its threshold in a form this guard can read');
+  const kb = declared ? Number(declared[1]) : null;
+  eq(kb, 200, 'and it is the value the templates are checked against');
+
+  const refs = path.join(__dirname, '..', 'references');
+  const templates = fs.readdirSync(refs).filter(f => /-template\.md$/.test(f) && f !== 'dharana-template.md');
+  // A denominator, so "every template agrees" cannot be produced by finding none.
+  eq(templates.length, 3, 'three catalogue templates were found to check');
+  for (const t of templates) {
+    const src = fs.readFileSync(path.join(refs, t), 'utf8');
+    has(src, `~${kb} KB`, `${t} states the same threshold the hook compares against`);
+    hasNot(src, '1500 lines', `${t} no longer states the threshold as a line count`);
+  }
+}
+
 console.log('\nthe states stay distinct');
 {
   const EXPECTED = ['no log section', 'no pass recorded', 'last pass', 'log unreadable'];

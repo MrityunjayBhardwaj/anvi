@@ -24,7 +24,7 @@
 > - **Every compaction appends to the Compaction Log** (bottom of this file):
 >   date, pre-compaction sha, and each affected ID → disposition
 >   (`pruned` | `merged-into <ID>` | `promoted-to <catalogue>`).
-> Commit format: `🗜️ compact: krama N→M — pruned [IDs], merged [IDs]`
+> Commit format: `🗜️ compact: krama <before>KB→<after>KB — pruned [IDs], merged [IDs]`
 >
 > **Quality-filtered growth (sādhanā):** Only add lifecycle patterns that
 > were verified by direct observation of execution order (debug logs,
