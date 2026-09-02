@@ -7,7 +7,7 @@
 > ROOT FIX, not the cascade of bad attempts that precede it.
 >
 > **Maintenance — size-triggered compaction (not every-Nth-entry):**
-> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compact when the catalogue passes ~200 KB, not on a fixed line or entry count.
 > Compaction removes entries that are too specific to one bug (not
 > generalizable), contradicted by a newer entry, or describe a pattern the
 > codebase no longer has — stale entries create false pattern-matching.
@@ -65,7 +65,7 @@
 ## Project-Specific Error Patterns
 
 _(Add entries as discovered. Follow the format below.)_
-_(Compact when the catalogue passes ~1500 lines — see the Compaction Log below.)_
+_(Compact when the catalogue passes ~200 KB — see the Compaction Log below.)_
 
 ### Entry Format (MANDATORY fields)
 

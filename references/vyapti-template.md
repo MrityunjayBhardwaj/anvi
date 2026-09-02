@@ -11,7 +11,7 @@
 > This catalogue grows across sessions. Load at session start.
 >
 > **Maintenance — size-triggered compaction (not every-Nth-entry):**
-> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compact when the catalogue passes ~200 KB, not on a fixed line or entry count.
 > Compaction removes entries contradicted by newer entries, too specific to one
 > instance (not generalizable), or describing patterns the codebase no longer
 > has. When a vyāpti's scope conditions change, update the entry in place —

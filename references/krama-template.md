@@ -10,7 +10,7 @@
 > This catalogue grows across sessions. Load at session start.
 >
 > **Maintenance — size-triggered compaction (not every-Nth-entry):**
-> Compact when the catalogue passes ~1500 lines, not on a fixed entry count.
+> Compact when the catalogue passes ~200 KB, not on a fixed line or entry count.
 > Compaction removes entries describing lifecycles of components that no longer
 > exist, or superseded by newer entries for the same component. When a lifecycle
 > changes (e.g., sync becomes async in an update), update the entry in place.
