@@ -181,6 +181,23 @@ ONLY if $ARGUMENTS explicitly requests it: report working-tree cleanliness per
 repo, open PRs/issues per repo, open tasks, and a gap-check — any fix that took
 more than one attempt but isn't yet a dharana entry, and any ungrounded
 observation the session surfaced (candidate for /anvi:ground).
+
+Also reconcile the board against the issues it projects (§10: new work items flow
+local → GitHub, and nothing else checked that they arrived):
+
+```bash
+node scripts/board-reconcile.js      # repo path; installed at ~/.claude/anvi/scripts/
+```
+
+`0` reconciled · `1` drift found, itemised · `2` it could not answer and says why.
+It takes roughly half a minute against a repo this size, which is why it lives behind
+this opt-in step rather than in `/anvi:orient` — that command's live-state step already
+costs about twenty seconds and is run far more often.
+
+Read the two counts as the report states them, each against its own denominator, and
+quote them that way. A `2` is not a clean bill: it means one of the reads was short or
+unavailable, and a difference computed over a short read is wrong in BOTH directions —
+inventing rows that are not missing and hiding rows that are.
 </step>
 
 <step name="6_additional_instructions">
