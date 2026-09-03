@@ -159,7 +159,13 @@ console.log('\nwhether the run joined the series is stated, in both directions')
 
   // ⚠ THE ASSERTION THAT MAKES THE PAIR MEAN SOMETHING: the claim is about a file on
   // disk, so check the disk. A tool could print both lines correctly and write nothing.
-  const files = fs.readdirSync(SNAPS).filter(f => /^health-\d{4}-\d{2}-\d{2}\.json$/.test(f));
+  // ⚠ THIS READ MUST NOT THROW. `readdirSync` on a directory the run never created takes
+  // the whole file down mid-way, and every assertion below it then reads as untested
+  // rather than failing — which is how a matrix comes to report a guard as unexercised
+  // while the thing it guards is broken. Found by falsification: a mutation that made the
+  // script die left this line throwing and the assertions after it silent.
+  let files = [];
+  try { files = fs.readdirSync(SNAPS).filter(f => /^health-\d{4}-\d{2}-\d{2}\.json$/.test(f)); } catch { files = []; }
   ok(files.length > 0, `the --write run actually created a snapshot file (found ${files.length})`);
 }
 
