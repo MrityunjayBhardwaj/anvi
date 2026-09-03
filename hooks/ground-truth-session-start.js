@@ -289,11 +289,19 @@ process.stdin.on('end', () => {
       // Names a command rather than a section. The previous text sent the reader to
       // the Compaction Log, which does not exist in 46 of the 57 catalogues in the
       // store — a banner that fires every session and points at nothing is how a
-      // banner stops being read. The one recorded pass concluded the threshold had
-      // fired on live grounded knowledge and that the real finding was reference
-      // drift, so drift is what this points at. Removal stays human-invoked.
+      // banner stops being read. Every recorded pass so far — MoGraph-DSL 2026-07-30
+      // and anvi 2026-09-03, four catalogue records between them — concluded the
+      // threshold had fired on live grounded knowledge and that the real finding was
+      // reference drift, so drift is what this points at. Removal stays human-invoked.
+      //
+      // ⚠ THE WORDING DELIBERATELY CARRIES NO TALLY (anvi #375). It used to say "the one
+      // recorded pass", which was true when written and was falsified by the act of
+      // taking the advice: recording a second pass made the sentence wrong while making
+      // the advice it gives BETTER supported. A message that counts instances expires
+      // whenever an instance is added, and the thing that adds one is usually the thing
+      // the message asked for.
       message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD_BYTES / 1024}KB` +
-        ` — run /anvi:currency first (the one recorded pass found drift, not bloat); removal stays human-invoked`;
+        ` — run /anvi:currency first (every recorded pass so far found drift, not bloat); removal stays human-invoked`;
     }
 
     // Silent while the series is healthy. The only states that speak are the
