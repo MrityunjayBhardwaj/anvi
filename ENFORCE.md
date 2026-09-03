@@ -972,3 +972,92 @@ operation reading as continued value.
   13 of 13 reddened their predicted assertion. The harness treats a non-zero exit
   with no failure markers as its own third outcome, because a crash prints no marker
   and would otherwise be graded as an undetected mutation.
+
+## REF Line Spans — a line number decays on every commit to the file it names
+
+A `**REF:**` cites code by line — `install.sh:507,679`, `layer.ts:85`
+(`layer.ks = ks ?? {}`) — and nothing has ever checked one. The file gets
+edited, the lines shift, and the citation goes on reading exactly as it did
+when it was true. It is the faster-rotting half of the citation grammar: a
+section heading mostly survives an edit, a line number rarely does. Measured
+across the store when this was built: **1,451 line-span citations in 15
+projects, none ever checked**.
+
+- **Report:** `node ~/.claude/anvi/scripts/ref-span-check.js` — for every
+  `path:span[ (anchor)]` in a catalogue, resolves the file and checks the
+  cited lines. Exit **0** clean, **1** when a citation is broken, **2** when
+  the catalogue directory cannot be read. Offline. `--catalogues <dir>` points
+  it at any project in the store; the search roots are then derived from that
+  path, so no second flag is needed.
+- **The outcomes are named apart, because they are different repairs.**
+  `ANCHOR-DRIFTED` reports **where the anchor actually is** and by how many
+  lines, so the entry is fixable in one edit; `ANCHOR-NOT-FOUND` means the
+  cited thing is gone rather than moved; `SPAN-OUT-OF-RANGE` means the file
+  shrank; `FILE-NOT-FOUND` and `FILE-AMBIGUOUS` are about the path, not the
+  line. Folding any pair of these sends the reader to fix the wrong end.
+
+**⚠ `unanchored` is never folded into the verified count.** A span sitting
+inside a file's line count is not evidence that a citation is true — a
+900-line file contains line 543 forever. Counting those as passes produces a
+green run over a corpus where most citations were never actually checked,
+which is the false green this repo keeps rebuilding. The summary therefore
+states what was **VERIFIED** on one line and what merely **could not be
+contradicted** beside it, and the unanchored list doubles as the worklist for
+making the corpus checkable at all.
+
+**⚠ Four rules were corrected by reading the rows the tool flagged**, never by
+reasoning about the rule — the same way #285's matcher was corrected:
+
+| the rule | what it cost to get wrong |
+|---|---|
+| **no extension allowlist** | the first version listed the extensions it expected; `bmesh_bevel.cc:1248-1254` matched none, so it **vanished** rather than being reported — and the two continuations after it were then blamed for a missing antecedent |
+| a continuation inherits the nearest path named before it, **spanned or not** | six live citations blamed on an antecedent sitting right there, unspanned |
+| a nested checkout is the same file at another commit | four citations read AMBIGUOUS because the repo keeps its worktrees inside itself |
+| an anchor matches on its **non-whitespace content** | `['transform','constraint']` reported gone from a file containing `['transform', 'constraint']` |
+
+The first of those is the one that generalises: **a matcher that quietly stops
+matching shrinks the denominator, and every rate above it becomes a lie.** So
+an unparsed form is counted and reported, never skipped — including a bare
+`:N` with nothing before it to inherit.
+
+**⚠ An anchor that is absent from the whole file has two causes and the tool
+cannot separate them:** the cited code is gone, or the parenthetical was a
+*label* rather than a quotation (`(CameraPose.lookAt)` describes; it was never
+source text). Both are defects in the entry, so both are reported — but a row
+is a prompt to look, not a proven decay. The repair for the second is to write
+anchors as quotations.
+
+**⚠ A search that ran out of budget is not a search that found nothing.** The
+file walk stops after `--walk-budget` entries (default 40,000); exhaustion is
+recorded per root and printed beside the verdict, because a partial walk would
+otherwise report an existing file as FILE-NOT-FOUND — a wrong answer wearing
+the shape of a finding. The budget is a flag only so a test can reach that path
+at all: a guard whose failure mode is unreachable from a test rots silently.
+
+**⚠ One match resolves a citation, but the shortfall is reported.** A
+parenthetical carries several anchors and they are not all quotations, so
+requiring every token would condemn correct entries — but a citation whose
+anchors mostly failed must not read as one that was entirely true. The row says
+`1 of 4 anchors matched` and the summary carries the count. Measured across two
+live catalogues when this was added: **12 of 73 resolved rows were partial**,
+all previously reported as clean passes.
+
+**⚠ `--json` sets `process.exitCode` and returns; it must never call
+`process.exit()`.** Node's stdout is asynchronous when it is a pipe and
+`process.exit()` kills the process before the buffer drains — measured at
+65,536 bytes through a pipe against 109,899 to a file, cut mid-string, exit
+status still correct. A consumer piping the report to `jq` was handed a
+truncated document that read as the whole one. Writing to a file is synchronous
+and hides this completely, which is why it survived a session of runs.
+
+- **Tests:** `node test/ref-span-check.test.js` — 63 assertions, every rule
+  paired with a control that must **not** resolve. The central one is that an
+  anchor present in the file but at the wrong line comes back DRIFTED and not
+  resolved: a checker that accepts "somewhere in the file" resolves everything
+  and reports a perfect sweep over a decayed catalogue. Falsified by a
+  27-mutation matrix, **27 of 27 conclusive** (26 witnessed, 1 held), controls
+  agreeing at 63 assertions both ends. **Two mutations came back NOT WITNESSED
+  and both indicted the fixture, not the guard** — one anchor contained no
+  whitespace for the squash to remove, and one cited a path that resolves
+  directly against the search root and so never entered the fallback the rule
+  lives in. Both were rebuilt to the live shape and both then reddened.
