@@ -169,9 +169,14 @@ console.log('\na nested checkout is the same file at another commit, not a rival
 
   // CONTROL: two copies in ORDINARY directories are genuinely ambiguous and are reported
   // rather than resolved against whichever the walk reached first.
+  // ⚠ The copies sit UNDER a directory the citation does not name. A citation whose path
+  // resolves directly against a root never reaches the basename fallback at all, so a
+  // fixture citing `b/thing.ts` at the root exercised none of this — the mutation matrix
+  // reported the narrowing untested and it was right. The live shape is a PARTIAL path:
+  // `lottie-edit/src/emit/assets.ts` against a real `packages/lottie-edit/src/emit/…`.
   const R2 = path.join(TMP, 'root2');
-  write(path.join(R2, 'a/thing.ts'), 'const A = 1;\n');
-  write(path.join(R2, 'b/thing.ts'), 'const A = 1;\n');
+  write(path.join(R2, 'pkg/a/thing.ts'), 'const A = 1;\n');
+  write(path.join(R2, 'pkg/b/thing.ts'), 'const A = 1;\n');
   const cat = path.join(TMP, 'catamb');
   write(path.join(cat, 'hetvabhasa.md'), '**REF:** `thing.ts:1` (`const A`)');
   const rr = spawnSync('node', [TOOL, '--catalogues', cat, '--roots', R2], { encoding: 'utf8' });
