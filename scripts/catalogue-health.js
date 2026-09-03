@@ -172,6 +172,28 @@ if (prev && prev.data) {
 // report every single week — which is the wallpaper this tool exists to stop
 // producing. So the quiet line CARRIES the gap instead of waiting for it to close,
 // and a gap that CHANGED takes the long path, because that is a change.
+// ⚠ A PREVIEW SAYS SO (anvi #377), because otherwise the only thing distinguishing it
+// from a real run is a trailing line that DOESN'T appear — and an absence is not a signal.
+// Everything above is byte-identical between the two forms: the same per-entry diff, the
+// same LEVELS line, the same `newly unmeasurable since health-<date>.json`, a sentence
+// that speaks in the series' vocabulary about a continuity the preview did not create.
+// Observed 2026-09-03: a bare run was read as having taken the snapshot and written into
+// two memory files as fact; it surfaced only because the session-start banner still
+// called the series 13 days stale — the reader disagreeing with the writer.
+//
+// ⚠ IT IS ONE LINE, and on the quiet path it is APPENDED to the quiet line rather than
+// added below it. "A quiet week is ONE line" is a deliberate property of this report
+// (see the output comment below) and naming a state is not a reason to spend three lines
+// on a week where nothing happened. The state has to be said; it does not have to be said
+// spaciously.
+//
+// The flag it names is this SCRIPT's (`--write`), not the skill's (`/anvi:currency
+// --fleet`) — the banner that sends a reader here uses the skill's spelling, and someone
+// who arrives at the script directly from that wording lands on the preview form.
+const previewNote = write ? null : (prev
+  ? `PREVIEW — nothing written; the series still ends at ${prev.file} (re-run with --write to extend it).`
+  : 'PREVIEW — nothing written; the series still has no snapshot (re-run with --write to start it).');
+
 const gaps = [...unmeasured, ...skipped].map(([n]) => n).sort();
 const gapsBefore = prev && prev.data ? Object.keys(prev.data.unmeasured || {}).sort() : null;
 const gapsMoved = gapsBefore === null || gaps.join(',') !== gapsBefore.join(',');
@@ -180,7 +202,8 @@ if (prev && prev.data && !changes.length && !gapsMoved) {
   const tail = gaps.length
     ? ` ${gaps.length} project(s) still not measured: ${gaps.join(', ')}.`
     : ' Every store project was measured.';
-  console.log(`Catalogue health ${today} (UTC): no entry changed verdict across ${examinedTotal} entries in ${Object.keys(measured).length} projects since ${prev.file}.${tail}`);
+  console.log(`Catalogue health ${today} (UTC): no entry changed verdict across ${examinedTotal} entries in ${Object.keys(measured).length} projects since ${prev.file}.${tail}` +
+              (previewNote ? ` ${previewNote}` : ''));
 } else {
   out.push(`CATALOGUE HEALTH — ${today} (UTC)`);
   out.push('');
@@ -213,9 +236,28 @@ if (prev && prev.data && !changes.length && !gapsMoved) {
   if (!unmeasured.length && !skipped.length) out.push('  (every store project was measured)');
   for (const [n, why] of unmeasured) out.push(`  - ${n}: ${why}`);
   for (const [n, why] of skipped) out.push(`  - ${n}: ${why}`);
+  if (previewNote) { out.push(''); out.push(previewNote); }
   console.log(out.join('\n'));
 }
 
+// WHETHER THIS RUN JOINED THE SERIES IS ITS OWN LINE, IN BOTH DIRECTIONS (anvi #377).
+//
+// ⚠ IT USED TO BE SIGNALLED BY AN ABSENCE, and an absence is not a signal. Without
+// `--write` the report is a preview, and everything above this point is byte-identical
+// to the real thing: the same per-entry diff, the same fleet LEVELS line, the same
+// `newly unmeasurable since health-<date>.json` — a sentence that speaks in the series'
+// vocabulary and makes a claim about continuity this run did not create. The only
+// difference was that one trailing line did not appear.
+//
+// Observed 2026-09-03: a bare run was read as having taken the snapshot, that was written
+// into two memory files as fact, and the error surfaced only because the session-start
+// banner still reported the series as 13 days stale — the READER disagreeing with the
+// writer's apparent success. `ls` settled it.
+//
+// This is the discipline the session-start hook applies to the Compaction Log's four
+// states and to the snapshot series' own four, turned inward on what this script DID
+// rather than on what it found. "Reported but did not join the series" is a state, and a
+// state needs a name.
 if (write) {
   fs.mkdirSync(SNAP_DIR, { recursive: true });
   const snap = { date: today, projects: {} };
@@ -226,4 +268,7 @@ if (write) {
   const target = path.join(SNAP_DIR, `health-${today}.json`);
   fs.writeFileSync(target, JSON.stringify(snap, null, 1) + '\n');
   console.log(`\nsnapshot written: ${target}`);
+  console.log(prev
+    ? `  the series now ends at health-${today}.json (it ended at ${prev.file})`
+    : `  the series now ends at health-${today}.json — its first snapshot`);
 }

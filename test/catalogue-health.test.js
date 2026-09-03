@@ -89,6 +89,12 @@ console.log('\na quiet run is one line — and only when it is genuinely quiet')
 {
   const r = run();
   eq(r.out.trim().split('\n').length, 1, 'nothing changed and nothing was unmeasurable → a single line');
+  // ⚠ THE TWO PROPERTIES ARE PINNED TOGETHER ON PURPOSE. This run is a preview, so it must
+  // ALSO say so (anvi #377) — and the obvious way to add that state is a line of its own,
+  // which would silently spend three lines on a week where nothing happened and undo the
+  // property asserted immediately above. Asserting only one of the two leaves the next
+  // author free to satisfy it by breaking the other.
+  has(r.out, 'PREVIEW —', 'and that single line still says the run was a preview');
   has(r.out, 'no entry changed verdict', 'which says so plainly');
   has(r.out, 'across 1 entries in 1 projects', 'CONTROL — with the denominator, so it is a result and not a shrug');
   has(r.out, 'orphan', 'and the standing gap is CARRIED in that one line rather than omitted from it');
@@ -128,6 +134,48 @@ console.log('\nthree silences that must not read alike');
   const r = spawnSync('node', [TOOL, '--dir', SNAPS], { encoding: 'utf8', env: { ...process.env, HOME: emptyHome } });
   eq(r.status, 2, 'an unreadable store exits non-zero');
   has(r.stderr, 'REFUSING', 'and says it is refusing rather than reporting a healthy fleet');
+}
+
+console.log('\nwhether the run joined the series is stated, in both directions');
+{
+  // ⚠ THE STATE THAT USED TO BE SIGNALLED BY AN ABSENCE (anvi #377). Everything a
+  // preview prints is byte-identical to the real run — the same per-entry diff, the same
+  // LEVELS line, the same "newly unmeasurable since <file>" phrasing, which speaks in the
+  // series' vocabulary about a continuity the preview did not create. The only difference
+  // was one trailing line that did not appear, and a missing line is not something a
+  // reader observes. It was read as a completed snapshot and written into memory as fact.
+  const preview = run();
+  has(preview.out, 'PREVIEW —', 'a run without --write says it is a preview');
+  has(preview.out, 'nothing written', 'and says in as many words that nothing was written');
+  has(preview.out, '--write', 'and names the flag that would extend the series — the script’s own, not the skill’s');
+  hasNot(preview.out, 'snapshot written: ', 'CONTROL — and does not print the success line');
+  // The preview must not merely be silent about the series; it must say where it still ends.
+  has(preview.out, 'the series still ends at', 'and states where the series still ends, rather than leaving it to be inferred');
+
+  const written = run(['--write']);
+  has(written.out, 'snapshot written: ', 'a --write run says the snapshot was written');
+  has(written.out, 'the series now ends at', 'and states the series advanced, so the two runs are distinguishable by what they SAY');
+  hasNot(written.out, 'PREVIEW —', 'CONTROL — and is not also labelled a preview');
+
+  // ⚠ THE ASSERTION THAT MAKES THE PAIR MEAN SOMETHING: the claim is about a file on
+  // disk, so check the disk. A tool could print both lines correctly and write nothing.
+  // ⚠ THIS READ MUST NOT THROW. `readdirSync` on a directory the run never created takes
+  // the whole file down mid-way, and every assertion below it then reads as untested
+  // rather than failing — which is how a matrix comes to report a guard as unexercised
+  // while the thing it guards is broken. Found by falsification: a mutation that made the
+  // script die left this line throwing and the assertions after it silent.
+  let files = [];
+  try { files = fs.readdirSync(SNAPS).filter(f => /^health-\d{4}-\d{2}-\d{2}\.json$/.test(f)); } catch { files = []; }
+  ok(files.length > 0, `the --write run actually created a snapshot file (found ${files.length})`);
+}
+
+console.log('\nthe first run has no series to point at, and says so');
+{
+  const solo = path.join(TMP, 'snaps-empty');
+  fs.mkdirSync(solo, { recursive: true });
+  const r = spawnSync('node', [TOOL, '--dir', solo], { encoding: 'utf8', env: { ...process.env, HOME } });
+  has(r.stdout, 'still has no snapshot', 'with no prior snapshot the preview says the series has none yet');
+  hasNot(r.stdout, 'still ends at', 'CONTROL — rather than naming a previous file that does not exist');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
