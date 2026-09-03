@@ -144,7 +144,14 @@ console.log('\nno extension allowlist — an unexpected extension is examined, n
 
 console.log('\nan anchor is matched on its non-whitespace content');
 {
-  const sp = run("**REF:** `src/widget.ts:6` (`['transform','constraint']`)");
+  // The source line reads `['transform', 'constraint']`. BOTH directions of the mismatch
+  // have to be exercised, because they are guarded by two different squashes: an anchor
+  // typed TIGHTER than the source needs the span squashed, and one typed LOOSER needs the
+  // anchor squashed. The first version of this block only had the tight form, so removing
+  // the anchor-side squash changed nothing and the matrix reported it untested.
+  const tight = run("**REF:** `src/widget.ts:6` (`['transform','constraint']`)");
+  has(tight.out, 'VERIFIED 1', 'an anchor typed tighter than the source still matches');
+  const sp = run("**REF:** `src/widget.ts:6` (`[ 'transform' , 'constraint' ]`)");
   has(sp.out, 'VERIFIED 1', 'formatting differences in the anchor do not make a true citation false');
 
   // CONTROL: squashing whitespace must not make everything match. A token that differs by
