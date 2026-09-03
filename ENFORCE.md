@@ -801,6 +801,46 @@ been right for the wrong reason.
   `dharana.md` in a fresh clone; every case builds its own boundary text and tree,
   and the suite means the same thing in CI as it does on the author's machine.
 
+## Citation Anchors — a specific citation reads as a verified one
+
+Five catalogue citations once named sections of an issue that has no numbered
+sections at all. Every one was well-formed, specific, and false, and they sat
+there for a day. That is the whole failure: **nobody follows a citation that
+looks careful**, so a dangling one is indistinguishable from a live one until
+somebody happens to open the document — and the population grows every session.
+
+- **Report:** `node ~/.claude/anvi/scripts/citation-anchors.js` — for every
+  `<document>.md §<anchor>` written in a catalogue, checks that the anchor names
+  something in that document. Exit **0** clean, **1** when something dangles,
+  **2** when the catalogue directory cannot be read. Offline: it resolves cited
+  documents across the repo, the store's `ref/`, and the installed framework, in
+  that order. Citations of *issues* need the network and are out of scope here.
+- **The denominator is printed beside the verdict.** `DANGLING 0` out of zero
+  citations found is the shape of a matcher that silently matched nothing, and it
+  renders identically to a clean sweep. A run that finds no citations says so in
+  those words rather than reporting success.
+- **The outcomes that look alike are named apart.** "the document is not there"
+  is a different repair from "the section is not in it", and folding them sends
+  the reader to fix the wrong end.
+
+**⚠ Four things the matcher has to get right**, each found by running it over the
+real corpus and reading every row it flagged. Three successive drafts each
+reported a different confident wrong number, in both directions:
+
+| the rule | what it costs to get wrong |
+|---|---|
+| a numeric anchor matches the **whole** number | prefix-matching resolves `§11` against heading `1. …` — a false **green**, the dangerous direction |
+| …but a slug separator still ends it | excluding `_` rejected `§2c`, which names step `2c_store_durability` — two live citations |
+| an anchor may be **quoted**, and has no closing delimiter | leaving the quote on made ten live citations read as dangling; where the anchor ends is decided by the target, so the longest prefix naming a real section wins |
+| a **heading is not the only citable thing** | workflow files are cited by `<step name="…">`, and a numbered section is cited as often by its title as by its number |
+
+The rule that separates the first two is that a number ends at anything which is
+not a digit or a letter — `_` and `-` end it, because they cannot make it a
+different number. `§1` therefore names step `1_harvest_catalogues` and does *not*
+name heading `11.`, and both directions are pinned by a control that must NOT
+resolve. Without those controls a matcher that resolves everything produces a
+perfect report.
+
 ## Absent-Warrant Instances — the store has a reader, and it refuses rather than counts
 
 > **⛔ BUILT, TESTED, AND DELIBERATELY NOT REGISTERED.** This hook ships (the installer globs
