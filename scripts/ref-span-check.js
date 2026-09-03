@@ -215,7 +215,12 @@ function classify(rel, lines, tokens) {
   // two source lines be found at all, which a line-at-a-time search cannot do.
   const inSpan = squash(src.slice(lo - 1, hi).join('\n'));
   const found = tokens.filter(t => inSpan.includes(squash(t)));
-  if (found.length) return { status: 'resolved', detail: found[0], target: res.file };
+  // A citation may carry several anchors, and they are not all quotations — a parenthetical
+  // mixes the thing being pointed at with prose about it. So ONE match resolves the
+  // citation, but how many of them matched is REPORTED rather than rounded away: a row
+  // saying 1 of 3 is a prompt to look, and a report that only ever said "resolved" would
+  // hide the two that did not.
+  if (found.length) return { status: 'resolved', detail: found.length === tokens.length ? found[0] : `${found[0]} — ${found.length} of ${tokens.length} anchors matched`, anchors: tokens.length, matched: found.length, target: res.file };
 
   // The anchor is not where the entry says it is. WHERE IT ACTUALLY IS is the repair, so the
   // delta is reported rather than a bare failure — an entry that has slipped forty lines is
@@ -293,7 +298,12 @@ console.log(`  margin ±${MARGIN} line(s); roots: ${ROOTS.join(', ')}`);
 // VERIFIED and UNANCHORED are printed on separate lines and never summed, because "checked
 // and true" and "there was nothing to check" are the two states this report exists to keep
 // apart.
-console.log(`  VERIFIED ${by('resolved')}   unanchored ${by('unanchored')} (nothing to check against — not a pass)   broken ${broken.length}`);
+// A partial match is still a resolution — not every parenthetical is a quotation — but it
+// is NOT the same as a citation whose every anchor was found, and a summary that says only
+// "verified" hides the difference. Measured on two live catalogues when this was added:
+// 12 of 73 resolved rows were partial, one of them 1 of 4.
+const partial = rows.filter(r => r.status === 'resolved' && r.matched < r.anchors).length;
+console.log(`  VERIFIED ${by('resolved')}${partial ? ` (${partial} matched only SOME of their anchors — see --all)` : ''}   unanchored ${by('unanchored')} (nothing to check against — not a pass)   broken ${broken.length}`);
 if (broken.length) {
   const counts = BROKEN.map(s => [s, by(s)]).filter(([, n]) => n);
   console.log('  ' + counts.map(([s, n]) => `${s} ${n}`).join('   '));

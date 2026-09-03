@@ -230,6 +230,26 @@ console.log('\nthe report refuses rather than printing a clean zero it cannot st
   has(r.stderr, 'REFUSING', 'and says it is refusing rather than reporting zero citations');
 }
 
+console.log('\na citation whose anchors only PARTLY matched does not report as a clean pass');
+{
+  // One anchor is on the cited line, the other is nowhere. The citation still resolves —
+  // a parenthetical mixes the thing pointed at with prose about it, so requiring every
+  // token would condemn correct entries — but the report must not call it whole.
+  const part = run('**REF:** `src/widget.ts:3` (`WIDGET_LIMIT`, `NEVER_WRITTEN`)');
+  has(part.out, 'VERIFIED 1', 'it is still counted as resolved');
+  has(part.out, 'matched only SOME of their anchors', 'and the summary says some anchors did not match');
+  // The row itself is behind --all, which the summary names: a quiet run stays one line,
+  // and the count in it is what sends the reader to the detail.
+  const partAll = run('**REF:** `src/widget.ts:3` (`WIDGET_LIMIT`, `NEVER_WRITTEN`)', ['--all']);
+  has(partAll.out, '1 of 2 anchors matched', 'and the row under --all says how many');
+
+  // CONTROL: when every anchor matches, nothing is said about partials — otherwise the
+  // notice appears on every run and stops carrying information.
+  const whole = run('**REF:** `src/widget.ts:3` (`WIDGET_LIMIT`, `export const`)');
+  has(whole.out, 'VERIFIED 1', 'a citation whose anchors all match resolves');
+  hasNot(whole.out, 'matched only SOME', 'and says nothing about partials');
+}
+
 console.log('\na report larger than the pipe buffer arrives whole');
 {
   // ⚠ Node's stdout is ASYNCHRONOUS when it is a pipe, and `process.exit()` kills the
