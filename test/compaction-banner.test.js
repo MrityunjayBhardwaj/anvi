@@ -120,6 +120,14 @@ console.log('\nthe banner names something to do, and only fires when it should')
   has(b, '/anvi:currency', 'the banner names a command that exists');
   hasNot(b, 'see Compaction Log', 'and no longer sends the reader to a section that is usually absent');
   has(b, 'human-invoked', 'and says removal is not automated');
+  // ⚠ AND IT CARRIES NO TALLY (anvi #375). The banner used to say "the one recorded
+  // pass". That was true when written and was falsified by the act of taking its own
+  // advice — recording a second pass made the sentence wrong while making the advice it
+  // gives better supported. A message that counts instances expires whenever an instance
+  // is added, and here the thing that adds one is the thing the message asked for.
+  ok(!/\bthe (one|two|three|four|five|[0-9]+) [a-z]+ pass/.test(b),
+     'the banner does not state how many passes have been recorded');
+  has(b, 'every recorded pass so far', 'it makes the claim in a form that survives the next pass');
 }
 {
   // CONTROL — under the threshold there must be no banner at all. Without this,
