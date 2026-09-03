@@ -145,8 +145,18 @@ function resolve(rel) {
   const base = path.basename(rel);
   for (const r of ROOTS) {
     const hits = walkFor(r, base);
-    if (hits.length === 1) return { file: hits[0] };
-    if (hits.length > 1) return { ambiguous: hits };
+    if (!hits.length) continue;
+    // ⚠ USE ALL OF THE CITATION BEFORE CALLING IT AMBIGUOUS. A citation like
+    // `lottie-edit/src/emit/assets.ts` names directories that pick out exactly one of the
+    // two files called `assets.ts`; matching on the basename alone threw that away and
+    // reported ambiguity the entry had already resolved. Narrowing by the cited SUFFIX uses
+    // more of what the author wrote, not less — a bare `lottie.js` with three copies in the
+    // tree is still ambiguous, and correctly so.
+    const suffix = path.sep + rel.split('/').join(path.sep);
+    const narrowed = rel.includes('/') ? hits.filter(h => h.endsWith(suffix)) : hits;
+    const final = narrowed.length ? narrowed : hits;
+    if (final.length === 1) return { file: final[0] };
+    return { ambiguous: final };
   }
   return {};
 }

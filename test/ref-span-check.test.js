@@ -176,6 +176,16 @@ console.log('\na nested checkout is the same file at another commit, not a rival
   write(path.join(cat, 'hetvabhasa.md'), '**REF:** `thing.ts:1` (`const A`)');
   const rr = spawnSync('node', [TOOL, '--catalogues', cat, '--roots', R2], { encoding: 'utf8' });
   has((rr.stdout || '') + (rr.stderr || ''), 'FILE-AMBIGUOUS 1', 'two real copies ARE reported ambiguous');
+
+  // …unless the citation itself already tells them apart. A cited DIRECTORY PREFIX is part
+  // of the citation and must be used before declaring ambiguity — matching on the basename
+  // alone threw away what the author had already written down.
+  const cat2 = path.join(TMP, 'catnarrow');
+  write(path.join(cat2, 'hetvabhasa.md'), '**REF:** `b/thing.ts:1` (`const A`)');
+  const rn = spawnSync('node', [TOOL, '--catalogues', cat2, '--roots', R2], { encoding: 'utf8' });
+  const nout = (rn.stdout || '') + (rn.stderr || '');
+  hasNot(nout, 'FILE-AMBIGUOUS', 'a cited directory prefix picks out one of two same-named files');
+  has(nout, 'VERIFIED 1', 'and the narrowed file is the one checked');
 }
 
 console.log('\nthe margin is a stated number, and changing it changes the verdict in one direction');
