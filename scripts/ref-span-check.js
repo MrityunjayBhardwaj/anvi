@@ -263,6 +263,8 @@ function scan() {
   return rows;
 }
 
+main();
+function main() {
 const rows = scan();
 if (rows === null) {
   // Printing zeros here is indistinguishable from a catalogue with no citations.
@@ -276,7 +278,14 @@ const broken = rows.filter(r => BROKEN.includes(r.status));
 
 if (jsonOut) {
   console.log(JSON.stringify({ examined: rows.length, verified: by('resolved'), unanchored: by('unanchored'), margin: MARGIN, catalogues: CAT_DIR, searchTruncated: [...truncatedRoots], rows }, null, 1));
-  process.exit(broken.length ? 1 : 0);
+  // ⚠ `process.exitCode`, NEVER `process.exit()`. Node's stdout is ASYNCHRONOUS when it is a
+  // pipe, and `process.exit()` kills the process before the buffer drains — measured on the
+  // live corpus: 65,536 bytes through a pipe against 109,899 to a file, the report cut
+  // mid-string with no error and no non-zero status. A consumer piping this to `jq` would
+  // have been handed a truncated document that reads as the whole one. Setting the code and
+  // returning lets Node flush and exit on its own.
+  process.exitCode = broken.length ? 1 : 0;
+  return;
 }
 
 console.log(`REF line spans — ${rows.length} span citation(s) examined across ${CAT_DIR}`);
@@ -302,4 +311,5 @@ for (const r of rows) {
   if (r.status === 'unanchored') { if (showAll) console.log(`  · [${r.file}] ${r.cited} — ${r.detail}`); continue; }
   console.log(`  ✗ [${r.file}] ${r.cited} — ${r.status}: ${r.detail}`);
 }
-process.exit(broken.length ? 1 : 0);
+process.exitCode = broken.length ? 1 : 0;
+}

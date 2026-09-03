@@ -230,6 +230,23 @@ console.log('\nthe report refuses rather than printing a clean zero it cannot st
   has(r.stderr, 'REFUSING', 'and says it is refusing rather than reporting zero citations');
 }
 
+console.log('\na report larger than the pipe buffer arrives whole');
+{
+  // ⚠ Node's stdout is ASYNCHRONOUS when it is a pipe, and `process.exit()` kills the
+  // process before the buffer drains. Measured on the live corpus before this was fixed:
+  // 65,536 bytes through a pipe against 109,899 to a file — the JSON cut mid-string, with
+  // no error and no non-zero status, so a consumer piping it to `jq` is handed a truncated
+  // document that reads as the whole one. spawnSync below IS a pipe, so this is the real
+  // path; the fixture only has to be big enough to pass 64KB.
+  const many = Array.from({ length: 900 }, () => '**REF:** `src/widget.ts:3` (`WIDGET_LIMIT`)').join('\n');
+  const big = run(many, ['--json']);
+  ok(big.out.length > 65536, `the report is larger than one pipe buffer (${big.out.length} bytes)`);
+  let parsed = null;
+  try { parsed = JSON.parse(big.out); } catch (e) { parsed = null; }
+  ok(parsed !== null, 'and it parses — it was not cut off at the buffer boundary');
+  eq(parsed && parsed.examined, 900, 'and every citation is present in it');
+}
+
 console.log('\nranges and lists are expanded, and the JSON carries the same counts as the text');
 {
   const rng = run('**REF:** `src/widget.ts:6-9` (`resolveWidget`)');
