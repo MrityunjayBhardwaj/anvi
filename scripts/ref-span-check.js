@@ -40,6 +40,10 @@ const CAT_DIR = path.resolve(argOf('--catalogues') || path.join(HOME, '.anvideck
 // numbers are typed by hand. The margin is a FLAG rather than a constant so the report can be
 // re-run at 0 and the difference read, and its value is printed with the verdict.
 const MARGIN = Math.max(0, parseInt(argOf('--margin') ?? '0', 10) || 0);
+// Exposed as a flag ONLY so the exhaustion path can be exercised by a test. A guard whose
+// failure mode cannot be reached from a test is one that rots silently, which is the same
+// argument as everything else in this file.
+const WALK_BUDGET = Math.max(1, parseInt(argOf('--walk-budget') ?? '40000', 10) || 40000);
 
 // Roots are derived from the catalogue path so the tool works on any project in the store
 // without a second flag: <store>/projects/<name>/.anvi implies the repo <name>. Hardcoding
@@ -62,7 +66,7 @@ const ROOTS = (argOf('--roots') ? argOf('--roots').split(path.delimiter) : defau
 // `:1298`) then had nothing to inherit and were blamed for a missing antecedent instead. A
 // denominator that quietly shrinks makes every rate above it a lie. So: any name with a dot
 // and a letter-initial extension is a path. Requiring the extension to START WITH A LETTER
-// is what keeps a version number or a date out (`P2.5`, `2026-05-07`), and it is the guard.
+// is what keeps a version number or a date out (`2.5.1`, `2026-05-07`), and it is the guard.
 const PATH = /[A-Za-z0-9_./{}~@-]*[A-Za-z0-9_]\.[A-Za-z][A-Za-z0-9]{0,7}/g;
 // A span citation is a path, a colon, and at least one line number. The number list runs over
 // `,` `/` and `-` plus whitespace — all three appear in the live corpus. A BARE
@@ -109,12 +113,17 @@ function anchorsAfter(text, from) {
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage',
   '.claude', '.anvi_artifacts', 'worktrees', '.worktrees', 'vendor']);
 const walkCache = new Map();
+const truncatedRoots = new Set();
 function walkFor(root, base) {
   const key = root + '\0' + base;
   if (walkCache.has(key)) return walkCache.get(key);
   const hits = [];
   const stack = [root];
-  let budget = 40000;
+  let budget = WALK_BUDGET;
+  // ⚠ A SEARCH THAT RAN OUT OF BUDGET IS NOT A SEARCH THAT FOUND NOTHING. Exhausting this
+  // silently would report an existing file as FILE-NOT-FOUND — a wrong answer wearing the
+  // shape of a finding, which is the failure mode this whole report exists to catch. So
+  // exhaustion is recorded and said out loud beside the verdict.
   while (stack.length && budget-- > 0) {
     let ents; try { ents = fs.readdirSync(stack.pop(), { withFileTypes: true }); } catch { continue; }
     for (const e of ents) {
@@ -128,6 +137,7 @@ function walkFor(root, base) {
       else if (e.isDirectory()) stack.push(p);
     }
   }
+  if (stack.length) truncatedRoots.add(root);
   walkCache.set(key, hits);
   return hits;
 }
@@ -265,7 +275,7 @@ const BROKEN = ['ANCHOR-DRIFTED', 'ANCHOR-NOT-FOUND', 'SPAN-OUT-OF-RANGE', 'FILE
 const broken = rows.filter(r => BROKEN.includes(r.status));
 
 if (jsonOut) {
-  console.log(JSON.stringify({ examined: rows.length, verified: by('resolved'), unanchored: by('unanchored'), margin: MARGIN, catalogues: CAT_DIR, rows }, null, 1));
+  console.log(JSON.stringify({ examined: rows.length, verified: by('resolved'), unanchored: by('unanchored'), margin: MARGIN, catalogues: CAT_DIR, searchTruncated: [...truncatedRoots], rows }, null, 1));
   process.exit(broken.length ? 1 : 0);
 }
 
@@ -278,6 +288,10 @@ console.log(`  VERIFIED ${by('resolved')}   unanchored ${by('unanchored')} (noth
 if (broken.length) {
   const counts = BROKEN.map(s => [s, by(s)]).filter(([, n]) => n);
   console.log('  ' + counts.map(([s, n]) => `${s} ${n}`).join('   '));
+}
+if (truncatedRoots.size) {
+  console.log(`  ⚠ the file search hit its budget in ${[...truncatedRoots].join(', ')} — a FILE-NOT-FOUND`);
+  console.log('    row from this run may mean "not reached" rather than "not there".');
 }
 if (!rows.length) {
   console.log('\n⚠ NO SPAN CITATIONS FOUND. That is not a clean sweep — it is a matcher that matched');

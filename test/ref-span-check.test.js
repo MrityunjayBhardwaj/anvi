@@ -136,8 +136,8 @@ console.log('\nno extension allowlist — an unexpected extension is examined, n
   has(cc.out, 'VERIFIED 1', 'and is checked like any other');
 
   // CONTROL: the guard that keeps a version number out is that an extension must begin with
-  // a LETTER. `P2.5:30` must not be read as a citation of a file called P2.5.
-  const ver = run('**REF:** protocol P2.5:30 was superseded');
+  // a LETTER. `2.5.1:30` must not be read as a citation of a file called `2.5.1`.
+  const ver = run('**REF:** protocol 2.5.1:30 was superseded');
   has(ver.out, '0 span citation(s) examined', 'a version number is not a path');
   has(ver.out, 'NO SPAN CITATIONS FOUND', 'and an empty run says so rather than reporting a clean sweep');
 }
@@ -207,6 +207,20 @@ console.log('\nthe margin is a stated number, and changing it changes the verdic
   // outside it is still reported.
   const far = run('**REF:** `src/widget.ts:9` (`WIDGET_LIMIT`)', ['--margin', '2']);
   has(far.out, 'ANCHOR-DRIFTED 1', 'a drift beyond the margin is still reported');
+}
+
+console.log('\na search that ran out of budget is not a search that found nothing');
+{
+  // The exhaustion path is the dangerous one: a partial walk reports an existing file as
+  // FILE-NOT-FOUND, which is a wrong answer wearing the shape of a finding.
+  const starved = run('**REF:** `widget.ts:3` (`WIDGET_LIMIT`)', ['--walk-budget', '1']);
+  has(starved.out, 'hit its budget', 'a truncated search says so');
+  has(starved.out, 'may mean "not reached" rather than "not there"', 'and says what that costs the verdict');
+
+  // CONTROL: the same citation at the real budget resolves and says nothing about budgets.
+  const full = run('**REF:** `widget.ts:3` (`WIDGET_LIMIT`)');
+  has(full.out, 'VERIFIED 1', 'the same citation resolves when the search can finish');
+  hasNot(full.out, 'hit its budget', 'and a complete search does not warn');
 }
 
 console.log('\nthe report refuses rather than printing a clean zero it cannot stand behind');
