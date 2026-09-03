@@ -32,6 +32,10 @@ const path = require('path');
 const args = process.argv.slice(2);
 const jsonOut = args.includes('--json');
 const showAll = args.includes('--all');
+// Proposals are a REPORT, not an edit. Nothing in this file writes to a catalogue: the
+// record has no other copy, and a repair tool one bad match away from corrupting it is worse
+// than 147 citations repaired by hand.
+const propose = args.includes('--propose');
 const argOf = flag => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : null; };
 const HOME = os.homedir();
 
@@ -186,6 +190,20 @@ function lineOfSquashed(src, needle) {
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= at) lo = mid; else hi = mid - 1; }
   return lo;
 }
+/** Every line index (0-based) at which `needle` appears in the squashed file. */
+function allLinesOfSquashed(src, needle) {
+  if (!needle) return [];
+  let acc = '';
+  const starts = [];
+  for (const l of src) { starts.push(acc.length); acc += squash(l); }
+  const hits = [];
+  for (let at = acc.indexOf(needle); at >= 0; at = acc.indexOf(needle, at + 1)) {
+    let lo = 0, hi = starts.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= at) lo = mid; else hi = mid - 1; }
+    if (hits[hits.length - 1] !== lo) hits.push(lo);
+  }
+  return hits;
+}
 const fileCache = new Map();
 function readLines(file) {
   if (fileCache.has(file)) return fileCache.get(file);
@@ -230,7 +248,13 @@ function classify(rel, lines, tokens) {
     if (at >= 0) {
       const near = lines.reduce((b, n) => Math.abs(n - (at + 1)) < Math.abs(b - (at + 1)) ? n : b, lines[0]);
       const d = (at + 1) - near;
-      return { status: 'ANCHOR-DRIFTED', detail: `${JSON.stringify(t)} is at line ${at + 1}, cited at ${near} (${d > 0 ? '+' : ''}${d})`, target: res.file };
+      // Every occurrence, because a repair is only DERIVABLE when there is exactly one line
+      // the anchor can mean. Two occurrences is not a harder version of one — it is a
+      // different answer, and resolving it to the first hit is how a repair tool corrupts
+      // the record it exists to protect.
+      const occ = allLinesOfSquashed(src, squash(t)).map(i => i + 1);
+      return { status: 'ANCHOR-DRIFTED', detail: `${JSON.stringify(t)} is at line ${at + 1}, cited at ${near} (${d > 0 ? '+' : ''}${d})`,
+               anchor: t, foundAt: at + 1, citedNear: near, delta: d, occurrences: occ, target: res.file };
     }
   }
   return { status: 'ANCHOR-NOT-FOUND', detail: `${JSON.stringify(tokens[0])} appears nowhere in the file`, target: res.file };
@@ -244,6 +268,9 @@ function scan() {
     const text = fs.readFileSync(path.join(CAT_DIR, f), 'utf8');
     for (const rm of text.matchAll(/^[ \t]*\*\*REF:\*\*(.+)$/gm)) {
       const line = rm[1];
+      // Where in the catalogue this REF sits, so a proposal names a place a human can open
+      // rather than a citation they then have to go and find.
+      const catLine = text.slice(0, rm.index).split('\n').length;
       // ⚠ The continuation inherits the nearest path named BEFORE it, whether or not that
       // path carried a span of its own. Inheriting only from paths that had spans blamed six
       // live citations on a missing antecedent that was sitting right there, unspanned:
@@ -261,7 +288,7 @@ function scan() {
         // `file` is the CATALOGUE the citation was written in and is written LAST, so a
         // field of the same name returned by classify() cannot silently take its place — the
         // first version of this line printed the resolved source path here instead.
-        rows.push({ cited: `${rel}:${m[2].trim()}`, ...classify(rel, lines, tokens), file: f });
+        rows.push({ cited: `${rel}:${m[2].trim()}`, ...classify(rel, lines, tokens), file: f, catLine, rel, spanText: m[2].trim() });
       }
     }
   }
@@ -277,6 +304,22 @@ if (rows === null) {
   process.exit(2);
 }
 
+/** Rewrite a span expression given that ONE of its lines moved by `delta`.
+ *  A RANGE moves as a block — both ends shift, because the citation's span is part of what
+ *  the author wrote and a block that slid did not also change length. A LIST does not: only
+ *  the element the anchor pins was measured, and shifting the others would be inventing
+ *  evidence for lines nothing was checked against. */
+function proposeSpan(spanText, near, delta) {
+  return spanText.replace(/\d+(?:\s*-\s*\d+)?/g, tok => {
+    const r = /^(\d+)\s*-\s*(\d+)$/.exec(tok.trim());
+    if (r) {
+      const a = +r[1], b = +r[2];
+      return (a === near || b === near) ? `${a + delta}-${b + delta}` : tok;
+    }
+    return +tok.trim() === near ? String(+tok.trim() + delta) : tok;
+  });
+}
+
 const by = s => rows.filter(r => r.status === s).length;
 const BROKEN = ['ANCHOR-DRIFTED', 'ANCHOR-NOT-FOUND', 'SPAN-OUT-OF-RANGE', 'FILE-NOT-FOUND', 'FILE-AMBIGUOUS', 'FILE-UNREADABLE', 'NO-PATH-TO-INHERIT', 'SPAN-UNPARSED'];
 const broken = rows.filter(r => BROKEN.includes(r.status));
@@ -290,6 +333,38 @@ if (jsonOut) {
   // have been handed a truncated document that reads as the whole one. Setting the code and
   // returning lets Node flush and exit on its own.
   process.exitCode = broken.length ? 1 : 0;
+  return;
+}
+
+if (propose) {
+  const drifted = rows.filter(r => r.status === 'ANCHOR-DRIFTED');
+  const derivable = drifted.filter(r => (r.occurrences || []).length === 1);
+  const judgement = drifted.filter(r => (r.occurrences || []).length !== 1);
+  console.log(`REF line span proposals — ${rows.length} span citation(s) examined across ${CAT_DIR}`);
+  // The three counts are printed together and MUST reconcile. Showing only the derivable
+  // ones teaches the reader that they are the population; here they are 38 of 147.
+  console.log(`  derivable ${derivable.length}   needs judgement ${judgement.length}   total drifted ${drifted.length}`);
+  console.log('  ⚠ nothing is written. Apply these by hand, and re-run to confirm.');
+  // The assumption is stated where it is acted on, not buried in the source: only the
+  // anchor's own line was measured, so a range is proposed as a block that SLID. If the
+  // block also grew, the start is wrong and only a human can see that.
+  console.log('  ⚠ a range is proposed as a block that slid — both ends move by the same delta.');
+  if (derivable.length + judgement.length !== drifted.length) {
+    console.log('  ✗ INTERNAL: the two groups do not sum to the drifted total — do not trust this run.');
+    process.exitCode = 2;
+    return;
+  }
+  if (!drifted.length) console.log('\n  no drifted citations — nothing to propose.');
+  for (const r of derivable) {
+    const next = proposeSpan(r.spanText, r.citedNear, r.delta);
+    console.log(`  → [${r.file}:${r.catLine}] ${r.rel}:${r.spanText}  ->  ${r.rel}:${next}   (${JSON.stringify(r.anchor)})`);
+  }
+  for (const r of judgement) {
+    const at = (r.occurrences || []).slice(0, 6).join(', ');
+    const more = (r.occurrences || []).length > 6 ? ', …' : '';
+    console.log(`  ? [${r.file}:${r.catLine}] ${r.rel}:${r.spanText} — ${JSON.stringify(r.anchor)} occurs ${(r.occurrences || []).length}× (lines ${at}${more}) — needs judgement`);
+  }
+  process.exitCode = 0;
   return;
 }
 
