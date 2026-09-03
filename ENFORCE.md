@@ -987,13 +987,21 @@ source text). Both are defects in the entry, so both are reported — but a row
 is a prompt to look, not a proven decay. The repair for the second is to write
 anchors as quotations.
 
-- **Tests:** `node test/ref-span-check.test.js` — 49 assertions, every rule
+**⚠ A search that ran out of budget is not a search that found nothing.** The
+file walk stops after `--walk-budget` entries (default 40,000); exhaustion is
+recorded per root and printed beside the verdict, because a partial walk would
+otherwise report an existing file as FILE-NOT-FOUND — a wrong answer wearing
+the shape of a finding. The budget is a flag only so a test can reach that path
+at all: a guard whose failure mode is unreachable from a test rots silently.
+
+- **Tests:** `node test/ref-span-check.test.js` — 55 assertions, every rule
   paired with a control that must **not** resolve. The central one is that an
   anchor present in the file but at the wrong line comes back DRIFTED and not
   resolved: a checker that accepts "somewhere in the file" resolves everything
   and reports a perfect sweep over a decayed catalogue. Falsified by a
-  22-mutation matrix, **22 of 22 conclusive** (21 witnessed, 1 held), controls
-  agreeing at 49 assertions both ends. The whitespace rule was reported NOT
-  WITNESSED on the first run — the assertion was sound and the **fixture** could
-  not tell the two versions apart, because its anchor contained no whitespace
-  for the squash to remove.
+  24-mutation matrix, **24 of 24 conclusive** (23 witnessed, 1 held), controls
+  agreeing at 55 assertions both ends. **Two mutations came back NOT WITNESSED
+  and both indicted the fixture, not the guard** — one anchor contained no
+  whitespace for the squash to remove, and one cited a path that resolves
+  directly against the search root and so never entered the fallback the rule
+  lives in. Both were rebuilt to the live shape and both then reddened.
