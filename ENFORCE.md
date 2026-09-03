@@ -994,13 +994,29 @@ otherwise report an existing file as FILE-NOT-FOUND — a wrong answer wearing
 the shape of a finding. The budget is a flag only so a test can reach that path
 at all: a guard whose failure mode is unreachable from a test rots silently.
 
-- **Tests:** `node test/ref-span-check.test.js` — 55 assertions, every rule
+**⚠ One match resolves a citation, but the shortfall is reported.** A
+parenthetical carries several anchors and they are not all quotations, so
+requiring every token would condemn correct entries — but a citation whose
+anchors mostly failed must not read as one that was entirely true. The row says
+`1 of 4 anchors matched` and the summary carries the count. Measured across two
+live catalogues when this was added: **12 of 73 resolved rows were partial**,
+all previously reported as clean passes.
+
+**⚠ `--json` sets `process.exitCode` and returns; it must never call
+`process.exit()`.** Node's stdout is asynchronous when it is a pipe and
+`process.exit()` kills the process before the buffer drains — measured at
+65,536 bytes through a pipe against 109,899 to a file, cut mid-string, exit
+status still correct. A consumer piping the report to `jq` was handed a
+truncated document that read as the whole one. Writing to a file is synchronous
+and hides this completely, which is why it survived a session of runs.
+
+- **Tests:** `node test/ref-span-check.test.js` — 63 assertions, every rule
   paired with a control that must **not** resolve. The central one is that an
   anchor present in the file but at the wrong line comes back DRIFTED and not
   resolved: a checker that accepts "somewhere in the file" resolves everything
   and reports a perfect sweep over a decayed catalogue. Falsified by a
-  24-mutation matrix, **24 of 24 conclusive** (23 witnessed, 1 held), controls
-  agreeing at 55 assertions both ends. **Two mutations came back NOT WITNESSED
+  27-mutation matrix, **27 of 27 conclusive** (26 witnessed, 1 held), controls
+  agreeing at 63 assertions both ends. **Two mutations came back NOT WITNESSED
   and both indicted the fixture, not the guard** — one anchor contained no
   whitespace for the squash to remove, and one cited a path that resolves
   directly against the search root and so never entered the fallback the rule
