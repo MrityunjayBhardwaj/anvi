@@ -1050,13 +1050,51 @@ status still correct. A consumer piping the report to `jq` was handed a
 truncated document that read as the whole one. Writing to a file is synchronous
 and hides this completely, which is why it survived a session of runs.
 
-- **Tests:** `node test/ref-span-check.test.js` — 63 assertions, every rule
+### Writing a REF so it can be checked at all
+
+**Give a line span an anchor: `` `file.ts:85` (`the exact source text`) ``.** Measured
+2026-09-04: **1,233 of 1,770** span citations in the store carry no anchor, and a span
+with no anchor is unverifiable by construction — the report can only say the line
+exists, which a 900-line file will keep saying forever. The anchor is a short piece of
+the cited text, quoted, and the report matches it on non-whitespace content so it does
+not have to be retyped byte-perfect.
+
+This is the number that gates everything downstream: with the anchor rate where it is,
+only ~14% of line citations can be told true from false, and the `unanchored` count in
+every run is the backlog. Nothing enforces this — it is how a REF gets written.
+
+### `--propose` — repairing the drift the report finds
+
+`node ~/.claude/anvi/scripts/ref-span-check.js --propose` prints `old -> new` for each
+drift whose correction is **derivable rather than guessed**, beside the catalogue file
+and line the citation was written in. Measured on the fleet: **39 derivable, 108 needing
+judgement, 147 drifted.**
+
+- **It proposes; it never writes.** The catalogue is the record with no other copy, and
+  a repair tool one bad match away from corrupting it is worse than 147 hand edits. The
+  suite asserts the catalogue *and* the cited file are byte-identical after a run, and a
+  mutation that makes the tool apply its own proposal reddens exactly that assertion.
+- **Derivable means the anchor occurs on exactly ONE line.** Two lines is not a harder
+  version of one, it is a different answer; those rows are printed with their candidate
+  lines and never resolved to the first hit. The three counts are printed together and
+  must reconcile — showing only the derivable ones would teach the reader that 39 is the
+  population.
+- **Uniqueness is of the LINE, not the substring.** `isBakedMaterialSpec` occurs twice
+  on one line of a file that cites it, because squashing whitespace joins
+  `v is BakedMaterialSpec` into one token. The line is still unambiguous, so the repair
+  is still derivable — an independent count that asked for a unique *substring* got this
+  one wrong.
+- **A range is proposed as a block that slid**, both ends moving by the same delta, and
+  the run says so: only the anchor's line was measured, and if the block also grew the
+  start is wrong. A list is not a block — only the element the anchor pins moves.
+
+- **Tests:** `node test/ref-span-check.test.js` — 81 assertions, every rule
   paired with a control that must **not** resolve. The central one is that an
   anchor present in the file but at the wrong line comes back DRIFTED and not
   resolved: a checker that accepts "somewhere in the file" resolves everything
   and reports a perfect sweep over a decayed catalogue. Falsified by a
-  27-mutation matrix, **27 of 27 conclusive** (26 witnessed, 1 held), controls
-  agreeing at 63 assertions both ends. **Two mutations came back NOT WITNESSED
+  two matrices — 27 mutations for the check and 14 for the proposals, **41 of 41
+  conclusive**, controls agreeing at 81 assertions both ends. **Two mutations came back NOT WITNESSED
   and both indicted the fixture, not the guard** — one anchor contained no
   whitespace for the squash to remove, and one cited a path that resolves
   directly against the search root and so never entered the fallback the rule

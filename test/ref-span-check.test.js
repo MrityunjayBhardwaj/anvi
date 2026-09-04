@@ -49,6 +49,19 @@ write(path.join(ROOT, 'src/widget.ts'), [
 // A second file with the same BASENAME, inside a nested checkout — the shape that made four
 // live citations report AMBIGUOUS.
 write(path.join(ROOT, '.claude/worktrees/branch-x/src/widget.ts'), 'export const WIDGET_LIMIT = 99;\n');
+// A second subject, built for the proposal cases: an anchor on TWO lines (not derivable),
+// an anchor twice on ONE line (derivable — a repair needs a unique LINE, not a unique
+// substring), and one for the range and list forms.
+write(path.join(ROOT, 'src/multi.ts'), [
+  '// 1 header',                        // 1
+  'const dupToken = 1;',                // 2
+  '// 3',                               // 3
+  'const dupToken = 2;',                // 4
+  '// 5',                               // 5
+  'const sameLine = sameLine;',         // 6
+  '// 7',                               // 7
+  'const rangeAnchor = 5;',             // 8
+].join('\n'));
 // A `.cc` file: no extension allowlist may exclude it.
 write(path.join(ROOT, 'ref/sources/mesh/bevel.cc'), ['// a', '// b', 'int bevel_offset = 3;', '// d'].join('\n'));
 
@@ -282,6 +295,60 @@ console.log('\nranges and lists are expanded, and the JSON carries the same coun
   eq(parsed.examined, 1, 'the JSON reports the denominator');
   eq(parsed.verified, 0, 'and the verified count');
   eq(parsed.rows[0].status, 'ANCHOR-DRIFTED', 'and the row verdict matches the text report');
+}
+
+console.log('\n--propose derives a repair only where the corrected line is not a guess');
+{
+  const one = run('**REF:** `src/widget.ts:9` (`WIDGET_LIMIT`)', ['--propose']);
+  has(one.out, 'derivable 1', 'a drift whose anchor is unique in the file is derivable');
+  has(one.out, 'needs judgement 0', 'and nothing needs judgement');
+  has(one.out, 'total drifted 1', 'and the three counts are printed together');
+  has(one.out, 'src/widget.ts:9  ->  src/widget.ts:3', 'and the corrected citation is proposed');
+  eq(one.status, 0, 'proposing is a report, so it exits 0 even with drift');
+
+  // THE CONTROL. An anchor on two different lines has two answers, and resolving it to the
+  // first hit is how a repair tool corrupts the record it exists to protect.
+  const amb = run('**REF:** `src/multi.ts:1` (`dupToken`)', ['--propose']);
+  has(amb.out, 'derivable 0', 'an anchor on two lines is NOT derivable');
+  has(amb.out, 'needs judgement 1', 'it is reported as needing judgement');
+  has(amb.out, 'occurs 2× (lines 2, 4)', 'and its candidate lines are named');
+  hasNot(amb.out, '->', 'and no repair is proposed for it');
+
+  // The live case that separates "unique substring" from "unique line": squashing joins
+  // `v is BakedMaterialSpec` into `visBakedMaterialSpec`, so the anchor matches twice on one
+  // line. The line number is still unambiguous, so the repair is still derivable.
+  const same = run('**REF:** `src/multi.ts:1` (`sameLine`)', ['--propose']);
+  has(same.out, 'derivable 1', 'an anchor occurring twice on ONE line is still derivable');
+  has(same.out, 'src/multi.ts:1  ->  src/multi.ts:6', 'and it proposes that single line');
+}
+
+console.log('\na proposal preserves the shape of what the author wrote');
+{
+  const rng = run('**REF:** `src/multi.ts:1-3` (`rangeAnchor`)', ['--propose']);
+  has(rng.out, 'src/multi.ts:1-3  ->  src/multi.ts:6-8', 'a range slides as a block, keeping its length');
+  has(rng.out, 'a range is proposed as a block that slid', 'and the run states that assumption');
+
+  // A LIST is not a block. Only the element the anchor pins was measured, so the others are
+  // left alone — shifting them would be inventing evidence for lines nothing checked.
+  const lst = run('**REF:** `src/multi.ts:1,5` (`rangeAnchor`)', ['--propose']);
+  has(lst.out, 'src/multi.ts:1,5  ->  src/multi.ts:1,8', 'a list moves only the element the anchor pins');
+}
+
+console.log('\nproposing writes nothing, and says so');
+{
+  const cat = path.join(TMP, 'catwrite');
+  const body = '**REF:** `src/widget.ts:9` (`WIDGET_LIMIT`)';
+  write(path.join(cat, 'hetvabhasa.md'), body);
+  const subject = path.join(ROOT, 'src/widget.ts');
+  const beforeCat = fs.readFileSync(path.join(cat, 'hetvabhasa.md'), 'utf8');
+  const beforeSrc = fs.readFileSync(subject, 'utf8');
+  const r = spawnSync('node', [TOOL, '--catalogues', cat, '--roots', ROOT, '--propose'], { encoding: 'utf8' });
+  has(r.stdout, 'nothing is written', 'the run says it wrote nothing');
+  eq(fs.readFileSync(path.join(cat, 'hetvabhasa.md'), 'utf8'), beforeCat, 'and the catalogue is byte-identical after');
+  eq(fs.readFileSync(subject, 'utf8'), beforeSrc, 'and so is the cited file');
+
+  const clean = run('**REF:** `src/widget.ts:3` (`WIDGET_LIMIT`)', ['--propose']);
+  has(clean.out, 'no drifted citations — nothing to propose', 'a corpus with no drift says so rather than printing an empty list');
 }
 
 console.log(`\n${fail ? '✗' : '✓'} ref-span-check: ${pass} passed, ${fail} failed`);
