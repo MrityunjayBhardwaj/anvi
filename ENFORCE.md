@@ -602,6 +602,15 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
    back. **Off unless the user consents:** the mirror runs only when
    `~/.claude/anvi-config.json` has `"memorySync": true` — written by the
    `install.sh` "Back up your project memory?" prompt. Absent/false → no mirror.
+   - **Resolved from the MAIN worktree.** Both the store envelope and the live-memory
+     slug belong to the project, not to the checkout the session happens to sit in, so
+     a session in a linked worktree mirrors the project's memory rather than looking
+     for an envelope named after the worktree and silently declining (#388). The
+     substitution applies only when the worktree and the project are genuinely
+     different directories — git reports realpath'd paths while the harness encodes
+     the cwd string it was handed, so an ordinary session gets its cwd back verbatim.
+     Residual limit: a project whose path traverses a symlink, driven from a linked
+     worktree, still declines to mirror — unchanged from before, never worse.
 
 ### Currency — is a catalogue entry STILL real?
 
