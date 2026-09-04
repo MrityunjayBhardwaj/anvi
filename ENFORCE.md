@@ -1240,10 +1240,13 @@ nominal.
   produced `0 of 590 cited paths (0%)` and 576 well-formed false failures. That
   number describes where the question was asked, not the corpus it names.
 
-- **Tests:** `node test/ref-strength-report.test.js` — 58 assertions, every
-  bucket paired with a control. Falsified by a 20-mutation matrix, **20 of 20
-  conclusive**, controls agreeing at 58 assertions both ends, plus a
-  cross-suite mutation proving the shared predicate is genuinely shared. The
+- **Tests:** `node test/ref-strength-report.test.js` — 60 assertions, every
+  bucket paired with a control. Falsified by a 22-mutation matrix, **22 of 22
+  conclusive** (21 witnessed, 1 held), controls agreeing at 60 assertions both
+  ends, plus a cross-suite mutation proving the shared predicate is genuinely
+  shared. One mutation is deliberately inverted — removing the reconciliation
+  check must change nothing on a healthy corpus, because a guard whose pass is
+  silence is invisible to a matrix that only asks whether reddening happens. The
   matrix earned its keep three times: one mutation came back NOT WITNESSED and
   indicted the fixture rather than the guard — a single-entry fixture was
   asserting the parser's newest-stamp rule upstream while leaving this report's
