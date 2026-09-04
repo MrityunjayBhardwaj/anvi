@@ -710,7 +710,7 @@ console.log('\nGROUP 9 — a rate is never printed without the period it was com
   ok(/period these figures describe is UNKNOWN/.test(lines(undated, NOW)),
     'a store where NO record is dated says the period is unknown, not that it is current');
   const partly = { record_window: win('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 5), scorable_window: win('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 5), scorable_of: 5, undated: 2 };
-  ok(/2 undated record\(s\) outside this span/.test(lines(partly, NOW)),
+  ok(/2 record\(s\) with no usable timestamp, outside this span/.test(lines(partly, NOW)),
     'records with no timestamp are named, because the span silently excludes them');
 
   // ---- the decay case this issue was filed for ----
@@ -760,8 +760,30 @@ console.log('\nGROUP 9 — a rate is never printed without the period it was com
     rec({ ts: null, session_id: 'sess-w', turn_ref: refs[2], verdict: 'fired', claim_kind: 'verified', claim_text: 'b' }),
   ], finder);
   eq(smU.undated, 1, 'a record with no timestamp is counted as undated by summarise');
+
+  // ⚠ PRESENT is not USABLE, and this is the case self-review caught. A ts that is
+  // a non-empty string but not a date survives a truthiness filter, sorts lexically
+  // against real stamps, and rendered as "span not-a-date → also-bad (NaN days),
+  // newest NaN day(s) old" — nonsense in the shape of a measurement, which is worse
+  // than printing nothing, because a reader takes the shape for the substance.
+  const smBad = R.summarise([
+    rec({ ts: '2026-08-01T00:00:00.000Z', session_id: 'sess-w', turn_ref: refs[0], verdict: 'fired', claim_kind: 'verified', claim_text: 'a' }),
+    rec({ ts: 'not-a-date', session_id: 'sess-w', turn_ref: refs[2], verdict: 'fired', claim_kind: 'verified', claim_text: 'b' }),
+  ], finder);
+  eq(smBad.undated, 1, 'an UNPARSEABLE timestamp counts as undated, not as a date');
+  eq(smBad.record_window.n, 1, 'and it is kept out of the window rather than sorting into it');
+  eq(smBad.record_window.first.slice(0, 10), '2026-08-01', 'the window is dated only by the usable stamp');
+  const badOut = R.render(smBad, '/tmp/s.jsonl', 5);
+  ok(!/NaN/.test(badOut), 'no figure in the report is ever rendered as NaN');
+  ok(/1 record\(s\) with no usable timestamp/.test(badOut), 'and the unusable record is NAMED rather than dropped');
+
+  // The renderer's own last-resort guard, for a window a caller built itself.
+  const bad = { record_window: { first: 'not-a-date', last: 'also-bad', n: 2 }, scorable_window: null, scorable_of: 0, undated: 0 };
+  const bo = lines(bad, NOW);
+  ok(/unparseable timestamp — age NOT computed/.test(bo), 'an unparseable window refuses the arithmetic');
+  ok(!/NaN/.test(bo), 'and prints no NaN while refusing');
   eq(smU.record_window.n, 1, 'and it is excluded from the record window rather than dating it');
-  ok(/1 undated record\(s\) outside this span/.test(R.render(smU, '/tmp/s.jsonl', 5)),
+  ok(/1 record\(s\) with no usable timestamp/.test(R.render(smU, '/tmp/s.jsonl', 5)),
     'the undated count reaches the rendered report from real summarise output');
 
   // And the block really reaches the rendered report, not just its own helper.

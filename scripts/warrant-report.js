@@ -475,9 +475,16 @@ function summarise(records, findTranscript) {
   // ⚠ Its denominator is CLAIMS, never `records`. A record carrying no claim was
   // never scorable and never will be, so counting it as lost would report every
   // store as decaying from the moment it holds one claimless record.
-  const stamps = records.map((r) => r && r.ts).filter(Boolean).sort();
+  // ⚠ PRESENT is not USABLE. A ts that is a non-empty string but not a date passes
+  // a truthiness filter, sorts lexically against real stamps, and renders as
+  // "span not-a-date → also-bad (NaN days)" — nonsense wearing the shape of a
+  // measurement, which is worse than saying nothing. Parse before trusting, and
+  // fold anything unparseable in with the genuinely absent: both mean the record
+  // cannot date the window, and both must be counted rather than dropped.
+  const usable = (t) => typeof t === 'string' && !Number.isNaN(Date.parse(t));
+  const stamps = records.map((r) => r && r.ts).filter(usable).sort();
   const scorable = scored.filter((x) => x.score && x.score.state !== 'transcript_gone');
-  const scorableStamps = scorable.map((x) => x.rec && x.rec.ts).filter(Boolean).sort();
+  const scorableStamps = scorable.map((x) => x.rec && x.rec.ts).filter(usable).sort();
   const window = (list) => (list.length
     ? { first: list[0], last: list[list.length - 1], n: list.length }
     : null);
@@ -631,9 +638,17 @@ function renderWindow(s, say, now) {
   }
   const spanDays = daysBetween(w.first, w.last);
   const ageDays = daysBetween(w.last, now || new Date().toISOString());
+  if (Number.isNaN(spanDays) || Number.isNaN(ageDays)) {
+    // Belt and braces: summarise() already drops unparseable stamps, so reaching
+    // here means a caller built the window itself. Print the dates and refuse the
+    // arithmetic rather than emitting "NaN day(s) old" as though it were a figure.
+    say(`  records span ${String(w.first).slice(0, 10)} → ${String(w.last).slice(0, 10)}`
+      + ' · ⚠ unparseable timestamp — age NOT computed');
+    return;
+  }
   say(`  records span ${w.first.slice(0, 10)} → ${w.last.slice(0, 10)}`
     + ` (${spanDays === 0 ? 'a single day' : `${spanDays} days`}), newest ${ageDays} day(s) old`
-    + (s.undated ? ` · ⚠ ${s.undated} undated record(s) outside this span` : ''));
+    + (s.undated ? ` · ⚠ ${s.undated} record(s) with no usable timestamp, outside this span` : ''));
 
   if (ageDays >= STALE_AFTER_DAYS) {
     say(`  ⚠ NOTHING RECORDED FOR ${ageDays} DAYS — every figure below describes that closed`);
