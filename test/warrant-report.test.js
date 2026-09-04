@@ -64,12 +64,15 @@ const mk = (...p) => { const d = path.join(TMP, ...p); fs.mkdirSync(d, { recursi
 let uid = 0;
 const u = () => `u${++uid}`;
 
-function transcript(turns) {
+function transcript(turns, ts) {
   const lines = [];
   const refs = [];
+  // `ts` is opt-in: leaving it off keeps every pre-existing fixture undated, which is
+  // the branch that must still say so rather than inventing a window.
+  const stamp = ts === undefined ? {} : { timestamp: ts };
   for (const t of turns) {
     lines.push(JSON.stringify({
-      type: 'user', isSidechain: false, uuid: u(),
+      type: 'user', isSidechain: false, uuid: u(), ...stamp,
       message: { role: 'user', content: t.prompt || 'go on' },
     }));
     let content = [];
@@ -78,18 +81,18 @@ function transcript(turns) {
       const id = `tu${u()}`;
       content.push({ type: 'tool_use', id, name: step[1], input: step[2] });
       lines.push(JSON.stringify({
-        type: 'assistant', isSidechain: false, uuid: u(),
+        type: 'assistant', isSidechain: false, uuid: u(), ...stamp,
         message: { role: 'assistant', content, stop_reason: 'tool_use' },
       }));
       content = [];
       lines.push(JSON.stringify({
-        type: 'user', isSidechain: false, uuid: u(),
+        type: 'user', isSidechain: false, uuid: u(), ...stamp,
         message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: step[3], is_error: false }] },
       }));
     }
     const last = u();
     lines.push(JSON.stringify({
-      type: 'assistant', isSidechain: false, uuid: last,
+      type: 'assistant', isSidechain: false, uuid: last, ...stamp,
       message: { role: 'assistant', content, stop_reason: 'end_turn' },
     }));
     refs.push(last);
@@ -110,8 +113,8 @@ const NON_LICENSING_TURN = {
   steps: [['text', 'Moving on to the next file.'], ['tool', 'Write', { file_path: '/a' }, 'File created']],
 };
 
-function writeTranscript(dir, session, turns) {
-  const t = transcript(turns);
+function writeTranscript(dir, session, turns, ts) {
+  const t = transcript(turns, ts);
   fs.writeFileSync(path.join(dir, `${session}.jsonl`), t.text);
   return t.refs;
 }
@@ -790,6 +793,109 @@ console.log('\nGROUP 9 — a rate is never printed without the period it was com
   const rendered = R.render(sm, '/tmp/store.jsonl', 5);   // render() returns the joined text
   ok(/records span 2026-08-01 → 2026-08-03/.test(rendered), 'render() emits the window under the header');
   ok(/NARROWER than the claim set: 1 of 2/.test(rendered), 'render() emits the decay warning from real summarise output');
+}
+
+// ── GROUP 11 — the baseline states its own window and configuration ─────────
+console.log('\nGROUP 11 — a baseline is never printed without the period and the row table it covers');
+{
+  const NOW = '2026-09-04T00:00:00.000Z';
+  const dayBefore = (n) => new Date(Date.parse(NOW) - n * 86400000).toISOString();
+
+  // 1. UNDATED — the pre-existing fixtures carry no timestamp at all. The report must
+  //    say the period is unknown rather than print nothing and read as current.
+  const undated = mk('t-bw-undated');
+  writeTranscript(undated, 'u-1', [CLAIM_UNLICENSED, LICENSING_TURN]);
+  const bu = R.baseline({ transcriptDir: undated, transcriptRoots: [TMP], now: NOW });
+  ok(/NO REPLAYED RECORD CARRIES A USABLE TIMESTAMP/.test(bu.text),
+    'an undated baseline says its period is UNKNOWN');
+  ok(!/transcripts span/.test(bu.text), 'and invents no span to fill the gap');
+
+  // 2. DATED — span and age, both derived from the records actually replayed.
+  const dated = mk('t-bw-dated');
+  writeTranscript(dated, 'd-1', [CLAIM_UNLICENSED, LICENSING_TURN], dayBefore(10));
+  writeTranscript(dated, 'd-2', [LICENSING_TURN], dayBefore(4));
+  const bd = R.baseline({ transcriptDir: dated, transcriptRoots: [TMP], now: NOW });
+  ok(/transcripts span 2026-08-25 → 2026-08-31 \(6 days\), newest 4 day\(s\) old/.test(bd.text),
+    'a dated baseline prints the span it covers and how old the newest is');
+
+  // 3. A single day is said in words, not as "0 days".
+  const oneDay = mk('t-bw-oneday');
+  writeTranscript(oneDay, 'o-1', [CLAIM_UNLICENSED], dayBefore(3));
+  const b1 = R.baseline({ transcriptDir: oneDay, transcriptRoots: [TMP], now: NOW });
+  ok(/\(a single day\), newest 3 day\(s\) old/.test(b1.text), 'a one-day population says so');
+
+  // 4. MIXED — a transcript with no usable stamp is REPLAYED and is not dated by the
+  //    span. Both facts must be printed; dropping it silently narrows the window.
+  const mixed = mk('t-bw-mixed');
+  writeTranscript(mixed, 'm-1', [CLAIM_UNLICENSED], dayBefore(5));
+  writeTranscript(mixed, 'm-2', [LICENSING_TURN]);                       // undated
+  writeTranscript(mixed, 'm-3', [CLAIM_UNLICENSED], 'not-a-date');       // present, unusable
+  const rm = R.replayRecords(mixed);
+  eq(rm.files, 3, 'all three transcripts are replayed');
+  eq(rm.dated_files, 1, 'one dates the window');
+  eq(rm.undated_files, 2, 'and a present-but-unparseable stamp counts with the absent, not the usable');
+  const bm = R.baseline({ transcriptDir: mixed, transcriptRoots: [TMP], now: NOW });
+  ok(/2 of 3 transcript\(s\) carry no usable timestamp/.test(bm.text),
+    'the report names how many of the replayed transcripts the span does not cover');
+  ok(!/NaN/.test(bm.text), 'and an unparseable stamp never renders as NaN');
+
+  // 5. STALENESS, BOTH DIRECTIONS. A wide current population must NOT be flagged; an
+  //    old one must be. A one-directional check cannot tell a working threshold from
+  //    a warning that never fires.
+  const old = mk('t-bw-old');
+  writeTranscript(old, 'x-1', [CLAIM_UNLICENSED], dayBefore(400));
+  writeTranscript(old, 'x-2', [LICENSING_TURN], dayBefore(200));
+  const bold = R.baseline({ transcriptDir: old, transcriptRoots: [TMP], now: NOW });
+  ok(/THE NEWEST TRANSCRIPT IS 200 DAYS OLD/.test(bold.text), 'an old population is flagged');
+  ok(!/THE NEWEST TRANSCRIPT IS/.test(bd.text), 'and a current one is NOT — the threshold discriminates');
+  const edge = mk('t-bw-edge');
+  writeTranscript(edge, 'e-1', [CLAIM_UNLICENSED], dayBefore(R.BASELINE_STALE_AFTER_DAYS - 1));
+  ok(!/THE NEWEST TRANSCRIPT IS/.test(
+    R.baseline({ transcriptDir: edge, transcriptRoots: [TMP], now: NOW }).text),
+    'one day inside the threshold is silent');
+
+  // 6. The belt-and-braces branch: a caller that builds the window itself must get the
+  //    dates and a refusal, never computed-looking arithmetic.
+  const lines = [];
+  R.renderTranscriptWindow(
+    { transcript_window: { first: 'not-a-date', last: 'also-bad', n: 2 }, readable_files: 1, undated_files: 0 },
+    (t) => lines.push(t === undefined ? '' : t), NOW);
+  const wtxt = lines.join('\n');
+  ok(/unparseable timestamp — age NOT computed/.test(wtxt), 'a hand-built bad window refuses the arithmetic');
+  ok(!/NaN/.test(wtxt), 'and prints no NaN while refusing');
+
+  // A denominator that is not there must not render as one. Same class as the
+  // unparseable stamp: nonsense in the shape of a measurement.
+  const noDenom = [];
+  R.renderTranscriptWindow(
+    { transcript_window: { first: dayBefore(2), last: dayBefore(1), n: 2 }, files: 4, undated_files: 1 },
+    (t) => noDenom.push(t === undefined ? '' : t), NOW);
+  const ntxt = noDenom.join('\n');
+  ok(/1 of 4 transcript\(s\) carry no usable timestamp/.test(ntxt),
+    'a missing readable count falls back to the file count rather than printing "of undefined"');
+  ok(!/undefined/.test(ntxt), 'and no branch renders the word undefined');
+
+  // 7. THE CONFIGURATION. A count of rows is identical for the two ask policies that
+  //    measured +14pp and -14pp on the same turns, so the count cannot be the marker.
+  const asking = [{ kind: 'a' }, { kind: 'b' }, { kind: 'c' }];
+  const silenced = [{ kind: 'a' }, { kind: 'b' }, { kind: 'c', silent: true }];
+  eq(asking.length, silenced.length, 'the two configurations have the SAME row count');
+  ok(R.fingerprintOf(asking).hash !== R.fingerprintOf(silenced).hash,
+    'and different fingerprints — flipping one ask policy changes the marker');
+  eq(R.fingerprintOf(silenced).silent.join(','), 'c', 'the silent rows are named, not just counted');
+  eq(R.fingerprintOf(silenced).asking.join(','), 'a,b', 'and so are the asking ones');
+  ok(R.fingerprintOf([{ kind: 'a', claim: [/x/] }]).hash !== R.fingerprintOf([{ kind: 'a', claim: [/y/] }]).hash,
+    'a changed claim pattern moves the fingerprint too');
+  ok(R.fingerprintOf(asking).hash === R.fingerprintOf(asking.map((r) => ({ ...r }))).hash,
+    'and an unchanged table is stable across calls');
+
+  // 8. The marker reaches BOTH renders, or the baseline's is not comparable to the
+  //    live figure it is read against.
+  const fp = R.rowsFingerprint();
+  ok(new RegExp(`rows ${fp.hash} — asking: ${fp.asking.join(', ')}`).test(bd.text),
+    'the baseline prints the live row fingerprint');
+  ok(new RegExp(`rows ${fp.hash}`).test(R.render(R.summarise([], () => null), '/tmp/s.jsonl', 5)),
+    'and the live report prints the same one');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

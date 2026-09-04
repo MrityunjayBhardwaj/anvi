@@ -943,6 +943,22 @@ operation reading as continued value.
   confident wrong answer in opposite directions — a strong negative result, then an
   equally strong positive one, neither about asking. A stale baseline is worse than
   none, because it gets subtracted with confidence.
+  - **So both halves now PRINT the configuration they were computed under** — a short
+    fingerprint over the rows plus, in words, which rows ask and which record silently.
+    The report used to say `across N licence rows`, and that count is IDENTICAL for the
+    two configurations that produced +14pp and −14pp, so it could not carry the
+    difference. Compare the two fingerprints before subtracting one figure from the
+    other (#386).
+- **⚠ A baseline also belongs to a PERIOD, and now says which.** It is replayed over
+  transcripts, and transcripts age out under retention, so a replay today covers a
+  different population from one six months ago — silently, because the count changes
+  and nothing else said the period did. The baseline prints the span its replayed
+  records cover and how old the newest is; a population with no usable timestamp is
+  reported as UNKNOWN rather than left to read as current, and transcripts carrying no
+  usable stamp are counted and named rather than dropped from the denominator. Past
+  `BASELINE_STALE_AFTER_DAYS` (90, a quarter of the 365-day retention) the age is
+  called out. Like the live report's window this is a REPORTING threshold: it decides
+  when age is worth a sentence, never whether a figure is valid (#386).
 - **A firing is not automatically an asking.** Records carry `asked`, and the arms
   split on it: a claim from a `silent` row is genuinely unlicensed and keeps the
   `fired` verdict, but nobody was shown a question, so it goes to its own
