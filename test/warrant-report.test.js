@@ -666,6 +666,110 @@ console.log('\nGROUP 8 — no NUL byte in the shipped source');
   }
 }
 
+// ── GROUP 9 — the window the figures describe (#293) ────────────────────────
+console.log('\nGROUP 9 — a rate is never printed without the period it was computed over');
+{
+  // WHY THIS GROUP EXISTS. Every figure in this report is a rate, and a rate
+  // carries no date. A store that has STOPPED being appended to therefore renders
+  // identically to a live one — which is the failure this component was built
+  // against ("continued operation reading as continued value") arriving from the
+  // other side: halted operation reading as continued value. The live store is in
+  // exactly that state today (writer deliberately un-registered, tracking #299),
+  // so this is not hypothetical.
+  //
+  // Both directions are asserted for every rule below. A group that only proves
+  // "the warning appears" would pass just as well if the warning appeared always.
+  const lines = (summary, now) => { const L = []; R.renderWindow(summary, (t) => L.push(t === undefined ? '' : t), now); return L.join('\n'); };
+  const NOW = '2026-09-04T00:00:00.000Z';
+  const win = (first, last, n) => ({ first, last, n });
+
+  // ---- when the store has gone silent ----
+  const frozen = { record_window: win('2026-08-17T10:00:00.000Z', '2026-08-17T12:00:00.000Z', 25), scorable_window: null, scorable_of: 0, undated: 0 };
+  const fo = lines(frozen, NOW);
+  ok(/records span 2026-08-17 → 2026-08-17/.test(fo), 'the span is printed as dates, not as a record count');
+  ok(/a single day/.test(fo), 'a store written on one day says so rather than reporting a 0-day span');
+  ok(/NOTHING RECORDED FOR 18 DAYS/.test(fo), 'a store silent past the threshold says so, in days');
+
+  // The paired negative. Without it, a warning hard-coded to always fire passes above.
+  const live = { record_window: win('2026-09-01T10:00:00.000Z', '2026-09-03T12:00:00.000Z', 25), scorable_window: win('2026-09-01T10:00:00.000Z', '2026-09-03T12:00:00.000Z', 20), scorable_of: 20, undated: 0 };
+  const lo = lines(live, NOW);
+  ok(/records span 2026-09-01 → 2026-09-03 \(2 days\)/.test(lo), 'a multi-day span reports its length');
+  ok(!/NOTHING RECORDED/.test(lo), 'a CURRENT store is NOT flagged as silent');
+  ok(!/NARROWER/.test(lo), 'a store whose every claim is scorable is NOT flagged as decayed');
+
+  // The threshold, on both sides of the boundary — an off-by-one here changes
+  // which stores get the sentence, and nothing else in the report would show it.
+  const at = { record_window: win('2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z', 1), scorable_window: null, scorable_of: 0, undated: 0 };
+  ok(/NOTHING RECORDED FOR 7 DAYS/.test(lines(at, NOW)), 'a store exactly at the 7-day threshold fires');
+  eq(R.STALE_AFTER_DAYS, 7, 'the threshold is 7 days — the assertions above name it literally, so that a');
+  const under = { record_window: win('2026-08-29T00:00:00.000Z', '2026-08-29T00:00:00.000Z', 1), scorable_window: null, scorable_of: 0, undated: 0 };
+  ok(!/NOTHING RECORDED/.test(lines(under, NOW)), 'one day under the threshold does NOT fire');
+
+  // ---- undated records ----
+  const undated = { record_window: null, scorable_window: null, scorable_of: 0, undated: 3 };
+  ok(/period these figures describe is UNKNOWN/.test(lines(undated, NOW)),
+    'a store where NO record is dated says the period is unknown, not that it is current');
+  const partly = { record_window: win('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 5), scorable_window: win('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 5), scorable_of: 5, undated: 2 };
+  ok(/2 undated record\(s\) outside this span/.test(lines(partly, NOW)),
+    'records with no timestamp are named, because the span silently excludes them');
+
+  // ---- the decay case this issue was filed for ----
+  const decayed = { record_window: win('2026-09-01T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 40), scorable_window: win('2026-09-02T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 12), scorable_of: 20, undated: 0 };
+  const dm = lines(decayed, NOW);
+  ok(/scorable window is NARROWER than the claim set: 12 of 20 claim\(s\)/.test(dm),
+    'a narrowed scorable window is reported against the CLAIM count');
+  ok(/The other 8 lost the/.test(dm), 'the count that lost its transcript is stated, not left to subtraction');
+
+  const allGone = { record_window: win('2026-08-01T00:00:00.000Z', '2026-08-02T00:00:00.000Z', 9), scorable_window: null, scorable_of: 9, undated: 0 };
+  ok(/NONE of the 9 claim\(s\) is still scorable/.test(lines(allGone, NOW)),
+    'a store with claims but no surviving transcript says so, rather than printing nothing');
+
+  // ⚠ THE FALSE POSITIVE THIS PINS. `scored` is built from CLAIMS, not from
+  // records, so comparing the scorable count against the RECORD count reports
+  // every store as decaying the moment it holds one claimless record — which the
+  // live store does. This case is the reason the denominator is `scorable_of`.
+  const claimless = { record_window: win('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 25), scorable_window: win('2026-09-03T00:00:00.000Z', '2026-09-03T00:00:00.000Z', 16), scorable_of: 16, undated: 0 };
+  ok(!/NARROWER/.test(lines(claimless, NOW)),
+    '25 records / 16 claims / 16 scorable is NOT decay — claimless records were never scorable');
+
+  // ---- end to end through summarise(), so the fields are really populated ----
+  const wdir = mk('win-transcripts');
+  const refs = writeTranscript(wdir, 'sess-w', [
+    { role: 'user', text: 'q' }, { role: 'assistant', text: 'ran it, output read' },
+    { role: 'user', text: 'q2' }, { role: 'assistant', text: 'ok' },
+  ]);
+  const finder = R.makeTranscriptFinder([TMP]);   // the finder scans root/<dir>/<session>.jsonl
+  const sm = R.summarise([
+    rec({ ts: '2026-08-01T00:00:00.000Z', session_id: 'sess-w', turn_ref: refs[0], verdict: 'fired', claim_kind: 'verified', claim_text: 'a' }),
+    rec({ ts: '2026-08-02T00:00:00.000Z', session_id: 'gone-session', turn_ref: 'no-such-ref', verdict: 'fired', claim_kind: 'verified', claim_text: 'b' }),
+    rec({ ts: '2026-08-03T00:00:00.000Z', session_id: 'sess-w', turn_ref: refs[2], verdict: 'no_claims' }),
+  ], finder);
+  eq(sm.record_window.first.slice(0, 10), '2026-08-01', 'summarise reports the first record date');
+  eq(sm.record_window.last.slice(0, 10), '2026-08-03', 'summarise reports the last record date, including a claimless one');
+  eq(sm.record_window.n, 3, 'the record window counts every dated record');
+  eq(sm.scorable_of, 2, 'the scorable denominator is the CLAIM count, not the record count');
+  eq(sm.scorable_window.n, 1, 'the claim whose transcript is gone is outside the scorable window');
+  eq(sm.undated, 0, 'every record here carries a timestamp');
+
+  // ⚠ A record with NO ts. Until this existed, the `undated` computation in
+  // summarise() could be replaced with a literal 0 and the whole suite stayed
+  // green — every other assertion about it hand-built its own summary object and
+  // never reached the code under test. The fixture sat outside the mutation.
+  const smU = R.summarise([
+    rec({ ts: '2026-08-01T00:00:00.000Z', session_id: 'sess-w', turn_ref: refs[0], verdict: 'fired', claim_kind: 'verified', claim_text: 'a' }),
+    rec({ ts: null, session_id: 'sess-w', turn_ref: refs[2], verdict: 'fired', claim_kind: 'verified', claim_text: 'b' }),
+  ], finder);
+  eq(smU.undated, 1, 'a record with no timestamp is counted as undated by summarise');
+  eq(smU.record_window.n, 1, 'and it is excluded from the record window rather than dating it');
+  ok(/1 undated record\(s\) outside this span/.test(R.render(smU, '/tmp/s.jsonl', 5)),
+    'the undated count reaches the rendered report from real summarise output');
+
+  // And the block really reaches the rendered report, not just its own helper.
+  const rendered = R.render(sm, '/tmp/store.jsonl', 5);   // render() returns the joined text
+  ok(/records span 2026-08-01 → 2026-08-03/.test(rendered), 'render() emits the window under the header');
+  ok(/NARROWER than the claim set: 1 of 2/.test(rendered), 'render() emits the decay warning from real summarise output');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 fs.rmSync(TMP, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);
