@@ -54,6 +54,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 // --- locate shared modules from both install trees ---------------------------
 function loadFromCandidates(name) {
@@ -327,6 +328,11 @@ function declineFault(reason) {
  * the first day the hook ran, and the mechanism would have been killed by its own
  * missing control.
  */
+// ⚠ PRESENT is not USABLE — see the note in summarise(). One definition, used by
+// both the store side and the replay side, because a baseline and the live figure it
+// is read against must agree about which stamps count.
+const usableTs = (t) => typeof t === 'string' && !Number.isNaN(Date.parse(t));
+
 function replayRecords(transcriptDir) {
   const out = [];
   let files;
@@ -335,9 +341,16 @@ function replayRecords(transcriptDir) {
       .map((f) => path.join(transcriptDir, f));
   } catch { return null; }
 
+  const stamps = [];
+  let datedFiles = 0, undatedFiles = 0;
+
   for (const f of files) {
     const convo = readConvo(f);
     if (!convo) continue;
+    // The window is the period the REPLAYED records cover — the same records the
+    // figures are computed from, not the file's mtime, which a copy would rewrite.
+    const fileStamps = convo.map((r) => r && r.timestamp).filter(usableTs);
+    if (fileStamps.length) { datedFiles += 1; stamps.push(...fileStamps); } else undatedFiles += 1;
     const sessionId = path.basename(f, '.jsonl');
     let start = 0;
     for (let i = 0; i < convo.length; i++) {
@@ -365,7 +378,20 @@ function replayRecords(transcriptDir) {
       }
     }
   }
-  return { records: out, files: files.length };
+  stamps.sort();
+  // The denominator is files that were READABLE — a file that could not be parsed was
+  // never eligible to date anything, so counting it as undated would report every
+  // directory as partly undated the moment it holds one unreadable file.
+  return {
+    records: out,
+    files: files.length,
+    readable_files: datedFiles + undatedFiles,
+    dated_files: datedFiles,
+    undated_files: undatedFiles,
+    transcript_window: stamps.length
+      ? { first: stamps[0], last: stamps[stamps.length - 1], n: stamps.length }
+      : null,
+  };
 }
 
 // ── the arithmetic ──────────────────────────────────────────────────────────
@@ -481,10 +507,9 @@ function summarise(records, findTranscript) {
   // measurement, which is worse than saying nothing. Parse before trusting, and
   // fold anything unparseable in with the genuinely absent: both mean the record
   // cannot date the window, and both must be counted rather than dropped.
-  const usable = (t) => typeof t === 'string' && !Number.isNaN(Date.parse(t));
-  const stamps = records.map((r) => r && r.ts).filter(usable).sort();
+  const stamps = records.map((r) => r && r.ts).filter(usableTs).sort();
   const scorable = scored.filter((x) => x.score && x.score.state !== 'transcript_gone');
-  const scorableStamps = scorable.map((x) => x.rec && x.rec.ts).filter(usable).sort();
+  const scorableStamps = scorable.map((x) => x.rec && x.rec.ts).filter(usableTs).sort();
   const window = (list) => (list.length
     ? { first: list[0], last: list[list.length - 1], n: list.length }
     : null);
@@ -627,6 +652,77 @@ const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / DAY);
  */
 const STALE_AFTER_DAYS = 7;
 
+/**
+ * A baseline is valid ONLY for the row table and ask policy it was measured under.
+ * That is not a caution in the abstract: on the same 815 turns, marking `suite`
+ * silent moved the baseline gap by 28 percentage points and flipped its sign. The
+ * report printed `across N licence rows` — a COUNT, which is identical for the two
+ * configurations that produced +14pp and -14pp. A count cannot carry that difference.
+ *
+ * So print the axis that actually moved (which rows ask, which record silently) in
+ * words, and a fingerprint over everything else that could change underneath a stored
+ * figure — the kinds, their claim patterns and their licence predicates. The words are
+ * what a reader acts on; the hash is what catches a change nobody described.
+ *
+ * BASELINE_STALE_AFTER_DAYS is a quarter of the 365-day transcript retention. Past it,
+ * part of the population the baseline was drawn from is measurably nearer aging out
+ * and the replay is no longer reproducible. Like STALE_AFTER_DAYS it is a REPORTING
+ * threshold: it decides when age is worth a sentence, never whether a figure is valid.
+ */
+const BASELINE_STALE_AFTER_DAYS = 90;
+
+function fingerprintOf(rows) {
+  const list = rows || [];
+  const canon = list.map((r) => ({
+    kind: r.kind,
+    silent: !!r.silent,
+    claim: (r.claim || []).map(String),
+    licensed: String(r.licensed || ''),
+  }));
+  return {
+    hash: crypto.createHash('sha1').update(JSON.stringify(canon)).digest('hex').slice(0, 8),
+    asking: list.filter((r) => !r.silent).map((r) => r.kind),
+    silent: list.filter((r) => r.silent).map((r) => r.kind),
+  };
+}
+
+const rowsFingerprint = () => fingerprintOf(ROWS);
+
+// The baseline is replayed over TRANSCRIPTS, so its window is the period those cover.
+// That is a different population from the store's records and cannot reuse
+// summarise()'s window: the store is what the mechanism recorded, the transcripts are
+// what it was replayed against.
+function renderTranscriptWindow(rep, say, now) {
+  const w = rep && rep.transcript_window;
+  if (!w) {
+    say('   ⚠ NO REPLAYED RECORD CARRIES A USABLE TIMESTAMP — the period this baseline');
+    say('     describes is UNKNOWN, which is not the same as recent. The figure it is read');
+    say('     against now states its own window, so an undated baseline cannot be compared.');
+    return;
+  }
+  const spanDays = daysBetween(w.first, w.last);
+  const ageDays = daysBetween(w.last, now || new Date().toISOString());
+  if (Number.isNaN(spanDays) || Number.isNaN(ageDays)) {
+    // summarise()'s counterpart guard, for the same reason: print what is there and
+    // refuse the arithmetic rather than emit a computed-looking NaN.
+    say(`   transcripts span ${String(w.first).slice(0, 10)} → ${String(w.last).slice(0, 10)}`
+      + '  ⚠ unparseable timestamp — age NOT computed');
+    return;
+  }
+  say(`   transcripts span ${w.first.slice(0, 10)} → ${w.last.slice(0, 10)}`
+    + ` (${spanDays === 0 ? 'a single day' : `${spanDays} days`}), newest ${ageDays} day(s) old`);
+  if (rep.undated_files) {
+    const readable = rep.readable_files || rep.files || rep.undated_files;
+    say(`   ⚠ ${rep.undated_files} of ${readable} transcript(s) carry no usable timestamp`);
+    say('     and are OUTSIDE this span — they were replayed, and they are not dated by it.');
+  }
+  if (ageDays >= BASELINE_STALE_AFTER_DAYS) {
+    say(`   ⚠ THE NEWEST TRANSCRIPT IS ${ageDays} DAYS OLD. Transcripts age out under retention,`);
+    say('     so replaying today covers a different population from replaying six months ago —');
+    say('     silently, because the count changes and nothing else says the period did.');
+  }
+}
+
 function renderWindow(s, say, now) {
   const w = s.record_window;
   if (!w) {
@@ -694,7 +790,13 @@ function render(s, storeFile, limit) {
   say(`   turns declined as unread  ${String(s.unread).padStart(6)}   the hook could not read the turn — not a silence`);
   renderDeclines(say, s);
   say(`   turns with no claim       ${String(s.no_claims).padStart(6)}`);
+  const fp = rowsFingerprint();
   say(`   claims detected           ${String(s.claims_detected).padStart(6)}   across ${ROWS.length} licence rows`);
+  // The baseline this gap is read against prints the same fingerprint. Two figures
+  // computed under different row tables are not comparable, and a count of rows is
+  // the same for configurations that differ by 28pp.
+  say(`   rows ${fp.hash} — asking: ${fp.asking.join(', ') || '(none)'}`
+    + ` · records silently: ${fp.silent.join(', ') || '(none)'}`);
   say(`   firings, ASKED            ${String(s.fired.n).padStart(6)}   ${s.turns ? (s.fired.n / s.turns).toFixed(2) : '—'} questions per recorded turn`);
   say(`   firings, recorded only    ${String(s.recorded_only.n).padStart(6)}   unlicensed, but from a row that does not ask`);
   say(`   licensed (silences)       ${String(s.control.n).padStart(6)}`);
@@ -778,10 +880,20 @@ function render(s, storeFile, limit) {
 
 function pad(n, w) { return w < 0 ? String(n) : String(n).padStart(w); }
 
-function renderBaseline(s, dir, files) {
+function renderBaseline(s, dir, rep, now) {
   const L = [];
   const say = (t) => L.push(t === undefined ? '' : t);
-  say(`PRE-INTERVENTION BASELINE — replayed over ${files} transcript(s) in ${dir}`);
+  // `rep` is the replay result, not a bare count: a count says how much was replayed
+  // and nothing about WHEN or under WHICH configuration, which is the blindness here.
+  const r = rep || { files: 0 };
+  say(`PRE-INTERVENTION BASELINE — replayed over ${r.files} transcript(s) in ${dir}`);
+  renderTranscriptWindow(r, say, now);
+  const fp = rowsFingerprint();
+  say(`   rows ${fp.hash} — asking: ${fp.asking.join(', ') || '(none)'}`
+    + ` · records silently: ${fp.silent.join(', ') || '(none)'}`);
+  say('   This figure is valid ONLY for that configuration. Marking one row silent has');
+  say('   moved this gap by 28pp and flipped its sign, on the very same turns.');
+  say();
   say('No question was injected on any of these turns. This is what the two arms do');
   say('when the mechanism is not running, and it is the figure the live gap is read');
   say('against — not zero.');
@@ -892,12 +1004,13 @@ function baseline(opts) {
   if (!replayed) return null;
   const roots = opts.transcriptRoots || [path.dirname(opts.transcriptDir)];
   const s = summarise(replayed.records, makeTranscriptFinder(roots));
-  return { summary: s, text: renderBaseline(s, opts.transcriptDir, replayed.files) };
+  return { summary: s, text: renderBaseline(s, opts.transcriptDir, replayed, opts.now) };
 }
 
 module.exports = {
   report, baseline, summarise, render, renderBaseline, locate, readStore,
   nextTurnAfter, scoreRecord, isContested, CONTESTED, replayRecords,
+  rowsFingerprint, fingerprintOf, renderTranscriptWindow, BASELINE_STALE_AFTER_DAYS, usableTs,
   makeTranscriptFinder, gapOf, EXIT,
   DECLINES, DECLINE_GROUPS, DECLINE_LABEL_W, classifyDecline, declineFault, renderDeclines,
   renderWindow, STALE_AFTER_DAYS,
