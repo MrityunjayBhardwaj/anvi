@@ -4,7 +4,10 @@
 # dirs — no real memory or store is touched. Run:  bash test/anvideck-checkpoint-memory-sync.test.sh
 set -u
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/hooks/anvideck-checkpoint.js"
-T=$(mktemp -d)
+# -P: mktemp returns /var/... which is a symlink to /private/var. git reports
+# realpath'd paths, so an uncanonicalised temp root would make the harness and
+# git disagree about the same directory for reasons unrelated to the hook.
+T=$(cd "$(mktemp -d)" && pwd -P)
 CLAUDE="$T/claude"; STORE="$T/anvideck"
 PASS=0; FAIL=0
 ok(){ [ "$1" = "$2" ] && { echo "  ✓ $3"; PASS=$((PASS+1)); } || { echo "  ✗ $3 (got:[$1] want:[$2])"; FAIL=$((FAIL+1)); }; }
@@ -72,6 +75,69 @@ echo dirty > "$STORE/projects/proj/scratch.txt"
 printf '{}' | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
 ok "$rc" "0" "exits 0 with empty payload"
 ok "$(git -C "$STORE" status --porcelain | wc -l | tr -d ' ')" "0" "dirty tree still committed without cwd"
+
+# --- worktree resolution (issue #388) -------------------------------------
+# TESTS 0-6 above all run from plain (non-repo) directories, so they exercise the
+# fallback branch of projectRoot() and never the worktree branch. These do.
+
+echo "TEST 7 — a session in a linked worktree mirrors into the PROJECT envelope"
+REPO="$T/realproj"; mkdir -p "$REPO"; git -C "$REPO" init -q
+git -C "$REPO" config user.email t@t; git -C "$REPO" config user.name t
+git -C "$REPO" commit -q --allow-empty -m init
+WTREE="$T/realproj-wt"
+git -C "$REPO" worktree add -q "$WTREE" -b wtbranch
+mkdir -p "$STORE/projects/realproj"                 # envelope belongs to the PROJECT
+RLIVE="$CLAUDE/projects/$(enc "$REPO")/memory"
+mkdir -p "$RLIVE"; printf 'r\n' > "$RLIVE/MEMORY.md"
+printf '{"cwd":"%s"}' "$WTREE" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
+ok "$rc" "0" "exits 0 when driven from a linked worktree"
+# The discriminating assertion: under cwd-basename resolution the envelope lookup
+# is 'realproj-wt', which does not exist, so the hook returns before mirroring.
+ok "$([ -f "$STORE/projects/realproj/memory/MEMORY.md" ] && echo y || echo n)" "y" "worktree session mirrored into the project envelope"
+ok "$([ -d "$STORE/projects/realproj-wt" ] && echo made || echo none)" "none" "no envelope invented for the worktree basename"
+# The marker must name the slug the harness actually uses, not the worktree's.
+MARKER="$STORE/projects/realproj/memory/MIRROR-README.md"
+ok "$(grep -c -- "projects/$(enc "$REPO")/memory" "$MARKER")" "1" "marker names the main worktree slug"
+ok "$(grep -c -- "projects/$(enc "$WTREE")/memory" "$MARKER")" "0" "marker does not name the worktree slug"
+
+echo "TEST 8 — same repo driven from its MAIN worktree is unchanged (regression guard)"
+printf 'r2\n' > "$RLIVE/b.md"
+printf '{"cwd":"%s"}' "$REPO" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
+ok "$rc" "0" "exits 0 from the main worktree"
+ok "$([ -f "$STORE/projects/realproj/memory/b.md" ] && echo y || echo n)" "y" "main-worktree session still mirrors to the same envelope"
+
+echo "TEST 9 — a repo with no store envelope still returns early (must not invent one)"
+BARE="$T/unowned"; mkdir -p "$BARE"; git -C "$BARE" init -q
+git -C "$BARE" config user.email t@t; git -C "$BARE" config user.name t
+git -C "$BARE" commit -q --allow-empty -m init
+mkdir -p "$CLAUDE/projects/$(enc "$BARE")/memory"; printf 'u\n' > "$CLAUDE/projects/$(enc "$BARE")/memory/MEMORY.md"
+printf '{"cwd":"%s"}' "$BARE" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
+ok "$rc" "0" "exits 0 for a repo that is not an anvi project"
+ok "$([ -d "$STORE/projects/unowned" ] && echo made || echo none)" "none" "no envelope created for a repo with no project"
+
+echo "TEST 10 — no usable git: falls back to cwd rather than throwing"
+NODE_BIN="$(command -v node)"
+printf '{"cwd":"%s"}' "$WTREE" | PATH=/var/empty CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 "$NODE_BIN" "$HOOK"; rc=$?
+ok "$rc" "0" "exits 0 when git cannot be resolved at all"
+
+echo "TEST 11 — a cwd reached through a symlink keeps the slug the harness used"
+# git answers with realpath'd paths; the harness encodes the string it was handed.
+# Substituting git's answer for an ordinary (non-worktree) session would point the
+# lookup at a memory directory that was never created. Parent is symlinked so the
+# basename — and therefore the envelope — is identical either way, isolating the slug.
+mkdir -p "$T/realdir"
+SYM="$T/realdir/symproj"; mkdir -p "$SYM"; git -C "$SYM" init -q
+git -C "$SYM" config user.email t@t; git -C "$SYM" config user.name t
+git -C "$SYM" commit -q --allow-empty -m init
+ln -s "$T/realdir" "$T/linkdir"
+LINKED="$T/linkdir/symproj"
+ok "$(basename "$LINKED")" "symproj" "symlinked and real path share a basename"
+mkdir -p "$STORE/projects/symproj"
+SLIVE="$CLAUDE/projects/$(enc "$LINKED")/memory"      # the slug the harness would write
+mkdir -p "$SLIVE"; printf 's\n' > "$SLIVE/MEMORY.md"
+printf '{"cwd":"%s"}' "$LINKED" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
+ok "$rc" "0" "exits 0 for a cwd reached through a symlink"
+ok "$([ -f "$STORE/projects/symproj/memory/MEMORY.md" ] && echo y || echo n)" "y" "symlinked cwd still mirrored"
 
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
