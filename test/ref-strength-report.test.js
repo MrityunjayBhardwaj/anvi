@@ -51,10 +51,10 @@ const HEAD = g('rev-parse', '--short', 'HEAD').trim();
 
 let n = 0;
 /** Run the tool over a catalogue containing exactly `entries`, against the fixture repo. */
-function run(entries, extra = []) {
+function run(entries, extra = [], repo = REPO) {
   const cat = path.join(TMP, `cat${++n}`);
   write(path.join(cat, 'hetvabhasa.md'), entries.join('\n\n') + '\n');
-  const r = spawnSync('node', [TOOL, '--catalogues', cat, '--repo', REPO, ...extra], { encoding: 'utf8' });
+  const r = spawnSync('node', [TOOL, '--catalogues', cat, '--repo', repo, ...extra], { encoding: 'utf8' });
   return { out: (r.stdout || '') + (r.stderr || ''), status: r.status, cat };
 }
 const entry = (id, title, ref, extraFields = '') =>
@@ -183,6 +183,20 @@ console.log('\nan unreadable catalogue directory REFUSES rather than reporting z
   has((r.stdout || '') + (r.stderr || ''), 'REFUSING', 'it refuses out loud');
   eq(r.status, 255, 'and exits 255, which no failure count can collide with');
   hasNot((r.stdout || ''), 'FAILURES', 'CONTROL — and prints no report at all, so zeros cannot be misread');
+}
+
+console.log('\na repo that is not a checkout REFUSES, rather than calling the whole corpus broken');
+{
+  // ⚠ THE OTHER DIRECTION OF THE TRAP THE ISSUE NAMES. A scratch copy outside a checkout
+  // makes git-derived tools report nothing, which reads as the check working. Here it goes
+  // the opposite way and reports EVERYTHING as broken, because git answers "never tracked"
+  // about every path. Both numbers describe where the question was asked, not the corpus.
+  const plain = path.join(TMP, 'not-a-checkout');
+  fs.mkdirSync(plain, { recursive: true });
+  const r = run([entry('H1', 'a citation that is perfectly fine', '`src/alpha.js` (`inNamedFile`)')], [], plain);
+  has(r.out, 'is not a git working tree', 'it refuses and says why');
+  eq(r.status, 255, 'and exits 255, not a failure count');
+  hasNot(r.out, 'cited paths are files in this repo', 'CONTROL — and no rate is printed, so 0% cannot be read as a finding');
 }
 
 console.log('\nthe report labels itself PROVENANCE, not support');

@@ -202,6 +202,18 @@ const SECTION_RE = /(\S+\.md)\s*§/g;
 const ISSUE_RE = /(?:^|[\s(])#(\d{1,6})\b/g;
 const SHA_RE = /\b([0-9a-f]{7,40})\b/g;
 
+// ⚠ A REPO THAT IS NOT A CHECKOUT MUST REFUSE, NOT REPORT. Every path question here goes
+// through git, and git's answer from a plain directory is "never tracked" for everything —
+// so the run comes back with the whole bibliography marked broken. Measured while building
+// this: pointing --repo at an empty directory produced `0 of 590 cited paths (0%)` and 576
+// failures, each one well-formed and false. It is the same defect as the quiet version the
+// issue warned about, in the other direction: the number describes where the question was
+// asked, not the corpus it names. A refusal is the only honest output, so it exits 255 with
+// the rest of the refusals rather than joining the failure counts it cannot be told apart from.
+function repoIsCheckout() {
+  try { return git('rev-parse --is-inside-work-tree').trim() === 'true'; } catch { return false; }
+}
+
 function scan() {
   let files;
   try { files = fs.readdirSync(CAT_DIR).filter(f => CATALOGUES.includes(f)); }
@@ -310,6 +322,27 @@ function scan() {
 }
 
 // --- issues and shas ---------------------------------------------------------
+// ⚠ RESOLUTION IS TALLIED OVER DISTINCT TARGETS, NEVER OVER CITATIONS, and the two are
+// printed as two figures. The first version of the sha line read `45 resolve (20 in the
+// repo, 4 in the store)` — 45 counting citations and 20+4 counting distinct shas, so the
+// parenthetical did not sum to the number in front of it and only the source said why. A
+// sha cited nine times is one resolution question, not nine.
+//
+// ONE tally for both resolvers, because the defect was found in the sha half and the issue
+// half had it too, in the same sentence shape, one function away. A fix applied to one
+// instance of a class and not its twin is how the twin survives.
+function tally(seen, citations) {
+  const vals = [...seen.values()];
+  return {
+    ok: vals.filter(v => v !== false && v !== null).length,
+    bad: vals.filter(v => v === false).length,
+    unknown: vals.filter(v => v === null).length,
+    distinct: seen.size,
+    citations,
+    unresolved: [...seen.entries()].filter(([, v]) => v === false).map(([k]) => k),
+  };
+}
+
 // A catalogue records shas from BOTH repos — the project's commits and the store commits
 // that carried the harvest. Asking only the project repo reports every store sha as
 // unresolvable, which is a fact about where the question was asked, not about the
@@ -317,7 +350,6 @@ function scan() {
 // store" and "resolves nowhere" are different states and only one of them is a finding.
 function resolveShas(list) {
   const seen = new Map();
-  let ok = 0, bad = 0, unknown = 0;
   for (const s of list) {
     if (!seen.has(s.sha)) {
       let v;
@@ -330,20 +362,17 @@ function resolveShas(list) {
       }
       seen.set(s.sha, v);
     }
-    const v = seen.get(s.sha);
-    if (v === 'repo' || v === 'store') ok++; else if (v === false) bad++; else unknown++;
   }
+  const vals = [...seen.values()];
   return {
-    ok, bad, unknown, distinct: seen.size,
-    inRepo: [...seen.values()].filter(v => v === 'repo').length,
-    inStore: [...seen.values()].filter(v => v === 'store').length,
-    unresolved: [...seen.entries()].filter(([, v]) => v === false).map(([k]) => k),
+    ...tally(seen, list.length),
+    inRepo: vals.filter(v => v === 'repo').length,
+    inStore: vals.filter(v => v === 'store').length,
   };
 }
 
 function resolveIssues(list) {
   const seen = new Map();
-  let ok = 0, bad = 0, unknown = 0;
   for (const it of list) {
     if (!seen.has(it.n)) {
       let v;
@@ -354,15 +383,19 @@ function resolveIssues(list) {
       } catch { v = null; }
       seen.set(it.n, v);
     }
-    const v = seen.get(it.n);
-    if (v === true) ok++; else if (v === false) bad++; else unknown++;
   }
-  return { ok, bad, unknown, distinct: seen.size };
+  return tally(seen, list.length);
 }
 
 // --- report ------------------------------------------------------------------
 main();
 function main() {
+  if (!repoIsCheckout()) {
+    console.error(`REFUSING: ${REPO} is not a git working tree, and every path question here is`);
+    console.error('answered by git. From a plain directory git says "never tracked" about everything,');
+    console.error('so the report would mark the entire bibliography broken. Point --repo at the checkout.');
+    process.exit(255);
+  }
   const scanned = scan();
   if (scanned === null) {
     // Printing zeros here is indistinguishable from a catalogue with no citations, which is
@@ -458,10 +491,10 @@ function main() {
   console.log(`  ── delegated, counted here so the bibliography's denominator is whole ─────`);
   console.log(`  line spans      ${other.spans}  → scripts/ref-span-check.js owns this class`);
   console.log(`  section anchors ${other.sections}  → scripts/citation-anchors.js owns this class`);
-  console.log(`  shas            ${other.shas.length} cited (${shas.distinct} distinct): ${shas.ok} resolve (${shas.inRepo} in the repo, ${shas.inStore} in the store), ${shas.bad} do not, ${shas.unknown} unanswerable`);
+  console.log(`  shas            ${shas.ok} of ${shas.distinct} distinct shas resolve (${shas.inRepo} in the repo, ${shas.inStore} in the store); ${shas.bad} do not, ${shas.unknown} unanswerable — cited ${shas.citations} times`);
   if (shas.unresolved.length) console.log(`                  unresolved: ${shas.unresolved.join(', ')}`);
   console.log(issues
-    ? `  issues/PRs      ${other.issues.length} cited (${issues.distinct} distinct): ${issues.ok} resolve, ${issues.bad} do not, ${issues.unknown} unanswerable`
+    ? `  issues/PRs      ${issues.ok} of ${issues.distinct} distinct issues/PRs resolve; ${issues.bad} do not, ${issues.unknown} unanswerable — cited ${issues.citations} times`
     : `  issues/PRs      ${other.issues.length} cited — NOT CHECKED (needs the network; pass --online)`);
   console.log('');
   console.log(`  FAILURES (citations that do not resolve where named): ${failures}`);

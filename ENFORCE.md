@@ -1142,3 +1142,112 @@ judgement, 147 drifted.**
   whitespace for the squash to remove, and one cited a path that resolves
   directly against the search root and so never entered the fallback the rule
   lives in. Both were rebuilt to the live shape and both then reddened.
+
+## REF Strength — a citation that RESOLVES, as against a field that was typed
+
+The banner reports `GROUNDING: N/N entries grounded (100%)`, and the predicate
+behind it is a presence test — does the body contain a `**REF:**` field. It never
+asks whether the citation resolves. So the metric that reads best is the one
+measuring least, and 100% has stood beside an independently measured zero.
+
+Three questions, and they are never one number:
+
+| | |
+|---|---|
+| **presence** | does the entry carry a citation? — free, already reported |
+| **resolution** | does the citation land where it says? — MECHANICAL, this report |
+| **support** | does what it lands on back the claim? — a RULING, deliberately absent |
+
+**Support is staged out on purpose.** Whether a citation *supports* its claim is
+adjudication, not computation, and belongs in a sampled manual pass once these
+numbers exist. A similarity score here would be a judgement wearing a
+computation's clothes and would produce a confident number for the hardest
+question in the chain.
+
+- **Report:** `node ~/.claude/anvi/scripts/ref-strength-report.js` — for every
+  citation in a catalogue, asks whether it resolves where the entry names it.
+  Exit code is a **count** of citations that do not, capped at 250 (251 means
+  more than that); **255** is a refusal. Offline; `--online` additionally asks
+  `gh` whether cited issues exist. `--catalogues <dir>` points it at any project
+  in the store, `--repo <dir>` at the checkout the citations are about.
+- **The classes are reported apart, because they are different repairs.**
+  `elsewhere` — the name is real but not in the file named — is not `gone`, and
+  reporting them together makes the second inherit the first's confidence.
+  `tail-only` is a dotted name whose tail alone is present: evidence that stops
+  one step short of the claim, never a resolution. `ambiguous attribution` is the
+  false-positive mode a per-file check has by construction — a note that mentions
+  a name while attributing it elsewhere — and it is **counted, not judged**,
+  leaving the denominator rather than being scored in either direction.
+
+**⚠ `REF with no checkable target` is never folded into anything.** An entry
+whose citation names nothing checkable is the *absence* of a citation, not a
+passing one. Same rule the line-span report states for `unanchored`, for the
+same reason: folding them produces a clean sweep over a corpus nothing checked.
+
+**⚠ The denominator is not the banner's.** The grounding count reads three
+catalogues; this reads four, because dharana is a catalogue and its entries cite
+code. Universal entries are excluded **and counted**, matching the grounding
+check's own rule, so the population cannot shrink unnamed.
+
+### What it measured, and how that moved
+
+Measured at `07ca7d2` over 302 entries in four catalogues:
+
+- **305 of 306 (file, symbol) pairs resolve in the file the entry names —
+  99.7%.** 0 elsewhere, 0 nowhere, 1 tail-only. 1 further pair was ambiguous
+  attribution and left the denominator.
+- **576 of 590 cited paths are files in the repo (97.6%)**; 7 resolve into the
+  store's reference area, 7 resolve nowhere. Those 7 are the whole failure count.
+- 24 of 24 distinct shas resolve (20 in the repo, 4 in the store), cited 45
+  times; 82 of 82 distinct issues resolve, cited 156 times.
+- 21 entries carry a REF that names no checkable target; 1 carries no REF.
+- Delegated and counted so the bibliography's denominator is whole: 1 line span,
+  12 section anchors.
+
+**The movement against the prior is the finding.** The last per-file audit
+recorded 218 of 220 — about 1% mis-pointing. The denominator has grown to 306
+(+39%) and the mis-pointing is now **zero**: both prior instances were repaired
+in the store when they were found, and nothing has replaced them. This is a
+re-measurement, not a quotation of that figure, and it is the reason **symbols
+are the load-bearing anchor rather than lines** — the same corpus, the same
+authors, and the line-anchor rate is two orders of magnitude worse.
+
+**⚠ A ~1% rate makes a good audit and a noisy gate.** This ships as an audit. It
+flags; a person repairs. Nothing here writes, and it is not a lint or a hook.
+
+**⚠ It measures PROVENANCE, not applicability.** Whether a pointer lands where it
+says is not whether the thing it lands on supports the claim. The output says so
+on every run, because otherwise a provenance figure gets read as a relevance
+score within a couple of months.
+
+### One parser, and it is not in this file
+
+`hooks/currency.js` owns the citation grammar — `parseEntries`, `citedSymbols`,
+`extractRefFiles`, `lineAnchoredRefs`, `classifySpec`, `symbolInText`. This
+report reads none of it a second time. The one genuinely new predicate, **is a
+cited name in the file that names it**, lives there and the currency lint was
+switched onto it, so the lint's cheap pre-filter and this report's headline
+cannot drift apart on the dotted-name case.
+
+**That sharing is asserted by MUTATION, not by grepping for one occurrence.**
+Folding `tail-only` into `present` in the one definition reddens assertions in
+*both* suites. A mutation that reddens only one side means the sharing is
+nominal.
+
+- **A repo that is not a checkout REFUSES.** Every path question goes through
+  git, and git's answer from a plain directory is "never tracked" for
+  everything — measured while building this, `--repo` on an empty directory
+  produced `0 of 590 cited paths (0%)` and 576 well-formed false failures. That
+  number describes where the question was asked, not the corpus it names.
+
+- **Tests:** `node test/ref-strength-report.test.js` — 58 assertions, every
+  bucket paired with a control. Falsified by a 20-mutation matrix, **20 of 20
+  conclusive**, controls agreeing at 58 assertions both ends, plus a
+  cross-suite mutation proving the shared predicate is genuinely shared. The
+  matrix earned its keep three times: one mutation came back NOT WITNESSED and
+  indicted the fixture rather than the guard — a single-entry fixture was
+  asserting the parser's newest-stamp rule upstream while leaving this report's
+  own across-entries selection untested; and one came back ANCHOR ABSENT, which
+  is how a **corrupted regex escaper** was found. The whole 90-file suite was
+  green over it, because the escaping branch is only entered by a name
+  containing a metacharacter and no fixture had one.
