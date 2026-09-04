@@ -609,6 +609,8 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
      substitution applies only when the worktree and the project are genuinely
      different directories — git reports realpath'd paths while the harness encodes
      the cwd string it was handed, so an ordinary session gets its cwd back verbatim.
+     A submodule keeps its own name: git answers with a `.git/modules/<name>` internal
+     there, so a resolved root that is not itself a checkout is discarded.
      Residual limit: a project whose path traverses a symlink, driven from a linked
      worktree, still declines to mirror — unchanged from before, never worse.
 

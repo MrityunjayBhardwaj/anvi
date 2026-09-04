@@ -127,6 +127,10 @@ function projectRoot(cwd) {
     // the two are genuinely different directories, i.e. a LINKED worktree; otherwise
     // hand cwd back verbatim so the ordinary case stays byte-identical.
     if (sameDir(root, cwd)) return cwd;
+    // In a SUBMODULE the common dir is `<super>/.git/modules/<name>`, so its parent is
+    // `<super>/.git/modules` — a git internal, not a checkout, and its basename would be
+    // the literal `modules`. Substitute only for a root that is itself a working tree.
+    if (!fs.existsSync(path.join(root, '.git'))) return cwd;
     return root;
   } catch { /* not a git repo, or a git too old for --path-format — keep cwd */ }
   return cwd;

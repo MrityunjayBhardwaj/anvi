@@ -139,6 +139,26 @@ printf '{"cwd":"%s"}' "$LINKED" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANV
 ok "$rc" "0" "exits 0 for a cwd reached through a symlink"
 ok "$([ -f "$STORE/projects/symproj/memory/MEMORY.md" ] && echo y || echo n)" "y" "symlinked cwd still mirrored"
 
+echo "TEST 12 — a submodule keeps its own name (git points at a .git internal, not a checkout)"
+# `git rev-parse --git-common-dir` inside a submodule answers `<super>/.git/modules/<name>`,
+# whose parent is `<super>/.git/modules`. Resolving through it would name the project
+# `modules` and lose a submodule that legitimately has its own envelope.
+SUP="$T/super"; mkdir -p "$SUP"; git -C "$SUP" init -q
+git -C "$SUP" config user.email t@t; git -C "$SUP" config user.name t
+git -C "$SUP" commit -q --allow-empty -m init
+SRC="$T/subsrc"; mkdir -p "$SRC"; git -C "$SRC" init -q
+git -C "$SRC" config user.email t@t; git -C "$SRC" config user.name t
+git -C "$SRC" commit -q --allow-empty -m init
+git -C "$SUP" -c protocol.file.allow=always submodule add -q "$SRC" mysub 2>/dev/null
+SUB="$SUP/mysub"
+mkdir -p "$STORE/projects/mysub"                    # the submodule IS an anvi project
+MLIVE="$CLAUDE/projects/$(enc "$SUB")/memory"
+mkdir -p "$MLIVE"; printf 'm\n' > "$MLIVE/MEMORY.md"
+printf '{"cwd":"%s"}' "$SUB" | CLAUDE_DIR="$CLAUDE" ANVIDECK_DIR="$STORE" ANVIDECK_QUIET_SECONDS=-1 node "$HOOK"; rc=$?
+ok "$rc" "0" "exits 0 inside a submodule"
+ok "$([ -f "$STORE/projects/mysub/memory/MEMORY.md" ] && echo y || echo n)" "y" "submodule mirrored under its own name"
+ok "$([ -d "$STORE/projects/modules" ] && echo made || echo none)" "none" "no envelope named after the git internal"
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]
