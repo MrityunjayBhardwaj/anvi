@@ -879,6 +879,14 @@ operation reading as continued value.
 - **Report:** `node ~/.claude/anvi/scripts/warrant-report.js [project-dir]`
   (`--json` for the figures alone, `--limit N` for how many firings to list, `0` for
   all). Default target is the cwd. Read-only.
+- **Every figure is printed under the WINDOW it was computed over.** A rate carries
+  no date, so a store that has stopped being appended to renders identically to a
+  live one — this component's own failure mode ("continued operation reading as
+  continued value") arriving from the other side. The header states the span of the
+  records, how old the newest is, and says so outright once nothing has been
+  recorded for a week; when transcripts have aged out it also names the narrower
+  window the rates actually cover, against the CLAIM count, since a record carrying
+  no claim was never scorable. None of it changes a figure or an exit status.
 - **It refuses in five distinguishable ways and NONE of them prints a figure.** No
   catalogues (2), catalogues withheld by the binding check (3), no store (4), an
   empty store (5), a store that would be sited in the tree holding the catalogue

@@ -465,8 +465,36 @@ function summarise(records, findTranscript) {
     };
   });
 
+  // The WINDOW the figures describe. A rate carries no date, so a store that has
+  // stopped being written reads exactly like a live one — the same failure this
+  // component was built against ("continued operation reading as continued value"),
+  // arriving from the other side. The scorable window is tracked separately because
+  // it is the one that narrows when transcripts age out: records outside it are
+  // excluded from every rate, honestly, but silently (#293).
+  //
+  // ⚠ Its denominator is CLAIMS, never `records`. A record carrying no claim was
+  // never scorable and never will be, so counting it as lost would report every
+  // store as decaying from the moment it holds one claimless record.
+  // ⚠ PRESENT is not USABLE. A ts that is a non-empty string but not a date passes
+  // a truthiness filter, sorts lexically against real stamps, and renders as
+  // "span not-a-date → also-bad (NaN days)" — nonsense wearing the shape of a
+  // measurement, which is worse than saying nothing. Parse before trusting, and
+  // fold anything unparseable in with the genuinely absent: both mean the record
+  // cannot date the window, and both must be counted rather than dropped.
+  const usable = (t) => typeof t === 'string' && !Number.isNaN(Date.parse(t));
+  const stamps = records.map((r) => r && r.ts).filter(usable).sort();
+  const scorable = scored.filter((x) => x.score && x.score.state !== 'transcript_gone');
+  const scorableStamps = scorable.map((x) => x.rec && x.rec.ts).filter(usable).sort();
+  const window = (list) => (list.length
+    ? { first: list[0], last: list[list.length - 1], n: list.length }
+    : null);
+
   return {
     store_records: records.length,
+    record_window: window(stamps),
+    scorable_window: window(scorableStamps),
+    scorable_of: scored.length,
+    undated: records.length - stamps.length,
     malformed,
     duplicates,
     sessions: new Set(records.map((r) => r && r.session_id).filter(Boolean)).size,
@@ -579,6 +607,73 @@ function renderDeclines(say, s) {
   }
 }
 
+const DAY = 86400000;
+const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / DAY);
+
+/**
+ * Say WHEN the figures below are from, and for how long the store has been silent.
+ *
+ * A rate printed without its window is read as current, whatever its age. Two
+ * different things make that reading wrong, and they need different sentences:
+ *   - the store has STOPPED being appended to (the writer is un-registered, or has
+ *     never fired) — every figure is a snapshot of a closed period;
+ *   - transcripts have AGED OUT under the retention setting, so the scorable window
+ *     is narrower than the claim set and every rate quietly became a rate over
+ *     recent sessions only (#293's original case).
+ * Neither is an error and neither changes a figure, so neither affects exit status.
+ *
+ * STALE_AFTER_DAYS is a REPORTING threshold, not a correctness one: it decides when
+ * silence is worth a sentence, never whether a figure is valid.
+ */
+const STALE_AFTER_DAYS = 7;
+
+function renderWindow(s, say, now) {
+  const w = s.record_window;
+  if (!w) {
+    // Saying nothing here would let an undated store look identical to a current
+    // one, which is the defect this whole block exists to close.
+    say('  ⚠ no record carries a timestamp — the period these figures describe is UNKNOWN,');
+    say('    which is not the same as current.');
+    return;
+  }
+  const spanDays = daysBetween(w.first, w.last);
+  const ageDays = daysBetween(w.last, now || new Date().toISOString());
+  if (Number.isNaN(spanDays) || Number.isNaN(ageDays)) {
+    // Belt and braces: summarise() already drops unparseable stamps, so reaching
+    // here means a caller built the window itself. Print the dates and refuse the
+    // arithmetic rather than emitting "NaN day(s) old" as though it were a figure.
+    say(`  records span ${String(w.first).slice(0, 10)} → ${String(w.last).slice(0, 10)}`
+      + ' · ⚠ unparseable timestamp — age NOT computed');
+    return;
+  }
+  say(`  records span ${w.first.slice(0, 10)} → ${w.last.slice(0, 10)}`
+    + ` (${spanDays === 0 ? 'a single day' : `${spanDays} days`}), newest ${ageDays} day(s) old`
+    + (s.undated ? ` · ⚠ ${s.undated} record(s) with no usable timestamp, outside this span` : ''));
+
+  if (ageDays >= STALE_AFTER_DAYS) {
+    say(`  ⚠ NOTHING RECORDED FOR ${ageDays} DAYS — every figure below describes that closed`);
+    say('    period, not the present. A store stops growing when its writer is un-registered');
+    say('    or never fires; check the registration before reading any rate as current.');
+    say('    Nothing below is wrong. It is dated.');
+  }
+
+  // The scorable window is the honest denominator for a figure whose evidence decays.
+  const sw = s.scorable_window;
+  const total = s.scorable_of;
+  if (!total) return;                        // no claims at all: §2 already says so
+  if (!sw) {
+    say(`  ⚠ NONE of the ${total} claim(s) is still scorable — every transcript behind this`);
+    say('    store is gone, so no rate below has any evidence left underneath it.');
+    return;
+  }
+  if (sw.n < total) {
+    say(`  ⚠ scorable window is NARROWER than the claim set: ${sw.n} of ${total} claim(s)`);
+    say(`    (${sw.first.slice(0, 10)} → ${sw.last.slice(0, 10)}). The other ${total - sw.n} lost the`);
+    say('    transcript their outcome derives from and are excluded from every rate below —');
+    say('    correctly, but that makes those rates figures over the narrower window.');
+  }
+}
+
 function render(s, storeFile, limit) {
   const L = [];
   const say = (t) => L.push(t === undefined ? '' : t);
@@ -586,6 +681,7 @@ function render(s, storeFile, limit) {
   say(`absent-warrant instance store — ${storeFile}`);
   say(`  ${s.store_records} records · ${s.sessions} session(s)`
     + (s.malformed ? ` · ⚠ ${s.malformed} malformed, excluded` : ''));
+  renderWindow(s, say);
   if (s.duplicates) {
     say(`  ⚠ ${s.duplicates} duplicate record(s) collapsed — the same turn was recorded more than`);
     say('    once. The writer\'s dedupe scans a store other sessions append to and stops early');
@@ -804,6 +900,7 @@ module.exports = {
   nextTurnAfter, scoreRecord, isContested, CONTESTED, replayRecords,
   makeTranscriptFinder, gapOf, EXIT,
   DECLINES, DECLINE_GROUPS, DECLINE_LABEL_W, classifyDecline, declineFault, renderDeclines,
+  renderWindow, STALE_AFTER_DAYS,
 };
 
 if (require.main !== module) return;
