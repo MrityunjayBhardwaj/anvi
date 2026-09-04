@@ -556,7 +556,7 @@ function symbolInText(text, name) {
   // An undotted name has already been asked in full above, and its tail IS the name, so
   // there is no weaker question left to ask.
   if (last === n) return 'absent';
-  return new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\// The path a parenthetical hangs off, or null. Same unwrapping as extractRefFiles')}\\b`).test(s) ? 'tail-only' : 'absent';
+  return new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(s) ? 'tail-only' : 'absent';
 }
 
 // The path a parenthetical hangs off, or null. Same unwrapping as extractRefFiles —

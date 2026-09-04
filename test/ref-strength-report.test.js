@@ -151,11 +151,22 @@ console.log('\nthe window is printed, and it is the LOCAL day');
 
 console.log('\nthe newest VALIDATED stamp per catalogue is reported, newest not first');
 {
-  const r = run([
-    entry('H1', 'stamped twice', '`src/alpha.js` (`inNamedFile`)', '**VALIDATED:** 2026-01-02 — first look\n**VALIDATED:** 2026-03-04 — re-checked\n'),
+  // ⚠ TWO DIFFERENT SELECTIONS, AND THE FIRST DRAFT ONLY EXERCISED ONE. Picking the
+  // newest stamp WITHIN an entry belongs to the catalogue parser upstream; picking the
+  // newest ACROSS a catalogue's entries is this report's own line. A single-entry fixture
+  // asserts the first and leaves the second untested, which a mutation of that line
+  // proved by leaving every assertion green.
+  const across = run([
+    entry('H1', 'stamped long ago', '`src/alpha.js` (`inNamedFile`)', '**VALIDATED:** 2026-01-02 — first look\n'),
+    entry('H2', 'stamped recently', '`src/beta.js` (`movedAway`)', '**VALIDATED:** 2026-03-04 — re-checked\n'),
   ]);
-  has(r.out, 'hetvabhasa 2026-03-04', 'the NEWEST stamp is reported');
-  hasNot(r.out, 'hetvabhasa 2026-01-02', 'CONTROL — not the first one, which would make re-validation invisible');
+  has(across.out, 'hetvabhasa 2026-03-04', 'the newest stamp ACROSS a catalogue\'s entries is the one reported');
+  hasNot(across.out, 'hetvabhasa 2026-01-02', 'CONTROL — and it is not simply the first entry\'s, which document order would give');
+
+  const within = run([
+    entry('H1', 'stamped twice', '`src/alpha.js` (`inNamedFile`)', '**VALIDATED:** 2026-01-02 — first look\n**VALIDATED:** 2026-05-06 — re-checked\n'),
+  ]);
+  has(within.out, 'hetvabhasa 2026-05-06', 'and within one entry the APPENDED stamp wins, so re-validation is not invisible');
 }
 
 console.log('\na corpus with no citations is REPORTED as such, never as a clean sweep');
@@ -211,6 +222,13 @@ console.log('\nthe shared per-file predicate has exactly one definition');
   eq(C.symbolInText('const tailPartExtra = 3;', 'wrapper.tailPart'), 'absent',
      'CONTROL — the tail must match as a WORD, so a longer identifier containing it is not a match');
   eq(C.symbolInText('', 'anything'), 'absent', 'an empty file resolves nothing');
+  // ⚠ THE ESCAPING BRANCH, WHICH NO OTHER FIXTURE ENTERS. A tail with no regex
+  // metacharacter never reaches `.replace`, so a corrupted escaper and a correct one
+  // return the same answer for every name above. This suite passed over a broken one.
+  eq(C.symbolInText('const a$b = 3;', 'wrapper.a$b'), 'tail-only',
+     'a tail containing a regex metacharacter is escaped, not interpreted');
+  eq(C.symbolInText('const aXb = 3;', 'wrapper.a$b'), 'absent',
+     'CONTROL — and the metacharacter is matched LITERALLY, not as an anchor that matches nothing');
 }
 
 console.log('\nthe parenthetical\'s other paths come from the ONE path reader');
