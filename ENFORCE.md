@@ -16,7 +16,14 @@ User message
    before Claude starts thinking.
 
   ↓
-③ UserPromptSubmit — absent-warrant-check.js
+③ UserPromptSubmit — named-entry-delivery.js
+   Delivers the catalogue entries the prompt already NAMES. It selects nothing —
+   the ids were written by hand, for the work about to start. Measured: briefs name
+   a median of 8 entries and only 61.7% of them ever reached context, because prose
+   asking for a read is obeyed about six times in ten. Silent on a prompt naming
+   none. Caps the payload and NAMES what it dropped.
+
+④ UserPromptSubmit — absent-warrant-check.js
    Reads the PREVIOUS assistant turn out of the transcript and asks, of each claim
    in it, whether the observation that licenses it is present. The firing condition
    is an ABSENCE, not a match — which is why it works at a moment when the
@@ -45,40 +52,40 @@ User message
    to answer stays unanswerable, which is this component's own failure mode.
 
   ↓
-④ Context Routing Protocol — global CLAUDE.md
+⑤ Context Routing Protocol — global CLAUDE.md
    Classifies message → debugging route now includes reading Ground Truth docs
    for affected boundaries.
 
   ↓
-⑤ /anvi:debug workflow — workflows/debug.md
+⑥ /anvi:debug workflow — workflows/debug.md
    step read_ground_truth is MANDATORY. Reads Ground Truth, passes it as
    INPUT to the debugger agent. Agent must cite file:line or declare UNGROUNDED.
    3-round limit, then "read more source" not "try more experiments."
 
   ↓
-⑥ Diagnose lens — cognitive-os/modes/diagnose.md
+⑦ Diagnose lens — cognitive-os/modes/diagnose.md
    Phase 3 Question 0: "Does Ground Truth doc exist? Read it FIRST."
    Phase 3 Question 7: "How many answers are GROUNDED vs INFERRED?"
 
   ↓
-⑦ PreToolUse:Read — catalogue-context-injector.js
+⑧ PreToolUse:Read — catalogue-context-injector.js
    Fires when READING code at catalogued boundaries.
    Matches via FILES: or KINDS: (both deterministic) or text fallback.
    Injects boundary context + Ground Truth REFs before you form opinions.
 
   ↓
-⑧ PreToolUse:Bash — experiment-protocol-guard.js
+⑨ PreToolUse:Bash — experiment-protocol-guard.js
    Fires when running diagnostic tools (tools/diagnose-*, capture, raw-osc).
    Checks for ~/.anvideck/projects/[project]/investigations/exp-*.md with hypothesis + prediction.
    "Write the prediction BEFORE running."
 
   ↓
-⑨ PreToolUse:Write|Edit — catalogue-context-injector.js
+⑩ PreToolUse:Write|Edit — catalogue-context-injector.js
    Fires when editing code at catalogued boundaries.
    Injects: boundary context, error patterns, invariants, Ground Truth REFs.
 
   ↓
-⑩ PreToolUse:Bash — catalogue-id-leak-guard.js
+⑪ PreToolUse:Bash — catalogue-id-leak-guard.js
    Fires on `gh issue|pr` and `git commit` — asked of each segment's EXECUTABLE text
    (quoted arguments, `#` comments, and QUOTED heredoc bodies removed — a `<<'X'` body
    is handed to a program verbatim, so no line of it can be the publish; an UNQUOTED
@@ -101,7 +108,7 @@ User message
    nothing about closing keywords.
 
   ↓
-⑪ PreToolUse:Bash — shell-rewrite-guard.js
+⑫ PreToolUse:Bash — shell-rewrite-guard.js
    Fires on every Bash command. Warns when THIS shell (zsh) rewrites an argument
    before the command sees it: a bare `$VAR` in a `for` list or `set --` (iterates
    ONCE, unlike bash), `$var[…]` in a quoted pattern (array subscripting), or a glob
@@ -111,7 +118,7 @@ User message
    wrapper, and `$(…)`, which DOES split in zsh.
 
   ↓
-⑫ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
+⑬ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
    Enforces the base-layer Provenance Check. Fires when a tool returns data from a
    surface that isn't scoped to this project (account-wide artifact gallery, web,
    any MCP server, or a file read in ANOTHER project's territory). Injects a one-line
@@ -125,6 +132,7 @@ User message
 |------|---------|------|
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
+| Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
 | Publish-text guard (catalogue IDs; negated closing keywords) | PreToolUse:Bash (`gh issue\|pr`, `git commit`; the ID check skips the private locations, the closing-keyword check covers only a PR description and a commit message) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
@@ -491,7 +499,7 @@ Two things it checks that a plain loop would not:
 
 `~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`):
 - `SessionStart`: ground-truth-session-start.js, gsd-check-update.js
-- `UserPromptSubmit`: debug-grounding-gate.js, absent-warrant-check.js
+- `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js, absent-warrant-check.js
 - `PreToolUse:Read`: catalogue-context-injector.js
 - `PreToolUse:Write|Edit`: catalogue-context-injector.js, gsd-prompt-guard.js
 - `PreToolUse:Bash`: experiment-protocol-guard.js, catalogue-id-leak-guard.js

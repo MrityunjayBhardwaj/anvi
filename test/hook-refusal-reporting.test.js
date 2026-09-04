@@ -150,6 +150,11 @@ const payloadFor = (hook, dir) => {
       return { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: file } };
     case 'debug-grounding-gate.js':
       return { hook_event_name: 'UserPromptSubmit', prompt: 'this is broken, debug the failing test' };
+    case 'named-entry-delivery.js':
+      // Names ids AND a catalogue, which is the only shape this door acts on.
+      // A payload naming neither would make it silent for a reason unrelated to
+      // the refusal under test — the vacuous pass this suite exists to prevent.
+      return { hook_event_name: 'UserPromptSubmit', prompt: 'read .anvi entries H1 and V1 first' };
     case 'experiment-protocol-guard.js':
       return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'node tools/diagnose-rate.js' } };
     case 'catalogue-id-leak-guard.js':

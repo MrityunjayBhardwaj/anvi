@@ -111,6 +111,7 @@ const COVERED = new Set([
   'provenance-guard.js',
   'ground-truth-session-start.js',
   'debug-grounding-gate.js',
+  'named-entry-delivery.js',      // test/named-entry-delivery.test.js drives it through real stdin
   'absent-warrant-check.js',      // witnessed below, plus test/absent-warrant-check.test.js
   'experiment-protocol-guard.js',
   'catalogue-id-leak-guard.js',
