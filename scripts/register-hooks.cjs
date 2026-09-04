@@ -28,6 +28,7 @@ const PRUNE = process.argv.slice(2).includes('--prune');
 const REGISTRATIONS = [
   ['SessionStart',     null,         'ground-truth-session-start.js', 5],
   ['UserPromptSubmit', null,         'debug-grounding-gate.js',       5],
+  ['UserPromptSubmit', null,         'named-entry-delivery.js',       5],
   ['PreToolUse',       'Write|Edit', 'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Read',       'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
