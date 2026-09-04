@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -293,15 +293,13 @@ if (lintOnly) {
     // than folded into `present`.
     const dotted = last !== name;
     try {
-      const txt = fs.readFileSync(path.join(cwd, rel), 'utf8');
-      if (txt.includes(name)) return 'present';
-      if (new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(txt)) {
-        // The member access may genuinely be written across a line break, so this
-        // is not evidence of absence either. It is evidence that stops one step
-        // short of the claim, which is exactly what wants saying out loud.
-        if (!dotted) return 'present';
-        return { verdict: 'unchecked', note: 'in the file that cites it' };
-      }
+      // Asked through the SHARED predicate rather than restated here. The REF strength
+      // report asks the same per-file question as its headline, and two expressions of
+      // it would drift apart on exactly the dotted-name case this branch exists for —
+      // with both halves still printing a confident number.
+      const where = symbolInText(fs.readFileSync(path.join(cwd, rel), 'utf8'), name);
+      if (where === 'present') return 'present';
+      if (where === 'tail-only') return { verdict: 'unchecked', note: 'in the file that cites it' };
     } catch { /* unreadable — fall through to the repo-wide question */ }
     // Keyed on the NAME, not the tail. Two dotted names can share a tail and
     // deserve different answers, and the old key would have served the first

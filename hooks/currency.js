@@ -497,6 +497,28 @@ function citedSymbols(refField) {
     }
     const inner = s.slice(i + 1, depth > 0 ? s.length : k - 1);
 
+    // Paths named INSIDE the parenthetical, other than the one it hangs off. This is the
+    // false-positive mode #272 documents, made visible rather than guessed at: a note may
+    // legitimately MENTION a name while attributing it to another file in the same breath,
+    // which reads as a mis-point to a per-file checker and as correct prose to a human.
+    // Computed HERE, because `refPathToken` is the one reader of the path grammar and a
+    // consumer re-deriving it would be a second — the failure this whole area is organised
+    // against. Backticked tokens only: a path is written in backticks throughout the
+    // corpus, and widening to bare prose makes `e.g.` a path.
+    const otherPaths = [];
+    for (const t of inner.matchAll(/`([^`]+)`/g)) {
+      const raw = String(t[1]).trim().replace(/\(\)$/, '');
+      // ⚠ A DOTTED SYMBOL NAME PASSES refPathToken. `wrapper.tailPart` is a token, a dot,
+      // and a short letter-initial tail, which is the whole of that rule — so without this
+      // line every dotted member access in a parenthetical reads as a second file being
+      // named, and the citation leaves the denominator as ambiguous rather than being
+      // checked. Measured on the fixture and then on the live corpus. The discriminator is
+      // `isSymbolName`, which is already the one rule for what a name is, so the two
+      // questions cannot drift apart: a token readable as a symbol is not a path here.
+      if (isSymbolName(raw)) continue;
+      const p = refPathToken(raw);
+      if (p && p !== file && !otherPaths.includes(p)) otherPaths.push(p);
+    }
     for (const m of inner.matchAll(/`([^`]+)`/g)) {
       const name = String(m[1]).trim().replace(/\(\)$/, '');
       if (!isSymbolName(name)) continue;
@@ -504,11 +526,37 @@ function citedSymbols(refField) {
       const key = `${file} ${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ file, name });
+      out.push({ file, name, otherPaths });
     }
     i = k - 1;
   }
   return out;
+}
+
+// Is a cited NAME in a given FILE'S TEXT, and did the FULL name answer or only its tail?
+//
+// The one definition of the per-file half of the symbol question. Two consumers ask it —
+// the currency lint, as the cheap pre-filter before its repo-wide search, and the REF
+// strength report, where it IS the headline — and two implementations would grade
+// different corpora while printing the same finding name. It lives beside `citedSymbols`
+// because it is the second half of one question: that decides what was cited, this decides
+// whether it is there.
+//
+// Three outcomes, and `tail-only` is NEVER folded into `present`. A dotted name whose tail
+// is in the file but whose full form is not is evidence that stops one step short of the
+// claim — the member access may genuinely be written across a line break, so it is not
+// evidence of absence either. That is exactly what wants saying out loud rather than being
+// rounded in either direction.
+function symbolInText(text, name) {
+  const s = String(text == null ? '' : text);
+  const n = String(name == null ? '' : name).trim();
+  if (!n) return 'absent';
+  if (s.includes(n)) return 'present';
+  const last = n.split('.').pop();
+  // An undotted name has already been asked in full above, and its tail IS the name, so
+  // there is no weaker question left to ask.
+  if (last === n) return 'absent';
+  return new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\// The path a parenthetical hangs off, or null. Same unwrapping as extractRefFiles')}\\b`).test(s) ? 'tail-only' : 'absent';
 }
 
 // The path a parenthetical hangs off, or null. Same unwrapping as extractRefFiles —
@@ -2031,6 +2079,10 @@ module.exports = {
   // citation is one rule, and a second reader of it would judge a different corpus
   // while reporting the same finding name.
   citedSymbols, citedNameIsTrackedPath,
+  // The per-file half of the symbol question, exported for the reason its own note gives:
+  // the lint asks it as a pre-filter and the strength report asks it as the headline, and
+  // a second implementation would disagree silently on the dotted-name case.
+  symbolInText,
   // The boundary questions the hook no longer answers alone: what a boundary is
   // CALLED, and whether it DECLARES what it governs. Exported for the same reason
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers
