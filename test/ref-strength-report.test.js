@@ -199,6 +199,17 @@ console.log('\na repo that is not a checkout REFUSES, rather than calling the wh
   hasNot(r.out, 'cited paths are files in this repo', 'CONTROL — and no rate is printed, so 0% cannot be read as a finding');
 }
 
+console.log('\nthe printed classes reconcile with their totals, and a run that does not REFUSES');
+{
+  // Every figure here is a partition of a population. A partition that silently stops
+  // covering its population still prints a full page of plausible numbers, which is the
+  // same invisibility as the metric this tool replaces. So the report checks its own
+  // arithmetic and declines to be read when it does not hold.
+  const r = run(ALL);
+  hasNot(r.out, 'INTERNAL', 'a healthy run reconciles and says nothing about it');
+  eq(r.status, 3, 'CONTROL — and still reports its real failure count, so silence here is not silence everywhere');
+}
+
 console.log('\nthe report labels itself PROVENANCE, not support');
 {
   const r = run(ALL);

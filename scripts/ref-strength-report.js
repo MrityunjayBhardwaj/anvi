@@ -38,10 +38,15 @@
 //   last matcher in this repo went wrong: right corpus, wrong field, four successive
 //   corrections before the count settled.
 //
-// ⚠ EXIT CODE IS A COUNT, NOT A VERDICT. It is the number of citations that do not resolve
+// ⚠ EXIT CODE IS A COUNT, NOT A VERDICT, and the reserved codes are stated once here:
+//   0-250  that many citations do not resolve where they are named
+//   251    more than 250 do
+//   254    the report's own classes do not sum to their totals — refuses to be read
+//   255    it could not report at all (no catalogue, or a repo that is not a checkout)
+//
+// It is the number of citations that do not resolve
 // where they are named — symbol pairs found elsewhere or nowhere, plus cited paths that
-// resolve nowhere. Capped at 250 (and 251 means "more than 250"); 255 is a REFUSAL to
-// report at all. Everything else — ambiguity, tail-only matches, unanchorable entries,
+// resolve nowhere. Everything else — ambiguity, tail-only matches, unanchorable entries,
 // delegated classes — is reported with its own denominator and explicitly kept OUT of that
 // count, because a number that silently absorbs the cases it cannot judge is the defect this
 // instrument exists to measure.
@@ -394,14 +399,16 @@ function main() {
     console.error(`REFUSING: ${REPO} is not a git working tree, and every path question here is`);
     console.error('answered by git. From a plain directory git says "never tracked" about everything,');
     console.error('so the report would mark the entire bibliography broken. Point --repo at the checkout.');
-    process.exit(255);
+    process.exitCode = 255;
+    return;
   }
   const scanned = scan();
   if (scanned === null) {
     // Printing zeros here is indistinguishable from a catalogue with no citations, which is
     // the failure this whole report exists to catch.
     console.error(`REFUSING: no catalogue could be read at ${CAT_DIR}.`);
-    process.exit(255);
+    process.exitCode = 255;
+    return;
   }
   const { rows, fileRows, other, entries, stamps } = scanned;
 
@@ -418,6 +425,18 @@ function main() {
   const misPointing = by('elsewhere') + by('gone');
   const deadPaths = kindOf('deleted') + kindOf('external');
   const failures = misPointing + deadPaths;
+
+  // ⚠ THE PRINTED CLASSES MUST SUM TO THEIR TOTALS, AND THIS IS THE ONLY THING THAT ASKS.
+  // Every number in this report is a partition of a population, and a partition that has
+  // silently stopped covering its population still prints a full page of plausible figures —
+  // the failure is invisible in exactly the way the metric this tool was built to replace
+  // was invisible. A mismatch is not a finding about the corpus, it is a refusal to be read.
+  const sums = [
+    ['entries', entries.universal + entries.noRef + entries.unanchorable + entries.judged, entries.total],
+    ['symbol pairs', askable.length + by('ambiguous-attribution') + by('names-a-file') + by('file-unresolved') + by('unknown'), rows.length],
+    ['askable pairs', inFile + by('tail-only') + by('elsewhere') + by('gone'), askable.length],
+    ['cited paths', kindOf('present') + kindOf('reference') + kindOf('ambiguous') + kindOf('deleted') + kindOf('external') + kindOf('unknown'), fileRows.length],
+  ].filter(([, got, want]) => got !== want);
 
   const shas = resolveShas(other.shas);
   const issues = online ? resolveIssues(other.issues) : null;
@@ -444,6 +463,15 @@ function main() {
     rows: showAll || jsonOut ? rows : undefined,
     fileRows: showAll || jsonOut ? fileRows : undefined,
   };
+
+  if (sums.length) {
+    for (const [what, got, want] of sums) {
+      console.error(`✗ INTERNAL: the ${what} classes sum to ${got}, not ${want} — a class is missing or double-counted.`);
+    }
+    console.error('Do not trust this run. The figures below would each be well-formed and none of them complete.');
+    process.exitCode = 254;
+    return;
+  }
 
   if (jsonOut) {
     console.log(JSON.stringify(payload, null, 1));
