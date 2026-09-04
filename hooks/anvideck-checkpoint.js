@@ -100,14 +100,51 @@ function memorySyncEnabled() {
   } catch { return false; }
 }
 
+// Two directories can be the same directory under different names, and the only
+// cheap way to ask is to canonicalise both sides.
+function sameDir(a, b) {
+  try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return a === b; }
+}
+
+// A linked worktree's basename is NOT the project's name in the store, and its
+// cwd-encoded slug is NOT the memory namespace the harness chose — both belong to
+// the MAIN worktree. Measured 2026-08-26: from `…/projects/basher-ai` (a worktree
+// of `…/projects/basher`) the envelope resolved to a non-existent `basher-ai` and
+// syncMemory returned early, so the mirror silently never ran. Resolving from the
+// main worktree recovers BOTH the envelope name and the exact live slug.
+function projectRoot(cwd) {
+  try {
+    const common = execSync('git rev-parse --path-format=absolute --git-common-dir', {
+      cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!common) return cwd;
+    const root = path.dirname(common);
+    // git reports REALPATH'd paths; the harness encoded whatever cwd string it was
+    // handed. Returning git's answer unconditionally would rewrite the slug for every
+    // project whose path traverses a symlink (/var -> /private/var on macOS), so an
+    // ordinary session would look for a memory directory that does not exist and
+    // decline to mirror — trading one silent skip for another. Substitute ONLY when
+    // the two are genuinely different directories, i.e. a LINKED worktree; otherwise
+    // hand cwd back verbatim so the ordinary case stays byte-identical.
+    if (sameDir(root, cwd)) return cwd;
+    // In a SUBMODULE the common dir is `<super>/.git/modules/<name>`, so its parent is
+    // `<super>/.git/modules` — a git internal, not a checkout, and its basename would be
+    // the literal `modules`. Substitute only for a root that is itself a working tree.
+    if (!fs.existsSync(path.join(root, '.git'))) return cwd;
+    return root;
+  } catch { /* not a git repo, or a git too old for --path-format — keep cwd */ }
+  return cwd;
+}
+
 function syncMemory(cwd) {
   try {
     if (!cwd) return;
     if (!memorySyncEnabled()) return;                     // no consent → no mirror (opt-in only)
-    const name = path.basename(cwd);
+    const root = projectRoot(cwd);
+    const name = path.basename(root);
     const envelope = path.join(DIR, 'projects', name);
     if (!fs.existsSync(envelope)) return;                 // not an anvi project — nothing to mirror
-    const live = path.join(CLAUDE_DIR, 'projects', encodeCwd(cwd), 'memory');
+    const live = path.join(CLAUDE_DIR, 'projects', encodeCwd(root), 'memory');
     if (!fs.existsSync(live) || !fs.statSync(live).isDirectory()) return;
     if (countFiles(live) === 0) return;                   // NEVER mirror empty → don't --delete-wipe the backup
     const store = path.join(envelope, 'memory');
@@ -118,7 +155,7 @@ function syncMemory(cwd) {
       fs.writeFileSync(markerPath,
         `# Memory backup mirror — do not edit\n\n` +
         `One-way backup of the live memory at\n` +
-        `\`~/.claude/projects/${encodeCwd(cwd)}/memory/\`, written by the\n` +
+        `\`~/.claude/projects/${encodeCwd(root)}/memory/\`, written by the\n` +
         `anvideck-checkpoint Stop hook at session end.\n\n` +
         `- The harness never reads memory from here — it reads/writes the live copy above.\n` +
         `- Files here are OVERWRITTEN (rsync --delete) every session. Edits made here are lost.\n` +
