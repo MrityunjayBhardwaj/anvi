@@ -13,6 +13,14 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
+// The one catalogue reader. Required here for the same reason the injector requires
+// it: the grammar of an entry and of its fields is one rule, and a second reader of
+// either judges a different corpus while printing the same finding name.
+const { parseEntries } = require('./currency.js');
+
+// A REF field DECLARING that the entry is knowingly unanchored, as opposed to a body
+// that MENTIONS the word. Case-sensitive and word-bounded; see the note at its use.
+const DECLARES_UNGROUNDED = /\bUNGROUNDED\b/;
 
 // One writer for this hook's only output channel, so the refusal path and the
 // status path cannot drift into different shapes.
@@ -214,19 +222,45 @@ process.stdin.on('end', () => {
         oversized.push(`${cat.replace('.md', '')} (${kb}KB, ${compactionState(content)})`);
       }
 
-      // Split into entries by ## headers with IDs
-      const entries = content.split(/^## ([A-Z]+\d+)/m);
-      for (let i = 1; i < entries.length; i += 2) {
-        const id = entries[i];
-        const body = entries[i + 1] || '';
+      // ⚠ ONE PARSER, AND IT IS NOT THIS ONE. Splitting on `/^## ([A-Z]+\d+)/m` was a
+      // third reader of a grammar `hooks/currency.js` already owns: it saw only
+      // level-2 headings, so a level-3 entry or a slash-joined id was invisible to
+      // the count while being live everywhere else.
+      for (const entry of parseEntries(content)) {
         // Skip universal entries (U1, UV1, UK1 etc)
-        if (/^U[A-Z]?\d+$/.test(id)) continue;
-        if (body.includes('**REF:**') && !body.includes('UNGROUNDED')) {
+        if (/^U[A-Z]?\d+$/.test(entry.id)) continue;
+        // AN ADDENDUM IS NOT A SECOND ENTRY. A later occurrence of an id is a dated
+        // continuation of the first: it inherits the primary's evidence and normally
+        // does not repeat the REF. Counting it separately would both inflate the
+        // denominator and report the parent's own citation as missing — this very
+        // defect, one level along. This project's own krama carries the live
+        // instance: a level-3 ADDENDUM under a level-2 primary that cites three files.
+        if (entry.occurrence > 1) continue;
+        // ⚠ ASK THE FIELD, NOT THE DOCUMENT (anvi #393). `body.includes('UNGROUNDED')`
+        // read a QUOTATION of the declaration as the declaration, so the entry whose
+        // subject IS this predicate was reported as having no citation while carrying
+        // one. The word is a field value, so it is read off the field. The companion
+        // half, `body.includes('**REF:**')`, asked a field question by scanning prose
+        // and counted an empty `**REF:**` as a citation; `refField` is undefined for
+        // both "no field" and "field with no value", which is the honest answer.
+        //
+        // Case-SENSITIVE, word-bounded, and deliberately NOT anchored to the start of
+        // the field. Both halves are measured over the store's 60 catalogues rather
+        // than chosen: of 870 REF fields naming the word, 827 open with it and 43
+        // close with it ("… turbo.json build outputs. UNGROUNDED."), so anchoring
+        // would silently re-grade 43 authors' declarations as grounded — and all 870
+        // are declarations, while the prose that caused this bug ("the grounded/
+        // ungrounded predicate") is lowercase and lives in the body, not the field.
+        //
+        // The residue, stated rather than hidden: a REF that QUOTED the word in
+        // uppercase would still be misread. None exists among the 4,064 fields that
+        // carry a value, and narrowing further would cost the trailing form above.
+        const ref = entry.refField;
+        if (ref && !DECLARES_UNGROUNDED.test(ref)) {
           grounded++;
         } else {
           ungrounded++;
-          const titleMatch = body.match(/^[:\s]*(.+?)$/m);
-          if (titleMatch) ungroundedList.push(`${id}: ${titleMatch[1].trim().substring(0, 50)}`);
+          if (entry.title) ungroundedList.push(`${entry.id}: ${entry.title.trim().substring(0, 50)}`);
         }
       }
     }
