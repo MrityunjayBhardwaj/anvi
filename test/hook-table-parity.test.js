@@ -238,5 +238,58 @@ ok(partial.length === 1 && partial[0].includes('PreToolUse'),
 ok(tableRows(TABLE, '## No Such Heading') === null,
   'a missing section returns null, not an empty list');
 
+// --- the third direction: the DIRECTORY against the registrar (anvi #391 §7) ---
+//
+// The two checks above compare the registrar with the documentation. Both read the
+// registrar as the population, so neither can see a hook that exists on disk and is
+// in no table at all — and that is the direction which actually shipped a defect:
+// `tree-lock-guard.js` sat in `hooks/` for a day, live and unregistered, while
+// hook-table-parity, hook-liveness and hook-install-imports all passed. Worse, it is
+// the dangerous direction, because `install.sh` globs `hooks/*.js` wholesale: an
+// unregistered hook is COPIED to every user and wired for none of them.
+//
+// ⚠ AN UNREGISTERED COMPONENT MAY BE OFF BY DESIGN, so this cannot simply demand that
+// every file be registered. The discriminator is DERIVED rather than listed: a file is
+// hook-SHAPED if it reads stdin and emits a hookSpecificOutput envelope. A shared
+// module (`currency.js`, `anvi-paths.js`, `shell-spans.js`) does neither and is not
+// accused. A hook-shaped file must then be either registered or named below WITH ITS
+// REASON — an explicit decision, not an absence.
+console.log('directory against registrar');
+
+const HOOKS_DIR = path.join(__dirname, '..', 'hooks');
+const hookShaped = fs.readdirSync(HOOKS_DIR)
+  .filter(f => f.endsWith('.js'))
+  .filter(f => {
+    const s = fs.readFileSync(path.join(HOOKS_DIR, f), 'utf8');
+    return /process\.stdin/.test(s) && /hookSpecificOutput/.test(s);
+  })
+  .sort();
+
+// Deliberately unregistered, each with the reason it is off. An entry here is a
+// decision someone made and can defend; an empty value is not accepted.
+const DELIBERATELY_UNREGISTERED = {
+  'absent-warrant-check.js':
+    'disabled 2026-08-17: its trigger is 17 hand-written regexes over prose with no ' +
+    'currency mechanism. Re-enable only when detection is driven by something maintained.',
+};
+
+// A derivation that derives nothing would pass every assertion under it.
+ok(hookShaped.length >= 5, `the hook-shape derivation finds hooks at all (${hookShaped.length} of ${fs.readdirSync(HOOKS_DIR).filter(f => f.endsWith('.js')).length} files)`);
+ok(!hookShaped.includes('currency.js') && !hookShaped.includes('anvi-paths.js'),
+  'a shared module is NOT counted as a hook (it reads no stdin and emits no envelope)');
+
+const wiredFiles = new Set(REGISTRATIONS.map(r => r[2]));
+const stranded = hookShaped.filter(f => !wiredFiles.has(f) && !(f in DELIBERATELY_UNREGISTERED));
+ok(stranded.length === 0,
+  `every hook-shaped file is registered or has a recorded reason${stranded.length ? ` — stranded: ${stranded.join(', ')}` : ''}`);
+
+for (const [f, why] of Object.entries(DELIBERATELY_UNREGISTERED)) {
+  ok(typeof why === 'string' && why.trim().length > 20, `${f}: the reason it is off is actually stated`);
+  // A file that has since been registered, or deleted, must not linger here saying
+  // it is deliberately off — that is how a stale exemption hides a real regression.
+  ok(!wiredFiles.has(f), `${f}: listed as deliberately off, and is indeed not registered`);
+  ok(fs.existsSync(path.join(HOOKS_DIR, f)), `${f}: listed as deliberately off, and still exists`);
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} hook table parity: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

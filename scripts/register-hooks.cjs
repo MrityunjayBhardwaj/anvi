@@ -25,11 +25,27 @@ const HOOKS_DIR = path.join(HOME, '.claude', 'hooks');
 const PRUNE = process.argv.slice(2).includes('--prune');
 
 // The Anvi hooks: [event, matcher|null, file, timeout]
+// ⚠ ORDER MATTERS WITHIN A GROUP, AND THE ENFORCING HOOKS COME FIRST.
+// Registration order is preserved into each settings.json group, and an ENFORCING
+// hook (one that may refuse a tool call — see ENFORCE.md §Liveness) must run before
+// the annotating ones. Otherwise the advisory guards spend a turn attaching context
+// to a call that is about to be denied, and the reader gets the annotation and the
+// refusal in the same breath with no way to tell which came first.
 const REGISTRATIONS = [
   ['SessionStart',     null,         'ground-truth-session-start.js', 5],
   ['UserPromptSubmit', null,         'debug-grounding-gate.js',       5],
   ['UserPromptSubmit', null,         'named-entry-delivery.js',       5],
-  ['PreToolUse',       'Write|Edit', 'catalogue-context-injector.js', 5],
+  // Enforcing — first in both of its groups, deliberately (see the note above).
+  ['PreToolUse',       'Bash',              'tree-lock-guard.js',     10],
+  ['PreToolUse',       'Write|Edit|MultiEdit', 'tree-lock-guard.js',  10],
+  // ⚠ THIS MATCHER IS SHARED WITH THE GUARD ABOVE AND THE TWO MUST STAY EQUAL.
+  // The guard has to cover MultiEdit — a multi-edit mutates the tree exactly as a
+  // Write does — and running the two off different matchers would put them in
+  // different settings.json groups, where relative order is undefined and the
+  // refusal could arrive after the annotation. Widening the injector to match is
+  // the smaller change and it closes a real gap: the injector never fired on a
+  // MultiEdit, so a catalogued boundary edited that way was silently uncovered.
+  ['PreToolUse',       'Write|Edit|MultiEdit', 'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Read',       'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
   ['PreToolUse',       'Bash',       'catalogue-id-leak-guard.js',    5],

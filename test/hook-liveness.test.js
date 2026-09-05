@@ -119,6 +119,7 @@ const COVERED = new Set([
   'anvi-route-logger.js',
   'anvideck-checkpoint.js',       // anvideck-checkpoint-memory-sync.test.sh
   'register-hooks.cjs',           // the registrar itself, not a hook
+  'tree-lock-guard.js',           // section 8 — a REFUSAL witness, not an injection one
 ]);
 const uncovered = [...new Set(registered)].filter(h => !COVERED.has(h));
 ok(uncovered.length === 0, `every registered hook has a liveness witness${uncovered.length ? ` — missing: ${uncovered.join(', ')}` : ''}`);
@@ -391,7 +392,12 @@ ok(r.ctx === '', 'silent on 4 distinct id-shaped tokens (SHA1/MD5/CRC32/UTF8) �
 console.log('degradation (the never-block contract)');
 const ALL = ['ground-truth-session-start.js', 'debug-grounding-gate.js',
   'experiment-protocol-guard.js', 'provenance-guard.js', 'catalogue-id-leak-guard.js',
-  'anvi-route-logger.js', 'catalogue-context-injector.js', 'absent-warrant-check.js'];
+  'anvi-route-logger.js', 'catalogue-context-injector.js', 'absent-warrant-check.js',
+  // ⚠ THE ENFORCING HOOK IS IN THIS LIST DELIBERATELY. It is the one hook allowed to
+  // exit non-zero, which makes it the one hook where a crash is indistinguishable from
+  // a refusal — so 'fails open on its own bugs' has to be witnessed, not asserted in
+  // prose. A guard that blocked whenever it threw would brick a session.
+  'tree-lock-guard.js'];
 for (const h of ALL) {
   const bad = spawnSync('node', [path.join(HOOKS, h)], { input: 'not json at all{{', encoding: 'utf8', timeout: 20000 });
   ok(bad.status === 0, `${h}: malformed stdin → exit 0, no crash`);
@@ -402,6 +408,124 @@ for (const h of ['ground-truth-session-start.js', 'debug-grounding-gate.js']) {
   const none = fire(h, { cwd: ORPHAN, prompt: 'why is this broken', hook_event_name: 'UserPromptSubmit' });
   ok(none.exit === 0, `${h}: project with no catalogues → exit 0`);
 }
+
+// --- 8. tree-lock-guard — the ENFORCING hook (anvi #391) --------------------
+// Contract is the inverse of every case above: the observable is a REFUSAL, not an
+// injection. Exit 2 plus a deny payload. Injection witnesses cannot see this hook at
+// all, which is why it needs its own section rather than a row in one of the loops.
+//
+// ⚠ BOTH DIRECTIONS, AND THE SECOND IS THE ONE THAT MATTERS. A guard that refuses
+// what it must is half a witness; a guard STUCK PERMANENTLY ON refuses that too, and
+// is the failure mode that gets a guard uninstalled. So every refusal below is paired
+// with the release that must follow it.
+//
+// Policy is read from $HOME/.claude/tree-guard.json, so the fixture gets its own HOME.
+// That keeps the real machine config out of the test in both directions: the test
+// cannot be coloured by the developer's own policy, and it cannot write to their
+// override log.
+console.log('tree-lock-guard (PreToolUse — the enforcing hook)');
+
+const HOME2 = path.join(tmp, 'home');
+const REPO = path.join(tmp, 'guarded-repo');
+fs.mkdirSync(path.join(HOME2, '.claude'), { recursive: true });
+fs.mkdirSync(path.join(REPO, 'src'), { recursive: true });
+const GATE_PAT = 'liveness-fixture-gate';
+fs.writeFileSync(path.join(HOME2, '.claude', 'tree-guard.json'), JSON.stringify({
+  default: { bannedOps: [], gatePatterns: [] },
+  repos: { [REPO]: { bannedOps: ['git stash'], gatePatterns: [GATE_PAT] } },
+}));
+
+function guard(payload, env) {
+  const r = spawnSync('node', [path.join(HOOKS, 'tree-lock-guard.js')], {
+    input: JSON.stringify(payload), encoding: 'utf8', timeout: 20000,
+    env: Object.assign({}, process.env, { HOME: HOME2 }, env || {}),
+  });
+  let denied = false;
+  try { denied = JSON.parse(r.stdout || '{}').hookSpecificOutput.permissionDecision === 'deny'; } catch { denied = false; }
+  return { exit: r.status, denied, why: (r.stdout || '') + (r.stderr || '') };
+}
+const bash = (command, cwd) => ({ tool_name: 'Bash', tool_input: { command }, cwd: cwd || REPO });
+
+// BAN — a banned op, gate or no gate.
+let g = guard(bash('git stash'));
+ok(g.exit === 2 && g.denied, 'BAN: a banned tree op is REFUSED (exit 2 + deny payload)');
+ok(/git worktree add|scratchpad/.test(g.why), 'BAN: the refusal carries the remedy, not just the verdict');
+
+// ⚠ A MENTION IS NOT A COMMAND. This is one of the two bugs the guard found in itself:
+// it refused an inspection whose sample string quoted the banned op.
+ok(guard(bash('echo "git stash is banned here"')).exit === 0, 'BAN: a QUOTED mention of the op is allowed');
+ok(guard(bash("grep -rn 'git stash' docs/")).exit === 0, 'BAN: searching FOR the op is allowed');
+ok(guard(bash('git stash list')).exit === 0, 'BAN: a read-only subcommand is allowed');
+
+// ⚠ THE BYPASS OBEYS THE SAME RULE AS THE BAN. Three spellings that each opened the
+// wall by merely NAMING the override token, all measured working before the fix.
+ok(guard(bash('echo "prefix with TREE_LOCK_OVERRIDE=1 to bypass" && git stash')).exit === 2,
+  'BAN: a QUOTED mention of the override token does not open the door');
+ok(guard(bash('grep -rn TREE_LOCK_OVERRIDE=1 notes.md && git stash')).exit === 2,
+  'BAN: the override token as an ARGUMENT does not open the door (only a command position counts)');
+ok(guard(bash("cat <<'EOF' > doc.md\nuse TREE_LOCK_OVERRIDE=1\nEOF\ngit stash")).exit === 2,
+  'BAN: the override token inside a HEREDOC does not open the door');
+ok(guard(bash('make build && TREE_LOCK_OVERRIDE=1 git stash')).exit === 0,
+  'BAN: the override still works at a genuine command position after &&');
+
+// ⚠ A HEREDOC ANYWHERE IN THE COMMAND USED TO BYPASS THE GUARD ENTIRELY. `heredocStates`
+// takes (cmd, quoteStates); called with one argument it throws, and the blanket catch
+// that makes an enforcing hook fail open turned that crash into "allowed". Both rules
+// went inert for any command containing `<<`, and nothing could see it, because a
+// guard that has stopped guarding is silent in exactly the way a guard with nothing to
+// say is silent.
+ok(guard(bash("cat <<'EOF' > doc.md\nhello\nEOF\ngit stash")).exit === 2,
+  'BAN: a banned op AFTER a heredoc is still refused (the guard did not crash open)');
+ok(guard(bash("cat <<'EOF' > d.md\ngit stash\nEOF")).exit === 0,
+  'BAN: a banned op INSIDE a heredoc is text, and stays allowed');
+
+// Inert by default — the opt-in condition. A repo with no entry gets a policy that
+// bans nothing, so installing the hook changes nothing for projects that never asked.
+const OUTSIDE = path.join(tmp, 'unguarded-repo');
+fs.mkdirSync(OUTSIDE, { recursive: true });
+ok(guard(bash('git stash', OUTSIDE)).exit === 0, 'inert for a repo with no policy entry');
+
+// The escape hatch, and its audit trail. A bypass that is not recorded is the same
+// as no wall at all.
+ok(guard(bash('TREE_LOCK_OVERRIDE=1 git stash')).exit === 0, 'the logged override passes');
+const log = path.join(HOME2, '.claude', 'tree-guard-overrides.log');
+ok(fs.existsSync(log) && /git stash/.test(fs.readFileSync(log, 'utf8')), 'the override was APPENDED to the log');
+
+// LOCK — the tree is locked while a gate reads it. The gate is a real process, because
+// the guard reads the process table; a stubbed one would witness nothing.
+// ⚠ THE LOOP IS LOAD-BEARING, NOT STYLE. `sh -c 'sleep 30 # marker'` is a SIMPLE
+// command, and sh exec-optimises those: the shell replaces itself with `sleep 30` and
+// the marker vanishes from the process table. Measured — that spelling shows up in ps
+// as bare `sleep 5`, so the gate is invisible and every LOCK case below passes
+// vacuously. A loop cannot be exec-optimised, so the full command line survives.
+const gate = require('child_process').spawn('/bin/sh',
+  ['-c', `while :; do sleep 1; done # ${GATE_PAT} ${REPO}`], { detached: true, stdio: 'ignore' });
+const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+let visible = false;
+for (let i = 0; i < 60 && !visible; i++) {
+  nap(50);
+  try {
+    visible = spawnSync('/bin/ps', ['-Ao', 'command='], { encoding: 'utf8' })
+      .stdout.split('\n').some(l => l.includes(GATE_PAT) && l.includes(REPO));
+  } catch { /* retry */ }
+}
+ok(visible, 'the fixture gate is actually running (else every LOCK case below is vacuous)');
+
+const write = { tool_name: 'Write', tool_input: { file_path: path.join(REPO, 'src', 'new.ts') }, cwd: REPO };
+g = guard(write);
+ok(g.exit === 2 && g.denied, 'LOCK: a Write into a gated tree is REFUSED');
+ok(guard(bash('rm -rf src/build')).exit === 2, 'LOCK: a mutating command is REFUSED while the gate runs');
+ok(guard(bash('echo hi > src/out.txt')).exit === 2, 'LOCK: a redirect into the tree is REFUSED');
+ok(guard(bash('git show HEAD:src/a.ts')).exit === 0, 'LOCK: a READ-ONLY command still passes while locked');
+// The scratchpad pattern that was used correctly during the original incident.
+ok(guard({ tool_name: 'Write', tool_input: { file_path: path.join(tmp, 'scratch.ts') }, cwd: REPO }).exit === 0,
+  'LOCK: writing OUTSIDE the tree still passes while locked');
+
+// ⚠ THE RELEASE. Without this the suite cannot tell a working guard from one wedged on.
+try { process.kill(-gate.pid, 'SIGKILL'); } catch { try { gate.kill('SIGKILL'); } catch { /* gone */ } }
+let released = false;
+for (let i = 0; i < 60 && !released; i++) { nap(50); released = guard(write).exit === 0; }
+ok(released, 'LOCK: the guard RELEASES once the gate exits — it is not wedged on');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

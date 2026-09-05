@@ -130,13 +130,14 @@ User message
 
 | Hook | Trigger | File |
 |------|---------|------|
+| Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
 | Publish-text guard (catalogue IDs; negated closing keywords) | PreToolUse:Bash (`gh issue\|pr`, `git commit`; the ID check skips the private locations, the closing-keyword check covers only a PR description and a commit message) | `~/.claude/hooks/catalogue-id-leak-guard.js` |
 | Shell rewrite guard | PreToolUse:Bash (idioms zsh rewrites — bare `$VAR` in `for`/`set --`, `$var[…]`, unquoted globs) | `~/.claude/hooks/shell-rewrite-guard.js` |
-| Catalogue context injector | PreToolUse:Read\|Write\|Edit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
+| Catalogue context injector | PreToolUse:Read\|Write\|Edit\|MultiEdit (catalogued boundaries) | `~/.claude/hooks/catalogue-context-injector.js` |
 | Anvideck checkpoint | Stop (dirty ~/.anvideck) | `~/.claude/hooks/anvideck-checkpoint.js` |
 | Route logger | PostToolUse:Read (reads of a cognitive-OS spec or a project catalogue) | `~/.claude/hooks/anvi-route-logger.js` |
 | Provenance guard | PostToolUse:Artifact\|WebFetch\|WebSearch\|mcp__*\|Read\|Grep\|Glob (non-project-scoped results) | `~/.claude/hooks/provenance-guard.js` |
@@ -391,9 +392,45 @@ centralized projects). See issue #5.
 
 ## Liveness — a quiet hook and a dead hook look identical
 
-Every hook wraps its body in a blanket catch and always exits 0. That is correct and
-non-negotiable: a hook must never block a tool call, and an optional annotation must
-never cost the user the thing it annotates. But **the guard fails open** — it cannot
+Hooks here come in two categories, and the rule below is written for the first.
+
+**Annotating hooks — all but one.** Each wraps its body in a blanket catch and always
+exits 0. That is correct and non-negotiable *for these*: an optional annotation must
+never cost the user the thing it annotates, so a guard that cannot decide stays quiet
+and the call proceeds.
+
+**Enforcing hooks — a deliberately small second category (anvi #391).** One exists:
+`tree-lock-guard.js`. It may refuse a tool call, because the failures it catches are
+not recoverable by re-deriving an answer — a destroyed uncommitted change, or a test
+gate that read a tree while it moved and reported a number that looks exactly like a
+real pass. There is no artifact afterwards that distinguishes that number from a true
+one, which is why an advisory line is the wrong instrument. The asymmetry is the whole
+argument: a false positive costs one rephrased command, a false negative costs work
+that cannot be recovered by inspection.
+
+Because it can refuse, it carries five conditions the annotating hooks do not:
+
+1. **Refuse only the unambiguous.** A command the guard cannot classify is *allowed*.
+   A guard that guesses trains reflexive overrides, which is the failure it exists to
+   prevent.
+2. **Carry the remedy in the refusal.** The message names the sanctioned alternatives,
+   so the fix arrives when it is needed rather than living in a document.
+3. **Provide a logged escape hatch, not an absent one.** A wall with no door sends the
+   pressure into routing around the guard. `TREE_LOCK_OVERRIDE=1` passes and is
+   appended to `~/.claude/tree-guard-overrides.log`, so a bypass is auditable rather
+   than impossible.
+4. **Fail open on its own bugs.** The blanket catch stays. A guard that throws must
+   allow — otherwise a typo in the guard bricks the session.
+5. **Be opt-in per repo, inert by default.** Policy lives in `~/.claude/tree-guard.json`
+   keyed by repo path, so no file is added to any project and installing the hook
+   changes nothing for a repo that has not asked for it.
+
+A refusal must be triggered by a **command, never by a mention of one** — every match
+is taken at an unquoted, non-heredoc offset via `hooks/shell-spans.js`. Both of this
+guard's own early bugs were that same class: it matched its own caller's `ps` line, and
+it refused commands that merely quoted the banned op.
+
+The rest of this section applies to both categories. **The guard fails open** — it cannot
 distinguish *"nothing to say"* from *"threw on every call"*. A typo'd import, a
 renamed export, a changed payload field: all collapse into silence, and silence is
 also what healthy output looks like. The hooks that inject **reminders** are the worst
