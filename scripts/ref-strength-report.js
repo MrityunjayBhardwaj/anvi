@@ -80,6 +80,7 @@ const {
   parseEntries, citedSymbols, extractRefFiles, lineAnchoredRefs,
   classifySpec, makeRefResolver, matchedTracked, citedNameIsTrackedPath, symbolInText,
 } = loadFromCandidates('currency.js');
+const { formatPct } = loadFromCandidates('rate.js');
 
 // --- args -------------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -483,7 +484,7 @@ function main() {
     return;
   }
 
-  const pct = (n, d) => d ? ` (${Math.round((n / d) * 1000) / 10}%)` : ' (no denominator — nothing was examined)';
+  const pct = (n, d) => d ? ` (${formatPct(n, d, { decimals: 1, absent: '' })})` : ' (no denominator — nothing was examined)';
 
   console.log(`REF strength — ${PROJECT}: does a citation RESOLVE where the entry names it?`);
   console.log(`  window: repo ${REPO} at ${head} (committed ${headDate}); computed ${payload.window.computedAt}`);
