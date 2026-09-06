@@ -55,6 +55,7 @@ table and the tree disagree.
 | `template.cjs` | patched | 6 |
 | `uat.cjs` | patched | 10 |
 | `verify.cjs` | patched | 12 |
+
 **Which commits to re-apply is not written down here. Ask the tool:**
 
 ```sh
