@@ -523,7 +523,14 @@ function citedSymbols(refField) {
       const name = String(m[1]).trim().replace(/\(\)$/, '');
       if (!isSymbolName(name)) continue;
       if (NEGATION.test(clauseAround(inner, m.index, m[0].length))) continue;
-      const key = `${file} ${name}`;
+      // The delimiter is a NUL because it cannot occur in a path or a symbol name, so
+      // the two halves can never run together into a colliding key. It is written as an
+      // ESCAPE rather than as a raw byte: one raw NUL makes grep call the whole file
+      // binary, and under -I (which the wrapper every session invokes passes) it then
+      // prints nothing and exits 1 — grep's answer for NO MATCHES, on the module most of
+      // this tree imports. Same string at runtime, ASCII on disk. Guarded repo-wide by
+      // test/source-nul-byte.test.js.
+      const key = `${file}\u0000${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ file, name, otherPaths });
