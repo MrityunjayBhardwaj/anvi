@@ -1324,24 +1324,43 @@ function isReachable(git, sha) {
 // mistake, one layer in. Same function ⇒ same repo, by construction.
 const committedCatalogueCache = new WeakMap();
 
+// How much output a git helper must be able to hold. Node's execSync defaults to 1 MB,
+// and reading a committed catalogue is a `git show` of the whole file — the largest one
+// here passed 1 MB and the read began throwing ENOBUFS, which was caught and reported as
+// "no store history". A limit that the corpus grows past on an ordinary Tuesday is not a
+// limit, it is a timer. Exported so the two callers that build git helpers use the same
+// number instead of each picking one (#409).
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
 function committedEntries(storeGit, cataloguePath) {
   let byPath = committedCatalogueCache.get(storeGit);
   if (!byPath) { byPath = new Map(); committedCatalogueCache.set(storeGit, byPath); }
   if (byPath.has(cataloguePath)) return byPath.get(cataloguePath);
 
-  // The catch covers the git call ONLY, and only one expected outcome: this path is
-  // not in HEAD (a catalogue created this session, or a store with no commits yet).
-  // Parsing sits OUTSIDE it deliberately — wrapping both would let a real parser bug
-  // read as "HEAD cannot answer", which is the shape that turns a broken instrument
-  // into a quiet one. parseEntries is a regex sweep over a string and has no
-  // failure of its own, so letting it throw costs nothing and hides nothing.
-  let text = null;
+  // The catch covers the git call ONLY. Parsing sits OUTSIDE it deliberately — wrapping
+  // both would let a real parser bug read as "HEAD cannot answer", which is the shape
+  // that turns a broken instrument into a quiet one. parseEntries is a regex sweep over
+  // a string and has no failure of its own, so letting it throw costs nothing.
+  //
+  // But the catch had ONE expected outcome — this path is not in HEAD — and a second one
+  // arrived that it was never written for. `git show` of a catalogue past execSync's
+  // buffer throws before git's answer is ever read, and this swallowed it identically:
+  // the largest catalogue lost the whole time rung, and every entry in it reported "no
+  // store history" while the history sat there unread (#409).
+  //
+  // So the two are separated at the only place that can tell them apart. Git RAN and
+  // said no (a numeric exit status) means absent. Anything else — ENOBUFS, git missing,
+  // a timeout — means we never got an answer, and "unreadable" is what the ladder is
+  // told. Absence and failure-to-look are different claims and must never share a word.
+  let text = null, unreadable = false;
   try {
     text = storeGit(`show HEAD:${JSON.stringify(cataloguePath)}`);
-  } catch { /* not in HEAD — there is no committed text to date */ }
-  const entries = text === null ? null : parseEntries(text);
-  byPath.set(cataloguePath, entries);
-  return entries;
+  } catch (e) {
+    if (typeof (e && e.status) !== 'number') unreadable = true;
+  }
+  const result = { entries: text === null ? null : parseEntries(text), unreadable };
+  byPath.set(cataloguePath, result);
+  return result;
 }
 
 // Ladder rung 4 — the universal fallback. Ask the STORE repo when this entry's own
@@ -1388,7 +1407,12 @@ function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level, occurrence
   // record is which. Level is still accepted and still filters, for direct callers that
   // have one and no occurrence; when both are absent the first match in document order
   // wins, which is the primary.
-  const committed = committedEntries(storeGit, cataloguePath);
+  const read = committedEntries(storeGit, cataloguePath);
+  if (!read) return null;
+  // The store could not be read. Say so — it is not the same statement as "the store
+  // has nothing", and only one of the two is the entry's fault.
+  if (read.unreadable) return { sha: null, unreadable: true };
+  const committed = read.entries;
   if (!committed) return null;
   const self = committed.find((e) => e.id === id
     && (occurrence === undefined || e.occurrence === occurrence)
@@ -1417,6 +1441,21 @@ function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level, occurrence
 // ladder documented at the top of this file. `git` is (args:string) => string
 // (stdout), run in the project repo. Returns { sha, source, provisional? } or
 // { sha: null, source: 'none' }.
+// The instant an anchor NAMES, as an ISO timestamp. A sha is only meaningful inside the
+// repository that minted it, and every rung of the ladder resolves to a PROJECT sha —
+// including the time rung, which dates the entry in the store and then converts that date
+// back into a project sha. So a project sha cannot be diffed against a store commit, and
+// the date is the one currency both repositories accept. Null when the sha is unreachable
+// or git says something that is not a timestamp: an uncomputable instant must read as
+// "unknown", never as the epoch, which would call every document drifted.
+function anchorInstant(anchor, git) {
+  if (!anchor || !anchor.sha || typeof git !== 'function') return null;
+  let out;
+  try { out = git(`log -1 --format=%cI ${JSON.stringify(anchor.sha)}`).trim(); }
+  catch { return null; }
+  return /^\d{4}-\d{2}-\d{2}T/.test(out) ? out : null;
+}
+
 function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
   const shaRe = /\b([0-9a-f]{7,40})\b/;
 
@@ -1443,6 +1482,9 @@ function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
     try {
       const t = timeAnchor();
       if (t && t.sha) return t;
+      // The rung did not decline — it could not look. That travels with the verdict so
+      // the report can say which of the two happened.
+      if (t && t.unreadable) return { sha: null, source: 'none', storeUnreadable: true };
     } catch { /* fall through to GRAY */ }
   }
   return { sha: null, source: 'none' };
@@ -1901,7 +1943,7 @@ function greenScopeText(scope) {
 //                                rung 4, the time-based fallback.
 // Returns { status, anchor, files:[{file,exists,changedCommits}], reason }.
 function computeCurrency(entry, opts) {
-  const { git, fileExists, storeGit, cataloguePath, refResolver, readVendor } = opts;
+  const { git, fileExists, storeGit, cataloguePath, refResolver, readVendor, refHistory } = opts;
 
   // The UNION of what the entry maps and what grounds it. A boundary genuinely
   // depends on both: FILES: is the code it describes, REF: the doc it was written
@@ -1953,7 +1995,70 @@ function computeCurrency(entry, opts) {
     readVendor);
   const withVendor = (v) => (vendor ? { ...v, vendor } : v);
 
+  // THE STORE'S OWN DOCUMENTS ARE NOT AN UPSTREAM-VERSION QUESTION.
+  //
+  // `ref/sources/` holds vendored third-party code, and for that the 🔵 exemption below
+  // is right: "is this current" really is a question about someone else's release, which
+  // no git history here can answer. `ref/*.md` — the Ground Truth documents — sit in the
+  // same directory and are the opposite case. We write them, and the store is a git repo
+  // that tracks them. Their drift is ordinary drift, computed against a different git
+  // directory. Exempting them along with their neighbours is what let a summary state
+  // that a hook event had not been observed for nineteen days after the document it
+  // cites recorded observing it (#408).
+  //
+  // Resolved LAZILY and only when such a document is actually cited, so every entry that
+  // does not cite one runs exactly the git commands it ran before. The anchor is shared
+  // with the drift path below rather than resolved twice.
+  let anchor = null;
+  const ensureAnchor = () => (anchor || (anchor = resolveAnchor({
+    validatedField: entry.validatedField,
+    fixField: entry.fixField,
+    git,
+    timeAnchor: () => resolveTimeAnchor({
+      git, storeGit, cataloguePath,
+      id: entry.id, level: entry.level, occurrence: entry.occurrence,
+    }),
+  })));
+
+  const docKinds = kinds.filter(k => k.c.kind === 'reference' && k.c.area === 'ref');
+  // rows keyed by spec, so both terminals below read one computation.
+  const docDrift = new Map();
+  if (docKinds.length && typeof refHistory === 'function') {
+    const since = anchorInstant(ensureAnchor(), git);
+    // No anchor, or an instant git would not give us, means there is no moment to date
+    // the document against. That is 🔵 as before — an honest "not checked here" — never
+    // a green, which would be a freshness claim nobody measured.
+    if (since) {
+      for (const { f, c } of docKinds) {
+        let n = null;
+        try { n = refHistory({ area: c.area, path: c.path, since }); } catch { n = null; }
+        if (typeof n === 'number' && n >= 0) docDrift.set(f, n);
+      }
+    }
+  }
+
   if (!hasPresent && allNonProject && kinds.some(k => k.c.kind === 'reference')) {
+    // Grounded in the store, but at least one of those grounds is a document WE keep
+    // and can date. Grade on those; the vendored refs beside them keep their exemption
+    // and are still listed, so the reason line says which half was actually judged.
+    if (docDrift.size) {
+      const files = kinds.map(({ f, c }) => ({
+        file: f, exists: false,
+        reference: c.kind === 'reference', referencePath: c.path, area: c.area,
+        external: c.kind === 'external', ambiguous: c.kind === 'ambiguous',
+        ...(docDrift.has(f) ? { changedCommits: docDrift.get(f) } : {}),
+      }));
+      const drifted = [...docDrift.values()].some(n => n > 0);
+      const others = kinds.filter(k => k.c.kind === 'reference' && k.c.area !== 'ref').length;
+      const aside = others ? `; ${others} vendored ref(s) beside them remain an upstream-version question` : '';
+      return withVendor({
+        status: drifted ? 'YELLOW' : 'GREEN', anchor,
+        files,
+        reason: drifted
+          ? `store Ground Truth doc(s) changed since anchor${aside}`
+          : `no change to the cited Ground Truth doc(s) since anchor${aside}`,
+      });
+    }
     // Grounded entirely in the store — no anchor required, no drift to compute.
     const files = kinds.map(({ f, c }) => ({
       file: f, exists: false,
@@ -1968,24 +2073,22 @@ function computeCurrency(entry, opts) {
     });
   }
 
-  const anchor = resolveAnchor({
-    validatedField: entry.validatedField,
-    fixField: entry.fixField,
-    git,
-    timeAnchor: () => resolveTimeAnchor({
-      git, storeGit, cataloguePath,
-      // id + occurrence select the entry in the COMMITTED catalogue, which is where
-      // its line span is then read from. The working-tree span is deliberately not
-      // passed. Occurrence rather than level, because a continuation may now share
-      // its primary's depth — see the join in resolveTimeAnchor.
-      id: entry.id, level: entry.level, occurrence: entry.occurrence,
-    }),
-  });
+  // Same anchor the document check above may already have paid for. id + occurrence
+  // select the entry in the COMMITTED catalogue, which is where its line span is then
+  // read from; the working-tree span is deliberately not passed. Occurrence rather than
+  // level, because a continuation may now share its primary's depth — see the join in
+  // resolveTimeAnchor.
+  ensureAnchor();
 
   if (!anchor.sha) {
     // No anchor to diff against — but if the entry cites an opted-in vendor, its
     // version re-verify prompt still rides along (the vendor was read up front).
-    return withVendor({ status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })), reason: 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)' });
+    return withVendor({
+      status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })),
+      reason: anchor.storeUnreadable
+        ? 'no anchor: the store catalogue could not be READ, so the time rung never ran — this is not a claim that store history is absent'
+        : 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)',
+    });
   }
 
   const files = [];
@@ -2000,11 +2103,19 @@ function computeCurrency(entry, opts) {
       //             blame the entry for our blind spot.
       // 'ambiguous' the shorthand matches several tracked files → we don't know WHICH,
       //             so we cannot diff it. Not the entry's rot either.
+      // A store Ground Truth doc is diffable (see the note above), so it counts toward
+      // this entry's drift exactly as a project file does. Without this, an entry citing
+      // BOTH a project file and a document reads GREEN off the file alone while the
+      // document it summarises moves underneath it — the same false green the 🔵
+      // exemption produced, reached by the other route.
+      const docChanged = docDrift.has(f) ? docDrift.get(f) : undefined;
       files.push({
         file: f, exists: false,
         reference: c.kind === 'reference', referencePath: c.path, area: c.area,
         external: c.kind === 'external', ambiguous: c.kind === 'ambiguous',
+        ...(docChanged === undefined ? {} : { changedCommits: docChanged }),
       });
+      if (docChanged > 0) anyDrift = true;
       continue;
     }
     // Diff the path git actually knows — a bare "SoundLayer.ts" resolves to
@@ -2067,7 +2178,8 @@ function computeCurrency(entry, opts) {
 }
 
 module.exports = {
-  computeCurrency, verdictScope, greenScopeText, extractRefFiles, resolveAnchor, resolveTimeAnchor, isReachable,
+  computeCurrency, verdictScope, greenScopeText, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable,
+  GIT_MAX_BUFFER,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom, matchedTracked,
   // The one glob engine and the one declaration predicate. The injector imports these
