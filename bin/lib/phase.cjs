@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { escapeRegex, loadConfig, normalizePhaseName, comparePhaseNum, findPhaseInternal, getArchivedPhaseDirs, generateSlugInternal, getMilestonePhaseFilter, stripShippedMilestones, extractCurrentMilestone, replaceInCurrentMilestone, toPosixPath, output, error, planningRoot, pmRel } = require('./core.cjs');
+const { ratePercent, escapeRegex, loadConfig, normalizePhaseName, comparePhaseNum, findPhaseInternal, getArchivedPhaseDirs, generateSlugInternal, getMilestonePhaseFilter, stripShippedMilestones, extractCurrentMilestone, replaceInCurrentMilestone, toPosixPath, output, error, planningRoot, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { writeStateMd, stateExtractField, stateReplaceField, stateReplaceFieldWithFallback } = require('./state.cjs');
 
@@ -931,7 +931,7 @@ function cmdPhaseComplete(cwd, phaseNum, raw) {
       if (totalRaw) {
         const totalPhases = parseInt(totalRaw, 10);
         if (totalPhases > 0) {
-          const newPercent = Math.round((newCompleted / totalPhases) * 100);
+          const newPercent = ratePercent(newCompleted, totalPhases);
           stateContent = stateReplaceField(stateContent, 'Progress', `${newPercent}%`) || stateContent;
           // Also update percent field if it exists separately
           stateContent = stateContent.replace(
