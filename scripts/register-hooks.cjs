@@ -208,6 +208,14 @@ function matcherSupersedes(a, b) {
 function pruneSupersededMatchers(settings, files = new Set(REGISTRATIONS.map(r => r[2]))) {
   const removed = [];
   let examined = 0;
+  // Groups THIS RUN emptied, held by identity. Compaction is keyed on this set and not on
+  // "is empty", because the two are not the same population: a settings file can already
+  // contain an empty group, or one whose `hooks` is not an array at all, and neither is
+  // this script's to delete. A malformed group is the worse half — it is most likely a
+  // hand-edit someone got wrong and would want to find, and removing it silently removes
+  // the evidence rather than the mistake. Identity keeps the promise the comment above
+  // makes; `.length === 0` quietly broke it (#407).
+  const emptiedHere = new Set();
   if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
     return { removed, examined };
   }
@@ -226,13 +234,19 @@ function pruneSupersededMatchers(settings, files = new Set(REGISTRATIONS.map(r =
         narrow.hooks = narrow.hooks.filter(h => !commandRefsFile(h && h.command, file));
         if (narrow.hooks.length < before) {
           removed.push({ event, file, matcher: narrow.matcher, coveredBy: widened.matcher });
+          if (narrow.hooks.length === 0) emptiedHere.add(narrow);
         }
       }
     }
     // A group that this emptied is drift too — but a group emptied of OUR hook may still
-    // hold someone else's, so only genuinely empty ones go.
-    settings.hooks[event] = list.filter(g => g && Array.isArray(g.hooks) && g.hooks.length > 0);
-    if (settings.hooks[event].length === 0) delete settings.hooks[event];
+    // hold someone else's, so only the ones emptied HERE go, and only when something was
+    // actually removed from this event. An event list left exactly as found is written
+    // back exactly as found.
+    const dropped = list.filter(g => emptiedHere.has(g));
+    if (dropped.length) {
+      settings.hooks[event] = list.filter(g => !emptiedHere.has(g));
+      if (settings.hooks[event].length === 0) delete settings.hooks[event];
+    }
     examined++;
   }
   return { removed, examined };

@@ -190,5 +190,58 @@ console.log('\nGROUP 6 — registration after the clean does not re-create it');
   eq(r.removed.length, 0, 'and the clean finds nothing to do afterwards');
 }
 
+console.log('\nGROUP 7 — the clean touches nothing it did not empty itself');
+{
+  // Found in review of this PR, not from a symptom: compaction was keyed on "is this
+  // group empty?" rather than "did I empty it?", so a settings file that ALREADY held an
+  // empty group, or one whose `hooks` is not an array, lost it — with `removed` empty and
+  // the run reporting nothing. It reaches disk whenever registration writes for any other
+  // reason, and the file is the user's global settings.json (#407).
+  //
+  // The malformed group is the half worth keeping: it is most likely a hand-edit someone
+  // got wrong and would want to find, and deleting it silently removes the evidence
+  // rather than the mistake.
+  const s = { hooks: { PreToolUse: [
+    { matcher: 'Write|Edit', hooks: [] },
+    group('Bash', 'somebody-else.js'),
+    { matcher: 'Read', hooks: 'not-an-array' },
+  ] } };
+  const before = JSON.stringify(s);
+  const r = pruneSupersededMatchers(s);
+  eq(r.removed.length, 0, 'nothing of ours was superseded here');
+  eq(JSON.stringify(s), before, 'so the settings object is byte-identical to what was handed in');
+  eq(s.hooks.PreToolUse.length, 3, 'all three foreign groups survive — including the empty and the malformed one');
+
+  // And the other direction, because a fix that stops deleting can do so by never
+  // compacting at all. A group WE empty still goes, and its event key with it.
+  const t = { hooks: {
+    PreToolUse: [
+      group('Write|Edit|MultiEdit', 'catalogue-context-injector.js'),
+      group('Write|Edit', 'catalogue-context-injector.js'),
+    ],
+    Stop: [group('Write', 'catalogue-context-injector.js')],
+  } };
+  const r2 = pruneSupersededMatchers(t, new Set(['catalogue-context-injector.js']));
+  eq(r2.removed.length, 1, 'the genuinely superseded group is still reported');
+  eq(t.hooks.PreToolUse.length, 1, 'and removed');
+  eq(t.hooks.PreToolUse[0].matcher, 'Write|Edit|MultiEdit', 'leaving the wider one');
+  ok(Object.prototype.hasOwnProperty.call(t.hooks, 'Stop'),
+    'while an untouched event list keeps its key');
+
+  // A narrow group that also holds SOMEONE ELSE's hook is emptied of ours and kept.
+  const u = { hooks: { PreToolUse: [
+    group('Write|Edit|MultiEdit', 'catalogue-context-injector.js'),
+    group('Write|Edit', 'catalogue-context-injector.js', 'somebody-else.js'),
+  ] } };
+  pruneSupersededMatchers(u, new Set(['catalogue-context-injector.js']));
+  eq(u.hooks.PreToolUse.length, 2, 'a shared narrow group survives the clean');
+  // Through a stand-in, not by indexing: when the group above is wrongly dropped, the
+  // index is undefined and this line THROWS — and a test that dies partway reports
+  // neither a pass nor a failure. It reddens instead.
+  const kept = u.hooks.PreToolUse[1] || { hooks: [] };
+  eq(filesIn(kept).join(','), 'somebody-else.js',
+    'holding exactly the hook that was not ours');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
