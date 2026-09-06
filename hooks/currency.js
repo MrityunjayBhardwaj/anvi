@@ -468,7 +468,15 @@ const LINT = {
 // and the residue is the right size to accept: it is the difference between a check
 // that is occasionally wrong and one that is wrong in the direction that gets it
 // switched off. Widen it when a case appears, not preemptively.
-const NEGATION = /\b(no|not|never|without|missing|absent|lacks?|lacking|gone|un(?:declared|set)|deleted|removed|retired|dropped|renamed|replaced)\b/i;
+// The boundaries exclude a HYPHEN on either side, not just word characters (anvi #415).
+// A hyphen is a word boundary, so `\b` let the vocabulary match INSIDE a hyphenated
+// identifier: the finding named `ref-symbol-gone` read as a negation of the symbol
+// beside it and suppressed a citation that was correct as written. A name is not a
+// claim. `symbol gone` still negates; `ref-symbol-gone` is a name and no longer does.
+// Measured across the corpus before and after: exactly two entries change, and every
+// other suppression decision is identical — the widening this comment's own rule asks
+// for, made when the cases appeared rather than preemptively.
+const NEGATION = /(?<![\w-])(no|not|never|without|missing|absent|lacks?|lacking|gone|un(?:declared|set)|deleted|removed|retired|dropped|renamed|replaced)(?![\w-])/i;
 
 function citedSymbols(refField) {
   const s = String(refField || '');

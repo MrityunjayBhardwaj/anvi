@@ -69,6 +69,32 @@ ok(names('`src/a.ts` (`OLD_TABLE` deleted rather than moved)').length === 0,
 ok(names('`src/a.ts` (`alpha` — the shared rule, since `beta` was never a discriminator)').join() === 'alpha',
   'a negation in a DIFFERENT clause does not suppress a real citation');
 
+// A NEGATION WORD INSIDE A HYPHENATED IDENTIFIER IS PART OF A NAME, NOT A CLAIM (anvi #415).
+// `\b` treats a hyphen as a word boundary, so the vocabulary used to match inside the token
+// itself: a finding NAMED `ref-symbol-gone` read as a negation of the symbol beside it and
+// suppressed a citation that was correct as written. Measured across the corpus at the time:
+// 26 REFs contain such a token, 2 lost a symbol to it — one dropping its only one, which put
+// the entry outside the gradeable population entirely.
+console.log('\n  a negation word inside a hyphenated NAME is not a negation');
+ok(names('`hooks/currency.js` (`citedSymbols` and the `ref-symbol-gone` finding)').join() === 'citedSymbols',
+  'a finding named `ref-symbol-gone` does not suppress the symbol beside it');
+// ⚠ The name and the symbol must share a CLAUSE. A first draft put them either side of a
+// comma, where `clauseAround` already keeps them apart — so it passed under the OLD rule too
+// and asserted nothing. Verified to discriminate: empty before this fix, one name after.
+ok(names('`scripts/x.js` (`findStoreCopyByContent` implements the read-content-not-names discipline)').join() === 'findStoreCopyByContent',
+  'nor does `read-content-not-names` in the SAME clause as the symbol');
+// ⚠ Likewise `un-set-default` was a dud: the vocabulary spells `unset` closed, so a hyphen
+// splits it and no rule ever matched. `not-a-path` is the real head-position case.
+ok(names('`src/a.ts` (`alpha` follows the not-a-path rule)').join() === 'alpha',
+  'nor a hyphenated token whose HEAD is the negation word');
+// …and the direction that would be the WORSE trade. Loosening a suppression rule buys back
+// false negatives by paying in false positives, so every genuine negation is re-asserted
+// HERE, in the same block, including one sharing its clause with a hyphenated name.
+ok(names('`src/a.ts` (`foo` is gone, per the ref-symbol-gone finding)').length === 0,
+  'a REAL negation still suppresses, even beside a hyphenated name that contains the same word');
+ok(names('`src/a.ts` (`bar` was removed)').length === 0, 'and a plain removal still suppresses');
+ok(names('`turbo.json` (no `env` declared)').length === 0, 'and a plain absence still suppresses');
+
 console.log('\n  what is name-shaped but is not a symbol');
 ok(names('`src/a.ts` (`4991800`, `deadbee`)').length === 0, 'git shas are not symbols');
 ok(names('`src/a.ts` (`TS2322`)').length === 0, 'diagnostic codes are not symbols');
