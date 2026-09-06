@@ -137,29 +137,58 @@ console.log('\nGROUP 2 — falsified by PLANTING one: the guard fails when it sh
   const after = scanTree(d);
   eq(after.examined, 2, 'both fixtures are examined');
   eq(after.offenders.length, 1, 'the planted NUL is reported');
-  eq(after.offenders[0].file, 'planted.js', 'and it is named');
-  eq(after.offenders[0].count, 1, 'with its count');
-  eq(after.offenders[0].firstOffset, 14, 'and its offset');
+  // Read through a stand-in rather than indexing directly. When the plant fails to take,
+  // `offenders[0]` is undefined and the three assertions below THROW — and a test that
+  // dies partway reports neither a pass nor a failure, only an exit code. That is the
+  // ambiguous outcome this repo keeps paying for; the three below now redden instead.
+  const planted = after.offenders[0] || { file: null, count: null, firstOffset: null };
+  eq(planted.file, 'planted.js', 'and it is named');
+  eq(planted.count, 1, 'with its count');
+  eq(planted.firstOffset, 14, 'and its offset');
 
   // The reason this test exists at all, asserted rather than described: the same search
-  // that succeeds on the clean fixture goes SILENT on the planted one.
+  // that succeeds on the clean fixture reports NOTHING FOUND on the planted one, in a
+  // form a reader cannot tell from the term genuinely not being there.
   //
   // Which grep matters, and the measurement corrected the issue's own account of it.
-  // `/usr/bin/grep -n` on a NUL-bearing file prints `Binary file X matches` and exits 0
-  // — annoying, but visible. It is `-I` (ignore binary files) that produces no output
-  // and exit 1, which is grep's answer for NO MATCHES. That is not an exotic flag here:
-  // the shell `grep` every session actually runs is a wrapper that passes `-I`, so the
-  // silent form IS the default form in practice. Pinned against the absolute path so
-  // this asserts a property of grep rather than of whatever `grep` currently resolves to.
+  // `/usr/bin/grep -n` WITHOUT `-I` prints `Binary file X matches` and exits 0 — annoying,
+  // but visible. It is `-I` (ignore binary files) that answers as though the term were
+  // absent. That is not an exotic flag here: the shell `grep` every session actually runs
+  // is a wrapper that passes `-I`, so the ignoring form IS the default form in practice.
+  // Pinned against the absolute path so this asserts a property of grep rather than of
+  // whatever `grep` currently resolves to.
+  //
+  // AND THE ASSERTION IS AGAINST A CONTROL, NOT AGAINST A STRING. The first version of
+  // this pinned the exact bytes of the silent answer under `-c`, and reddened on Linux
+  // only: BSD grep prints nothing there, GNU grep prints `0`. Fixing it by pinning the
+  // other string would have been the same mistake facing the other way. So the run below
+  // adds a third case — a term genuinely absent from the clean fixture — and asserts the
+  // planted file's answer equals THAT, whatever the local grep chooses to say.
+  //
+  // The form is `-n`, not `-c`, and that is load-bearing. Measured on both: under `-n`
+  // (and under a bare `grep`) a NUL-bearing file and a true negative are byte-identical
+  // on BOTH implementations — nothing on stdout, exit 1. Under `-c` they are not, and the
+  // two implementations disagree about which way. `-n` is also the form a session types.
+  // The property is real; `-c` was the wrong instrument for showing it.
   const BIN = '/usr/bin/grep';
-  ok(fs.existsSync(BIN), `${BIN} is present (without it the next two assertions would pass vacuously)`);
+  ok(fs.existsSync(BIN), `${BIN} is present (without it the assertions below would pass vacuously)`);
   if (fs.existsSync(BIN)) {
-    const g = (f) => spawnSync(BIN, ['-I', '-c', 'const', path.join(d, f)], { encoding: 'utf8' });
-    const clean = g('clean.js'), planted = g('planted.js');
-    eq(clean.status, 0, 'grep -I finds the term in the clean fixture');
-    eq(clean.stdout.trim(), '1', 'and says so');
-    eq(planted.status, 1, 'and reports NO MATCH for the same term in the planted one — the failure this guards');
-    eq(planted.stdout.trim(), '', 'printing nothing at all, indistinguishable from a true negative');
+    const g = (f, term) => spawnSync(BIN, ['-I', '-n', term, path.join(d, f)], { encoding: 'utf8' });
+    const clean = g('clean.js', 'const');
+    const plantedHit = g('planted.js', 'const');
+    const absent = g('clean.js', 'this-term-is-nowhere-in-the-fixture');
+
+    eq(clean.status, 0, 'grep -I -n finds the term in the clean fixture');
+    ok(/^1:.*const/.test(clean.stdout), 'and prints the line it found it on');
+
+    eq(absent.status, 1, 'a term genuinely absent from that same file exits 1 — the control');
+    eq(absent.stdout, '', 'printing nothing');
+
+    eq(plantedHit.status, 1, 'and the term that IS present in the planted file exits 1 as well — the failure this guards');
+    eq(plantedHit.stdout, '', 'also printing nothing');
+
+    eq(plantedHit.status, absent.status, 'the same status a genuine absence gives');
+    eq(plantedHit.stdout, absent.stdout, 'and the same output — indistinguishable from a true negative');
   }
 }
 
