@@ -17,6 +17,7 @@ const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 // it: the grammar of an entry and of its fields is one rule, and a second reader of
 // either judges a different corpus while printing the same finding name.
 const { parseEntries } = require('./currency.js');
+const { formatPct } = require('./rate.js');
 
 // A REF field DECLARING that the entry is knowingly unanchored, as opposed to a body
 // that MENTIONS the word. Case-sensitive and word-bounded; see the note at its use.
@@ -300,8 +301,12 @@ process.stdin.on('end', () => {
     }
 
     // Build message
-    const pct = Math.round((grounded / total) * 100);
-    let message = `GROUNDING: ${grounded}/${total} entries grounded (${pct}%)`;
+    // 100% is reserved for an actual 100%: this same line names the exception when
+    // there is one, and `294/295 … (100%)` beside a named ungrounded entry is the
+    // banner contradicting itself. Shared rule, because two other reports rounded the
+    // same failure away in two other ways — see hooks/rate.js.
+    const pct = formatPct(grounded, total, { absent: 'no denominator' });
+    let message = `GROUNDING: ${grounded}/${total} entries grounded (${pct})`;
 
     if (gtDocs.length > 0) {
       message += ` | GT docs: ${gtDocs.map(d => `${d.name.replace('GROUND_TRUTH_', '').replace('.md', '')}${d.ageDays > 7 ? ' ('+d.ageDays+'d old)' : ''}`).join(', ')}`;

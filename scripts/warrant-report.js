@@ -68,6 +68,7 @@ function loadFromCandidates(name) {
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const check = loadFromCandidates('absent-warrant-check.js');
 const { ROWS } = loadFromCandidates('warrant-rows.js');
+const { formatPct } = loadFromCandidates('rate.js');
 
 const { instancePathFrom, buildTurn, terminal, mainline, isPlainPrompt } = check;
 
@@ -546,7 +547,7 @@ function countBy(list) {
   return out;
 }
 
-const pct = (n, d) => (d ? `${((100 * n) / d).toFixed(0)}%` : '—');
+const pct = (n, d) => formatPct(n, d, { absent: '—' });
 
 // The gap between the arms, in percentage points, or null when an arm has nothing
 // scorable. Null is not zero: a gap that could not be computed and a gap of zero
