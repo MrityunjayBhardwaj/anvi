@@ -10,7 +10,7 @@ of where the code came from.
 | Source | GSD `bin/lib/`, upstream [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done) |
 | GSD version | **1.27.0** |
 | Vendored | 2026-07-07 — `node scripts/vendor-drift.js` names the commit per module |
-| State | **11 of 16 modules carry anvi patches** — see the table below |
+| State | **12 of 16 modules carry anvi patches** — see the table below |
 | Consumer | `bin/anvi-tools.cjs` (`GSD_LIB` points here) |
 | License | MIT — see [`LICENSE.GSD`](./LICENSE.GSD) |
 
@@ -39,19 +39,19 @@ table and the tree disagree.
 
 | Module | State | Lines vs 1.27.0 |
 |---|---|---|
-| `commands.cjs` | patched | 78 |
-| `config.cjs` | patched | 18 |
-| `core.cjs` | patched | 302 |
+| `commands.cjs` | patched | 382 |
+| `config.cjs` | patched | 54 |
+| `core.cjs` | patched | 568 |
 | `frontmatter.cjs` | pristine | 0 |
-| `init.cjs` | patched | 148 |
+| `init.cjs` | patched | 158 |
 | `milestone.cjs` | patched | 10 |
 | `model-profiles.cjs` | pristine | 0 |
-| `phase.cjs` | patched | 40 |
+| `phase.cjs` | patched | 42 |
 | `profile-output.cjs` | patched | 12 |
 | `profile-pipeline.cjs` | pristine | 0 |
-| `roadmap.cjs` | pristine | 0 |
+| `roadmap.cjs` | patched | 4 |
 | `security.cjs` | pristine | 0 |
-| `state.cjs` | patched | 6 |
+| `state.cjs` | patched | 8 |
 | `template.cjs` | patched | 6 |
 | `uat.cjs` | patched | 10 |
 | `verify.cjs` | patched | 12 |
@@ -72,16 +72,20 @@ landed, because **no run before the merge could have produced the right answer.*
 column costs one command and removes the class. `test/vendored-doc-contract.test.js` fails if
 a sha reappears in this file.
 
-**The line counts are a dated measurement, not a live one.** Measured 2026-08-02
+**The line counts are a dated measurement, not a live one.** Measured 2026-09-06
 against a pristine copy of 1.27.0, counting insertions + deletions
-(`git diff --no-index --numstat`), **642 differing lines** across the eleven patched
-modules. Upstream has not moved from 1.27.0, so all of the divergence is ours.
+(`git diff --no-index --numstat`), **1266 differing lines** across the twelve patched
+modules. Upstream is ARCHIVED at v1.42.3 and this tree is 1.27.0, so all of the
+divergence is ours and there is no future re-vendor for it to complicate.
 
-`commands.cjs` and `init.cjs` have both been patched again since that measurement, so
-their counts — and the stated total — are low by roughly the size of those commits. The
-numbers above are deliberately NOT adjusted by hand: they are the output of one dated
-measurement, and editing them to account for later patches would turn a measurement into
-an estimate while keeping a measurement's authority. Re-deriving them needs the
+The previous measurement (2026-08-02, 642 lines) had gone badly stale in a direction
+nobody was tracking: it noted that `commands.cjs` and `init.cjs` were low, and by this
+re-run `commands.cjs` had gone 78 -> 382 and `core.cjs` 302 -> 568, while `config.cjs`
+had moved too and was not mentioned at all. **A dated measurement decays quietly, so the
+figure to distrust is always the one nobody has re-run.** The numbers above are still
+deliberately NOT adjusted by hand: they are the output of one dated measurement, and
+editing them to account for later patches would turn a measurement into an estimate while
+keeping a measurement's authority. Re-deriving them needs the
 pristine 1.27.0 bytes, which is the `--upstream` run; the state and the commit list come
 from history alone and are current on every run, which is the whole reason only the line
 counts carry a date.

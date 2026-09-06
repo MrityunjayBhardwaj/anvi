@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { safeReadFile, loadConfig, isGitIgnored, legacyTreeDurability, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, planningTreeState, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
+const { ratePercent, safeReadFile, loadConfig, isGitIgnored, legacyTreeDurability, execGit, normalizePhaseName, comparePhaseNum, getArchivedPhaseDirs, generateSlugInternal, getMilestoneInfo, getMilestonePhaseFilter, resolveModelInternal, stripShippedMilestones, extractCurrentMilestone, planningPaths, planningRoot, planningRootRelative, usesLegacyPlanning, planningTreeState, toPosixPath, output, error, findPhaseInternal, extractOneLinerFromBody, getRoadmapPhaseInternal, pmRel } = require('./core.cjs');
 const { extractFrontmatter } = require('./frontmatter.cjs');
 const { MODEL_PROFILES } = require('./model-profiles.cjs');
 
@@ -769,7 +769,7 @@ function cmdProgressRender(cwd, format, raw) {
     }
   }
 
-  const percent = totalPlans > 0 ? Math.min(100, Math.round((totalSummaries / totalPlans) * 100)) : 0;
+  const percent = ratePercent(totalSummaries, totalPlans);
   const notice = layoutNotice(layoutDesc, unreadablePhaseDirs);
 
   if (format === 'table') {
@@ -1100,8 +1100,8 @@ function cmdStats(cwd, format, raw) {
 
   const phases = [...phasesByNumber.values()].sort((a, b) => comparePhaseNum(a.number, b.number));
   const completedPhases = phases.filter(p => p.status === 'Complete').length;
-  const planPercent = totalPlans > 0 ? Math.min(100, Math.round((totalSummaries / totalPlans) * 100)) : 0;
-  const percent = phases.length > 0 ? Math.min(100, Math.round((completedPhases / phases.length) * 100)) : 0;
+  const planPercent = ratePercent(totalSummaries, totalPlans);
+  const percent = ratePercent(completedPhases, phases.length);
 
   // Requirements stats
   let requirementsTotal = 0;

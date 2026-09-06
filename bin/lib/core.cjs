@@ -1332,8 +1332,56 @@ function getMilestonePhaseFilter(cwd) {
   return isDirInMilestone;
 }
 
+// One definition of how a completion rate is rendered in this tree (anvi #406).
+//
+// WHY THIS EXISTS. Six sites across four modules each wrote their own version of
+// `Math.round((n / d) * 100)`, five of them wrapped in `Math.min(100, …)`. That cap
+// clamps a value ABOVE 100 and does nothing about one that rounds UP to it, so a
+// milestone with one plan outstanding reports the same figure as a finished one:
+//
+//   Math.min(100, Math.round((294/295) * 100))  ->  100
+//
+// The rule, stated once: a rate never reports a boundary it has not reached. Rounding
+// may move a value toward a boundary but may never carry it across one. 100% means
+// every one; 0% means none. Both directions, because they are the same rule and the low
+// end misreads identically — `0%` beside one finished plan reads as "nothing is done".
+//
+// Ordinary rounding is untouched everywhere else: 2/3 still rounds up to 67.
+//
+// TWO DELIBERATE DIVERGENCES from the first-party rule in hooks/rate.js, which is the
+// same rule for the same reason:
+//
+//   * No denominator returns 0 here, not null. These call sites put the value straight
+//     into JSON (`plan_percent`, `progress_percent`) and into a progress bar; a null
+//     would change an output contract that consumers already read. The existing
+//     `totalPlans > 0 ? … : 0` guards are preserved exactly, not improved.
+//   * The value is capped at 100 for n > d, which five of the six sites already did and
+//     the sixth did not. Capping is what all of them meant.
+//
+// It is a COPY rather than an import on purpose: every module in this directory requires
+// only node builtins and its siblings, and reaching into hooks/ would make the vendored
+// tree depend on first-party code — the one dependency vendoring exists to remove.
+// `test/vendored-rate-parity.test.js` asserts the two agree, so the copy cannot drift
+// without reddening.
+function ratePercent(n, d) {
+  const num = Number(n), den = Number(d);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return 0;
+
+  const exact = (num / den) * 100;
+  let v = Math.round(exact);
+
+  // Never round UP into a claim of completeness the count does not support.
+  if (v >= 100 && num < den) v = Math.floor(exact);
+  // Never round DOWN into a claim of emptiness the count does not support.
+  if (v <= 0 && num > 0) v = Math.ceil(exact);
+
+  return Math.min(100, v);
+}
+
 module.exports = {
   output,
+  // One rate rule for the six call sites that used to each carry their own (#406).
+  ratePercent,
   error,
   safeReadFile,
   loadConfig,

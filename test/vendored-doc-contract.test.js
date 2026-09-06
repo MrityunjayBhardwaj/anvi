@@ -74,6 +74,41 @@ ok(table.size === modules.length, `${table.size} rows, ${modules.length} modules
 for (const f of modules) ok(table.has(f), `${f} has a row`);
 for (const f of table.keys()) ok(modules.includes(f), `${f} is a module that exists (no row for a file that is gone)`);
 
+// ── the table renders AS a table ────────────────────────────────────────────
+// A table row followed immediately by a non-blank, non-row line is absorbed as a row:
+// GitHub's own renderer returns the sentence below the table as `<td>…</td><td></td>`.
+// This document lost that blank line once (anvi #412) and nothing noticed, because the
+// row regex above scans line by line and does not care what follows the last row. So the
+// shape has to be asserted separately from the content.
+console.log('\nevery table ends at a blank line, so the prose after it is not swallowed');
+{
+  const isRow = l => /^\s*\|.*\|\s*$/.test(l);
+  // Returns the offending line numbers for any document, so the check itself can be tested.
+  const absorbed = (src) => {
+    const lines = src.split('\n');
+    const out = [];
+    let fenced = false;
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (/^\s*```/.test(lines[i])) { fenced = !fenced; continue; }
+      if (fenced) continue;
+      const next = lines[i + 1];
+      if (isRow(lines[i]) && next.trim() && !isRow(next) && !/^\s*```/.test(next)) out.push(i + 2);
+    }
+    return out;
+  };
+
+  const hits = absorbed(text);
+  ok(hits.length === 0,
+    `no line is absorbed into a table${hits.length ? ` — line(s) ${hits.join(', ')}: ${JSON.stringify(text.split('\n')[hits[0] - 1].trim().slice(0, 60))}` : ''}`);
+
+  // …and the check is not vacuous. A checker that returns [] for everything would pass the
+  // assertion above on any document at all, which is the way this kind of guard dies.
+  const broken = '| a | b |\n|---|---|\n| `x.cjs` | patched |\n**swallowed**\n';
+  ok(absorbed(broken).length === 1, 'and the check catches the shape it exists for (a deliberately broken table)');
+  ok(absorbed('| a | b |\n|---|---|\n| `x.cjs` | patched |\n\n**not swallowed**\n').length === 0,
+    'while a table correctly terminated by a blank line passes');
+}
+
 console.log('\nevery row states the state git history actually shows');
 for (const r of patched) {
   const row = table.get(r.file);
