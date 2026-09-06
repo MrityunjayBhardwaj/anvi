@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans } = loadFromCandidates('currency.js');
+const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans, GIT_MAX_BUFFER } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -70,7 +70,9 @@ if (!anviDir) { console.error(`no .anvi catalogues for ${cwd}`); process.exit(2)
 const CATALOGUES = ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md'];
 
 // git runs in the PROJECT repo (REF files + FIX shas are project-repo history).
-const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+// maxBuffer, from the shared bound: a `git show` of a committed catalogue is the largest
+// thing either helper reads, and the default 1 MB is a size this corpus passed (#409).
+const git = (a) => execSync(`git ${a}`, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: GIT_MAX_BUFFER });
 const fileExists = (rel) => fs.existsSync(path.join(cwd, rel));
 
 // storeGit runs in the repo that holds the CATALOGUES — a different repo from the
@@ -84,7 +86,7 @@ try {
   cataloguePrefix = path.relative(storeRoot, realAnvi);
 } catch { storeRoot = null; } // catalogues not in a repo → rung 4 unavailable, ladder still works
 const storeGit = storeRoot
-  ? (a) => execSync(`git ${a}`, { cwd: storeRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  ? (a) => execSync(`git ${a}`, { cwd: storeRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: GIT_MAX_BUFFER })
   : null;
 
 // refResolver — does a REF spec resolve into the STORE's reference material? This is
@@ -111,6 +113,26 @@ const kindRead = { ref: readDir(cwd, 'ref'), investigations: readDir(cwd, 'inves
 const refResolver = makeRefResolver(
   AREA_SPECS.map(a => ({ area: a.area, dir: kindRead[a.kind].dir, sub: a.sub, strip: a.strip })),
   { readdir: (d) => fs.readdirSync(d, { withFileTypes: true }) });
+
+// How many store commits touched one reference file since a given instant. The core
+// cannot ask this itself: the store's layout — which directory an area lives in, and
+// where that sits inside the store repo — is this script's knowledge, the same reason
+// refResolver is injected rather than built in there. Returns null for "cannot say",
+// which the core is required to treat as unknown rather than as zero; a silent zero
+// here would print a freshness claim nobody measured.
+//
+// Scoped to the 'ref' area on purpose. `ref/sources` is vendored upstream code, where
+// the store's commit history records when WE copied it, not when it changed — dating an
+// entry against that would answer a question nobody asked. That half keeps its 🔵.
+const refHistory = (!storeGit || !kindRead.ref.dir) ? null : ({ area, path: rel, since }) => {
+  if (area !== 'ref' || !rel || !since) return null;
+  const storeRel = path.relative(storeRoot, path.join(kindRead.ref.dir, rel));
+  if (!storeRel || storeRel.startsWith('..')) return null;   // outside the store repo
+  try {
+    const out = storeGit(`log --since=${JSON.stringify(since)} --format=%h -- ${JSON.stringify(storeRel)}`).trim();
+    return out ? out.split('\n').filter(Boolean).length : 0;
+  } catch { return null; }
+};
 
 // --- propose mode -----------------------------------------------------------
 // Drafts a declaration for boundaries that have none. Prints; never edits. Turning a
@@ -560,7 +582,7 @@ for (const cat of CATALOGUES) {
   const lines = [];
   for (const e of entries) {
     const v = computeCurrency(e, {
-      git, fileExists, storeGit, fileExt, refResolver, readVendor,
+      git, fileExists, storeGit, fileExt, refResolver, readVendor, refHistory,
       cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
     });
     // Which of this entry's pointers name an area that was WITHHELD — computed from

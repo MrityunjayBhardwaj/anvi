@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile } = require('./currency.js');
+const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -50,8 +50,11 @@ function cacheFile(projectRoot, head) {
 // and it answers confidently about files it has never contained.
 function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
   if (!wanted.length) return [];
+  // Same bound as the CLI's helpers, from the same constant. This one runs on every
+  // edit, so an unbounded read here fails quietly at the worst moment (#409).
   const run = (dir) => (a) => execSync(`git ${a}`, {
     cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS,
+    maxBuffer: GIT_MAX_BUFFER,
   });
   const git = run(projectRoot);
 
@@ -98,6 +101,21 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
     storeGit = run(storeRoot);
   } catch { storeGit = null; } // no store repo → ladder rung 4 unavailable, rungs 1-3 still work
 
+  // Ground Truth doc freshness, built the same way the CLI builds it and for the same
+  // reason the resolver above is shared: if the point-of-use nudge and the batch report
+  // disagree about whether a cited document has moved, one of them is lying to somebody
+  // at the moment it matters most. Scoped to the document area — a vendored file's store
+  // history records when WE copied it, not when it changed (#408).
+  const refHistory = (!storeGit || !storeRoot || !refDir) ? null : ({ area, path: rel, since }) => {
+    if (area !== 'ref' || !rel || !since) return null;
+    const storeRel = path.relative(storeRoot, path.join(refDir, rel));
+    if (!storeRel || storeRel.startsWith('..')) return null;
+    try {
+      const out = storeGit(`log --since=${JSON.stringify(since)} --format=%h -- ${JSON.stringify(storeRel)}`).trim();
+      return out ? out.split('\n').filter(Boolean).length : 0;
+    } catch { return null; }
+  };
+
   const started = Date.now();
   const out = [];
   const byCat = {};
@@ -129,7 +147,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
         const verdict = computeCurrency(e, {
           git,
           fileExists: (rel) => fs.existsSync(path.join(projectRoot, rel)),
-          storeGit, refResolver, fileExt, readVendor,
+          storeGit, refResolver, fileExt, readVendor, refHistory,
           cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
         });
         nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
