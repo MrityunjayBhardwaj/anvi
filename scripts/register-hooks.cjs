@@ -162,6 +162,96 @@ function pruneRegistrations(settings, removed = REMOVED) {
   return removedFiles;
 }
 
+// ── superseded matchers ───────────────────────────────────────────────────────
+// The tools a matcher selects, as a set. `null` (a group with no matcher) selects
+// everything for its event, so it is represented as the universal set.
+//
+// Tokens are compared LITERALLY and that is deliberate. A matcher may be a regex
+// (`mcp__.*`), and no token-level test can tell whether one regex's language contains
+// another's. Comparing literals can therefore MISS a real superset; it can never invent
+// one — and inventing one would delete a live registration. Wrong in the safe direction.
+function matcherTools(m) {
+  if (m === null || m === undefined) return null; // universal
+  return new Set(String(m).split('|').map(s => s.trim()).filter(Boolean));
+}
+
+// Does `a` STRICTLY contain `b`? Equal matchers are not superseded — `ensureHook` already
+// reuses an existing group for those, order-insensitively, so equality is not drift.
+function matcherSupersedes(a, b) {
+  const A = matcherTools(a), B = matcherTools(b);
+  if (A === null && B === null) return false; // both universal — equal, not strict
+  if (A === null) return true;                // universal contains any concrete set
+  if (B === null) return false;
+  if (A.size <= B.size) return false;          // strict containment needs a bigger set
+  for (const t of B) if (!A.has(t)) return false;
+  return true;
+}
+
+// Remove a hook's registration under a matcher that a WIDER matcher for the same event
+// and the same file already covers (#399).
+//
+// WHY THIS IS NOT `--prune`. Pruning is authorized by REMOVED and is about hooks anvi no
+// longer ships; this is about a file anvi DOES ship, registered twice for the same tool.
+// `ensureHook` cannot prevent it: it finds-or-creates the group for an exact
+// (event, matcher) pair and has no notion that one matcher supersedes another, so
+// widening a matcher in the table leaves the narrow group behind in every settings.json
+// that was already written, forever, and re-running registration is idempotent over it.
+// The result is a hook selected twice on one tool call — nothing errors, nothing warns.
+//
+// It runs on EVERY registration rather than behind a flag, because the drift it repairs
+// is created BY registration. Removing a strictly-redundant entry can never change which
+// hooks fire, only how many times.
+//
+// Scope is anvi's own shipped filenames. A GSD or user hook registered under overlapping
+// matchers is not this script's to rewrite — the same discipline every other write here
+// follows.
+function pruneSupersededMatchers(settings, files = new Set(REGISTRATIONS.map(r => r[2]))) {
+  const removed = [];
+  let examined = 0;
+  // Groups THIS RUN emptied, held by identity. Compaction is keyed on this set and not on
+  // "is empty", because the two are not the same population: a settings file can already
+  // contain an empty group, or one whose `hooks` is not an array at all, and neither is
+  // this script's to delete. A malformed group is the worse half — it is most likely a
+  // hand-edit someone got wrong and would want to find, and removing it silently removes
+  // the evidence rather than the mistake. Identity keeps the promise the comment above
+  // makes; `.length === 0` quietly broke it (#407).
+  const emptiedHere = new Set();
+  if (!settings.hooks || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks)) {
+    return { removed, examined };
+  }
+  for (const event of Object.keys(settings.hooks)) {
+    const list = settings.hooks[event];
+    if (!Array.isArray(list)) continue;
+    for (const file of files) {
+      // Every group for this event that registers this file.
+      const holders = list.filter(g =>
+        g && Array.isArray(g.hooks) && g.hooks.some(h => commandRefsFile(h && h.command, file)));
+      if (holders.length < 2) continue;
+      for (const narrow of holders) {
+        const widened = holders.find(w => w !== narrow && matcherSupersedes(w.matcher, narrow.matcher));
+        if (!widened) continue;
+        const before = narrow.hooks.length;
+        narrow.hooks = narrow.hooks.filter(h => !commandRefsFile(h && h.command, file));
+        if (narrow.hooks.length < before) {
+          removed.push({ event, file, matcher: narrow.matcher, coveredBy: widened.matcher });
+          if (narrow.hooks.length === 0) emptiedHere.add(narrow);
+        }
+      }
+    }
+    // A group that this emptied is drift too — but a group emptied of OUR hook may still
+    // hold someone else's, so only the ones emptied HERE go, and only when something was
+    // actually removed from this event. An event list left exactly as found is written
+    // back exactly as found.
+    const dropped = list.filter(g => emptiedHere.has(g));
+    if (dropped.length) {
+      settings.hooks[event] = list.filter(g => !emptiedHere.has(g));
+      if (settings.hooks[event].length === 0) delete settings.hooks[event];
+    }
+    examined++;
+  }
+  return { removed, examined };
+}
+
 // Delete orphan hook files for retired names (copy-mode installs never rm a
 // dropped hook; dev-mode leaves a dangling symlink). Independent of whether a
 // registration existed, so a file left behind after its registration was
@@ -194,25 +284,33 @@ function main() {
 
   let added = 0;
   let prunedRegs = new Set();
+  let superseded = { removed: [], examined: 0 };
   try {
     for (const [event, matcher, file, timeout] of REGISTRATIONS) {
       if (ensureHook(settings, event, matcher, file, timeout)) added++;
     }
     if (PRUNE) prunedRegs = pruneRegistrations(settings);
+    superseded = pruneSupersededMatchers(settings);
   } catch (e) {
     console.log(`  ⚠ ${e.message}`);
     console.log('    Skipping hook registration — register the Anvi hooks manually.');
     process.exit(0);
   }
 
-  if (added > 0 || prunedRegs.size > 0) {
+  if (added > 0 || prunedRegs.size > 0 || superseded.removed.length > 0) {
     fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
     fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + '\n');
     if (added > 0) console.log(`  ✓ Registered ${added} new hook entr${added === 1 ? 'y' : 'ies'} in settings.json`);
     if (prunedRegs.size > 0) console.log(`  ✓ Pruned ${prunedRegs.size} retired hook registration(s): ${[...prunedRegs].join(', ')}`);
+    for (const r of superseded.removed) {
+      console.log(`  ✓ Removed ${r.file} from ${r.event} matcher "${r.matcher}" — already covered by "${r.coveredBy}"`);
+    }
   } else {
     console.log(`  ✓ All ${HOOK_FILE_COUNT} Anvi hooks already registered (no change)`);
   }
+  // The denominator, always. "0 superseded registrations" from a scan of 5 event lists and
+  // the same words from a scan that examined nothing are not the same statement.
+  console.log(`  ✓ ${superseded.removed.length} superseded registration(s) across ${superseded.examined} event list(s)`);
 
   if (PRUNE) {
     const deleted = pruneOrphanFiles();
@@ -237,4 +335,5 @@ if (require.main === module) main();
 module.exports = {
   REGISTRATIONS, REMOVED, ensureHook, normMatcher, commandRefsFile,
   pruneRegistrations, pruneOrphanFiles,
+  matcherTools, matcherSupersedes, pruneSupersededMatchers,
 };
