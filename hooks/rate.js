@@ -11,8 +11,9 @@
 // and read as "clean". A number that is exactly right and reads exactly wrong is the more
 // expensive kind, because it survives review.
 //
-// AND IT IS A CLASS, NOT AN INSTANCE. Measured across the repo before fixing anything:
-// three sites render a rate, in three different ways, and ALL THREE print a false 100%.
+// AND IT IS A CLASS, NOT AN INSTANCE. Measured across the FIRST-PARTY code before fixing
+// anything — the 34 tracked modules under hooks/ and scripts/: three sites render a rate,
+// in three different ways, and ALL THREE print a false 100%.
 //
 //   Math.round(n / d * 100)          294/295  -> 100%
 //   ((100 * n) / d).toFixed(0)       294/295  -> 100%
@@ -22,6 +23,15 @@
 // as the denominator grows — which is the direction these corpora move. Fixing the site
 // that was reported would have left two more, one function away, in the exact shape this
 // project has already recorded costing a session.
+//
+// AND THE CLASS IS WIDER THAN THAT — said here rather than left implied, because "measured
+// across the repo" was the first thing this comment claimed and it was not true. Six more
+// renderings of the same shape live in the vendored planning lib under bin/lib/, five of
+// them wrapped in `Math.min(100, …)`, which caps a value ABOVE 100 and does nothing about
+// one that rounds UP to it. They are out of scope here because patching vendored modules
+// widens a drift that document has to track, and that is a decision of its own: anvi #406.
+// Nine sites, three fixed. The number is stated so the next reader does not re-derive it
+// and does not mistake this module for complete coverage.
 //
 // THE RULE, stated once so the three cannot drift apart again: a rate never reports a
 // boundary it has not reached. Rounding may move a value toward a boundary but may never

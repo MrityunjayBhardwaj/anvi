@@ -8,8 +8,10 @@
 // because it survives review.
 //
 // AND THE FIX HAD TO BE THE CLASS. Before touching the reported site, all three rate
-// renderings in the repo were measured at the same inputs; all three print a false 100%,
-// two of them at 294/295 and the third at 1999/2000. A one-decimal form moves the
+// renderings in the FIRST-PARTY code were measured at the same inputs; all three print a
+// false 100%, two of them at 294/295 and the third at 1999/2000. (Six more of the same
+// shape live in the vendored lib under bin/lib/ and are deliberately not covered here —
+// anvi #406. Nine sites, three fixed; GROUP 4 below asserts the three, and nothing more.) A one-decimal form moves the
 // threshold and does not remove it — and it gets WORSE as the denominator grows, which is
 // the direction these corpora move. So the rule lives in one module and the three call
 // sites use it. GROUP 4 asserts that they actually do, by reading the source: a shared
