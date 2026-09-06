@@ -38,8 +38,13 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 
-let pass = 0, fail = 0;
-const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
+let pass = 0;
+// The failures are COLLECTED, not only printed where they occur. The runner shows the
+// last 12 lines of a failing file and nothing else, so an assertion that reddens in
+// GROUP 1 leaves no trace in CI at all — the log ends with four passing lines from
+// GROUP 4 and a count. A count is not a verdict; the summary below is.
+const failures = [];
+const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (failures.push(msg), console.log(`  ✗ ${msg}`));
 const eq = (a, b, msg) => ok(a === b, `${msg} (got ${JSON.stringify(a)})`);
 
 const ROOT = path.join(__dirname, '..');
@@ -192,5 +197,6 @@ console.log('\nGROUP 4 — the fixed module: same key, ASCII source');
   }
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+console.log(`\n${pass} passed, ${failures.length} failed`);
+for (const m of failures) console.log(`  FAILED: ${m}`);
+process.exit(failures.length ? 1 : 0);
