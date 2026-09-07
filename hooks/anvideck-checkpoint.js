@@ -189,10 +189,16 @@ function run(rawInput) {
       if (fs.existsSync(path.join(DIR, '.git', marker))) process.exit(0);
     }
 
-    // Projects mid-harvest are excluded from EVERYTHING below — the dirty check
-    // and the `add`. Both must use the same scope or the two disagree: an
+    // Projects mid-harvest are excluded from EVERYTHING below — the dirty check, the
+    // `add`, the two `diff --cached` reads that build the message and the ledger, and the
+    // `commit` itself. Every one of them must use the same scope or they disagree: an
     // unscoped dirty check plus a scoped add produces an empty commit attempt on
     // every Stop while a lease is held.
+    //
+    // ⚠ THIS SENTENCE USED TO SAY "EVERYTHING BELOW" AND THEN NAME TWO OF THE FIVE — the
+    // claim was right and the enumeration was the code. That gap IS #419: the doc asserted
+    // a coverage nobody had sized, which is the failure mode this repo already records for
+    // guards whose documentation promises more than they do.
     // ⚠ THE SCOPE GOVERNS EVERY STEP THAT READS OR WRITES THE INDEX, NOT JUST THE `add`
     // (#419). A lease used to reach the dirty check and the `add` and stop there, which
     // left the exclusion protecting the wrong thing: `add` only ADDS, while `commit` with
