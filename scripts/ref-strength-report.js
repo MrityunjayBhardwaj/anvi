@@ -33,10 +33,17 @@
 //   newest validation stamp per catalogue. An undated figure reads as current whatever its age.
 //
 //   ONE CITATION PARSER, AND IT IS NOT HERE. `hooks/currency.js` already owns the grammar of
-//   a citation — `citedSymbols`, `extractRefFiles`, `lineAnchoredRefs`, `classifySpec`,
-//   `symbolInText`, `parseEntries`. A fourth reader of the same field is precisely how the
-//   last matcher in this repo went wrong: right corpus, wrong field, four successive
-//   corrections before the count settled.
+//   a citation — `citedSymbols`, `citedLocators`, `extractRefFiles`, `lineAnchoredRefs`,
+//   `classifySpec`, `symbolInText`, `locatorInText`, `parseEntries`. A fourth reader of the
+//   same field is precisely how the last matcher in this repo went wrong: right corpus,
+//   wrong field, four successive corrections before the count settled.
+//
+//   TWO RUNGS, NOT ONE NUMBER (#417). A cited test is qualified in four ways — a symbol on
+//   the test, a locator inside it, the case named in prose, or the bare path — and only the
+//   first two can be checked. They are reported with SEPARATE denominators because they are
+//   different questions; the prose and bare forms stay ungraded and are not faults. What
+//   makes an entry ungraded here is the grammar it was written in, not the evidence behind
+//   it, and the report must not imply otherwise.
 //
 // ⚠ EXIT CODE IS A COUNT, NOT A VERDICT, and the reserved codes are stated once here:
 //   0-250  that many citations do not resolve where they are named
@@ -45,8 +52,9 @@
 //   255    it could not report at all (no catalogue, or a repo that is not a checkout)
 //
 // It is the number of citations that do not resolve
-// where they are named — symbol pairs found elsewhere or nowhere, plus cited paths that
-// resolve nowhere. Everything else — ambiguity, tail-only matches, unanchorable entries,
+// where they are named — symbol pairs found elsewhere or nowhere, cited paths that resolve
+// nowhere, plus locators naming a case their file does not contain. Everything else —
+// ambiguity, tail-only matches, unaskable locators, unanchorable entries,
 // delegated classes — is reported with its own denominator and explicitly kept OUT of that
 // count, because a number that silently absorbs the cases it cannot judge is the defect this
 // instrument exists to measure.
@@ -79,6 +87,7 @@ function loadFromCandidates(name) {
 const {
   parseEntries, citedSymbols, extractRefFiles, lineAnchoredRefs,
   classifySpec, makeRefResolver, matchedTracked, citedNameIsTrackedPath, symbolInText,
+  citedLocators, locatorInText,
 } = loadFromCandidates('currency.js');
 const { formatPct } = loadFromCandidates('rate.js');
 
@@ -227,6 +236,7 @@ function scan() {
   if (!files.length) return null;
 
   const rows = [];          // one per (file, symbol) citation
+  const locRows = [];       // one per (file, locator) citation — the second rung (#417)
   const fileRows = [];      // one per (entry, cited path)
   const other = { spans: 0, sections: 0, issues: [], shas: [] };
   const entries = { total: 0, universal: 0, noRef: 0, unanchorable: 0, judged: 0 };
@@ -321,10 +331,39 @@ function scan() {
           ? { ...row, status: 'elsewhere', detail: `not in ${pr.file}, but present in the repo` }
           : { ...row, status: 'gone', detail: 'not in the named file, and nowhere in the repo' });
       }
+
+      // (file, locator) — THE SECOND RUNG (#417). An entry may point INSIDE the file it
+      // cites — `TEST 14`, `GROUP 2b`, `§"a quiet run is one line"` — which names one
+      // labelled case rather than the whole file, and is therefore the more precise of the
+      // two citation forms. It is asked here rather than folded into the symbol population
+      // because it is a different question with a different denominator, and a rung that
+      // borrows another rung's denominator cannot be read.
+      for (const lc of citedLocators(ref)) {
+        const row = { cat: f, entry: e.id, file: lc.file, locator: lc.locator };
+        const res = classify(lc.file);
+        const txt = textOf(res);
+        if (txt === null) {
+          // Same rule as the symbol half: a path that does not resolve is a PATH finding,
+          // already counted as one above. Charging it to the locator would double-count it
+          // and blame a name for a file's defect.
+          locRows.push({ ...row, status: 'file-unresolved', detail: `${lc.file} → ${res.kind}` });
+          continue;
+        }
+        const where = locatorInText(txt, lc.locator);
+        if (where === 'present') { locRows.push({ ...row, status: 'in-file' }); continue; }
+        if (where === 'unaskable') {
+          // A locator shape this reader does not know how to resolve. NEVER folded into
+          // `absent` — "the file does not contain the case cited" and "I cannot tell" are
+          // different findings and only the first is a defect.
+          locRows.push({ ...row, status: 'unaskable', detail: `no rule for \`${lc.locator}\`` });
+          continue;
+        }
+        locRows.push({ ...row, status: 'absent', detail: `${lc.file} contains no ${lc.locator}` });
+      }
     }
     stamps[f] = newest || '(none)';
   }
-  return { rows, fileRows, other, entries, stamps };
+  return { rows, locRows, fileRows, other, entries, stamps };
 }
 
 // --- issues and shas ---------------------------------------------------------
@@ -411,7 +450,7 @@ function main() {
     process.exitCode = 255;
     return;
   }
-  const { rows, fileRows, other, entries, stamps } = scanned;
+  const { rows, locRows, fileRows, other, entries, stamps } = scanned;
 
   let head = '(unknown)', headDate = '(unknown)';
   try { head = git('rev-parse --short HEAD').trim(); } catch { /* not a checkout */ }
@@ -425,7 +464,15 @@ function main() {
   const inFile = by('in-file');
   const misPointing = by('elsewhere') + by('gone');
   const deadPaths = kindOf('deleted') + kindOf('external');
-  const failures = misPointing + deadPaths;
+  // The locator rung's own denominator, kept separate from the symbol rung's for the reason
+  // stated where it is collected. `askableLoc` is the subtraction the reader can see.
+  const locBy = (s) => locRows.filter(r => r.status === s).length;
+  const askableLoc = locBy('in-file') + locBy('absent');
+  // A locator naming a case its file does not contain IS a citation that does not resolve
+  // where it is named, which is exactly what this count means — so it belongs here. The
+  // unaskable and file-unresolved locators do NOT: the first is a reader's limit, the
+  // second is a path defect already charged to the path population above.
+  const failures = misPointing + deadPaths + locBy('absent');
 
   // ⚠ THE PRINTED CLASSES MUST SUM TO THEIR TOTALS, AND THIS IS THE ONLY THING THAT ASKS.
   // Every number in this report is a partition of a population, and a partition that has
@@ -436,6 +483,7 @@ function main() {
     ['entries', entries.universal + entries.noRef + entries.unanchorable + entries.judged, entries.total],
     ['symbol pairs', askable.length + by('ambiguous-attribution') + by('names-a-file') + by('file-unresolved') + by('unknown'), rows.length],
     ['askable pairs', inFile + by('tail-only') + by('elsewhere') + by('gone'), askable.length],
+    ['locator citations', askableLoc + locBy('unaskable') + locBy('file-unresolved'), locRows.length],
     ['cited paths', kindOf('present') + kindOf('reference') + kindOf('ambiguous') + kindOf('deleted') + kindOf('external') + kindOf('unknown'), fileRows.length],
   ].filter(([, got, want]) => got !== want);
 
@@ -452,6 +500,12 @@ function main() {
       ambiguousAttribution: by('ambiguous-attribution'), namesAFile: by('names-a-file'),
       fileUnresolved: by('file-unresolved'), unknown: by('unknown'),
     },
+    locators: {
+      total: locRows.length,
+      askable: askableLoc,
+      inFile: locBy('in-file'), absent: locBy('absent'),
+      unaskable: locBy('unaskable'), fileUnresolved: locBy('file-unresolved'),
+    },
     citedPaths: {
       total: fileRows.length,
       present: kindOf('present'), reference: kindOf('reference'), ambiguous: kindOf('ambiguous'),
@@ -462,6 +516,7 @@ function main() {
     shas: { cited: other.shas.length, ...shas },
     failures,
     rows: showAll || jsonOut ? rows : undefined,
+    locRows: showAll || jsonOut ? locRows : undefined,
     fileRows: showAll || jsonOut ? fileRows : undefined,
   };
 
@@ -509,6 +564,17 @@ function main() {
   console.log(`     the cited FILE does not resolve, so the question cannot be asked                ${by('file-unresolved')}`);
   console.log(`     the repo-wide search could not answer                                           ${by('unknown')}`);
   console.log('');
+  console.log(`  ── (file, locator) — the SECOND rung ──────────────────────────────────────`);
+  console.log(`  ${locBy('in-file')} of ${askableLoc} cited locators resolve IN THE FILE THE ENTRY NAMES${pct(locBy('in-file'), askableLoc)}`);
+  console.log(`     the file contains no such case                                               ${locBy('absent')}`);
+  console.log(`  ${locRows.length} locators cited in total; ${locRows.length - askableLoc} could not be asked and are NOT in the denominator above:`);
+  console.log(`     a locator shape this reader has no rule for (never folded into absent)        ${locBy('unaskable')}`);
+  console.log(`     the cited FILE does not resolve, so the question cannot be asked              ${locBy('file-unresolved')}`);
+  console.log('  A locator names one labelled case inside the file — `TEST 14`, `GROUP 2b`,');
+  console.log('  `§"a quiet run is one line"` — so it is a MORE precise citation than a bare path,');
+  console.log('  and the symbol check above cannot see it. Document sections are a different');
+  console.log('  class and stay with scripts/citation-anchors.js, which already owns them.');
+  console.log('');
   console.log(`  ── cited paths ───────────────────────────────────────────────────────────`);
   console.log(`  ${kindOf('present')} of ${fileRows.length} cited paths are files in this repo${pct(kindOf('present'), fileRows.length)}`);
   console.log(`     resolve into the store's reference area  ${kindOf('reference')}`);
@@ -527,7 +593,7 @@ function main() {
     : `  issues/PRs      ${other.issues.length} cited — NOT CHECKED (needs the network; pass --online)`);
   console.log('');
   console.log(`  FAILURES (citations that do not resolve where named): ${failures}`);
-  console.log(`     = ${misPointing} symbol pairs (elsewhere ${by('elsewhere')} + gone ${by('gone')}) + ${deadPaths} paths (deleted ${kindOf('deleted')} + external ${kindOf('external')})`);
+  console.log(`     = ${misPointing} symbol pairs (elsewhere ${by('elsewhere')} + gone ${by('gone')}) + ${deadPaths} paths (deleted ${kindOf('deleted')} + external ${kindOf('external')}) + ${locBy('absent')} locators (the file has no such case)`);
   console.log('  ⚠ this is a PROVENANCE measurement — whether a pointer lands where it says.');
   console.log('    It is NOT a measure of whether the citation SUPPORTS the claim. That is a');
   console.log('    ruling, not a computation, and is deliberately not attempted here.');

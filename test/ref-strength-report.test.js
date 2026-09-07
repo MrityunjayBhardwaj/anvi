@@ -41,6 +41,13 @@ const REPO = path.join(TMP, 'repo');
 write(path.join(REPO, 'src', 'alpha.js'), 'function inNamedFile() { return 1; }\n');
 write(path.join(REPO, 'src', 'beta.js'), 'function movedAway() { return 2; }\n');
 write(path.join(REPO, 'src', 'dotted.js'), 'const tailPart = 3;\nmodule.exports = { tailPart };\n');
+// A file carrying the labels a LOCATOR citation points at (#417). Real labels, in the two
+// spellings the corpus uses, so the locator rung is exercised against something a test
+// actually looks like rather than against a string chosen to match the matcher.
+write(path.join(REPO, 'test', 'labelled.test.js'),
+  "console.log('GROUP 1 — the first case');\nconsole.log('GROUP 2b — the letter-suffixed one');\nconsole.log('a quiet run is one line');\n");
+write(path.join(REPO, 'test', 'numbered.test.sh'),
+  'echo "TEST 3 — the third"\necho "TEST 7 — the seventh"\n');
 const g = (...a) => execFileSync('git', a, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 g('init', '-q');
 g('config', 'user.email', 'test@example.invalid');
@@ -263,6 +270,54 @@ console.log('\nthe parenthetical\'s other paths come from the ONE path reader');
   eq(pairs.length, 2, 'both citations are read');
   eq(JSON.stringify(pairs[0].otherPaths), '["src/beta.js"]', 'a parenthetical naming another file reports it');
   eq(JSON.stringify(pairs[1].otherPaths), '[]', 'CONTROL — one that names no other file reports none');
+}
+
+// ── the LOCATOR rung (#417) ─────────────────────────────────────────────────────────────
+// A second rung with its OWN denominator. The assertions below are written so that folding
+// it into the symbol rung, or folding its unaskable class into its absent one, reddens a
+// named assertion rather than merely changing a number nobody asserts.
+console.log('\nthe locator rung reports separately, and its absences reach the failure count');
+{
+  const LOC = [
+    entry('L1', 'a group locator the file labels', '`test/labelled.test.js` GROUP 2b (the letter-suffixed one)'),
+    entry('L2', 'a numeric locator the file labels', '`test/numbered.test.sh` TEST 3'),
+    entry('L3', 'a quoted section the file contains', '`test/labelled.test.js` §"a quiet run is one line"'),
+    entry('L4', 'a locator naming a case the file does NOT have', '`test/labelled.test.js` GROUP 9'),
+    entry('L5', 'a locator on a path that resolves nowhere', '`test/missing.test.js` GROUP 1'),
+  ];
+  const r = run(LOC);
+  has(r.out, '3 of 4 cited locators resolve IN THE FILE THE ENTRY NAMES',
+    'the locator rung prints its own denominator, and the unresolvable path is not in it');
+  has(r.out, '5 locators cited in total; 1 could not be asked',
+    'the total and the subtraction are both stated, so the reader can see what left');
+  // ⚠ THE DIRECTION THAT MATTERS. A locator naming a case its file does not contain is a
+  // citation that does not resolve where it is named, which is what the count means.
+  has(r.out, '+ 1 locators (the file has no such case)',
+    'a locator absence is named in the failure breakdown, not silently absorbed');
+  ok(r.status >= 1, 'and it reaches the exit code, which is a count of citations that do not resolve');
+  // The path defect is charged ONCE, to the path population — never twice.
+  hasNot(r.out, '2 locators (the file has no such case)',
+    'the unresolvable PATH is not also charged to the locator rung');
+}
+{
+  // A markdown section is another script's class, and the report must not steal it.
+  // BOTH spellings are asserted: the corpus writes the delegated form BARE, and the
+  // delegated matcher is anchored on that, so a backticked one is a different string —
+  // which is exactly the kind of near-miss that makes an exclusion pass for the wrong
+  // reason. The locator rung must stay out of both.
+  const r = run([entry('L6', 'a section anchor in a document', 'README.md §Some Heading')]);
+  has(r.out, '0 of 0 cited locators', 'a document section yields no locator here');
+  has(r.out, 'section anchors 1', 'it is counted as the delegated class it belongs to');
+  const rq = run([entry('L8', 'a backticked section anchor', '`README.md` §"Some Heading"')]);
+  has(rq.out, '0 of 0 cited locators', 'and the backticked, quoted spelling yields none either');
+}
+{
+  // NON-VACUITY for the whole rung: a corpus with no locators must still print the
+  // section with a zero and its denominator, never omit it. A missing section and a
+  // section reading zero are the same thing to a reader who is not looking for it.
+  const r = run([entry('L7', 'no locator anywhere', '`src/alpha.js` (`inNamedFile`)')]);
+  has(r.out, '(file, locator) — the SECOND rung', 'the section prints even when nothing was found');
+  has(r.out, '0 locators cited in total', 'with the zero carrying its denominator');
 }
 
 const label = 'ref-strength-report';
