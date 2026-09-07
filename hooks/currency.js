@@ -574,6 +574,105 @@ function symbolInText(text, name) {
   return new RegExp(`\\b${last.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(s) ? 'tail-only' : 'absent';
 }
 
+// ── The LOCATOR half of a citation ────────────────────────────────────────────
+//
+// A cited test is qualified in four ways in this corpus, and until now one reader existed
+// for one of them. `citedSymbols` finds a backticked identifier in a parenthetical; an
+// entry may instead point INSIDE the cited test — `TEST 14`, `TESTS 10 and 15`,
+// `GROUP 2b`, `§"a quiet run is one line"` — which names one labelled case rather than
+// the whole file, and is therefore the MORE precise citation of the two. It was invisible
+// because the token after the path is not `(`.
+//
+// Measured through THIS extractor rather than the probe that motivated it (#417, working on
+// #280): 21 locator citations across 21 entries — 12 quoted sections, 6 groups, 3 numeric —
+// all 21 resolving in the test they are cited on, against scrambled controls at 20% and
+// 35%, so the question discriminates rather than agreeing with everything. The probe said
+// 20; it capped a quoted locator at 60 characters and one is exactly 60. Quote the figure
+// the shipped code produces, and re-run before quoting it at all.
+//
+// ⚠ THIS DOES NOT WIDEN WHAT COUNTS AS A SYMBOL. A locator is not a name and is never
+// folded into the symbol population: it has its own extractor, its own resolver and its
+// own denominator, for the same reason `tail-only` is not folded into `present`.
+const LOCATOR_RE = /^[\s`'")\]]*(TESTS?\s+\d+(?:\s*(?:,|and|&|–|-)\s*\d+)*|GROUPS?\s+\d+[a-z]?|§\s*"[^"]{2,80}"|§\s*[A-Za-z][^;,.()]{2,60})/;
+
+// What a REF cites as a locator, as `{ file, locator }` pairs.
+//
+// The path population is the union the strength report already uses — extractRefFiles plus
+// the paths citedSymbols hangs parentheticals off — so this adds NO fifth reader of the
+// path grammar. The only question asked here is positional: what follows that path token.
+// A path that does not appear verbatim (a brace expansion, say) yields no locator, which
+// fails closed rather than inventing one.
+function citedLocators(refField) {
+  const s = String(refField || '');
+  if (!s) return [];
+  const paths = [...new Set([...extractRefFiles(s), ...citedSymbols(s).map((p) => p.file)])];
+  const out = [];
+  const seen = new Set();
+  for (const file of paths) {
+    // ⚠ A DOCUMENT SECTION IS ALREADY SOMEBODY ELSE'S CLASS. `<document>.md §<anchor>` is
+    // owned by scripts/citation-anchors.js, whose own matcher is scoped to `.md` for
+    // exactly this reason. A locator here is a position inside an EXECUTABLE test; emitting
+    // one for a markdown section would put two readers on one citation form, which is the
+    // failure this file's one-parser rule exists to prevent. Measured on the live corpus:
+    // without this line the extractor claims 45 locators, 25 of them section anchors that
+    // already have a checker — and 8 of those 25 read as unresolved purely because a
+    // section anchor runs to the end of a clause rather than to a delimiter.
+    if (/\.md$/i.test(file)) continue;
+    let from = 0;
+    for (;;) {
+      const at = s.indexOf(file, from);
+      if (at < 0) break;
+      from = at + file.length;
+      // ⚠ A PATH IS ALSO A PREFIX OF A LONGER PATH, and this REF field really does cite
+      // both forms — one entry names `currency.js` and `hooks/currency.js` in the same
+      // field. A bare `indexOf` finds the short one INSIDE the long one, and the locator
+      // written after the long path would then be attributed to the short one as well: a
+      // second citation nobody wrote, resolving perfectly, in a report about whether
+      // citations resolve. Require the match to start at a path boundary — the same
+      // both-edges rule the identity checks in this file already carry.
+      if (at > 0 && /[A-Za-z0-9._/-]/.test(s[at - 1])) continue;
+      const m = LOCATOR_RE.exec(s.slice(from, from + 100));
+      if (!m) continue;
+      const locator = m[1].trim();
+      const key = `${file}\u0000${locator}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ file, locator });
+    }
+  }
+  return out;
+}
+
+// Is a cited LOCATOR in a given file's text?
+//
+// The locator half of what `symbolInText` does for names, and deliberately the same
+// three-outcome string contract, so the two halves of one question cannot drift into two
+// shapes. `unaskable` is the locator kind this does not know how to resolve; it is NEVER
+// folded into `absent`, because "the citation names a case the file does not have" and
+// "this reader cannot tell" are different findings and only the first is a defect.
+//
+// ⚠ EVERY OUTCOME HERE IS A TRUTHY STRING, `'absent'` included. Compare against
+// `'present'` explicitly — a caller that tests the return for truthiness passes every
+// check, silently, and that exact defect has already cost this repo a probe.
+function locatorInText(text, locator) {
+  const s = String(text == null ? '' : text);
+  const l = String(locator == null ? '' : locator).trim();
+  if (!l) return 'unaskable';
+  let m;
+  if ((m = /^TESTS?\s+(.+)$/i.exec(l))) {
+    const nums = m[1].match(/\d+/g) || [];
+    if (!nums.length) return 'unaskable';
+    // EVERY number must be there. A citation naming three cases is a claim about three,
+    // and answering 'present' when two of them exist grades the citation on its best part.
+    return nums.every((n) => new RegExp(`TEST\\s+${n}\\b`, 'i').test(s)) ? 'present' : 'absent';
+  }
+  if ((m = /^GROUPS?\s+(\d+[a-z]?)$/i.exec(l)))
+    return new RegExp(`GROUP\\s+${m[1]}\\b`, 'i').test(s) ? 'present' : 'absent';
+  if ((m = /^§\s*"([^"]+)"$/.exec(l))) return s.includes(m[1]) ? 'present' : 'absent';
+  if ((m = /^§\s*(.+)$/.exec(l))) return s.includes(m[1].trim()) ? 'present' : 'absent';
+  return 'unaskable';
+}
+
 // The path a parenthetical hangs off, or null. Same unwrapping as extractRefFiles —
 // and deliberately NOT the FILE_EXT whitelist, for the reason the line-anchor rule
 // gives: this token is not going to be diffed, only handed to a resolver that knows
@@ -2206,6 +2305,10 @@ module.exports = {
   // citation is one rule, and a second reader of it would judge a different corpus
   // while reporting the same finding name.
   citedSymbols, citedNameIsTrackedPath,
+  // The locator half of the same question, exported for the same reason as the symbol
+  // half: the strength report asks it as a second rung and the grammar of a citation is
+  // one rule. A second reader here would grade a different corpus under the same name.
+  citedLocators, locatorInText,
   // The per-file half of the symbol question, exported for the reason its own note gives:
   // the lint asks it as a pre-filter and the strength report asks it as the headline, and
   // a second implementation would disagree silently on the dotted-name case.
