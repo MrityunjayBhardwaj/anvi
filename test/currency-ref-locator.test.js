@@ -74,6 +74,30 @@ ok(locs('`test/g.test.sh` (the prose note) and elsewhere entirely TEST 14').leng
 ok(locs('`test/g.test.sh` TEST 14').length === 1,
   'CONTROL — the same locator ADJACENT to that path is a citation, so the rule aims rather than switches off');
 
+// ⚠ THE BARE SECTION FORM IS UNREACHABLE ON TODAY'S CORPUS — 0 of 21, which are 12 quoted,
+// 6 group, 3 numeric. It is kept because a test file may carry an unquoted section
+// reference, and it is fixtured here for the reason this repo already states about
+// alternatives: an unreachable branch and a working one emit exactly the same thing, so a
+// green corpus is not evidence for any individual branch.
+ok(locs('`test/j.test.js` §Some Section Name').join() === 'test/j.test.js|§Some Section Name',
+  'the bare section form, which the corpus does not currently use, still reads');
+ok(c.locatorInText('describe: Some Section Name', '§Some Section Name') === 'present',
+  'and resolves against a file containing it');
+ok(c.locatorInText('nothing of the sort here', '§Some Section Name') === 'absent',
+  'CONTROL — and is absent from one that does not, so the branch aims rather than agrees');
+
+// ⚠ A PATH IS A PREFIX OF A LONGER PATH, and the live corpus already carries the shape:
+// one entry cites `currency.js` and `hooks/currency.js` in the same field. Without a
+// boundary check the short name matches INSIDE the long one and inherits its locator —
+// a citation nobody wrote, resolving perfectly.
+{
+  const both = locs('`currency.js` (the short form); `hooks/currency.js` GROUP 4');
+  ok(both.length === 1 && both[0] === 'hooks/currency.js|GROUP 4',
+    'a locator after a long path is NOT also attributed to a shorter path inside it');
+}
+ok(locs('`hooks/currency.js` GROUP 4').join() === 'hooks/currency.js|GROUP 4',
+  'CONTROL — the long path still gets its own locator, so the boundary rule aims rather than switches off');
+
 ok(locs('`test/h.test.js` GROUP 1; `test/h.test.js` GROUP 1').length === 1,
   'the same locator cited twice on the same file is one citation, not two');
 ok(locs('`test/i.test.js` GROUP 1; `test/i.test.js` GROUP 4').length === 2,

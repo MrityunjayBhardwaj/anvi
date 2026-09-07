@@ -583,9 +583,12 @@ function symbolInText(text, name) {
 // the whole file, and is therefore the MORE precise citation of the two. It was invisible
 // because the token after the path is not `(`.
 //
-// Measured before this was built (#417, figures on #280): 20 locator citations across 20
-// entries, all 20 resolving in the test they are cited on, against scrambled controls at
-// 20% and 35% — so the question discriminates rather than agreeing with everything.
+// Measured through THIS extractor rather than the probe that motivated it (#417, working on
+// #280): 21 locator citations across 21 entries — 12 quoted sections, 6 groups, 3 numeric —
+// all 21 resolving in the test they are cited on, against scrambled controls at 20% and
+// 35%, so the question discriminates rather than agreeing with everything. The probe said
+// 20; it capped a quoted locator at 60 characters and one is exactly 60. Quote the figure
+// the shipped code produces, and re-run before quoting it at all.
 //
 // ⚠ THIS DOES NOT WIDEN WHAT COUNTS AS A SYMBOL. A locator is not a name and is never
 // folded into the symbol population: it has its own extractor, its own resolver and its
@@ -620,6 +623,14 @@ function citedLocators(refField) {
       const at = s.indexOf(file, from);
       if (at < 0) break;
       from = at + file.length;
+      // ⚠ A PATH IS ALSO A PREFIX OF A LONGER PATH, and this REF field really does cite
+      // both forms — one entry names `currency.js` and `hooks/currency.js` in the same
+      // field. A bare `indexOf` finds the short one INSIDE the long one, and the locator
+      // written after the long path would then be attributed to the short one as well: a
+      // second citation nobody wrote, resolving perfectly, in a report about whether
+      // citations resolve. Require the match to start at a path boundary — the same
+      // both-edges rule the identity checks in this file already carry.
+      if (at > 0 && /[A-Za-z0-9._/-]/.test(s[at - 1])) continue;
       const m = LOCATOR_RE.exec(s.slice(from, from + 100));
       if (!m) continue;
       const locator = m[1].trim();
