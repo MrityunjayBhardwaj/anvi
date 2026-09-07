@@ -625,8 +625,15 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
      recorded splits, because at sweep time the median gap since the previous
      commit was 456s. So the wrap publishes its intent instead: it takes a lease
      (`anvi-tools harvest-lease acquire`) before writing entries and releases it
-     after its own commit, and the hook excludes leased projects from both its
-     dirty check and its `add`. **Scoped, never a global defer** — the store is
+     after its own commit, and the hook excludes leased projects from **every step
+     that reads or writes the index** — the dirty check, the `add`, the two
+     `diff --cached` reads that build the message and the swept ledger, and the
+     `commit` itself. Naming fewer than all of them is not a documentation detail:
+     until #419 the exclusion stopped at the `add`, and since `add` only ADDS while
+     `commit` with no pathspec takes the WHOLE index, a harvest's staged files were
+     swept anyway — staging being the first half of committing. **Take the lease
+     before the first EDIT, not before the commit**, since the exposure begins at
+     the edit. **Scoped, never a global defer** — the store is
      shared with concurrent sessions, and deferring the whole run would delay
      THEIR durability to protect one project's narrative. TTL-bounded (900s,
      `ANVI_HARVEST_LEASE_SECONDS`) and ignored when stale or future-dated, for the
