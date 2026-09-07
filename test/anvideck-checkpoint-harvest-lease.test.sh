@@ -297,6 +297,66 @@ ok "$(cli15 live)" "realproj" "and that is the lease that exists"
 cli15 release realproj >/dev/null
 ok "$(cli15 live)" "" "released again, leaving no state behind for later cases"
 
+echo "TEST 16 — a leased project's STAGED work survives a sweep (#419)"
+# THE CASE THE LEASE DID NOT COVER, and the one that actually cost a harvest. Every
+# case above leaves the leased work merely DIRTY. A real harvest stages its files —
+# that is the first half of committing — and `git commit` with no pathspec takes the
+# whole index, so the exclusion protecting the `add` never saw them. Observed live:
+# a lease was held and live, liveLeases() returned it, the pathspec excluded all of
+# its files, and the sweep committed them anyway.
+#
+# ⚠ THE HARNESS'S OWN `age_head` IS THE SAME DEFECT ONE LAYER DOWN: it amends with no
+# pathspec, so it would absorb the staged file before the hook ever runs and this case
+# would pass for the wrong reason. Age FIRST, stage SECOND, and drive without ageing.
+drive_staged(){ printf '{}' | ANVIDECK_DIR="$STORE" CLAUDE_DIR="$CLAUDE" \
+  ANVI_HARVEST_LEASE_SECONDS="${1:-900}" node "$HOOK"; }
+lease clear-swept anvi; lease clear-swept basher
+printf '\n## H920: staged by a harvest, mid-commit\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+printf '\n## H520: another session, also staged\n' >> "$STORE/projects/basher/.anvi/hetvabhasa.md"
+age_head
+git -C "$STORE" add projects/anvi/.anvi/hetvabhasa.md projects/basher/.anvi/hetvabhasa.md
+ok "$(git -C "$STORE" diff --cached --name-only | grep -c 'projects/anvi/')" "1" "precondition: the leased file really is STAGED before the sweep"
+lease acquire anvi >/dev/null
+drive_staged
+ok "$(committed_in_head 'projects/anvi/')" "0" "(a) the leased project's STAGED work is NOT in the sweep"
+ok "$(committed_in_head 'projects/basher/')" "1" "(b) an unleased STAGED file IS swept in the same run — the fix aims, it does not switch off"
+ok "$(git -C "$STORE" diff --cached --name-only | grep -c 'projects/anvi/')" "1" "the leased file is left staged, exactly as the harvest had it"
+ok "$(grep -c 'H920' "$STORE/projects/anvi/.anvi/hetvabhasa.md")" "1" "and its content is untouched on disk"
+
+echo "TEST 17 — the sweep's message and ledger describe only what it actually took (#419)"
+# Scoping the commit alone is not enough. The message and the swept ledger are built
+# from `diff --cached` BEFORE the commit, so unscoped they would name a project whose
+# files the commit does not contain — and recordSwept would write a row claiming the
+# harvest was split when it was not. A FALSE ledger row is worse than none, because
+# the wrap trusts it and writes its own message around it.
+ok "$(git -C "$STORE" log -1 --format=%s | grep -c 'anvi')" "0" "the message does not name the leased project"
+ok "$(git -C "$STORE" log -1 --format=%s | grep -c 'basher')" "1" "it does name the one it committed"
+ok "$(git -C "$STORE" log -1 --format=%s | grep -c 'H920')" "0" "and does not claim the leased entry"
+ok "$(lease swept anvi | grep -c 'H920')" "0" "no ledger row claims the leased entry was swept"
+ok "$(lease swept basher | grep -c 'H520')" "1" "the entry that WAS swept is recorded — the ledger still works"
+lease release anvi
+lease clear-swept basher
+
+echo "TEST 18 — with no lease, a STAGED file is still swept (the unleased path is unchanged)"
+# The control for TESTS 16-17. `excludes` is the empty string with no lease held, so
+# every command must behave exactly as before the fix. Without this, a scope that
+# silently excluded everything would pass every assertion above.
+printf '\n## H930: staged, and nothing is leased\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+age_head
+git -C "$STORE" add projects/anvi/.anvi/hetvabhasa.md
+ok "$(lease live)" "" "precondition: no lease is held"
+BEFORE18=$(count)
+drive_staged
+# ⚠ NOT `committed_in_head 'projects/anvi/'`. When no commit is made, that reads the
+# PREVIOUS commit, which contains the same path prefix from an earlier case — so it
+# passes for the wrong reason, and the mutation matrix found it doing exactly that.
+# Anchor on a commit HAVING HAPPENED and on THIS entry's text.
+ok "$(count)" "$((BEFORE18+1))" "a commit was actually made — the sweep did not silently do nothing"
+ok "$(git -C "$STORE" show HEAD --format= -- projects/anvi/.anvi/hetvabhasa.md | grep -c '^+## H930')" "1" "a staged file with no lease is committed, as it always was"
+ok "$(git -C "$STORE" diff --cached --name-only | grep -c .)" "0" "and the index is left clean"
+ok "$(lease swept anvi | grep -c 'H930')" "1" "and the ledger records it"
+lease clear-swept anvi
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]

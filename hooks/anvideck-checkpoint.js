@@ -193,10 +193,22 @@ function run(rawInput) {
     // and the `add`. Both must use the same scope or the two disagree: an
     // unscoped dirty check plus a scoped add produces an empty commit attempt on
     // every Stop while a lease is held.
+    // ⚠ THE SCOPE GOVERNS EVERY STEP THAT READS OR WRITES THE INDEX, NOT JUST THE `add`
+    // (#419). A lease used to reach the dirty check and the `add` and stop there, which
+    // left the exclusion protecting the wrong thing: `add` only ADDS, while `commit` with
+    // no pathspec takes the WHOLE INDEX — and a harvest's files are staged before it
+    // commits, by definition. Observed live: a lease was held and live, `liveLeases()`
+    // returned it, the pathspec excluded all of its files, and the sweep committed them
+    // anyway because they were already in the index. The same defect, and the same one-line
+    // shape of fix, is already recorded for scripts/migrate-planning.sh; it never travelled.
+    //
+    // The atoms are named ONCE and every consumer derives from them, because the failure
+    // this guards against is two sites disagreeing about what is in scope — which is what
+    // produced the bug being fixed. `excludes` is the empty string when no lease is held,
+    // so every command below is byte-identical to the unleased behaviour.
     const leased = liveLeases ? liveLeases() : [];
-    const scope = leased.length
-      ? `-- . ${leased.map(p => JSON.stringify(`:(exclude)projects/${p}/`)).join(' ')}`
-      : '';
+    const excludes = leased.map(p => JSON.stringify(`:(exclude)projects/${p}/`)).join(' ');
+    const scope = leased.length ? `-- . ${excludes}` : '';
 
     const dirty = git(`status --porcelain ${scope}`).trim();
     // Clean here means "nothing to commit that isn't leased". Either the workflow
@@ -226,8 +238,11 @@ function run(rawInput) {
 
     git(`add -A ${scope}`);
 
-    // Which projects were touched?
-    const files = git('diff --cached --name-only').trim().split('\n').filter(Boolean);
+    // Which projects were touched? SCOPED, because the index may hold a leased project's
+    // staged work that this sweep is deliberately not taking. Unscoped, the message names
+    // files the commit does not contain — which is the shape of a report that describes a
+    // population it did not measure.
+    const files = git(`diff --cached --name-only ${scope}`).trim().split('\n').filter(Boolean);
     const projects = [...new Set(files.map(f => {
       const m = f.match(/^projects\/([^/]+)\//);
       return m ? m[1] : '(root)';
@@ -236,7 +251,11 @@ function run(rawInput) {
     // New catalogue entry IDs added in this diff — any `##` or `###` heading whose id is a letter prefix plus a number.
     // Scope to .anvi/ catalogue files only — memory files (now mirrored here) may
     // quote a catalogue ID in prose, which must not inject a false (+ID) summary.
-    const added = git("diff --cached --unified=0 -- ':(glob)projects/*/.anvi/*.md'");
+    // SCOPED for a sharper reason than the message: this diff feeds `recordSwept`, and a
+    // leased project's staged entries would be recorded as SWEPT when they were not — a
+    // ledger row asserting a split that never happened. A false record is worse than no
+    // record, because the wrap trusts it and writes its message around it.
+    const added = git(`diff --cached --unified=0 -- ':(glob)projects/*/.anvi/*.md' ${excludes}`);
     // Collected PER PROJECT as well as flat. The flat list is the message summary
     // (unchanged); the per-project split is what lets a sweep leave a record the
     // wrap can read, so a split the lease didn't prevent is at least legible (#148).
@@ -264,7 +283,12 @@ function run(rawInput) {
     const idSummary = ids.length ? ` (+${ids.join(', +')})` : '';
 
     const msg = `📓 auto-checkpoint: ${projects.join(', ')} — ${fileSummary}${idSummary}`;
-    git(`commit -m ${JSON.stringify(msg)}`);
+    // THE STEP THE LEASE NEVER REACHED. With a pathspec this is a partial commit: git
+    // builds the tree from HEAD plus the matching paths, so a leased project's staged work
+    // is neither committed nor unstaged — it stays exactly as the harvest left it, which is
+    // what the lease promises. Measured against all four shapes a sweep must still capture:
+    // added, deleted and modified files are committed as before, and a new directory too.
+    git(`commit -m ${JSON.stringify(msg)} ${scope}`);
 
     // Leave a record of every entry this sweep claimed, so a wrap that runs later
     // can name the pre-swept entries and their commit rather than writing a message
