@@ -326,15 +326,15 @@ function run(rawInput) {
     // in the Ground Truth trace for the hook-events boundary — and the SessionStart
     // banner reads it on the next turn.
     //
-    // git's cause line arrives on stderr, not in `message`, so both are consulted —
-    // taking only `message` would record `Command failed: git commit …`, which names
-    // the command that failed and not the reason, and a report that cannot be acted on
-    // is the thing being fixed rather than a lesser version of it.
+    // `e.message` is enough, and consulting `e.stderr` first was measured to be dead
+    // code: execSync builds the message as `Command failed: <cmd>` followed by the whole
+    // of stderr, so the two agree on every line that matters. What IS load-bearing is
+    // taking the LAST lines of it in the record — the command is the head and the reason
+    // is the tail, and a head-truncated git error names what ran instead of why it broke.
+    // (A mutation swapping stderr for message was NOT witnessed, which is what showed the
+    // branch to be redundant rather than protective.)
     try {
-      if (recordCheckpointFailure) {
-        const stderr = e && e.stderr ? String(e.stderr).trim() : '';
-        recordCheckpointFailure(stderr || (e && e.message) || String(e));
-      }
+      if (recordCheckpointFailure) recordCheckpointFailure((e && e.message) || String(e));
     } catch { /* the record is best-effort; it must never become the thing that throws */ }
     process.exit(0); // never block the session
   }
