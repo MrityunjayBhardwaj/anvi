@@ -208,6 +208,17 @@ ok(/· the limit is five/.test(good.out) && /· cap clamps to the limit/.test(go
      'CONTROL — and that wider cut does not pair two assertions that differ before the parenthetical');
   ok(coverageKey('(only a parenthetical)') === '(only a parenthetical)',
      'a message that is nothing BUT a parenthetical keeps its text — an empty key would collide every such row');
+
+  // ⚠ THE CASE THE GUARD ABOVE LET THROUGH (#421). A message that BEGINS with a
+  // parenthetical is eaten whole by the greedy cut, so the key would be empty — and the
+  // old fallback then returned the FULL string, diagnostic included, keying the passing
+  // and failing forms apart. `(a)` / `(b)` is the ordinary way to label two assertions
+  // that must be read together, so this lands precisely where a reader reaches for it,
+  // and it is silent: the coverage figure reads THIN rather than broken.
+  ok(coverageKey('(a) the leased work is NOT swept') === coverageKey('(a) the leased work is NOT swept (got:[1] want:[0])'),
+     'an assertion whose message BEGINS with a parenthetical still pairs with its failing form');
+  ok(coverageKey('(a) the leased work is NOT swept') !== coverageKey('(b) the leased work is NOT swept (got:[1] want:[0])'),
+     'CONTROL — and two assertions differing only in that leading label still key apart');
   ok(coverageKey('weird ) trailing') === 'weird ) trailing',
      'a message with a close paren and no open one is left alone rather than cut at a guessed position');
   // The other direction of unbalanced, and the one that discriminates: this message HAS
