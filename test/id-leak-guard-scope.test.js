@@ -225,6 +225,27 @@ ok(!fired(`cat >> ${MEMFILE} <<'EOF'\ngit commit -m "note" was the shape\nEntrie
 ok(!fired(`printf '%s\\n' "${CLUSTER}" >> ${MEMFILE}`), 'a plain append to a memory file');
 ok(!fired(`git -C ${STORE_DIR} commit -m "${CLUSTER}"`), 'a commit into the store, named by path');
 ok(!fired(`git commit -m "${CLUSTER}"`, STORE_DIR), 'a commit run from inside the store');
+ok(!fired(`cd ${STORE_DIR} && git commit -m "${CLUSTER}"`), 'a commit into the store reached by `cd` — the path is nowhere in the git invocation');
+ok(!fired(`cd "${STORE_DIR}" && git commit -m "${CLUSTER}"`), 'the same with the path QUOTED, which the classifier strips and the target resolver must not');
+ok(!fired(`cd ${STORE_DIR} && cd projects && git commit -m "${CLUSTER}"`), 'a relative `cd` after an absolute one stays inside the store');
+
+// ── THE EXEMPTION IS BOUGHT BY THE TARGET, NOT BY THE PROSE (#239) ──────────
+// The exemption used to be granted when the command TEXT named a private location
+// anywhere — and a commit MESSAGE is text. So a commit into a PUBLIC repo whose
+// message happened to mention the store bought the store's silence, which is a real
+// leak going out unreported. A target and a mention look identical to a regex over
+// the whole string; they are told apart by asking where the commit would land.
+console.log('\nFIRES — a commit into a PUBLIC repo cannot buy silence by naming a private path:');
+ok(fired(`git commit -m "moved the notes to ${STORE_DIR} — see ${KEY}"`),
+  'a public commit whose MESSAGE names the store');
+ok(fired(`git commit -m "see ${MEMFILE} — ${KEY}"`),
+  'a public commit whose message names a memory file');
+ok(fired(`git add -A && git commit -m "sync with ${STORE_DIR}: ${CLUSTER}"`),
+  'the same behind `git add`, so the exemption is not restored by a wrapper');
+ok(fired(`git -C ${STORE_DIR} commit -m "${KEY}" && git commit -m "${KEY}"`),
+  'a store commit CHAINED with a public one — the public half still leaks, and the store half must not cover for it');
+ok(fired(`git commit -m "next: cd ${STORE_DIR} && git commit — ${KEY}"`),
+  'a message that merely DESCRIBES cd-ing into the store — a cd after the commit cannot move it');
 
 // ── THE HEREDOC SEAM ────────────────────────────────────────────────────────
 // A QUOTED heredoc body is handed to a program verbatim — nothing in it runs — so no

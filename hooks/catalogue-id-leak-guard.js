@@ -238,7 +238,8 @@ process.stdin.on('end', () => {
     // command, because a heredoc body is very often the thing being published — a
     // body carrying an ID is exactly the leak this guard exists to catch.
     const classifiable = blankQuotedHeredocs ? blankQuotedHeredocs(command) : command;
-    const segments = classifiable.split(/(?:\|\||&&|[\n;|&()])+/).map(executableText);
+    const rawSegments = classifiable.split(/(?:\|\||&&|[\n;|&()])+/);
+    const segments = rawSegments.map(executableText);
     // `commit` is guarded against a following word character or hyphen because
     // `git commit-tree` and `git commit-graph` are DIFFERENT commands that publish
     // nothing — `\b` sits happily between `commit` and `-` and matched both. The
@@ -296,7 +297,41 @@ process.stdin.on('end', () => {
     // closes issues in THAT repo exactly as here. So it is a flag the ID detectors
     // consult, and there is a case asserting the closing check still fires inside a
     // private location while the IDs in the same text stay exempt.
-    const idChecksExempt = inPrivate(cwd) || (!isGh && inPrivate(command));
+    // WHERE WOULD THIS COMMAND ACTUALLY COMMIT? (#239)
+    //
+    // The old question was whether the command TEXT named a private location anywhere,
+    // and a commit MESSAGE satisfies that — so `git commit -m "moved the notes to
+    // ~/.anvideck"` in a PUBLIC repo bought the store's exemption and went out silent.
+    // The exemption has to be bought by the TARGET, and to a regex over the whole string
+    // a target and a mention are the same thing.
+    //
+    // Resolved per segment and IN ORDER, which is what makes it safe: a `cd` appearing
+    // after the commit — including one the split lifts out of that commit's own message —
+    // cannot retroactively change where the commit already landed.
+    //
+    // Read from the RAW segments rather than the quote-stripped ones, because a path is
+    // often quoted (`cd "$HOME/.anvideck"`) and stripping it would silently cost a real
+    // store commit its exemption. Two rules keep the message out anyway: a `cd` must
+    // BEGIN its segment, and a `-C` is read only from the text BEFORE `commit`.
+    const CD_TO = /^\s*(?:\w+=\S*\s+)*cd\s+(?:-\S+\s+)*(?:"([^"]*)"|'([^']*)'|(\S+))/;
+    const GIT_DIR_ARG = /(?:^|\s)(?:-C|--git-dir)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/;
+    const captured = (m) => m && (m[1] || m[2] || m[3]);
+    let here = cwd;
+    const commitTargets = [];
+    rawSegments.forEach((raw, i) => {
+      const dest = captured(raw.match(CD_TO));
+      // A relative `cd` is joined onto where we already are, so `cd ~/.anvideck && cd
+      // projects && git commit` does not lose the store on the second step.
+      if (dest) { here = /^[~/]/.test(dest) ? dest : path.posix.join(here, dest); return; }
+      if (!GIT_COMMIT.test(segments[i])) return;
+      const at = raw.search(/\bcommit\b/);
+      commitTargets.push(captured((at < 0 ? raw : raw.slice(0, at)).match(GIT_DIR_ARG)) || here);
+    });
+    // EVERY target must be private. A command committing to the store AND to a public
+    // repo leaks into the public one, and exempting it on the strength of the other is
+    // the same mistake one level along.
+    const commitTargetsPrivate = commitTargets.length > 0 && commitTargets.every(inPrivate);
+    const idChecksExempt = inPrivate(cwd) || (!isGh && commitTargetsPrivate);
 
     // The full outward-facing text: the command string PLUS any file it publishes from.
     const scanned = command + referencedFileText(command, cwd);
