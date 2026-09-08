@@ -382,6 +382,10 @@ drive
 ok "$(count)" "$BEFORE19" "no commit was made — the sweep really did fail, so the assertions below are about a failure"
 ok "$(lease failure >/dev/null 2>&1; echo $?)" "1" "the failure is RECORDED — exit 1 says the backstop is not healthy"
 ok "$(lease failure | grep -c 'does not have a commit checked out')" "1" "and it names git's CAUSE line, not merely the command that failed"
+# execSync builds its message as `Command failed: <cmd>` followed by the whole of stderr,
+# and <cmd> here is the sweep's commit — carrying the ENTIRE generated commit message.
+# Keeping the head of that would spend the record's whole budget restating what ran.
+ok "$(lease failure | grep -c 'Command failed')" "0" "and drops the command line, which carries the whole commit message and would crowd the reason out"
 lease release basher
 
 echo "TEST 20 — a sweep that SUCCEEDS clears the record, and an early exit does not"
