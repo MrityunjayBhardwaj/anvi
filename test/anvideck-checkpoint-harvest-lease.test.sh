@@ -365,28 +365,30 @@ echo "TEST 19 — a sweep that CANNOT commit records the failure instead of exit
 # nobody reads, which is the failure this repo records repeatedly. It writes a file, and
 # the SessionStart banner reads it on the next turn.
 #
-# The failure is REAL rather than simulated: a gitlink with no commit checked out. A
-# `git commit` carrying a pathspec is a PARTIAL commit — it builds a temporary index and
-# updates the working tree — so it aborts there, while an unscoped index commit never
-# touches the tree and does not care. That is why this arms only while a lease is held.
+# ⚠ THE FAILURE IS INDUCED WITH A `pre-commit` HOOK, NOT WITH THE REAL-WORLD CAUSE. The
+# instance that produced #422 was a partial commit aborting on a gitlink with no checkout,
+# and that was tried here first: it reproduces on git 2.39 and NOT on the runners, which
+# committed happily and turned every assertion below red. The cause is not portable; the
+# BEHAVIOUR under test — a commit that fails is recorded rather than swallowed — is, and
+# a fixture that only fails on the author's machine tests the author's machine.
+#
+# ⚠ AGE FIRST, OBSTRUCT SECOND — and this is the THIRD case in this file to need that
+# ordering. `age_head` amends, an amend runs `pre-commit` too, so installing the hook
+# first breaks the AGEING instead of the sweep: HEAD stays young, the quiet period
+# defers, and "no commit was made" passes while the commit path was never reached.
 lease clear-failure
-mkdir -p "$STORE/projects/broken/ref/sources/inner"
-( cd "$STORE/projects/broken/ref/sources/inner" && git init -q . && git config user.email t@t \
-  && git config user.name t && printf 'x\n' > f.txt && git add f.txt && git commit -q -m inner )
-git -C "$STORE" add projects/broken 2>/dev/null
-rm -rf "$STORE/projects/broken/ref/sources/inner/.git"
+age_head
+printf '#!/bin/sh\necho "refusing: fixture pre-commit" >&2\nexit 1\n' > "$STORE/.git/hooks/pre-commit"
+chmod +x "$STORE/.git/hooks/pre-commit"
 printf '\n## H901: something for the sweep to want\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
 BEFORE19=$(count)
-lease acquire basher >/dev/null
-drive
+drive_staged
 ok "$(count)" "$BEFORE19" "no commit was made — the sweep really did fail, so the assertions below are about a failure"
 ok "$(lease failure >/dev/null 2>&1; echo $?)" "1" "the failure is RECORDED — exit 1 says the backstop is not healthy"
-ok "$(lease failure | grep -c 'does not have a commit checked out')" "1" "and it names git's CAUSE line, not merely the command that failed"
-# execSync builds its message as `Command failed: <cmd>` followed by the whole of stderr,
-# and <cmd> here is the sweep's commit — carrying the ENTIRE generated commit message.
-# Keeping the head of that would spend the record's whole budget restating what ran.
+ok "$(lease failure | grep -c 'refusing: fixture pre-commit')" "1" "and it names git's CAUSE, not merely that a command failed"
+# The cause here is ONE line of stderr, which is the case a tail-truncation rule gets
+# wrong: with two lines it drops the command by accident, with one it keeps it.
 ok "$(lease failure | grep -c 'Command failed')" "0" "and drops the command line, which carries the whole commit message and would crowd the reason out"
-lease release basher
 
 echo "TEST 20 — a sweep that SUCCEEDS clears the record, and an early exit does not"
 # The control for TEST 19 in both directions. Without the first pair, a record that was
@@ -394,11 +396,10 @@ echo "TEST 20 — a sweep that SUCCEEDS clears the record, and an early exit doe
 # any exit would report the backstop healthy on runs where it was never asked to commit.
 #
 # ⚠ AGE FIRST, DIRTY SECOND — the same harness trap TEST 16 names, and it caught this case
-# on the first run. `age_head` amends with no pathspec, so driving normally absorbs
+# on its first run. `age_head` amends with no pathspec, so driving normally absorbs
 # whatever TEST 19 left STAGED into HEAD; the store is then clean, the hook exits early
 # exactly as it should, and the assertion fails while the code is correct.
-git -C "$STORE" rm -q -r --cached projects/broken >/dev/null 2>&1 || true
-rm -rf "$STORE/projects/broken"
+rm -f "$STORE/.git/hooks/pre-commit"
 age_head
 printf '\n## H902: written AFTER the amend, so the sweep has something of its own\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
 BEFORE20=$(count)

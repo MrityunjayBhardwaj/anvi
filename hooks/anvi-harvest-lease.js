@@ -232,10 +232,16 @@ function recordCheckpointFailure(detail, nowMs) {
       firstAt: prev ? prev.firstAt : now,
       lastAt: now,
       count: prev ? prev.count + 1 : 1,
-      // The LAST lines, not the first. execSync's message is `Command failed: <cmd>`
-      // followed by stderr, and <cmd> here is the sweep's commit — carrying the whole
-      // generated message. Keeping the head spends the budget restating what ran.
-      detail: String(detail == null ? '' : detail).split('\n').filter(Boolean).slice(-2).join(' / ').slice(0, 300),
+      // execSync's message is `Command failed: <cmd>` followed by stderr, and <cmd> here
+      // is the sweep's commit — carrying the whole generated message. That line is
+      // dropped BY NAME rather than by taking the tail: a tail rule works only while
+      // stderr runs to two or more lines, and silently keeps the command for a failure
+      // that reports one. Then the last lines of what remains, because git puts the
+      // specific cause above its generic `fatal:` summary.
+      detail: String(detail == null ? '' : detail)
+        .split('\n').filter(Boolean)
+        .filter(l => !/^Command failed:/.test(l))
+        .slice(-2).join(' / ').slice(0, 300),
     }) + '\n';
     // WRITE THEN RENAME, because a plain write opens with O_TRUNC and every session on
     // this machine runs this hook. That leaves a window in which a concurrent reader sees
