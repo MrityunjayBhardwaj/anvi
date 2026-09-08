@@ -75,11 +75,15 @@ cli('acquire', 'demo');
 ok(cli('live').out === 'demo', 'a re-acquire restores liveness — the refresh the procedure now asks for');
 
 // Idempotence is what makes "call it again whenever you pass ten minutes" safe advice.
-const before = fs.readdirSync(path.dirname(LEASE)).filter(f => f.endsWith('.lease'));
+// Counts every artifact the project leaves behind, not just `.lease` files: the property
+// is that repeating the call adds NOTHING, and a filter that only sees lease-shaped names
+// would miss a second file accumulating per call under any other extension.
+const artifacts = () => fs.readdirSync(path.dirname(LEASE)).filter(f => f.startsWith('demo'));
+const before = artifacts();
 cli('acquire', 'demo'); cli('acquire', 'demo');
-const after = fs.readdirSync(path.dirname(LEASE)).filter(f => f.endsWith('.lease'));
+const after = artifacts();
 ok(after.length === before.length && after.length === 1,
-  'acquiring repeatedly is idempotent — one lease file, no error, so the advice cannot misfire');
+  `acquiring repeatedly is idempotent — one artifact, no error, so the advice cannot misfire (got ${after.length})`);
 
 // WHY the prose must say "read the output, not the exit status". If `live` distinguished
 // the two states by status, the instruction would be unnecessary — so this is the case
