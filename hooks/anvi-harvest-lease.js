@@ -228,14 +228,25 @@ function recordCheckpointFailure(detail, nowMs) {
   try {
     fs.mkdirSync(HARVEST_DIR, { recursive: true });
     const prev = readCheckpointFailure();
-    fs.writeFileSync(failurePath(), JSON.stringify({
+    const body = JSON.stringify({
       firstAt: prev ? prev.firstAt : now,
       lastAt: now,
       count: prev ? prev.count + 1 : 1,
-      // The LAST lines, not the first: git puts the specific cause above the generic
-      // `fatal:` summary, and a head-truncated git error is the half that says nothing.
+      // The LAST lines, not the first. execSync's message is `Command failed: <cmd>`
+      // followed by stderr, and <cmd> here is the sweep's commit — carrying the whole
+      // generated message. Keeping the head spends the budget restating what ran.
       detail: String(detail == null ? '' : detail).split('\n').filter(Boolean).slice(-2).join(' / ').slice(0, 300),
-    }) + '\n');
+    }) + '\n';
+    // WRITE THEN RENAME, because a plain write opens with O_TRUNC and every session on
+    // this machine runs this hook. That leaves a window in which a concurrent reader sees
+    // an empty or partial file, fails to parse it, and is told the backstop is HEALTHY —
+    // which is the exact direction of silence this record exists to remove. `rename` is
+    // atomic within a filesystem, and the temp file is a sibling so it always is one.
+    // The window was not reproduced; it is closed on the mechanism, since the cost is a
+    // rename and the failure it prevents is invisible by construction.
+    const tmp = `${failurePath()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, body);
+    fs.renameSync(tmp, failurePath());
     return true;
   } catch { return false; }
 }
