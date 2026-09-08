@@ -84,6 +84,13 @@ ok(after.length === before.length && after.length === 1,
 // WHY the prose must say "read the output, not the exit status". If `live` distinguished
 // the two states by status, the instruction would be unnecessary — so this is the case
 // that earns that sentence rather than decorating it.
+// Released and re-taken so this pair owns its own subject. Falsification caught the
+// coupling: reading the lease left over from the refresh case above made this pair a
+// second witness to the refresh, so breaking the refresh reddened both and the matrix
+// reported the mutation as too broad. A case that fails for another case's reason cannot
+// say what it names.
+cli('release', 'demo');
+cli('acquire', 'demo');
 const held = cli('live');
 ageLease(LEASE_SECONDS + 120);
 const expired = cli('live');
@@ -99,8 +106,14 @@ const step1 = wrap.slice(wrap.indexOf('<step name="1_harvest_catalogues">'),
                          wrap.indexOf('<step name="2_update_memory">'));
 ok(step1.length > 0, 'CONTROL — the harvest step was located, so the assertions below read a real subject');
 
-ok(/re-acquire/i.test(step1),
-  'the harvest step instructs a re-acquire rather than leaving the affordance undocumented');
+// Counted as a COMMAND, not as a word. Falsification caught this: the first version
+// asked whether "re-acquire" appeared anywhere in the step, and the word appears three
+// times in the surrounding prose — so deleting the instruction outright left the
+// assertion green. What has to be true is that the reader is told to RUN the thing a
+// second time, which is two occurrences of the command: the initial take and the refresh.
+const acquireCmds = (step1.match(/harvest-lease acquire/g) || []).length;
+ok(acquireCmds >= 2,
+  `the harvest step spells the acquire COMMAND twice — the take and the refresh (got ${acquireCmds})`);
 ok(/ten minutes|10 minutes/i.test(step1),
   'and says WHEN — a refresh with no trigger is a capability nobody reaches for');
 
