@@ -357,6 +357,64 @@ ok "$(git -C "$STORE" diff --cached --name-only | grep -c .)" "0" "and the index
 ok "$(lease swept anvi | grep -c 'H930')" "1" "and the ledger records it"
 lease clear-swept anvi
 
+echo "TEST 19 — a sweep that CANNOT commit records the failure instead of exiting silently (#422)"
+# THE POINT OF THIS CASE. Before it, a sweep that aborted committed nothing, exited 0 and
+# left no trace anywhere: the only symptom was a store that quietly stopped gaining
+# commits. A Stop hook has NO channel into its own session — the transcript carries zero
+# hook_success attachments for Stop — so PRINTING the error would report into a channel
+# nobody reads, which is the failure this repo records repeatedly. It writes a file, and
+# the SessionStart banner reads it on the next turn.
+#
+# ⚠ THE FAILURE IS INDUCED WITH A `pre-commit` HOOK, NOT WITH THE REAL-WORLD CAUSE. The
+# instance that produced #422 was a partial commit aborting on a gitlink with no checkout,
+# and that was tried here first: it reproduces on git 2.39 and NOT on the runners, which
+# committed happily and turned every assertion below red. The cause is not portable; the
+# BEHAVIOUR under test — a commit that fails is recorded rather than swallowed — is, and
+# a fixture that only fails on the author's machine tests the author's machine.
+#
+# ⚠ AGE FIRST, OBSTRUCT SECOND — and this is the THIRD case in this file to need that
+# ordering. `age_head` amends, an amend runs `pre-commit` too, so installing the hook
+# first breaks the AGEING instead of the sweep: HEAD stays young, the quiet period
+# defers, and "no commit was made" passes while the commit path was never reached.
+lease clear-failure
+age_head
+printf '#!/bin/sh\necho "refusing: fixture pre-commit" >&2\nexit 1\n' > "$STORE/.git/hooks/pre-commit"
+chmod +x "$STORE/.git/hooks/pre-commit"
+printf '\n## H901: something for the sweep to want\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+BEFORE19=$(count)
+drive_staged
+ok "$(count)" "$BEFORE19" "no commit was made — the sweep really did fail, so the assertions below are about a failure"
+ok "$(lease failure >/dev/null 2>&1; echo $?)" "1" "the failure is RECORDED — exit 1 says the backstop is not healthy"
+ok "$(lease failure | grep -c 'refusing: fixture pre-commit')" "1" "and it names git's CAUSE, not merely that a command failed"
+# The cause here is ONE line of stderr, which is the case a tail-truncation rule gets
+# wrong: with two lines it drops the command by accident, with one it keeps it.
+ok "$(lease failure | grep -c 'Command failed')" "0" "and drops the command line, which carries the whole commit message and would crowd the reason out"
+
+echo "TEST 20 — a sweep that SUCCEEDS clears the record, and an early exit does not"
+# The control for TEST 19 in both directions. Without the first pair, a record that was
+# never cleared would satisfy TEST 19 for the rest of time; without the last, clearing on
+# any exit would report the backstop healthy on runs where it was never asked to commit.
+#
+# ⚠ AGE FIRST, DIRTY SECOND — the same harness trap TEST 16 names, and it caught this case
+# on its first run. `age_head` amends with no pathspec, so driving normally absorbs
+# whatever TEST 19 left STAGED into HEAD; the store is then clean, the hook exits early
+# exactly as it should, and the assertion fails while the code is correct.
+rm -f "$STORE/.git/hooks/pre-commit"
+age_head
+printf '\n## H902: written AFTER the amend, so the sweep has something of its own\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+BEFORE20=$(count)
+drive_staged
+ok "$(count)" "$((BEFORE20+1))" "with the obstruction gone the sweep commits again"
+ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "and the record is CLEARED — the backstop proved it works"
+
+# An early exit is NOT a success. Aged first so the quiet period cannot be the reason the
+# hook stops, leaving "nothing to commit" as the only one.
+lease clear-failure
+age_head
+drive_staged
+ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "a clean store records nothing — it is not a failure, it is nothing to do"
+ok "$(count)" "$((BEFORE20+1))" "and it committed nothing either, so that really was the clean-store path"
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]

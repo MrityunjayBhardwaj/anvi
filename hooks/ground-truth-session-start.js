@@ -18,6 +18,12 @@ const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 // either judges a different corpus while printing the same finding name.
 const { parseEntries } = require('./currency.js');
 const { formatPct } = require('./rate.js');
+// The store checkpoint's failure record. Required defensively for the reason
+// test/hook-install-imports.test.js exists: an install predating this module has no
+// copy, and a hard require would take the whole banner down rather than lose one
+// segment. A symlinked (dev) install resolves it out of the repo and is unaffected.
+let readCheckpointFailure = null;
+try { ({ readCheckpointFailure } = require('./anvi-harvest-lease.js')); } catch { /* older install: segment off */ }
 
 // A REF field DECLARING that the entry is knowingly unanchored, as opposed to a body
 // that MENTIONS the word. Case-sensitive and word-bounded; see the note at its use.
@@ -307,6 +313,25 @@ process.stdin.on('end', () => {
     // same failure away in two other ways — see hooks/rate.js.
     const pct = formatPct(grounded, total, { absent: 'no denominator' });
     let message = `GROUNDING: ${grounded}/${total} entries grounded (${pct})`;
+
+    // FIRST after the headline, because it is the only segment that reports something
+    // BROKEN rather than something measured — the store's durability backstop has
+    // stopped committing and nothing else in the session will say so. The Stop hook
+    // that discovers it has no channel into its own session — nothing it emits reaches
+    // the transcript the model reads — so this is the read side of that write, and
+    // without it the record is a file nobody opens.
+    if (readCheckpointFailure) {
+      const f = readCheckpointFailure();
+      if (f) {
+        const mins = Math.max(1, Math.round((Date.now() - f.lastAt) / 60000));
+        // "Since" is the first failure and "last" is the most recent, and both are
+        // printed: one failure an hour ago and forty over three days are different
+        // situations that a single timestamp reports identically.
+        const ago = mins >= 1440 ? `${Math.floor(mins / 1440)}d ago` : mins >= 60 ? `${Math.floor(mins / 60)}h ago` : `${mins}m ago`;
+        message += ` | \u26d4 STORE CHECKPOINT FAILING: ${f.count}\u00d7 since ${new Date(f.firstAt).toISOString().slice(0, 16).replace('T', ' ')}Z, last ${ago}` +
+                   ` \u2014 the durability backstop is not committing${f.detail ? `: ${f.detail}` : ''}`;
+      }
+    }
 
     if (gtDocs.length > 0) {
       message += ` | GT docs: ${gtDocs.map(d => `${d.name.replace('GROUND_TRUTH_', '').replace('.md', '')}${d.ageDays > 7 ? ' ('+d.ageDays+'d old)' : ''}`).join(', ')}`;
