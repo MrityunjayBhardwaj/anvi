@@ -357,6 +357,59 @@ ok "$(git -C "$STORE" diff --cached --name-only | grep -c .)" "0" "and the index
 ok "$(lease swept anvi | grep -c 'H930')" "1" "and the ledger records it"
 lease clear-swept anvi
 
+echo "TEST 19 — a sweep that CANNOT commit records the failure instead of exiting silently (#422)"
+# THE POINT OF THIS CASE. Before it, a sweep that aborted committed nothing, exited 0 and
+# left no trace anywhere: the only symptom was a store that quietly stopped gaining
+# commits. A Stop hook has NO channel into its own session — the transcript carries zero
+# hook_success attachments for Stop — so PRINTING the error would report into a channel
+# nobody reads, which is the failure this repo records repeatedly. It writes a file, and
+# the SessionStart banner reads it on the next turn.
+#
+# The failure is REAL rather than simulated: a gitlink with no commit checked out. A
+# `git commit` carrying a pathspec is a PARTIAL commit — it builds a temporary index and
+# updates the working tree — so it aborts there, while an unscoped index commit never
+# touches the tree and does not care. That is why this arms only while a lease is held.
+lease clear-failure
+mkdir -p "$STORE/projects/broken/ref/sources/inner"
+( cd "$STORE/projects/broken/ref/sources/inner" && git init -q . && git config user.email t@t \
+  && git config user.name t && printf 'x\n' > f.txt && git add f.txt && git commit -q -m inner )
+git -C "$STORE" add projects/broken 2>/dev/null
+rm -rf "$STORE/projects/broken/ref/sources/inner/.git"
+printf '\n## H901: something for the sweep to want\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+BEFORE19=$(count)
+lease acquire basher >/dev/null
+drive
+ok "$(count)" "$BEFORE19" "no commit was made — the sweep really did fail, so the assertions below are about a failure"
+ok "$(lease failure >/dev/null 2>&1; echo $?)" "1" "the failure is RECORDED — exit 1 says the backstop is not healthy"
+ok "$(lease failure | grep -c 'does not have a commit checked out')" "1" "and it names git's CAUSE line, not merely the command that failed"
+lease release basher
+
+echo "TEST 20 — a sweep that SUCCEEDS clears the record, and an early exit does not"
+# The control for TEST 19 in both directions. Without the first pair, a record that was
+# never cleared would satisfy TEST 19 for the rest of time; without the last, clearing on
+# any exit would report the backstop healthy on runs where it was never asked to commit.
+#
+# ⚠ AGE FIRST, DIRTY SECOND — the same harness trap TEST 16 names, and it caught this case
+# on the first run. `age_head` amends with no pathspec, so driving normally absorbs
+# whatever TEST 19 left STAGED into HEAD; the store is then clean, the hook exits early
+# exactly as it should, and the assertion fails while the code is correct.
+git -C "$STORE" rm -q -r --cached projects/broken >/dev/null 2>&1 || true
+rm -rf "$STORE/projects/broken"
+age_head
+printf '\n## H902: written AFTER the amend, so the sweep has something of its own\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+BEFORE20=$(count)
+drive_staged
+ok "$(count)" "$((BEFORE20+1))" "with the obstruction gone the sweep commits again"
+ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "and the record is CLEARED — the backstop proved it works"
+
+# An early exit is NOT a success. Aged first so the quiet period cannot be the reason the
+# hook stops, leaving "nothing to commit" as the only one.
+lease clear-failure
+age_head
+drive_staged
+ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "a clean store records nothing — it is not a failure, it is nothing to do"
+ok "$(count)" "$((BEFORE20+1))" "and it committed nothing either, so that really was the clean-store path"
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]

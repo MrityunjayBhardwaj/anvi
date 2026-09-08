@@ -203,9 +203,65 @@ function clearSwept(project) {
   catch { return false; }
 }
 
+// ── the backstop's own failure, written where the NEXT SESSION will look ─────
+// A Stop hook cannot report anything to the session it runs in. The transcript
+// records `hook_success` attachments for SessionStart, UserPromptSubmit, PreToolUse
+// and PostToolUse and ZERO for Stop, so stdout and stderr both go somewhere the
+// model never reads — measured, and written up in this project's Ground Truth trace
+// for the hook-events boundary (§2.4). The only channels that reach a
+// later turn are a FILE and the SessionStart injection — so the checkpoint writes
+// here and the banner reads it. **Printing the error would itself be the defect this
+// fixes**: reporting into a channel nobody reads is how the failure stayed silent.
+//
+// It lives beside the leases because this directory already has one owner, and two
+// writers disagreeing about a shared location is the defect anvi #419 was.
+//
+// NOT windowed, unlike the swept ledger, and the difference is the point. A swept
+// line ages out because it describes one PAST event. This describes a CURRENT
+// condition — the backstop has not committed successfully since it began failing —
+// so it is cleared by a commit succeeding and never by time. The banner prints how
+// long ago, which is what lets a reader judge a stale one without the file guessing.
+function failurePath() { return path.join(HARVEST_DIR, 'checkpoint-failure.json'); }
+
+function recordCheckpointFailure(detail, nowMs) {
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  try {
+    fs.mkdirSync(HARVEST_DIR, { recursive: true });
+    const prev = readCheckpointFailure();
+    fs.writeFileSync(failurePath(), JSON.stringify({
+      firstAt: prev ? prev.firstAt : now,
+      lastAt: now,
+      count: prev ? prev.count + 1 : 1,
+      // The LAST lines, not the first: git puts the specific cause above the generic
+      // `fatal:` summary, and a head-truncated git error is the half that says nothing.
+      detail: String(detail == null ? '' : detail).split('\n').filter(Boolean).slice(-2).join(' / ').slice(0, 300),
+    }) + '\n');
+    return true;
+  } catch { return false; }
+}
+
+// null when the backstop is healthy. A record with no usable timestamp is DROPPED
+// rather than reported: the banner's whole value is "since when", and "failing since
+// undefined" is the shape of a report that cannot be acted on.
+function readCheckpointFailure() {
+  try {
+    const o = JSON.parse(fs.readFileSync(failurePath(), 'utf8'));
+    if (!o || typeof o.lastAt !== 'number' || Number.isNaN(o.lastAt)) return null;
+    return o;
+  } catch { return null; }
+}
+
+// Cleared ONLY by a commit that succeeded — never by an early exit. A clean store and
+// a deferred quiet period are not the backstop working; they are it not being asked.
+function clearCheckpointFailure() {
+  try { fs.unlinkSync(failurePath()); return true; }
+  catch { return false; } // already absent is success enough — the backstop is not failing
+}
+
 module.exports = {
   HARVEST_DIR, LEASE_SECONDS, SWEPT_WINDOW_SECONDS, isValidProject,
   acquire, release, liveLeases, recordSwept, readSwept, clearSwept,
+  recordCheckpointFailure, readCheckpointFailure, clearCheckpointFailure,
 };
 
 // --- CLI ---------------------------------------------------------------------
@@ -231,8 +287,18 @@ if (require.main === module) {
     }
     case 'clear-swept':
       clearSwept(project); process.exit(0);
+    case 'failure': {
+      const f = readCheckpointFailure();
+      // Silence means healthy, so the exit status carries the answer too — a caller
+      // scripting this should not have to parse prose to learn whether it is failing.
+      if (!f) process.exit(0);
+      console.log(`${new Date(f.firstAt).toISOString()} ${f.count} ${f.detail}`);
+      process.exit(1);
+    }
+    case 'clear-failure':
+      clearCheckpointFailure(); process.exit(0);
     default:
-      console.error('usage: anvi-harvest-lease.js acquire|release|live|swept|clear-swept [project]');
+      console.error('usage: anvi-harvest-lease.js acquire|release|live|swept|clear-swept|failure|clear-failure [project]');
       process.exit(2);
   }
 }

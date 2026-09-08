@@ -57,8 +57,8 @@ const QUIET_SECONDS = Number(process.env.ANVIDECK_QUIET_SECONDS) || 90;
 // the PERMISSIVE direction, so it is asserted in the test suite rather than
 // trusted, since a swallowed import failure and a store with no leases look
 // identical from here.
-let liveLeases = null, recordSwept = null;
-try { ({ liveLeases, recordSwept } = require('./anvi-harvest-lease.js')); } catch { /* pre-#148 behaviour */ }
+let liveLeases = null, recordSwept = null, recordCheckpointFailure = null, clearCheckpointFailure = null;
+try { ({ liveLeases, recordSwept, recordCheckpointFailure, clearCheckpointFailure } = require('./anvi-harvest-lease.js')); } catch { /* pre-#148 behaviour */ }
 
 function git(args, timeoutMs) {
   return execSync(`git ${args}`, {
@@ -296,6 +296,11 @@ function run(rawInput) {
     // added, deleted and modified files are committed as before, and a new directory too.
     git(`commit -m ${JSON.stringify(msg)} ${scope}`);
 
+    // The backstop just proved it works, so any recorded failure is over. Cleared HERE
+    // and not at any earlier exit: a clean store and a deferred quiet period are the
+    // hook not being ASKED to commit, which is no evidence that it can.
+    if (clearCheckpointFailure) clearCheckpointFailure();
+
     // Leave a record of every entry this sweep claimed, so a wrap that runs later
     // can name the pre-swept entries and their commit rather than writing a message
     // that describes work split across two commits without saying so (#148). Runs
@@ -313,6 +318,24 @@ function run(rawInput) {
 
     process.exit(0);
   } catch (e) {
+    // EXIT 0 IS STILL RIGHT — a Stop hook must never block a session — but exiting 0
+    // and saying nothing is what made anvi #422 silent: the sweep aborted, committed
+    // nothing, and the only symptom was a store that quietly stopped gaining commits.
+    // The failure is recorded to a FILE because this hook has no channel into its own
+    // session — the transcript carries zero hook_success attachments for Stop, measured
+    // in the Ground Truth trace for the hook-events boundary — and the SessionStart
+    // banner reads it on the next turn.
+    //
+    // git's cause line arrives on stderr, not in `message`, so both are consulted —
+    // taking only `message` would record `Command failed: git commit …`, which names
+    // the command that failed and not the reason, and a report that cannot be acted on
+    // is the thing being fixed rather than a lesser version of it.
+    try {
+      if (recordCheckpointFailure) {
+        const stderr = e && e.stderr ? String(e.stderr).trim() : '';
+        recordCheckpointFailure(stderr || (e && e.message) || String(e));
+      }
+    } catch { /* the record is best-effort; it must never become the thing that throws */ }
     process.exit(0); // never block the session
   }
 }
