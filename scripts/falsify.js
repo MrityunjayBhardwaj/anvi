@@ -245,12 +245,24 @@ const matches = (expect, msg) =>
 // assertions still key apart because what differs is upstream of the cut. Where it does
 // collapse two distinct rows, the collision check below reports them as undecidable
 // rather than letting either read as covered.
+//
+// ⚠ AND THE CUT IS ANCHORED AT THE FIRST `(` THAT HAS TEXT BEFORE IT, not at the first
+// `(` outright (#421). A message that BEGINS with a parenthetical — `(a) …`, which is
+// the natural label for a pair of assertions meant to be read together — is otherwise
+// eaten whole by the greedy run: the key comes out empty, the fallback hands back the
+// FULL string including the diagnostic, and the two forms key apart again. That is the
+// exact non-pairing this key exists to prevent, arriving through the guard that was
+// supposed to make it safe. Anchoring also makes the "nothing but a parenthetical" case
+// structural rather than caught afterwards: such a message now matches nothing here and
+// keeps its text, so an empty key is unreachable instead of repaired.
 const coverageKey = msg => {
   const s = String(msg).trim();
-  // A message that is NOTHING but a parenthetical keeps its whole text: an empty key
-  // would collapse every such assertion onto one row, turning a reporting gap into a
-  // false collision. An unbalanced message matches nothing and is left alone.
-  return s.replace(/\s*\(.*\)\s*$/, '').trim() || s;
+  // `.*?\S` is lazy and must end in non-space, so the cut lands at the EARLIEST
+  // parenthetical run that reaches the end AND has something in front of it. A message
+  // that is only a parenthetical, or that has no `(` at all, matches nothing and is
+  // returned unchanged.
+  const cut = s.match(/^(.*?\S)\s*\(.*\)\s*$/);
+  return cut ? cut[1].trim() : s;
 };
 
 // ── grading one mutation ─────────────────────────────────────────────────────
