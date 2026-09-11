@@ -465,6 +465,17 @@ allowed to be silent in production must be loud in a test, or it has no witness.
   real `.git`, so an extracted tarball reports failures that belong to the harness and
   are indistinguishable from a regression. The likeliest reading of those reds is
   "the suite is broken, ignore it", which costs more than the check was worth.
+- **A presence assertion that could match twice is not a witness either.**
+  `ok(/needle/.test(haystack))` says only that the needle occurs SOMEWHERE, so when it
+  occurs more than once the case cannot say which occurrence carries the rule, and
+  deleting the governed one leaves it green. `node scripts/blind-assertions.js [pattern]`
+  runs the suite with the check attached and reports each such assertion over the number
+  of presence checks it examined — a count with nothing to divide by is not a rate. It is
+  advisory, not a gate: it reports rather than fails, because a guard at this precision
+  that could block a merge would be weakened or deleted by whoever hit it first. Read the
+  findings; the remedy is to count the occurrence that carries the rule, or to narrow the
+  needle until it is unique. The check itself is silent when it finds nothing, which is
+  what makes attaching it to a whole run cost nothing.
 - **Falsify, don't assert.** Break the thing each case guards and confirm it goes
   red. An integration test that has never failed is a claim, not a witness.
   `node scripts/falsify.js <spec.js>` runs the matrix and is the part worth not
