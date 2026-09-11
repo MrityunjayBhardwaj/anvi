@@ -45,6 +45,8 @@ const doc = \`
   Re-acquire is also mentioned here in passing prose.
   And a third time: re-acquire, still only prose, never a command.
   anvi-tools harvest-lease acquire myproject
+  **REF:** one starred line, spelled with characters a regex must escape.
+  **REF:** and a second, so a needle matching them is not unique.
 \`;
 `;
 
@@ -117,6 +119,36 @@ const control = runFixture('control.js',
   `ok(/re-acquire/i.test(doc), 'control — the document really does discuss the procedure');`);
 ok(control.findings.length === 0,
   `a labelled control is not flagged, because breadth is what a control is FOR (got ${control.findings.length})`);
+
+// Exclusion 5. A check quantified over a collection claims that EVERY member is named; its
+// strength comes from the quantifier over the set, so one member's multiplicity says nothing
+// about whether the claim could pass wrongly. Five findings in the calibration run.
+const quantified = runFixture('quantified.js',
+  `ok(['re-acquire', 'prose'].every(w => doc.includes(w)),\n  'every term the procedure depends on is named');`);
+ok(quantified.findings.length === 0,
+  `a presence check quantified over a collection is not flagged (got ${quantified.findings.length})`);
+
+// Exclusion 6. A needle carrying character classes or quantifiers matches a SHAPE, and
+// asking whether a shape occurs — "a date appears", "a line assigns a variable" — means
+// presence by design. Escapes are stripped before the test, so a literal spelled with
+// backslashes is still a literal, and an alternation of literals is still a token: that
+// distinction is what keeps the genuinely blind cases in scope.
+const structural = runFixture('structural.js',
+  `ok(/re-[a-z]+quire/.test(doc), 'the document contains a hyphenated re- form');`);
+ok(structural.findings.length === 0,
+  `a needle that is a structural PATTERN rather than a token is not flagged (got ${structural.findings.length})`);
+ok(structural.denominator >= 1,
+  'CONTROL — the structural fixture was measured, so its silence is an exclusion and not an absence');
+
+// The boundary between exclusion 6 and the class it must not swallow. `\*\*REF:\*\*` is a
+// LITERAL that happens to be spelled with backslashes; read without stripping escapes its
+// asterisks look like quantifiers, and the whole needle would be waved through as a shape.
+// It must still be flagged. Falsification is what put this here: breaking the stripping
+// changed no assertion, because nothing exercised it.
+const escapedLiteral = runFixture('escaped.js',
+  `ok(/\\*\\*REF:\\*\\*/.test(doc), 'the document carries a starred REF line');`);
+ok(escapedLiteral.findings.length === 1,
+  `a literal spelled with escapes is still a token, so it IS flagged when it repeats (got ${escapedLiteral.findings.length})`);
 
 // The other half of precision: a needle that occurs exactly once discriminates perfectly.
 // Without this case the instrument could flag everything and still pass every case above.

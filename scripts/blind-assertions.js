@@ -75,6 +75,11 @@ const HELPER_DEF  = /^\s*(const|let|var|function)\s+\w+\s*=?\s*(\(|function)/;
 const IS_CONTROL  = /\bcontrol\b\s*[—:-]/i;
 // The assertion already counts occurrences — the correct shape (exclusion 4).
 const COUNTS      = /\.length\s*(>=|>|===|==|!==)|\bfilter\s*\(|\/g\b|\bsplit\s*\(/;
+// The presence check is quantified over a COLLECTION (exclusion 5). `list.every(x =>
+// text.includes(x))` claims that every member is named; its strength comes from the
+// quantifier over the set, not from where any single member sits. Each member's own
+// multiplicity says nothing about whether the claim could pass wrongly.
+const QUANTIFIED  = /\.every\s*\(/;
 
 // Walk the stack for the first USER frame that is an assertion call site. Returns null
 // when no such frame exists, which is exclusion 1 and exclusion 2 in one step: a
@@ -133,6 +138,22 @@ function countString(needle, str) {
   return n;
 }
 
+// Exclusion 6: the needle is a STRUCTURAL PATTERN rather than a token. A regex carrying
+// character classes, `\d`/`\w`/`\s`, or quantifiers matches a SHAPE, and an assertion that a
+// shape occurs is asking whether any text of that form exists — "a date appears", "a line
+// assigns a variable". Multiplicity is the expected reading of such a claim, not evidence
+// that it could pass wrongly. Escapes are stripped before the test so that `\*\*REF:\*\*`,
+// which is a literal despite its backslashes, is NOT treated as a pattern — and neither is
+// an alternation of literals, which is how the genuinely blind cases are usually spelled.
+function isStructuralPattern(needle) {
+  const m = /^\/(.*)\/[a-z]*$/.exec(needle);
+  if (!m) return false;                       // a plain string needle is always a token
+  const src = m[1];
+  if (/\\[dwsSWD]/.test(src)) return true;    // a class shorthand IS a shape
+  const literal = src.replace(/\\./g, '');    // drop escaped characters, quantifiers and all
+  return /\[[^\]]+\]|[+*]|\{\d+,?\d*\}/.test(literal);
+}
+
 function consider(kind, needle, haystack, count) {
   const site = assertionSite();
   if (!site) return;                                   // exclusion 1 + 2
@@ -140,6 +161,8 @@ function consider(kind, needle, haystack, count) {
   if (count <= 1) return;
   if (IS_CONTROL.test(site.text)) return;              // exclusion 3
   if (COUNTS.test(site.text)) return;                  // exclusion 4
+  if (QUANTIFIED.test(site.text)) return;              // exclusion 5
+  if (isStructuralPattern(needle)) return;             // exclusion 6
   const key = `${site.file}:${site.line}:${needle}`;
   if (seen.has(key)) return;
   seen.add(key);
