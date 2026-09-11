@@ -53,8 +53,22 @@ one that is coming. The lease is how you tell it one is coming; while it is held
 the hook leaves that project's paths alone and still commits every other
 project, so a concurrent session's durability is never delayed by your harvest.
 
-The lease expires on its own, so a crash cannot strand it — but release it as
-soon as you have committed, at the end of this step.
+The lease expires on its own, so a crash cannot strand it. That expiry is
+deliberate and should not be raised: a stalled session must not defer the
+backstop indefinitely. But it makes the harvest, not the lease, responsible for
+saying it is still alive — and the TTL is 900 seconds while a careful harvest
+(read the catalogues, verify each citation, write the entries, observe)
+routinely runs longer. Observed at the end of one session, on its first
+attempt: acquired, and swept 975 seconds later — expired by 75.
+
+SO RE-ACQUIRE WHENEVER THE HARVEST PASSES ROUGHLY TEN MINUTES, and always
+immediately before the commit below. `acquire` is idempotent and freshness is
+judged by the lease file's mtime, which a re-acquire rewrites, so this is one
+call that costs nothing:
+
+    anvi-tools harvest-lease acquire [project]     # again — refreshes the mtime
+
+Release it as soon as you have committed, at the end of this step.
 
 - Bug fixed / error pattern      → hetvabhasa (root cause, detection signal,
                                     the trap, the real fix, REF).
@@ -87,6 +101,17 @@ sweep and the author's own commit was about two minutes. The lease closes the
 window; committing early makes it small in the first place, and it makes the
 "is it SAFE?" answer above true when you give it rather than a promise about
 step 3.
+
+CHECK THE LEASE IS STILL LIVE, AND READ THE ANSWER, before you commit. This is
+the last moment the answer is knowable: afterwards a lease that expired and a
+lease that was never taken are the same observation, and both look exactly like
+a harvest nobody protected.
+
+    anvi-tools harvest-lease live                  # your project must be LISTED
+
+Read the output, not the exit status — `live` exits 0 whether or not anything is
+listed, so a silent run is the shape of both answers. If your project is missing,
+re-acquire before committing; the entries are still uncommitted and still exposed.
 
     git -C ~/.anvideck add -- projects/<project>/.anvi/    # catalogues only; never -A
     git -C ~/.anvideck commit -m "<what was learned, and why>"   # prints your sha — keep it
