@@ -90,8 +90,12 @@ ok(blind.findings[0] && /blind\.js$/.test(blind.findings[0].file),
 // what makes the case real; the `split` on the same line is what the exclusion must see.
 const counted = runFixture('counted.js',
   `ok(doc.includes('re-acquire') && doc.split('re-acquire').length - 1 === 3,\n  'the document names the procedure exactly three times');`);
+// Deliberately NOT interpolating the denominator into this message. An assertion whose
+// text carries the value it observed has a different identity when it fails than when it
+// passes, which silently defeats any matrix that keys on the message — the failure was
+// introduced here and caught by falsification within the hour.
 ok(counted.denominator >= 1,
-  `CONTROL — the counting fixture really is measured (${counted.denominator} presence check(s)), so the silence below means something`);
+  'CONTROL — the counting fixture really is measured, so the silence below means something');
 ok(counted.findings.length === 0,
   `an assertion that already COUNTS occurrences is not flagged (got ${counted.findings.length})`);
 
