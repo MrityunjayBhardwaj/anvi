@@ -273,7 +273,12 @@ r = fire('catalogue-id-leak-guard.js', {
   tool_input: { command: 'gh issue create --title "fix" --body "sibling of the vyapti:184 gap"' },
 });
 ok(r.exit === 0, 'exits 0 (reminds, never blocks)');
-ok(/vyapti:184|catalogue|leak/i.test(r.ctx + r.stdout), 'ALIVE: reacts to an index key bound for public content');
+// The needle is the ID ITSELF, not an alternation that also accepts "catalogue" or "leak".
+// Those two words appear throughout this guard's own boilerplate — the blind-assertion
+// check counted 14 matches — so the old form passed whenever the hook emitted anything at
+// all, including on input it had failed to recognise. What has to be true is that the guard
+// names the key it found.
+ok(/vyapti:184/.test(r.ctx + r.stdout), 'ALIVE: names the index key it caught bound for public content');
 
 // Precision: an ordinary command carrying no index key earns silence.
 r = fire('catalogue-id-leak-guard.js', {
