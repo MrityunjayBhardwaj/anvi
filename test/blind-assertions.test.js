@@ -82,18 +82,30 @@ ok(blind.findings[0] && /blind\.js$/.test(blind.findings[0].file),
 
 // The repair. Counting occurrences is what the author actually did to fix the real one, so
 // flagging it would punish the remedy being asked for.
+//
+// The presence check must be one the instrument actually sees. The first version of this
+// fixture counted with `doc.match(/…/g)`, which is not instrumented, so it recorded nothing
+// and the assertion below read "not flagged" when the truth was "not measured" — this file's
+// own subject matter, found by falsification rather than by review. The `.includes` call is
+// what makes the case real; the `split` on the same line is what the exclusion must see.
 const counted = runFixture('counted.js',
-  `const n = (doc.match(/harvest-lease acquire/g) || []).length;\nok(n >= 1, 'the step spells the COMMAND');`);
+  `ok(doc.includes('re-acquire') && doc.split('re-acquire').length - 1 === 3,\n  'the document names the procedure exactly three times');`);
+ok(counted.denominator >= 1,
+  `CONTROL — the counting fixture really is measured (${counted.denominator} presence check(s)), so the silence below means something`);
 ok(counted.findings.length === 0,
   `an assertion that already COUNTS occurrences is not flagged (got ${counted.findings.length})`);
 
 console.log('\nSILENCE — the shapes that are correct as written must not be flagged:');
 
-// Exclusion 1, measured at 23 of 100 raw flags: the call site is not an assertion.
-const filtered = runFixture('filtered.js',
-  `const hits = [doc].filter(t => /re-acquire/i.test(t));\nok(hits.length === 1, 'the filter selected the document');`);
-ok(filtered.findings.length === 0,
-  `a match used as a FILTER predicate is not an assertion, so it is not flagged (got ${filtered.findings.length})`);
+// Exclusion 1, measured at 23 of 100 raw flags: the call site is not an assertion. A match
+// stored in a variable is the largest share of that group, and it is the shape that
+// ISOLATES this exclusion — a `.filter()` predicate would be excluded by the counting rule
+// first (its line contains `filter(`), so removing this exclusion alone would change nothing
+// and the case could not witness what it names. Falsification is what surfaced that overlap.
+const assigned = runFixture('assigned.js',
+  `const found = /re-acquire/i.test(doc);\nok(found === true, 'the document discusses the procedure');`);
+ok(assigned.findings.length === 0,
+  `a match ASSIGNED to a variable is not an assertion site, so it is not flagged (got ${assigned.findings.length})`);
 
 // Exclusion 3: a control is deliberately broad — establishing that a subject exists at all
 // is its entire job, so breadth is not a defect in it.
