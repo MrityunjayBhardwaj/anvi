@@ -129,8 +129,15 @@ const commitAt = step1.indexOf('git -C ~/.anvideck commit');
 ok(liveAt !== -1 && commitAt !== -1 && liveAt < commitAt,
   'the liveness check comes BEFORE the commit — after it, an expired lease is indistinguishable from one never taken');
 
-ok(/exits 0|exit status/i.test(step1),
-  'and the reader is told not to trust the exit status, which was measured above to be uninformative');
+// Split from one alternation into two unique needles, on a finding from
+// `scripts/blind-assertions.js`: `/exits 0|exit status/` matched twice, so deleting either
+// half of the instruction left the assertion green. Both halves are load-bearing and each
+// is now asserted by a phrase that occurs exactly once — the instruction, and the measured
+// reason it is needed. Without the reason the instruction reads as a style preference.
+ok(/not the exit status/i.test(step1),
+  'the reader is told to read the OUTPUT rather than the exit status');
+ok(/exits 0 whether/i.test(step1),
+  'and is given the reason — the status is the same in both states, which is what makes it uninformative');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
