@@ -168,6 +168,50 @@ function evaluate(payload, deps) {
   return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry) };
 }
 
+// State below grows only on the rare paths — a new notice, a crash — so it is trimmed there and
+// nowhere else: an ordinary judged edit does no extra filesystem work (issue #452).
+const NOTICE_TTL_MS = 24 * 60 * 60 * 1000;   // sessions do not live this long
+const LOG_MAX_BYTES = 64 * 1024;
+
+// Remove notice markers older than NOTICE_TTL_MS, except `keep`. Returns how many went. A marker
+// pruned from a session still running only means that session is told again — louder, never quieter.
+function pruneNotices(dir, keep, now = Date.now()) {
+  let removed = 0;
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return 0; }
+  for (const name of names) {
+    if (name === keep) continue;
+    try {
+      const f = path.join(dir, name);
+      if (now - fs.lstatSync(f).mtimeMs > NOTICE_TTL_MS) { fs.unlinkSync(f); removed++; }
+    } catch { /* another session pruned it first, or it cannot be removed — move on */ }
+  }
+  return removed;
+}
+
+// Append one line, holding the log under maxBytes by keeping the newest whole lines that fit in
+// half of it. The rewrite goes through a rename so a reader never sees a half-written log.
+function recordFailure(logPath, line, maxBytes = LOG_MAX_BYTES) {
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  let size = 0;
+  try { size = fs.statSync(logPath).size; } catch { /* no log yet */ }
+  if (size + Buffer.byteLength(line) <= maxBytes) { fs.appendFileSync(logPath, line); return; }
+  let old = '';
+  try { old = fs.readFileSync(logPath, 'utf8'); } catch { /* gone meanwhile */ }
+  const lines = old.split('\n').filter(Boolean);
+  const kept = [];
+  let bytes = Buffer.byteLength(line);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const b = Buffer.byteLength(lines[i]) + 1;
+    if (bytes + b > maxBytes / 2) break;
+    kept.unshift(lines[i]);
+    bytes += b;
+  }
+  const tmp = `${logPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, (kept.length ? kept.join('\n') + '\n' : '') + line);
+  fs.renameSync(tmp, logPath);
+}
+
 // Once per session, by marker file — see the header for why not in memory.
 function noticeOnce(sessionId, text, stateDir) {
   const id = String(sessionId || 'no-session').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'no-session';
@@ -176,12 +220,14 @@ function noticeOnce(sessionId, text, stateDir) {
     if (fs.existsSync(marker)) return false;
     fs.mkdirSync(path.dirname(marker), { recursive: true });
     fs.writeFileSync(marker, new Date().toISOString() + '\n');
+    pruneNotices(path.dirname(marker), id);
   } catch { /* an unwritable marker means the notice may repeat — louder, never quieter */ }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } }));
   return true;
 }
 
-module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, noticeOnce, REGISTRY, STATE_DIR };
+module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, noticeOnce, pruneNotices, recordFailure,
+  REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {
   const stdinTimeout = setTimeout(() => process.exit(0), 9000);
@@ -216,7 +262,7 @@ if (require.main === module) {
     } catch (e) {
       // Fail open on its own bugs — and record it, because a crash and "nothing to refuse"
       // are otherwise the same observable.
-      try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.appendFileSync(LOG, `${new Date().toISOString()}\t${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}\n`); } catch { /* nothing more to do */ }
+      try { recordFailure(LOG, `${new Date().toISOString()}\t${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}\n`); } catch { /* nothing more to do */ }
       try { noticeOnce(payload.session_id, `structure guard: FAILED and allowed the edit — ${e && e.message}. Details in ${LOG}.`, STATE_DIR); } catch { /* fail open */ }
       process.exit(0);
     }
