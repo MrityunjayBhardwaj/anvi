@@ -104,13 +104,13 @@ The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.c
 | `./install.sh` | Interactive — prompts before overwriting an existing install |
 | `./install.sh --dev` | **Dev mode** — symlinks repo → live. Edits to the repo are immediately live. |
 | `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
-| `./install.sh --sync` | Silent one-way copy from repo → live (no prompts) |
+| `./install.sh --sync` | Silent one-way copy from repo → live (no prompts). On a dev install it copies nothing — it links hooks, skills and agents added since and registers the hooks. |
 | `./install.sh --migrate [dir ...]` | One-pass upgrade of an existing clone — framework sync + retired-hook prune + per-project catalogue migration for each `dir`. Idempotent. Usually driven by `/anvi:update`. |
 | `./install.sh --version-list` | List all releases (version + date + whether it needs a migration + summary), marking installed and latest |
 | `./install.sh --version <v> [--migrate]` | Install/upgrade to a specific version. Upgrade-only (refuses to go below installed). Older tagged releases come from `git archive`; your clone is never checked out. |
-| `./install.sh --check` | Show repo version vs installed version, change nothing |
+| `./install.sh --check` | Show repo version vs installed version, change nothing. On a dev install it also names any hook not yet linked. |
 
-**For contributors:** use `--dev` — the repo _is_ the live installation, no sync step needed.
+**For contributors:** use `--dev` — the repo _is_ the live installation. After pulling a change that adds a hook, skill or agent, run `--sync` to link it. Run the installer from the clone the install is linked to: from any other tree (a worktree, a second clone) it refuses rather than write through the links.
 
 ### Versions
 

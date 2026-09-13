@@ -600,9 +600,22 @@ says — otherwise a maintainer's slip would install and delete it on every run.
 
 Reclaiming is skipped entirely when `~/.claude/anvi` is a symlink: in dev mode
 that path **is** the repo, so removing through it would delete the developer's
-own source. `--no-dev` breaks the link before copying and `--migrate` skips the
-copy, so the guard covers the one path that still arrives here, `--sync` over a
-dev install.
+own source. No mode should reach the copy path over a link any more — the guard
+stays as the backstop:
+
+- **A dev install is decided by where the link LANDS**, not by its text — the same
+  clone has many spellings (a symlinked parent, `/tmp` vs `/private/tmp`).
+- **Same tree:** `--migrate` skips the copy and registers; `--sync` copies nothing and
+  relinks the hooks, skills and agents a merge added, then registers the hooks (it
+  used to die at `cp`'s "are identical", before linking anything); an interactive
+  run says which of those to use. `--no-dev` breaks the link before copying.
+- **A different tree** — a worktree, another clone, the temporary checkout
+  `--version` installs from — is **refused with exit 3 before anything is written**.
+  Copying from it used to write through the links into the linked clone's working
+  files and report "Done." with exit 0; on a dev machine those files are the live
+  hooks. Repointing is a deliberate `--dev` (or `--no-dev`).
+- **`--check` on a dev install** says so and names any hook in the clone that is not
+  linked yet — the version always matches there, so "up to date" alone says nothing.
 
 **Not covered:** a skill or agent retired while a **dev-mode** install is active.
 Dev mode symlinks each shipped artifact and exits before the copy path, so a

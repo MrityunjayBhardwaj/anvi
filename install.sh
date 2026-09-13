@@ -7,7 +7,9 @@ set -euo pipefail
 #
 # Usage:
 #   ./install.sh              Interactive install (prompts before overwrite)
-#   ./install.sh --sync       Silent sync from repo → live (no prompts)
+#   ./install.sh --sync       Silent sync from repo → live (no prompts). On a dev
+#                             install it copies nothing: it relinks hooks, skills and
+#                             agents added since, and registers the hooks.
 #   ./install.sh --migrate [project-dir ...]
 #                             One-pass upgrade of an existing clone: framework sync
 #                             + stale-hook prune + per-project catalogue migration
@@ -38,6 +40,8 @@ set -euo pipefail
 #   0  installed, or a choice the user made deliberately (declining an overwrite)
 #   2  refused before installing anything: a bad flag, a version that cannot be
 #      installed, or a prompt with no terminal to answer it (use --sync)
+#   3  refused before writing anything: this machine is a dev install linked to a
+#      DIFFERENT tree, and copying from here would write through those links into it
 #   *  an underlying command failed, and its status is passed through unchanged
 
 ANVI_DIR="$HOME/.claude/anvi"
@@ -276,6 +280,12 @@ echo " Ānvīkṣikī v${VERSION} — Installer"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# Where a directory really is, links resolved — empty when it cannot be reached.
+# A dev install is recognised by where `~/.claude/anvi` LANDS, never by the text of
+# the link: the same clone can be spelled many ways (a symlinked parent, /tmp vs
+# /private/tmp), and a string comparison reads each of those as a different tree.
+resolved_dir() { (cd "$1" 2>/dev/null && pwd -P) || true; }
+
 # --check mode: just show version diff
 if [ "$MODE" = "check" ]; then
   EXISTING_VERSION=$(cat "$ANVI_DIR/VERSION" 2>/dev/null || echo "not installed")
@@ -285,6 +295,21 @@ if [ "$MODE" = "check" ]; then
     echo "  Status:    up to date"
   else
     echo "  Status:    UPDATE AVAILABLE — run ./install.sh --sync"
+  fi
+  # On a dev install the version always matches — the framework IS the clone — so
+  # "up to date" says nothing about what a merge added. What can be stale is the
+  # per-file links: a hook merged since the last --dev/--sync is not linked, and
+  # nothing else on this screen would say so.
+  if [ -L "$ANVI_DIR" ]; then
+    echo "  Mode:      dev (${ANVI_DIR} → $(resolved_dir "$ANVI_DIR"))"
+    UNLINKED=""
+    for hook_file in "$SCRIPT_DIR/hooks/"*.js; do
+      [ -f "$hook_file" ] || continue
+      [ -e "$HOOKS_DIR/$(basename "$hook_file")" ] || UNLINKED="${UNLINKED} $(basename "$hook_file")"
+    done
+    if [ -n "$UNLINKED" ]; then
+      echo "  Not linked:${UNLINKED} — run ./install.sh --sync"
+    fi
   fi
   exit 0
 fi
@@ -382,17 +407,64 @@ if [ "$MODE" = "no-dev" ]; then
   fi
 fi
 
-# --migrate on a dev-mode install: the framework + hooks are already live via
-# symlinks, so the copy path would just hit "cp: identical (not copied)" and,
-# under `set -e`, abort before reaching the prune + per-project migration. Skip
-# the copy entirely; register (with prune) and migrate the projects directly.
-if [ "$MODE" = "migrate" ] && [ -L "$ANVI_DIR" ] && [ "$(readlink "$ANVI_DIR")" = "$SCRIPT_DIR" ]; then
-  echo "Dev-mode install detected — framework is already live via symlink; skipping copy."
-  node "$SCRIPT_DIR/scripts/register-hooks.cjs" --prune
-  echo ""
-  migrate_projects
-  echo "Done."
-  exit 0
+# ─── A dev install: ~/.claude/anvi is a link ────────────────────────────────
+# The copy path below knows nothing about links, and on a dev install every target
+# it writes is one: `~/.claude/anvi` points at a clone, and each installed hook,
+# skill and agent points into it. Reached anyway, two things happen, and neither
+# says so honestly (#455, #456):
+#
+#   - From the LINKED clone, the first `cp` copies the framework onto itself; macOS
+#     refuses ("are identical") and `set -e` ends the run before any hook is linked
+#     or registered. A hook merged since the dev install is never installed.
+#   - From a DIFFERENT tree — a worktree, another clone, the temporary checkout
+#     `--version` installs from — nothing refuses. Every `cp` writes THROUGH the
+#     links into the linked clone's working files, and the run prints "Done." with
+#     exit 0. On a dev machine that clone's hooks/ are what every session runs.
+#
+# So decide BEFORE anything is written, by where the link lands. The same tree is a
+# dev install: there is nothing to copy, only links a merge may have added and
+# registrations to refresh. A different tree is refused — repointing a machine at
+# another clone is a real choice, and --dev / --no-dev are how to make it.
+if [ -L "$ANVI_DIR" ] && { [ "$MODE" = "sync" ] || [ "$MODE" = "migrate" ] || [ "$MODE" = "interactive" ]; }; then
+  LINKED_TO="$(resolved_dir "$ANVI_DIR")"
+  if [ -z "$LINKED_TO" ] || [ "$LINKED_TO" != "$(resolved_dir "$SCRIPT_DIR")" ]; then
+    echo "✗ Refusing to install: this machine is a dev install linked to a different tree."
+    echo "    ${ANVI_DIR} → ${LINKED_TO:-$(readlink "$ANVI_DIR") (does not resolve)}"
+    echo "    this installer: ${SCRIPT_DIR}"
+    echo "  Installing from here would copy through those links into that tree's working files."
+    echo "  To update the linked clone, run its own installer${LINKED_TO:+: ${LINKED_TO}/install.sh}."
+    echo "  To point this machine at this tree instead, deliberately: ./install.sh --dev"
+    echo "  To switch to a standalone copy: ./install.sh --no-dev"
+    # 3, its own status: 2 is reserved for an unanswered prompt, and a caller must be
+    # able to tell "nobody said yes" from "this would have overwritten another tree".
+    exit 3
+  fi
+
+  # --migrate: the framework and hooks are already live, so skip the copy; register
+  # (with prune) and migrate the projects directly.
+  if [ "$MODE" = "migrate" ]; then
+    echo "Dev-mode install detected — framework is already live via symlink; skipping copy."
+    node "$SCRIPT_DIR/scripts/register-hooks.cjs" --prune
+    echo ""
+    migrate_projects
+    echo "Done."
+    exit 0
+  fi
+
+  # --sync: relink what a merge may have added, and register it — the dev path,
+  # without re-pointing the framework link that already lands here.
+  if [ "$MODE" = "sync" ]; then
+    echo "Dev-mode install detected — framework is already live via symlink; relinking skills, agents and hooks."
+    MODE="dev"
+    DEV_RELINK=1
+  else
+    # Interactive over a dev install used to ask to overwrite and then die at the
+    # same `cp`. There is no copy to offer here; say which command does which job.
+    echo "Dev-mode install detected (${ANVI_DIR} → ${LINKED_TO})."
+    echo "  To link hooks, skills and agents added since: ./install.sh --sync"
+    echo "  To switch to a standalone copy:               ./install.sh --no-dev"
+    exit 0
+  fi
 fi
 
 # Check if already installed
@@ -497,9 +569,13 @@ if [ "$MODE" = "dev" ]; then
   echo "DEV MODE: symlinking repo → live installation"
   mkdir -p "$AGENTS_DIR" "$SKILLS_DIR"
 
-  # Remove existing anvi dir and symlink
-  rm -rf "$ANVI_DIR"
-  ln -sf "$SCRIPT_DIR" "$ANVI_DIR"
+  # Remove existing anvi dir and symlink — unless this is a --sync relink, where the
+  # link was just resolved to this very tree and replacing it would only rewrite
+  # whichever spelling of the path the developer chose.
+  if [ "${DEV_RELINK:-0}" != 1 ]; then
+    rm -rf "$ANVI_DIR"
+    ln -sf "$SCRIPT_DIR" "$ANVI_DIR"
+  fi
   echo "  ✓ ${ANVI_DIR} → ${SCRIPT_DIR}"
 
   # Symlink skills
@@ -536,7 +612,8 @@ if [ "$MODE" = "dev" ]; then
 
   echo ""
   echo "Dev mode active. Edits to ${SCRIPT_DIR} are immediately live."
-  echo "Run ./install.sh (without --dev) to switch back to copy mode."
+  echo "Run ./install.sh --sync after pulling a change that adds a hook, skill or agent."
+  echo "Run ./install.sh --no-dev to switch back to copy mode."
   exit 0
 fi
 
