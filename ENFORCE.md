@@ -1398,4 +1398,4 @@ loosened until it stops firing guards nothing.
   case asserting how much it examined. Plus `test/structure-graph.test.js` (the builder) and
   `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
   assertion reddened by some mutation: rules + command **52 of 52** conclusive over 67
-  assertions · builder **24 of 24** over 29 · hook **29 of 29** over 34.
+  assertions · builder **24 of 24** over 29 · hook **35 of 35** over 38.
