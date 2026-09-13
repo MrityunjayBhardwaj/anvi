@@ -64,6 +64,13 @@
 //        are not inverted with it — a crash or a timeout still means no verdict, because
 //        "silent because nothing ran" is the one reading this tool must never offer.
 //
+//   8. A test that prints some green assertions and THEN throws reads NOT WITNESSED
+//      (#449). The crash rule consulted the exit code only when no assertion had printed,
+//      so a run that died partway had greens, no red, and fell through to "nothing here
+//      is testing this" — or, for a must-not-redden probe, to HELD.
+//      → a non-zero exit with no red assertion is `CRASHED` however many assertions ran
+//        first, and the detail says how many, so the reader knows where it died.
+//
 // Usage: node scripts/falsify.js <spec.js> [-v]
 //
 // The spec is a JS module the author writes per change and does not commit:
