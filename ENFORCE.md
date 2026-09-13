@@ -1364,6 +1364,17 @@ loosened until it stops firing guards nothing.
   TypeScript 5, a per-file cache) and judges it with the same rules as the report
   (`hooks/structure-rules.js`). **Only a new violation whose edge starts in the edited file
   is refused**; one it causes in another file's edge is counted, not refused.
+- **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
+  `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
+  judged at edit time. The report over the package — `--package <dir> --design <d>
+  --baseline <b>` — is what catches those, after they land. That is a stated blind spot, not
+  a bypass to use: the refusal tells an agent a deliberate edge is the user's decision.
+- **A deliberate edge is grandfathered AFTER it lands, never before.** The refusal prints the
+  exact command, built from the registry entry it judged against (`--package`, `--design`,
+  `--extractor` when registered, `--baseline` and `--write-baseline` on the same file,
+  `--allow-growth`). The baseline is written from the graph on disk, so running that command
+  while the edge is only proposed records nothing — observed: it reports "baseline written:
+  0 layer" and the same edit is refused again.
 - **The graph matches the analyser, measured.** On a 297-module package: compile each file,
   read imports and `export … from` from the output, resolve against the project's tsconfig
   — 742 of 742 edges, 0 re-export mismatches, identical cycle edges. Cycles are COMPUTED

@@ -144,7 +144,22 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   const r = hook(up);
   ok(r.exit === 2 && r.denied, `an upward import is REFUSED — exit 2 and a deny payload (got exit ${r.exit})`);
   ok(/layer: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(r.reason), 'the refusal names the edge and the rule');
-  ok(/Remedies:/.test(r.reason) && /--allow-growth/.test(r.reason), 'and carries the remedy, including how to grandfather a deliberate edge');
+  ok(/Remedies:/.test(r.reason), 'and carries the remedy');
+  // The whole command, flag by flag, from the registry entry — so a remedy that names the script
+  // but not the files it needs, or names the wrong one, reddens here.
+  ok(r.reason.includes(`structure-guard.js --package '${PKG}' --design '${DESIGN}' --extractor '${EXTRACTOR}' ` +
+                       `--baseline '${BASELINE}' --write-baseline '${BASELINE}' --allow-growth`),
+     'including the exact command that grandfathers a deliberate edge, built from the registry entry');
+  ok(/before the edge lands records nothing/.test(r.reason) && /user's decision/.test(r.reason),
+     'and says the edge must land first, by the user\'s decision — regenerating before it lands records nothing');
+
+  // A path with a space and an apostrophe must still be ONE shell word, and a package with no
+  // registered extractor must not print an empty --extractor.
+  const odd = H.refusalText('p', 'src/x.ts', [{ rule: 'layer', key: 'k', detail: 'd' }], { modules: 1, edges: 1 },
+    "/tmp/it's a pkg", { design: '/d.json', baseline: '/b.json' });
+  ok(odd.includes("--package '/tmp/it'\\''s a pkg' --design '/d.json' --baseline '/b.json'"),
+     'the command quotes a path with a space and an apostrophe as one shell word');
+  ok(!/--extractor/.test(odd), 'and names --extractor only when the package registers one');
 
   const implied = edit('src/mid/m.ts', "import { b } from '../low/b';\n", "import { b } from '../low/b';\nimport { a } from '../low/a';\n");
   const i = hook(implied);

@@ -23,6 +23,11 @@
 // by session, not a flag in memory: a hook is a new process per call, so in-process state would
 // repeat the notice on every edit.
 //
+// WHAT IT CANNOT SEE. Only Write and Edit tool calls reach it. A file changed through Bash (a
+// heredoc, `sed -i`, `cp`, `git checkout`), by another program or by hand is never judged here;
+// the report over the package catches those after they land. A stated blind spot, not a bypass:
+// the refusal tells the agent a deliberate edge is the user's decision.
+//
 // PAYLOAD, OBSERVED (Claude Code 2.1.270): Edit `tool_input` is `file_path`, `old_string`,
 // `new_string`, `replace_all` (a boolean, present even when unset); Write is `file_path`,
 // `content`. MultiEdit was not an offered tool on that version.
@@ -89,7 +94,22 @@ function proposedContent(toolName, input, readFile) {
   return current.slice(0, at) + to + current.slice(at + from.length);
 }
 
-function refusalText(pkgName, rel, fresh, examined) {
+// One shell word. Registry paths are absolute and may contain spaces or quotes.
+const shellWord = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+// The exact command that records this package's current graph as its baseline, built from the
+// registry entry the hook judged against — so the remedy names the files that were actually used.
+function baselineCommand(pkgDir, entry) {
+  return `node ~/.claude/anvi/scripts/structure-guard.js --package ${shellWord(pkgDir)} --design ${shellWord(entry.design)}` +
+    (entry.extractor ? ` --extractor ${shellWord(entry.extractor)}` : '') +
+    ` --baseline ${shellWord(entry.baseline)} --write-baseline ${shellWord(entry.baseline)} --allow-growth`;
+}
+
+// ORDER MATTERS in the last paragraph, observed: the baseline is written from the graph ON DISK,
+// so regenerating it while the edge is only proposed records nothing (and says "written"), and the
+// same edit is refused again. A deliberate edge has to land first — and landing it is not this
+// edit's to do, because the only way past the refusal is around the guard.
+function refusalText(pkgName, rel, fresh, examined, pkgDir, entry) {
   const lines = fresh.map(f => `  · ${f.rule}: ${f.key}\n      ${f.detail}`);
   return `BLOCKED: this edit to ${rel} adds ${fresh.length} import${fresh.length === 1 ? '' : 's'} that erode ${pkgName}'s declared structure:\n` +
     lines.join('\n') + '\n' +
@@ -98,8 +118,10 @@ function refusalText(pkgName, rel, fresh, examined) {
     '  · layer — move the code to a layer allowed to depend on the target, or depend on something lower\n' +
     '  · implied — use the path that already provides it; the direct import adds coupling, not capability\n' +
     '  · cycle — break the loop; one of the two modules is doing the other\'s job\n' +
-    'If the edge is deliberate, grandfather it by regenerating the package\'s baseline with --allow-growth ' +
-    '(node ~/.claude/anvi/scripts/structure-guard.js) — the growth is then recorded, not silent.';
+    'If the edge is deliberate, that is the user\'s decision — ask them. A baseline records only what is already ' +
+    'on disk, so regenerating it before the edge lands records nothing. Once the user has landed it, this records ' +
+    'it as grandfathered (the growth is then recorded, not silent):\n' +
+    `  ${baselineCommand(pkgDir, entry)}`;
 }
 
 // The whole decision, with every effect injected: { decision: 'allow'|'deny'|'unmeasured', ... }
@@ -143,7 +165,7 @@ function evaluate(payload, deps) {
   const elsewhere = all.length - fresh.length;
   const examined = { modules: built.graph.modules.size, edges: built.graph.edges.length, extracted: built.stats.extracted };
   if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere };
-  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined) };
+  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry) };
 }
 
 // Once per session, by marker file — see the header for why not in memory.
