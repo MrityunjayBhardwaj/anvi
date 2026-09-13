@@ -179,6 +179,18 @@ console.log('\nCYCLE — the analyser\'s own flag is read, not recomputed:');
   ok(keys(r).includes('src/x/p.ts -> src/x/q.ts') && keys(r).includes('src/x/q.ts -> src/x/p.ts'), 'both edges of a flagged cycle are reported');
   ok(r.examined === 3 && !keys(r).includes('src/x/s.ts -> src/x/p.ts'),
      `an edge into a cycle is not itself on it (of ${r.examined} examined)`);
+
+  // A graph built without an analyser has no flag to read, so cycles are COMPUTED — and the
+  // computation must agree with the flag it replaces on the same shape.
+  const bare = G.loadGraph(cruise({ 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': ['src/x/r.ts'], 'src/x/r.ts': ['src/x/p.ts'],
+                                    'src/x/s.ts': ['src/x/p.ts'], 'src/x/t.ts': [] }), d);
+  const computed = [...G.onCycle(bare.adj)].sort();
+  ok(bare.circular.size === 0 && computed.join() === ['src/x/p.ts -> src/x/q.ts', 'src/x/q.ts -> src/x/r.ts', 'src/x/r.ts -> src/x/p.ts'].join(),
+     `with no flag in the input, every edge of a three-module cycle is computed as on it (got ${computed.length})`);
+  ok(bare.edges.length === 4 && !computed.includes('src/x/s.ts -> src/x/p.ts'),
+     `and an edge into that cycle is not (of ${bare.edges.length} edges)`);
+  ok([...G.onCycle(g.adj)].sort().join() === keys(r).sort().join(),
+     'on the flagged graph above, the computed cycle edges are exactly the analyser\'s');
 }
 
 console.log('\nTHE RATCHET — only what the baseline does not already hold is refused:');
