@@ -581,6 +581,42 @@ function projectRootOfDir(dir) {
   }
 }
 
+// Which REPOSITORY is this project root a checkout of — its git COMMON directory,
+// realpath'd, or null when the root holds no `.git`.
+//
+// Two roots can be one project. Branch work in this framework is done in a
+// `git worktree`, so the main checkout can stay on the branch the installed hooks
+// run from, and a worktree's root is its own directory: comparing roots called
+// every read across the two another project's. The identity both share is the
+// repository, which is what this names.
+//
+// Read from disk rather than by running git, because the provenance guard asks it
+// on every file read. The rules are git's own (setup.c, git 2.39.5):
+//   - `.git` a DIRECTORY → that directory is the repository.
+//   - `.git` a FILE `gitdir: <p>` → `<p>`, relative to the directory holding the
+//     file (`read_gitfile_gently`, setup.c:857).
+//   - that gitdir holds `commondir` → the repository is that path, relative to the
+//     gitdir (`get_common_dir_noenv`, setup.c:306-333). No `commondir` → the gitdir
+//     itself: a submodule or a separate git directory IS its own repository, and
+//     must not be folded into whatever repository happens to hold its gitdir.
+function repositoryOf(root) {
+  if (!root) return null;
+  const dotGit = path.join(root, '.git');
+  let st;
+  try { st = fs.statSync(dotGit); } catch { return null; }
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  if (st.isDirectory()) return real(dotGit);
+  let gitdir;
+  try {
+    const m = fs.readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.*?)\s*$/m);
+    if (!m || !m[1]) return null;
+    gitdir = path.resolve(root, m[1]);
+  } catch { return null; }
+  try {
+    return real(path.resolve(gitdir, fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()));
+  } catch { return real(gitdir); }
+}
+
 // resolveDir for the project that owns `filePath`, rather than for the session cwd.
 // Consumers that act ON A FILE must resolve through this, not resolveDir(cwd) — one
 // answer to "whose knowledge governs this file", so the injector and the currency
@@ -669,6 +705,9 @@ function subjectRepoFor(filePath, sessionCwd) {
 
 module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, projectRootOfDir,
+  // "Which repository is this root a checkout of" — so a worktree and its main
+  // checkout can be recognised as one project without each consumer parsing `.git`.
+  repositoryOf,
   resolveDirForFile,
   subjectRepoFor,
   // "Which project is this directory in" — exported so it has ONE name as well

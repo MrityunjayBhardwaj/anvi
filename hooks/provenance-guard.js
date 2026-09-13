@@ -41,11 +41,21 @@ const os = require('os');
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
 let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
-  isInside = null, projectRootOfDir = null, projectRootFor = null;
+  isInside = null, projectRootOfDir = null, projectRootFor = null, repositoryOf = null;
 try {
   ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
-    projectRootOfDir, projectRootFor } = require('./anvi-paths.js'));
+    projectRootOfDir, projectRootFor, repositoryOf } = require('./anvi-paths.js'));
 } catch { /* older install */ }
+
+// Are these two project roots checkouts of the same repository? Asked of the
+// shared resolver, which reads git's own layout. Without it (an older install),
+// false: roots are compared as before, which over-warns on a worktree rather than
+// silencing anything that might be foreign.
+function sameRepository(a, b) {
+  if (!repositoryOf || !a || !b) return false;
+  const ra = repositoryOf(a);
+  return !!ra && ra === repositoryOf(b);
+}
 
 // Timeout guard: exit if stdin doesn't close in 5s
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
@@ -297,8 +307,13 @@ function foreignProjectOf(absPath, cwd) {
   // about an absent warning looks wrong. The neighbour test was a proxy for
   // containment from before containment could be asked; now that both operands
   // resolve through the same walk, ask the question directly.
+  //
+  // Two roots that are checkouts of ONE repository are one project (#448). A
+  // `git worktree` has its own root, so comparing roots alone announced this
+  // repository's own branch work as a stranger's on every read of it — noise on
+  // the very workflow that keeps the main checkout on the branch hooks run from.
   const theirs = workspaceRootFor(absPath);
-  if (theirs && !sameDir(theirs, root)) return path.basename(theirs);
+  if (theirs && !sameDir(theirs, root) && !sameRepository(theirs, root)) return path.basename(theirs);
 
   // The resolver is unavailable (a partial install), or the path resolves
   // nowhere at all. The literal spelling is still worth checking: it is the only
