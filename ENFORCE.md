@@ -121,7 +121,10 @@ User message
 ⑬ PostToolUse:Artifact|WebFetch|WebSearch|mcp__*|Read|Grep|Glob — provenance-guard.js
    Enforces the base-layer Provenance Check. Fires when a tool returns data from a
    surface that isn't scoped to this project (account-wide artifact gallery, web,
-   any MCP server, or a file read in ANOTHER project's territory). Injects a one-line
+   any MCP server, or a file read in ANOTHER project's territory). A project is its
+   repository, not its directory: a `git worktree` of this repository — where branch
+   work lives, so the main checkout stays on the branch hooks run from — is this
+   project, while a separate repository with a similar name is not. Injects a one-line
    "EXTERNAL until you confirm origin" reminder. "Grounding asks is-it-real; this asks
    is-it-real-for-THIS-project." Dedupes once per (surface, target) per session.
 ```
