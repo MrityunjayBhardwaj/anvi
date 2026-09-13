@@ -722,6 +722,73 @@ console.log('\na worktree of this repository is not another project');
      'the relative-gitdir checkout is real: its path is relative, the test runs elsewhere, and git resolves it');
   ok(typeof repositoryOf === 'function' && repositoryOf(REL) === common(REL),
      'a relative gitdir is resolved against the checkout, not against the process');
+
+  // ── the store: a worktree owns what its main checkout owns ──────────────────
+  // The second route to the same false alarm. Store ownership is decided from the
+  // working directory's `.anvi` link, and that link is untracked — so a worktree,
+  // which is a checkout of tracked files, has none. A session sitting in a worktree
+  // was told the project's own catalogues belonged to another project.
+  //
+  // Two shapes must NOT inherit, and each gets a firing case from its own cwd:
+  //   - a FORGED `.git` file pointing into this repository's worktree records. git
+  //     keeps a back-pointer (`<gitdir>/gitdir` names the worktree's own `.git`), so
+  //     a checkout the repository never recorded is not one of its worktrees.
+  //   - a SUBMODULE. Its common directory is `.git/modules/<name>`, not a `.git`, so
+  //     there is no main checkout to inherit from. git's own main-worktree derivation
+  //     strips a `/.git` suffix and silently returns the git directory when the strip
+  //     does nothing — which is exactly the result this must not reproduce.
+  fs.mkdirSync(storeOf('kappa'), { recursive: true });
+  fs.writeFileSync(path.join(storeOf('kappa'), 'hetvabhasa.md'), '# kappa\n');
+  fs.symlinkSync(storeOf('kappa'), path.join(MAIN, '.anvi'));   // untracked, as in real use
+  const KAPPA_CAT = path.join(storeOf('kappa'), 'hetvabhasa.md');
+
+  const FORGED = path.join(REPOS, 'kappa-forged');
+  fs.mkdirSync(FORGED, { recursive: true });
+  fs.writeFileSync(path.join(FORGED, 'f.js'), '//\n');
+  const wtGitdir = fs.readFileSync(path.join(WT, '.git'), 'utf8').match(/^gitdir:\s*(.*?)\s*$/m)[1];
+  fs.writeFileSync(path.join(FORGED, '.git'), `gitdir: ${wtGitdir}\n`);
+
+  git(STRANGE, 'add', '-A');
+  git(STRANGE, 'commit', '-q', '-m', 'sub');
+  git(MAIN, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', STRANGE, 'sub');
+  const SUB = path.join(MAIN, 'sub');
+
+  ok(!fs.existsSync(path.join(WT, '.anvi')) && fs.realpathSync(path.join(MAIN, '.anvi')) === fs.realpathSync(storeOf('kappa')),
+     'the worktree genuinely has no .anvi, and its main checkout genuinely owns kappa\'s store');
+  ok(fs.realpathSync(fs.readFileSync(path.join(path.resolve(WT, wtGitdir), 'gitdir'), 'utf8').trim()) === fs.realpathSync(path.join(WT, '.git')),
+     'git\'s back-pointer names the worktree\'s own .git file');
+  ok(isFile(path.join(SUB, '.git')) && path.basename(common(SUB)) !== '.git' && !fs.existsSync(path.join(SUB, '.anvi')),
+     'the submodule is real: a .git file, a common directory that is not a .git, and no .anvi');
+
+  ok(!fired(WT, KAPPA_CAT),
+     'from a worktree, the project\'s own store catalogue is not another project\'s');
+  ok(!fired(path.join(WT, 'src'), KAPPA_CAT),
+     'nor from a subdirectory of the worktree');
+  ok(!fired(MAIN, KAPPA_CAT),
+     'and the main checkout still reads it silently, as it always did');
+
+  // A worktree record with NO back-pointer — what git leaves when the record is
+  // half-gone. Claimed through `commondir`, vouched for by nothing.
+  const GHOST = path.join(REPOS, 'kappa-ghost');
+  const GHOST_REC = path.join(MAIN, '.git', 'worktrees', 'ghost');
+  fs.mkdirSync(GHOST_REC, { recursive: true });
+  fs.writeFileSync(path.join(GHOST_REC, 'commondir'), '../..\n');
+  fs.mkdirSync(GHOST, { recursive: true });
+  fs.writeFileSync(path.join(GHOST, 'g.js'), '//\n');
+  fs.writeFileSync(path.join(GHOST, '.git'), `gitdir: ${GHOST_REC}\n`);
+  ok(!fs.existsSync(path.join(GHOST_REC, 'gitdir')) && fs.existsSync(path.join(GHOST_REC, 'commondir')),
+     'the ghost record genuinely has a commondir and no back-pointer');
+  ok(fired(GHOST, path.join(MAIN, 'src', 'm.js')),
+     'a worktree record with no back-pointer is not adopted as one of this repository\'s checkouts');
+
+  ok(fired(FORGED, KAPPA_CAT),
+     'a forged .git file pointing at this repository\'s worktree records does not inherit its store');
+  ok(fired(FORGED, path.join(MAIN, 'src', 'm.js')),
+     'and does not become one of its checkouts either');
+  ok(fired(SUB, KAPPA_CAT),
+     'a submodule does not inherit its superproject\'s store — it is a different repository');
+  ok(fired(WT, BETA_CAT),
+     'and a worktree reading a genuinely different store project is still told so');
 }
 
 console.log('');

@@ -612,9 +612,34 @@ function repositoryOf(root) {
     if (!m || !m[1]) return null;
     gitdir = path.resolve(root, m[1]);
   } catch { return null; }
-  try {
-    return real(path.resolve(gitdir, fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()));
-  } catch { return real(gitdir); }
+  let commondir;
+  try { commondir = fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim(); }
+  catch { return real(gitdir); }
+  // A linked worktree, claimed. git records the claim from the OTHER side too: the
+  // worktree's gitdir holds a `gitdir` file naming the worktree's own `.git`
+  // (`get_linked_worktree`, worktree.c:72-91). A `.git` file anyone can write; the
+  // back-pointer lives inside the repository. Without it matching this root, the
+  // checkout is not one the repository recorded — so no repository is named at
+  // all, and a caller comparing identities over-warns rather than adopting it.
+  let back;
+  try { back = fs.readFileSync(path.join(gitdir, 'gitdir'), 'utf8').trim(); } catch { return null; }
+  if (!back || real(path.resolve(gitdir, back)) !== real(dotGit)) return null;
+  return real(path.resolve(gitdir, commondir));
+}
+
+// The MAIN checkout of the repository this root belongs to — where per-checkout,
+// untracked state such as the `.anvi` link lives — or null.
+//
+// git derives it by stripping a `/.git` suffix from the common directory
+// (`get_main_worktree`, worktree.c:54-55), and that strip silently returns its
+// input for a submodule, whose common directory is `.git/modules/<name>`: git then
+// reports a git directory as though it were a checkout. So only a repository that
+// IS a `.git` directory has a main checkout here; a submodule or a bare repository
+// answers null rather than a git directory posing as one.
+function mainCheckoutOf(root) {
+  const repo = repositoryOf(root);
+  if (!repo || path.basename(repo) !== '.git') return null;
+  return path.dirname(repo);
 }
 
 // resolveDir for the project that owns `filePath`, rather than for the session cwd.
@@ -707,7 +732,7 @@ module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, projectRootOfDir,
   // "Which repository is this root a checkout of" — so a worktree and its main
   // checkout can be recognised as one project without each consumer parsing `.git`.
-  repositoryOf,
+  repositoryOf, mainCheckoutOf,
   resolveDirForFile,
   subjectRepoFor,
   // "Which project is this directory in" — exported so it has ONE name as well

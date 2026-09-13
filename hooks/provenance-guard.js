@@ -41,10 +41,11 @@ const os = require('os');
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
 let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
-  isInside = null, projectRootOfDir = null, projectRootFor = null, repositoryOf = null;
+  isInside = null, projectRootOfDir = null, projectRootFor = null, repositoryOf = null,
+  mainCheckoutOf = null;
 try {
   ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
-    projectRootOfDir, projectRootFor, repositoryOf } = require('./anvi-paths.js'));
+    projectRootOfDir, projectRootFor, repositoryOf, mainCheckoutOf } = require('./anvi-paths.js'));
 } catch { /* older install */ }
 
 // Are these two project roots checkouts of the same repository? Asked of the
@@ -155,7 +156,17 @@ function foreignProjectOf(absPath, cwd) {
   //
   // null means nothing proves ownership of anything in the store. That is not a
   // reason to fall back to the name — it is the reason not to.
-  const ownStore = ownStoreProject ? ownStoreProject(cwd) : null;
+  let ownStore = ownStoreProject ? ownStoreProject(cwd) : null;
+
+  // A worktree owns what its repository's main checkout owns (#448). The `.anvi`
+  // link is untracked, so a `git worktree` — a checkout of tracked files — never has
+  // one, and a session sitting in one was told this project's own catalogues were
+  // another project's. Evidence, not a name: the main checkout comes from the
+  // repository the worktree is recorded in, and its link still has to land.
+  if (!ownStore && ownStoreProject && mainCheckoutOf) {
+    const main = mainCheckoutOf((projectRootOfDir ? projectRootOfDir(cwd) : null) || cwd);
+    if (main) ownStore = ownStoreProject(main);
+  }
 
   // Physical containment, decided on RESOLVED paths, asked before anything else.
   // A file that genuinely lives inside this working directory cannot coherently
