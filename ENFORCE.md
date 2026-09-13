@@ -1384,5 +1384,7 @@ loosened until it stops firing guards nothing.
   ~175 ms; a cold graph build ~0.8 s. Registered at 10 s.
 - **Tests:** `node test/structure-guard.test.js` — graphs built in the test, one real
   dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
-  case asserting how much it examined. Falsified by a 37-mutation matrix, **37 of 37
-  conclusive** (36 witnessed, 1 held), all 49 assertions reddened by some mutation.
+  case asserting how much it examined. Plus `test/structure-graph.test.js` (the builder) and
+  `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
+  assertion reddened by some mutation: rules + command **52 of 52** conclusive over 67
+  assertions · builder **24 of 24** over 29 · hook **29 of 29** over 34.
