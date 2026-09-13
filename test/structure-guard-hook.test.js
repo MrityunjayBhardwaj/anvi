@@ -189,7 +189,10 @@ console.log('\nALLOWED — each release paired with what was examined:');
   ok(hook(absent).exit === 0 && decide(absent, registryNow()).why === 'edit shape not judged',
      'an Edit whose old_string does not match is allowed, not guessed at');
 
-  ok(hook({ tool_name: 'Read', tool_input: { file_path: path.join(PKG, 'src/low/a.ts') } }).exit === 0, 'a tool that is not an edit passes');
+  // The reason as well as the exit: the proposal step also declines an unmodelled tool, so a
+  // missing tool gate would still exit 0 — only the stated reason tells the two apart.
+  const reading = { tool_name: 'Read', tool_input: { file_path: path.join(PKG, 'src/low/a.ts') } };
+  ok(hook(reading).exit === 0 && decide(reading, registryNow()).why === 'not an edit', 'a tool that is not an edit passes');
   const garbled = hook('not json at all{{');
   ok(garbled.exit === 0 && garbled.stdout === '', 'malformed stdin exits 0 in silence — unreadable input is not the guard failing');
 }

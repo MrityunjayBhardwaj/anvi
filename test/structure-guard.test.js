@@ -347,7 +347,10 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   const refusedArm = run(['--design', d, '--graph', extra, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
   ok(refusedArm.status === 1 && /NOT armed/.test(refusedArm.stdout) && !fs.existsSync(REG),
      `--arm on graphs that disagree registers nothing (got ${refusedArm.status})`);
-  ok(run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm']).status === 2 && !fs.existsSync(REG),
+  // The message, not only the status: without the guard, the missing path throws inside the
+  // registry write, and that catch ALSO exits 2 — a crash would pass a status-only assertion.
+  const noBase = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm']);
+  ok(noBase.status === 2 && /--arm needs --baseline/.test(noBase.stdout) && !fs.existsSync(REG),
      '--arm without a baseline is not measured, and registers nothing');
   ok(run(['--design', d, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]).status === 2 && !fs.existsSync(REG),
      '--arm without an analyser graph to agree with is not measured, and registers nothing');

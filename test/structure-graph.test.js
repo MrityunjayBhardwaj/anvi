@@ -155,8 +155,12 @@ console.log('\nCYCLES AND UNRESOLVED IMPORTS — computed, since no analyser fla
 
 console.log('\nNOT MEASURED — an extractor that cannot run says so:');
 {
-  const r = S.buildGraph({ pkgDir: PKG, design, extractor: { notMeasured: 'no TypeScript here' }, cachePath: CACHE });
-  ok(r.notMeasured === 'no TypeScript here' && !r.graph, 'the reason is returned, and no graph pretends to exist');
+  // Caught, so that a builder which ignored the refusal and went on to call an extractor that
+  // has no `edges` reddens THIS assertion by name rather than crashing the file mid-run.
+  let r;
+  try { r = S.buildGraph({ pkgDir: PKG, design, extractor: { notMeasured: 'no TypeScript here' }, cachePath: CACHE }); }
+  catch (e) { r = { threw: e.message }; }
+  ok(r.notMeasured === 'no TypeScript here' && !r.graph, `the reason is returned, and no graph pretends to exist (got ${JSON.stringify(r.threw ? { threw: r.threw } : Object.keys(r))})`);
   const ts = S.tsExtractor(PKG);
   ok(typeof ts.notMeasured === 'string' && /TypeScript/.test(ts.notMeasured),
      `with no TypeScript resolvable from the package, the default extractor is not measured (got ${JSON.stringify(ts.notMeasured || ts.id)})`);
