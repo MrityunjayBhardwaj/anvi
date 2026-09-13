@@ -1348,6 +1348,14 @@ loosened until it stops firing guards nothing.
   dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
 - **A new module that could have lived elsewhere is REPORTED, never refused**, until a
   replay of real module-adding history measures how often that would fire.
+- **Two sources for the graph, and a check that they agree.** `--package <dir>` judges the
+  graph the edit-time hook builds (the project's own TypeScript) instead of an analyser's.
+  Given `--graph` AND `--package`, it judges nothing: it compares the two — modules, edges,
+  re-exports, cycle edges — and exits 0 only if they agree. **`--arm --baseline <b>`
+  registers the package for the hook only when they do**, merging into
+  `~/.claude/structure-guard.json` by the package's real path, and refusing to overwrite a
+  registry of any other shape. Agreement was measured on one package before the hook was
+  built; arming is how every other package earns that trust instead of inheriting it.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —
   `{ "packages": [ { "dir", "design", "baseline", "cache"?, "extractor"? } ] }` — and with no

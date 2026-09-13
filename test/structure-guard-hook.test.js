@@ -105,8 +105,13 @@ console.log('\nTHE PROPOSED FILE — rebuilt exactly as the tool would leave it:
   ok(H.proposedContent('Edit', { file_path: f, old_string: '1', new_string: "'$&'" }, readFile) === "export const a = '$&';\n",
      'a replacement containing $& is taken literally, as the tool writes it');
   fs.unlinkSync(tw);
-  ok(H.proposedContent('Edit', { file_path: f, old_string: '', new_string: 'x' }, readFile) === null, 'an empty old_string proposes nothing');
-  ok(H.proposedContent('NotebookEdit', { file_path: f }, readFile) === null, 'a tool it does not model proposes nothing');
+  // With replace_all, so the uniqueness check cannot be what answers: an empty needle "matches"
+  // between every character, and splitting on it would interleave new_string through the file.
+  ok(H.proposedContent('Edit', { file_path: f, old_string: '', new_string: 'x', replace_all: true }, readFile) === null,
+     'an empty old_string proposes nothing, even with replace_all');
+  // Carries an Edit's fields, so only the tool name can be what refuses it.
+  ok(H.proposedContent('NotebookEdit', { file_path: f, old_string: '= 1', new_string: '= 2' }, readFile) === null,
+     'a tool it does not model proposes nothing, even with an Edit\'s fields');
 }
 
 console.log('\nWHICH PACKAGE — the deepest registered directory, through symlinks:');
@@ -119,6 +124,9 @@ console.log('\nWHICH PACKAGE — the deepest registered directory, through symli
   fs.symlinkSync(PKG, link);
   ok((H.packageFor(path.join(link, 'src/low/a.ts'), { packages: [{ dir: PKG }] }) || {}).rel === 'src/low/a.ts',
      'a path reached through a symlink belongs to the package it resolves into');
+  // A new file cannot be resolved itself; only its nearest existing parent can.
+  ok((H.packageFor(path.join(link, 'src/low/brand-new/x.ts'), { packages: [{ dir: PKG }] }) || {}).rel === 'src/low/brand-new/x.ts',
+     'so does a file that does not yet exist, reached through a symlink');
   ok(H.packageFor(path.join(os.tmpdir(), 'elsewhere.ts'), { packages: [{ dir: PKG }] }) === null, 'a file outside every registered package has no owner');
 }
 
@@ -182,7 +190,8 @@ console.log('\nALLOWED — each release paired with what was examined:');
      'an Edit whose old_string does not match is allowed, not guessed at');
 
   ok(hook({ tool_name: 'Read', tool_input: { file_path: path.join(PKG, 'src/low/a.ts') } }).exit === 0, 'a tool that is not an edit passes');
-  ok(hook('not json at all{{').exit === 0, 'malformed stdin exits 0');
+  const garbled = hook('not json at all{{');
+  ok(garbled.exit === 0 && garbled.stdout === '', 'malformed stdin exits 0 in silence — unreadable input is not the guard failing');
 }
 
 console.log('\nNOT MEASURED AND FAILED — allowed, and said once per session:');

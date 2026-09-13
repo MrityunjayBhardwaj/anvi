@@ -101,6 +101,11 @@ console.log('\nTHE CACHE — reused per file, rebuilt when resolution could have
   const one = build();
   ok(one.stats.cacheValid && one.stats.extracted === 1 && handed.join() === 'src/c.ts',
      `a changed file is the only one re-extracted (got ${handed.join(', ')})`);
+  // Same byte count, different content: only the mtime can tell the cache the file moved.
+  put('src/c.ts', "export const c = 33;\n"); touch('src/c.ts');
+  const sameSize = build();
+  ok(sameSize.stats.extracted === 1 && handed.join() === 'src/c.ts',
+     `a change that keeps the file's size is still seen, by its mtime (${sameSize.stats.extracted} extracted)`);
 
   touch('tsconfig.json');
   const cfg = build();
