@@ -236,6 +236,73 @@ console.log('\nNOT MEASURED AND FAILED — allowed, and said once per session:')
   ok(/NOT MEASURED/.test(hook(up('sess-b')).context), 'a baseline with no rules section is not measured, rather than read as empty');
 }
 
+console.log('\nBOUNDED STATE — old notice markers and an overgrown log are trimmed, only on the rare write:');
+{
+  const NOTICES = path.join(STATE, 'notices');
+  const DAY = 24 * 60 * 60 * 1000;
+  const plant = (name, ageMs) => {
+    const f = path.join(NOTICES, name);
+    fs.mkdirSync(NOTICES, { recursive: true });
+    fs.writeFileSync(f, 'planted\n');
+    const t = new Date(Date.now() - ageMs);
+    fs.utimesSync(f, t, t);
+    return f;
+  };
+  const stale = plant('stale-sess', 2 * DAY);
+  const recent = plant('recent-sess', 60 * 60 * 1000);
+
+  // The hot path first: a judged allow and a judged refusal must leave a stale marker alone.
+  register();
+  const up = s => edit('src/low/a.ts', "export const a = 1;\n", "import { up } from '../top/t';\nexport const a = up;\n", s);
+  const judged = hook(edit('src/mid/n.ts', "export const n = 1;\n", "import { a } from '../low/a';\nexport const n = a;\n", 'sess-hot'));
+  const refused = hook(up('sess-hot'));
+  ok(judged.exit === 0 && refused.exit === 2 && fs.existsSync(stale),
+     `an ordinary judged edit — allowed or refused — prunes nothing (exits ${judged.exit}/${refused.exit}, stale marker still there)`);
+
+  register({ broken: 'unmeasured' });
+  const told = hook(up('sess-prune'));
+  ok(/NOT MEASURED/.test(told.context) && fs.existsSync(path.join(NOTICES, 'sess-prune')),
+     'a new notice is still said, and its own marker written');
+  ok(!fs.existsSync(stale), 'writing a new marker removes one older than a day');
+  ok(fs.existsSync(recent), 'and keeps one from the last day');
+
+  // A session already told writes no marker, so it prunes nothing either.
+  const stale2 = plant('stale-again', 2 * DAY);
+  const quiet = hook(up('sess-prune'));
+  ok(quiet.stdout === '' && fs.existsSync(stale2), 'a session already told is quiet and prunes nothing');
+
+  ok(H.pruneNotices(path.join(DIR, 'no-such-dir'), 'x') === 0, 'pruning a directory that does not exist removes nothing and does not throw');
+
+  // A clock that jumps forward makes every marker look old — the one just written must survive it.
+  const own = plant('own-sess', 0);
+  ok(H.pruneNotices(NOTICES, 'own-sess', Date.now() + 3 * DAY) >= 1 && fs.existsSync(own),
+     'the marker being written is never pruned, even when every marker reads as old');
+
+  // The log, in-process with a small cap so the trim is exercised many times over.
+  const LOGF = path.join(DIR, 'capped', 'errors.log');
+  for (let i = 1; i <= 60; i++) H.recordFailure(LOGF, `entry-${i}\tsome failure text\n`, 300);
+  const kept = fs.readFileSync(LOGF, 'utf8');
+  ok(Buffer.byteLength(kept) <= 300, `the log stays under its cap (${Buffer.byteLength(kept)} of 300 bytes after 60 writes)`);
+  ok(kept.endsWith('entry-60\tsome failure text\n'), 'the newest entry is kept');
+  ok(!/^entry-1\t/m.test(kept), 'the oldest entry is dropped');
+  ok(kept.split('\n').slice(0, -1).every(l => /^entry-\d+\tsome failure text$/.test(l)), 'every kept line is whole — the trim cuts at line boundaries');
+
+  const SMALL = path.join(DIR, 'small', 'errors.log');
+  H.recordFailure(SMALL, 'one\n', 300);
+  H.recordFailure(SMALL, 'two\n', 300);
+  ok(fs.readFileSync(SMALL, 'utf8') === 'one\ntwo\n', 'under the cap, entries are appended and nothing is dropped');
+
+  // And the spawned hook's crash path goes through the cap.
+  const REAL_LOG = path.join(STATE, 'errors.log');
+  fs.writeFileSync(REAL_LOG, 'OLDEST-LINE\n' + 'x'.repeat(H.LOG_MAX_BYTES) + '\n');
+  register({ broken: 'throw' });
+  const crashed = hook(up('sess-crash-cap'));
+  const after = fs.readFileSync(REAL_LOG, 'utf8');
+  ok(crashed.exit === 0 && /FAILED and allowed the edit/.test(crashed.context), 'a crash is still allowed and said');
+  ok(Buffer.byteLength(after) <= H.LOG_MAX_BYTES && /fixture extractor exploded/.test(after) && !after.includes('OLDEST-LINE'),
+     `the hook's own crash record holds the log under ${H.LOG_MAX_BYTES} bytes, newest kept, oldest dropped (${Buffer.byteLength(after)} bytes)`);
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
