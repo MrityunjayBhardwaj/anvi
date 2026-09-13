@@ -127,6 +127,11 @@ console.log('\nPROPOSED CONTENT — judged, never cached:');
   const fresh = build({ proposed: { rel: 'src/e.ts', content: "import { a } from './a';\n" } });
   ok(fresh.stats.isNew && fresh.graph.modules.has('src/e.ts') && edgeKeys(fresh.graph).includes('src/e.ts -> src/a.ts'),
      'a proposed file that does not exist yet joins the graph with its imports');
+  ok(fresh.stats.cacheValid && fresh.stats.extracted === 0,
+     `proposing a new file keeps the cache — keying on it would rebuild every file (${fresh.stats.extracted} extracted)`);
+  const next = build();
+  ok(next.stats.cacheValid && next.stats.extracted === 0 && !next.graph.modules.has('src/e.ts'),
+     `and the next ordinary build still finds its cache valid, without the proposed file (${next.stats.extracted} extracted)`);
 }
 
 console.log('\nCYCLES AND UNRESOLVED IMPORTS — computed, since no analyser flagged them:');

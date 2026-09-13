@@ -139,14 +139,18 @@ const statOf = p => { try { const s = fs.statSync(p); return { mtimeMs: s.mtimeM
 function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
   if (extractor.notMeasured) return { notMeasured: extractor.notMeasured };
   const files = listCorpus(pkgDir, design);
-  const isNew = proposed && !files.includes(proposed.rel);
-  if (isNew) files.push(proposed.rel);
-
+  // The key is the files ON DISK. A proposed new file joins this one build, but keying on it
+  // would throw away a valid cache on every Write of a new file — ~0.9s each, and the next
+  // ordinary edit would pay it again. The cost of not keying on it: a proposed file that
+  // would shadow another import's target is not seen until it lands, and then the file list
+  // moves and everything rebuilds.
   const key = crypto.createHash('sha1').update(JSON.stringify({
     extractor: extractor.id,
     config: (extractor.configFiles || []).map(f => [f, statOf(f)]),
     files,
   })).digest('hex');
+  const isNew = !!proposed && !files.includes(proposed.rel);
+  if (isNew) files.push(proposed.rel);
 
   let cache = null;
   if (cachePath) { try { cache = JSON.parse(fs.readFileSync(cachePath, 'utf8')); } catch { cache = null; } }
