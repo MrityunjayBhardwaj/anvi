@@ -45,13 +45,15 @@ const REAL = {
 };
 
 // { 'src/x.ts': ['src/y.ts', ...] } -> the analyser's shape. `circular` lists edge keys the
-// analyser would have flagged; `unresolved` adds relative imports that failed to resolve.
-function cruise(spec, { circular = [], unresolved = {} } = {}) {
+// analyser would have flagged; `unresolved` adds relative imports that failed to resolve;
+// `exports` lists edge keys written as re-exports (`export … from`) rather than imports.
+function cruise(spec, { circular = [], unresolved = {}, exports = [] } = {}) {
   const dependents = {};
   for (const [s, ds] of Object.entries(spec)) for (const d of ds) (dependents[d] = dependents[d] || []).push(s);
   const rec = (s, d, bad) => ({
     module: bad ? './missing' : './' + path.basename(d, '.ts'), moduleSystem: 'es6', dynamic: false,
-    exoticallyRequired: false, dependencyTypes: bad ? ['local', 'import', 'unknown'] : ['local', 'import'],
+    exoticallyRequired: false,
+    dependencyTypes: bad ? ['local', 'import', 'unknown'] : exports.includes(`${s} -> ${d}`) ? ['local', 'export'] : ['local', 'import'],
     resolved: bad ? './missing' : d, coreModule: false, followable: !bad, couldNotResolve: !!bad,
     matchesDoNotFollow: false, circular: circular.includes(`${s} -> ${d}`), valid: true,
   });
@@ -145,6 +147,27 @@ console.log('\nIMPLIED — an edge another path already provides:');
   ok(r.examined === 10 && !k.includes('src/x/p.ts -> src/x/r.ts'),
      `a path that returns through the edge's own source does not imply it — p -> q -> p -> r needs p -> r (of ${r.examined} examined)`);
   ok(k.length === 2, `exactly the two implied edges are found (got ${k.length})`);
+}
+
+console.log('\nRE-EXPORTS — an index declaring its surface is not an implied use:');
+{
+  const d = design([{ n: 0, dirs: ['x'] }, { n: 1, dirs: ['y'] }]);
+  // p imports q, and the index names both. Written as re-exports this is a public surface;
+  // written as imports it is a redundant use. Same files, same names, one field different.
+  const spec = { 'src/x/index.ts': ['src/x/p.ts', 'src/x/q.ts'], 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': [] };
+  const REEXPORTS = ['src/x/index.ts -> src/x/p.ts', 'src/x/index.ts -> src/x/q.ts'];
+  const barrel = G.impliedEdges(G.loadGraph(cruise(spec, { exports: REEXPORTS }), d));
+  ok(barrel.examined === 1 && barrel.reexports === 2 && !keys(barrel).includes('src/x/index.ts -> src/x/q.ts'),
+     `a re-export is not judged as implied — set aside, and counted (${barrel.examined} judged, ${barrel.reexports} set aside)`);
+  const uses = G.impliedEdges(G.loadGraph(cruise(spec), d));
+  ok(keys(uses).includes('src/x/index.ts -> src/x/q.ts'),
+     'the same edge written as an import IS implied — the exclusion is about re-exporting, not about files named index');
+  // a imports the index and q directly; the index re-exports q. The re-export is the path.
+  const via = G.impliedEdges(G.loadGraph(cruise({ 'src/x/a.ts': ['src/x/index.ts', 'src/x/q.ts'], 'src/x/index.ts': ['src/x/q.ts'], 'src/x/q.ts': [] },
+                                                { exports: ['src/x/index.ts -> src/x/q.ts'] }), d));
+  ok(keys(via).includes('src/x/a.ts -> src/x/q.ts'), 'a re-export still counts as a path: importing an index reaches what it re-exports');
+  const up = G.layerViolations(G.loadGraph(cruise({ 'src/x/index.ts': ['src/y/z.ts'], 'src/y/z.ts': [] }, { exports: ['src/x/index.ts -> src/y/z.ts'] }), d), d);
+  ok(keys(up).includes('src/x/index.ts -> src/y/z.ts'), 'a re-export still faces layer order — a barrel re-exporting upward is an upward edge');
 }
 
 console.log('\nCYCLE — the analyser\'s own flag is read, not recomputed:');
@@ -243,6 +266,15 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
      `a baseline that would grow is not written, and the file is left as it was (got ${g1.status})`);
   const g2 = run('--design', d, '--graph', dirty, '--write-baseline', out, '--allow-growth');
   ok(g2.status === 0 && JSON.parse(fs.readFileSync(out, 'utf8')).rules.layer.length === 2, `with --allow-growth it is written (got ${g2.status})`);
+
+  const elsewhere = path.join(DIR, 'new-path.json');
+  const b1 = run('--design', d, '--graph', dirty, '--baseline', base, '--write-baseline', elsewhere);
+  ok(b1.status === 1 && !fs.existsSync(elsewhere),
+     `a baseline written to a NEW path is judged against the --baseline in force, and refused (got ${b1.status})`);
+  const first = path.join(DIR, 'first.json');
+  const f1 = run('--design', d, '--graph', dirty, '--write-baseline', first);
+  ok(f1.status === 0 && fs.existsSync(first) && /first baseline — nothing to compare against/.test(f1.stdout),
+     `a genuinely first baseline is written, and says so in words (got ${f1.status})`);
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

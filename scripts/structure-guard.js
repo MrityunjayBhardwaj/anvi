@@ -21,8 +21,8 @@
 //   3. A RATCHET. Existing violations are recorded in a baseline and allowed to stand;
 //      only NEW ones are refused. Without it, a guard on a real codebase either fires on
 //      hundreds of pre-existing edges and is switched off, or is loosened until it guards
-//      nothing. Measured on the corpus this was built against: 262 of 742 production
-//      edges were already implied before any edit.
+//      nothing. Measured on the corpus this was built against: 153 of the 565 production
+//      imports the implied rule judges were already implied before any edit.
 //
 // WHY THE BASELINE IS A STORED FILE AND NOT A DIFF AGAINST THE LAST GRAPH. A diff
 // grandfathers whatever landed without passing through the guard — a pull, a hand edit, a
@@ -32,7 +32,7 @@
 // WHY "IMPLIED" FORBIDS REVISITING THE SOURCE. Inside a cycle `a <-> b`, the looser test
 // ("does any other successor of `a` reach `c`?") answers yes for `a -> c` via `b -> a -> c`
 // — a path that only exists BECAUSE of the edge being judged. On the corpus that looser
-// test counts 266; the strict one counts 262, and the four in between all sit on the one
+// test counts 157; the strict one counts 153, and the four in between all sit on the one
 // two-file cycle. A refusal has to be defensible edge by edge, so the witness path is
 // printed and may not pass back through its own source.
 //
@@ -69,6 +69,7 @@ function loadGraph(cruise, design) {
   const modules = new Set(listed.filter(m => !m.coreModule && inCorpus(m.source)).map(m => m.source));
   const adj = new Map([...modules].map(s => [s, new Set()]));
   const circular = new Set();
+  const used = new Set();                   // edges at least one record USES, rather than only re-exports
   let relative = 0, unresolved = 0;
 
   for (const m of listed) {
@@ -83,10 +84,12 @@ function loadGraph(cruise, design) {
       if (!modules.has(d.resolved) || d.resolved === m.source) continue;
       adj.get(m.source).add(d.resolved);
       if (d.circular) circular.add(edgeKey(m.source, d.resolved));
+      if (!(d.dependencyTypes || []).includes('export')) used.add(edgeKey(m.source, d.resolved));
     }
   }
   const edges = [...adj].flatMap(([a, bs]) => [...bs].map(b => [a, b]));
-  return { root, modules, adj, edges, circular, relative, unresolved };
+  const reexports = new Set(edges.map(([a, b]) => edgeKey(a, b)).filter(k => !used.has(k)));
+  return { root, modules, adj, edges, circular, reexports, relative, unresolved };
 }
 
 // Why the input cannot support a verdict, or null when it can.
@@ -161,13 +164,22 @@ function witness(adj, a, c) {
   return null;
 }
 
+// A RE-EXPORT IS NOT JUDGED. An index file that re-exports two modules, one of which imports
+// the other, is declaring its public surface, not adding a use — refusing its second line
+// would mean dropping a public export to satisfy a rule about coupling. Measured on the
+// corpus: 109 of the first count of 262 were exactly this, every one from an index file.
+// Re-exports still count as PATHS (importing an index does reach what it re-exports), and
+// they still face the layer and cycle rules.
 function impliedEdges(graph) {
   const found = [];
+  let examined = 0;
   for (const [a, c] of graph.edges) {
+    if (graph.reexports.has(edgeKey(a, c))) continue;
+    examined++;
     const path = witness(graph.adj, a, c);
     if (path) found.push({ key: edgeKey(a, c), detail: `already reached via ${path.join(' -> ')}` });
   }
-  return { found, examined: graph.edges.length };
+  return { found, examined, reexports: graph.edges.length - examined };
 }
 
 // ── rule: cycle — the analyser's own flag, ratcheted here ───────────────────────────
@@ -300,7 +312,8 @@ function main(argv) {
   for (const rule of RULES) {
     const r = ledger[rule];
     print(`  ${rule.padEnd(8)}: ${r.total} of ${results[rule].examined} examined — ` +
-          `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`);
+          `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline` +
+          (rule === 'implied' && results.implied.reexports ? ` (${results.implied.reexports} re-exports not judged)` : ''));
   }
 
   const fresh = RULES.flatMap(rule => ledger[rule].fresh.map(f => ({ rule, ...f })));
@@ -318,10 +331,13 @@ function main(argv) {
   }
 
   if (args['write-baseline']) {
-    let previous = null;
-    if (fs.existsSync(args['write-baseline'])) {
+    // Growth is judged against the baseline IN FORCE. Judging only against whatever sits at
+    // the output path would let a write to a new path skip the refusal entirely.
+    let previous = baseline;
+    if (!previous && fs.existsSync(args['write-baseline'])) {
       try { previous = readJson(args['write-baseline'], 'previous baseline'); } catch (e) { return stop(e.message); }
     }
+    if (!previous) print('\n  first baseline — nothing to compare against');
     const plan = planBaseline(results, previous, { allowGrowth: args.allowGrowth });
     if (plan.refused) {
       print(`\n  baseline NOT written — it would grow: ` +

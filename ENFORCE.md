@@ -1333,10 +1333,18 @@ loosened until it stops firing guards nothing.
 - **The baseline is a stored file, not a diff against the last graph.** A diff would
   grandfather whatever landed without passing the guard — a pull, a hand edit, a
   branch switch. Writing the baseline refuses growth, compared by KEY: swapping one
-  fixed violation for one new one is still growth.
+  fixed violation for one new one is still growth. Growth is judged against the
+  `--baseline` in force, not only against whatever sits at the output path — a write to a
+  new path is still refused.
 - **An implied edge's witness may not pass back through its own source.** Inside a
   cycle `a <-> b`, the looser test calls `a -> c` implied by `a -> b -> a -> c`, a path
   that exists only because of the edge being judged. Every refusal prints its path.
+- **A re-export is not judged as implied.** An index file re-exporting two modules, one
+  of which imports the other, is declaring its surface, not adding a use; on the corpus
+  this was built against, 109 of the first 262 implied edges were exactly that. Re-exports
+  are set aside and COUNTED, still count as paths, and still face layer and cycle rules.
+- **Only imports that survive compilation are judged.** Without `tsPreCompilationDeps`,
+  dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
 - **A new module that could have lived elsewhere is REPORTED, never refused**, until a
   replay of real module-adding history measures how often that would fire.
 - **Not yet at edit time.** Refusing before the write lands needs the post-edit graph
@@ -1344,4 +1352,4 @@ loosened until it stops firing guards nothing.
 - **Tests:** `node test/structure-guard.test.js` — graphs built in the test, one real
   dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
   case asserting how much it examined. Falsified by a 32-mutation matrix, **32 of 32
-  conclusive**, every assertion reddened by some mutation.
+  conclusive**, every assertion reddened by some mutation (figures in the PR that last changed it).
