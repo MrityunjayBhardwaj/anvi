@@ -1351,5 +1351,5 @@ loosened until it stops firing guards nothing.
   without writing into the target project; that is its own piece of work.
 - **Tests:** `node test/structure-guard.test.js` — graphs built in the test, one real
   dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
-  case asserting how much it examined. Falsified by a 32-mutation matrix, **32 of 32
-  conclusive**, every assertion reddened by some mutation (figures in the PR that last changed it).
+  case asserting how much it examined. Falsified by a 37-mutation matrix, **37 of 37
+  conclusive** (36 witnessed, 1 held), all 49 assertions reddened by some mutation.
