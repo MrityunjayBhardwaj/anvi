@@ -319,6 +319,35 @@ const crashed = runFalsify([{
 ok(/CRASHED/.test(crashed.out), 'a mutation that stops the test parsing is CRASHED, not NOT WITNESSED');
 ok(/no assertion lines/.test(crashed.out), 'and the report says the test never reached a verdict');
 
+// ── and the crash that comes AFTER some assertions printed (#449) ───────────
+// The exit code used to be consulted only when nothing printed. A run that went green
+// for a while and then threw has greens, no red and exit 1 — and fell through to NOT
+// WITNESSED, the exact misreading the rule above exists to prevent. Here `cap` throws,
+// so the first two assertions print ✓ and the third never prints at all.
+const THROWING_CAP = {
+  file: 'subject.js',
+  find: 'cap: n => Math.min(n, LIMIT)', replace: "cap: () => { throw new Error('boom'); }",
+};
+const midCrash = runFalsify([{ label: 'cap throws after two greens', ...THROWING_CAP, expect: /cap clamps/, maxRed: 1 }]);
+ok(/✗ CRASHED\s+cap throws after two greens/.test(midCrash.out),
+   'a mutation that throws AFTER assertions printed is CRASHED, not NOT WITNESSED');
+ok(/after 2 assertion lines, none red/.test(midCrash.out), 'and the report says how far the run got before it died');
+
+// The other direction reads silence as its pass, so a run that died quietly would be HELD.
+const midCrashHeld = runFalsify([{ label: 'cap throws, must not redden', ...THROWING_CAP, mustNotRedden: true }]);
+ok(/✗ CRASHED\s+cap throws, must not redden/.test(midCrashHeld.out),
+   'in the must-not-redden direction too — a run that died is not a guard that stayed quiet');
+
+// Driven directly, so each boundary of the rule has its own witness.
+{
+  const { grade } = require(FALSIFY);
+  const m = { expect: /x/ };
+  ok(grade(m, { total: 2, red: [], code: 0 }).verdict === 'NOT WITNESSED',
+     'a run that FINISHED cleanly with nothing red is still NOT WITNESSED');
+  ok(grade(m, { total: 2, red: [{ ok: false, msg: 'x' }], code: 1 }).verdict === 'WITNESSED',
+     'and a non-zero exit WITH a red assertion is graded on the reds, not called a crash');
+}
+
 // ── an anchor that hits more than one site ──────────────────────────────────
 // The mis-aimed mutation: the edit lands somewhere the author did not intend, and the
 // reds that follow are about a decision nobody chose to test.
