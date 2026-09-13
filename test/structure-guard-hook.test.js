@@ -157,7 +157,8 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   // registered extractor must not print an empty --extractor.
   const odd = H.refusalText('p', 'src/x.ts', [{ rule: 'layer', key: 'k', detail: 'd' }], { modules: 1, edges: 1 },
     "/tmp/it's a pkg", { design: '/d.json', baseline: '/b.json' });
-  ok(odd.includes("--package '/tmp/it'\\''s a pkg' --design '/d.json' --baseline '/b.json'"),
+  // The --package word alone: the extractor case below owns what sits between the other flags.
+  ok(odd.includes("--package '/tmp/it'\\''s a pkg' "),
      'the command quotes a path with a space and an apostrophe as one shell word');
   ok(!/--extractor/.test(odd), 'and names --extractor only when the package registers one');
 
