@@ -271,8 +271,18 @@ function grade(m, run) {
   // that zero and read it as "not witnessed", which points at rewriting a healthy
   // assertion. It is its own outcome.
   if (run.timedOut) return { verdict: 'TIMED OUT', detail: `no verdict — the run never finished` };
-  if (run.code !== 0 && run.total === 0)
-    return { verdict: 'CRASHED', detail: `exit ${run.code} with no assertion lines — the test never ran to a verdict` };
+  //
+  // However many assertions printed FIRST (#449). A test that goes green for a while and
+  // then throws has no red and a non-zero exit; consulting the exit code only when nothing
+  // printed let that fall through to NOT WITNESSED — or, for a must-not-redden probe, to
+  // HELD — which is the same misreading arriving later in the file.
+  if (run.code !== 0 && run.red.length === 0)
+    return {
+      verdict: 'CRASHED',
+      detail: run.total === 0
+        ? `exit ${run.code} with no assertion lines — the test never ran to a verdict`
+        : `exit ${run.code} after ${run.total} assertion lines, none red — the test died before it reached a verdict`,
+    };
   if (run.total === 0)
     return { verdict: 'NO ASSERTIONS', detail: 'the run emitted no assertion lines — the parse contract does not hold for this test' };
 
