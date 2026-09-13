@@ -1309,3 +1309,47 @@ nominal.
   is how a **corrupted regex escaper** was found. The whole 90-file suite was
   green over it, because the escaping branch is only entered by a name
   containing a metacharacter and no fixture had one.
+
+## Structure Guard — the edge that erodes a design, refused only when it is new
+
+An agent editing a codebase can erode its structure one import at a time, and the
+tools that already exist catch only part of it. Cycles and layer order are well
+served; nothing surveyed refuses an edge that another path already provides, and
+nothing lets a real codebase adopt a guard without first repairing every violation
+it carries. A guard that fires on hundreds of old edges is switched off; one that is
+loosened until it stops firing guards nothing.
+
+- **Report:** `node ~/.claude/anvi/scripts/structure-guard.js --design <design.json>
+  --graph <depcruise.json> [--baseline <b.json>] [--before <depcruise.json>]
+  [--write-baseline <out.json> [--allow-growth]]`. Exit **0** nothing new, **1** a
+  new violation or a baseline write that would grow, **2** NOT MEASURED. It parses no
+  source: the graph is `depcruise --output-type json`, and the design names layers by
+  directory and file under a `root`.
+- **Pin `typescript@5` for the analyser.** Under TypeScript 7, dependency-cruiser
+  parses no `.ts` file and prints its green tick over zero modules. That is why an
+  empty graph, a graph with no edges, or one whose relative imports mostly failed to
+  resolve exits 2 here instead of reading as clean — and why every run prints what it
+  examined beside what it found.
+- **The baseline is a stored file, not a diff against the last graph.** A diff would
+  grandfather whatever landed without passing the guard — a pull, a hand edit, a
+  branch switch. Writing the baseline refuses growth, compared by KEY: swapping one
+  fixed violation for one new one is still growth. Growth is judged against the
+  `--baseline` in force, not only against whatever sits at the output path — a write to a
+  new path is still refused.
+- **An implied edge's witness may not pass back through its own source.** Inside a
+  cycle `a <-> b`, the looser test calls `a -> c` implied by `a -> b -> a -> c`, a path
+  that exists only because of the edge being judged. Every refusal prints its path.
+- **A re-export is not judged as implied.** An index file re-exporting two modules, one
+  of which imports the other, is declaring its surface, not adding a use; on the corpus
+  this was built against, 109 of the first 262 implied edges were exactly that. Re-exports
+  are set aside and COUNTED, still count as paths, and still face layer and cycle rules.
+- **Only imports that survive compilation are judged.** Without `tsPreCompilationDeps`,
+  dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
+- **A new module that could have lived elsewhere is REPORTED, never refused**, until a
+  replay of real module-adding history measures how often that would fire.
+- **Not yet at edit time.** Refusing before the write lands needs the post-edit graph
+  without writing into the target project; that is its own piece of work.
+- **Tests:** `node test/structure-guard.test.js` — graphs built in the test, one real
+  dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
+  case asserting how much it examined. Falsified by a 37-mutation matrix, **37 of 37
+  conclusive** (36 witnessed, 1 held), all 49 assertions reddened by some mutation.
