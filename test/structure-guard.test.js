@@ -179,6 +179,18 @@ console.log('\nCYCLE — the analyser\'s own flag is read, not recomputed:');
   ok(keys(r).includes('src/x/p.ts -> src/x/q.ts') && keys(r).includes('src/x/q.ts -> src/x/p.ts'), 'both edges of a flagged cycle are reported');
   ok(r.examined === 3 && !keys(r).includes('src/x/s.ts -> src/x/p.ts'),
      `an edge into a cycle is not itself on it (of ${r.examined} examined)`);
+
+  // A graph built without an analyser has no flag to read, so cycles are COMPUTED — and the
+  // computation must agree with the flag it replaces on the same shape.
+  const bare = G.loadGraph(cruise({ 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': ['src/x/r.ts'], 'src/x/r.ts': ['src/x/p.ts'],
+                                    'src/x/s.ts': ['src/x/p.ts'], 'src/x/t.ts': [] }), d);
+  const computed = [...G.onCycle(bare.adj)].sort();
+  ok(bare.circular.size === 0 && computed.join() === ['src/x/p.ts -> src/x/q.ts', 'src/x/q.ts -> src/x/r.ts', 'src/x/r.ts -> src/x/p.ts'].join(),
+     `with no flag in the input, every edge of a three-module cycle is computed as on it (got ${computed.length})`);
+  ok(bare.edges.length === 4 && !computed.includes('src/x/s.ts -> src/x/p.ts'),
+     `and an edge into that cycle is not (of ${bare.edges.length} edges)`);
+  ok([...G.onCycle(g.adj)].sort().join() === keys(r).sort().join(),
+     'on the flagged graph above, the computed cycle edges are exactly the analyser\'s');
 }
 
 console.log('\nTHE RATCHET — only what the baseline does not already hold is refused:');
@@ -275,6 +287,89 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   const f1 = run('--design', d, '--graph', dirty, '--write-baseline', first);
   ok(f1.status === 0 && fs.existsSync(first) && /first baseline — nothing to compare against/.test(f1.stdout),
      `a genuinely first baseline is written, and says so in words (got ${f1.status})`);
+}
+
+console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees with the analyser:');
+{
+  const PK = path.join(DIR, 'pkg');
+  const HOME = path.join(DIR, 'home');
+  fs.mkdirSync(path.join(PK, 'src', 'low'), { recursive: true });
+  fs.mkdirSync(path.join(PK, 'src', 'mid'), { recursive: true });
+  fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(PK, 'src', 'low', 'a.ts'), "import { m } from '../mid/m';\nexport const a = m;\n");
+  fs.writeFileSync(path.join(PK, 'src', 'mid', 'm.ts'), 'export const m = 1;\n');
+  const EX = path.join(DIR, 'line-extractor.js');
+  fs.writeFileSync(EX, [
+    "const fs = require('fs'), path = require('path');",
+    "module.exports = { create: pkgDir => ({ id: 'lines@1', configFiles: [], edges(rel, content) {",
+    '  const out = [];',
+    "  for (const m of content.matchAll(/^import\\b[^'\"]*from\\s+['\"](\\.[^'\"]+)['\"]/gm)) {",
+    "    const t = path.posix.join(path.posix.dirname(rel), m[1]) + '.ts';",
+    '    if (fs.existsSync(path.join(pkgDir, t))) out.push([t, false]);',
+    '  }',
+    '  return { edges: out, unresolved: 0 };',
+    '} }) };',
+  ].join('\n'));
+  const run = (args, env = {}) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8', env: { ...process.env, HOME, ...env } });
+  const write = (name, obj) => { const f = path.join(DIR, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const d = write('pkg-design.json', design([{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['mid'] }]));
+  const EDGE = 'src/low/a.ts -> src/mid/m.ts';
+  const base = write('pkg-base.json', { rules: { layer: [EDGE], implied: [], cycle: [] } });
+  const same = write('pkg-dc.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }));
+  const extra = write('pkg-dc-extra.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': ['src/low/a.ts'] }));
+  const REG = path.join(HOME, '.claude', 'structure-guard.json');
+
+  const judged = run(['--design', d, '--package', PK, '--extractor', EX]);
+  ok(judged.status === 1 && /examined 2 modules · 1 edges/.test(judged.stdout) && judged.stdout.includes(EDGE),
+     `--package judges the graph the hook builds, and refuses its new violation (got ${judged.status})`);
+  ok(/graph built by lines@1/.test(judged.stdout), 'and says which extractor built it');
+  ok(run(['--design', d, '--package', PK, '--extractor', EX, '--baseline', base]).status === 0,
+     'against a baseline holding that edge, the package graph has nothing new');
+
+  const agree = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX]);
+  ok(agree.status === 0 && /AGREE/.test(agree.stdout) && /analyser 2 modules · 1 edges/.test(agree.stdout),
+     `an analyser graph that matches the package graph AGREES, with both counts printed (got ${agree.status})`);
+  const differ = run(['--design', d, '--graph', extra, '--package', PK, '--extractor', EX]);
+  ok(differ.status === 1 && /DISAGREE/.test(differ.stdout) && differ.stdout.includes('analyser only: src/mid/m.ts -> src/low/a.ts'),
+     `one that has an edge the package lacks DISAGREES and names the edge (got ${differ.status})`);
+  // Each of these differs from the package graph in ONE category and agrees on every other,
+  // so each category's comparison is the only thing that can notice it.
+  const extraModule = write('pkg-dc-module.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [], 'src/mid/z.ts': [] }));
+  ok(/modules  : 1 only in the analyser/.test(run(['--design', d, '--graph', extraModule, '--package', PK, '--extractor', EX]).stdout),
+     'a module only the analyser lists is a disagreement on MODULES alone');
+  const reexported = write('pkg-dc-reexport.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }, { exports: [EDGE] }));
+  ok(/reexports: 1 only in the analyser/.test(run(['--design', d, '--graph', reexported, '--package', PK, '--extractor', EX]).stdout),
+     'the same edge read as a re-export by only one side is a disagreement on RE-EXPORTS alone');
+  const flagged = write('pkg-dc-cycle.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }, { circular: [EDGE] }));
+  ok(/cycles   : 1 only in the analyser/.test(run(['--design', d, '--graph', flagged, '--package', PK, '--extractor', EX]).stdout),
+     'an edge flagged as on a cycle by only one side is a disagreement on CYCLES alone');
+
+  const refusedArm = run(['--design', d, '--graph', extra, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  ok(refusedArm.status === 1 && /NOT armed/.test(refusedArm.stdout) && !fs.existsSync(REG),
+     `--arm on graphs that disagree registers nothing (got ${refusedArm.status})`);
+  // The message, not only the status: without the guard, the missing path throws inside the
+  // registry write, and that catch ALSO exits 2 — a crash would pass a status-only assertion.
+  const noBase = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm']);
+  ok(noBase.status === 2 && /--arm needs --baseline/.test(noBase.stdout) && !fs.existsSync(REG),
+     '--arm without a baseline is not measured, and registers nothing');
+  ok(run(['--design', d, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]).status === 2 && !fs.existsSync(REG),
+     '--arm without an analyser graph to agree with is not measured, and registers nothing');
+
+  const armed = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  const entries = fs.existsSync(REG) ? JSON.parse(fs.readFileSync(REG, 'utf8')).packages : [];
+  ok(armed.status === 0 && entries.length === 1 && entries[0].dir === fs.realpathSync(PK) && entries[0].extractor === EX,
+     `--arm on graphs that agree registers the package, by its real path, with its extractor (got ${armed.status}, ${entries.length} entries)`);
+  run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  ok(JSON.parse(fs.readFileSync(REG, 'utf8')).packages.length === 1, 'arming the same package again replaces its entry rather than adding one');
+
+  fs.writeFileSync(REG, '{"not":"a registry"}');
+  const clobber = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  ok(clobber.status === 2 && fs.readFileSync(REG, 'utf8') === '{"not":"a registry"}',
+     'a registry of an unexpected shape is refused, not overwritten — it may hold other packages');
+
+  const noTs = run(['--design', d, '--package', PK]);
+  ok(noTs.status === 2 && /NOT MEASURED/.test(noTs.stdout) && /TypeScript/.test(noTs.stdout),
+     `with no extractor named and no TypeScript beside the package, --package is not measured (got ${noTs.status})`);
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
