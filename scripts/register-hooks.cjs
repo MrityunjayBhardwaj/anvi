@@ -38,6 +38,10 @@ const REGISTRATIONS = [
   // Enforcing — first in both of its groups, deliberately (see the note above).
   ['PreToolUse',       'Bash',              'tree-lock-guard.js',     10],
   ['PreToolUse',       'Write|Edit|MultiEdit', 'tree-lock-guard.js',  10],
+  // Enforcing too, so it sits with the tree-lock guard at the head of this group. Inert for
+  // a package with no entry in ~/.claude/structure-guard.json. 10s: a cold graph build on a
+  // ~300-module package measured ~0.8s, a warm call ~0.2s including Node startup.
+  ['PreToolUse',       'Write|Edit|MultiEdit', 'structure-guard-hook.js', 10],
   // ⚠ THIS MATCHER IS SHARED WITH THE GUARD ABOVE AND THE TWO MUST STAY EQUAL.
   // The guard has to cover MultiEdit — a multi-edit mutates the tree exactly as a
   // Write does — and running the two off different matchers would put them in

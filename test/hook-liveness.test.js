@@ -120,6 +120,7 @@ const COVERED = new Set([
   'anvideck-checkpoint.js',       // anvideck-checkpoint-memory-sync.test.sh
   'register-hooks.cjs',           // the registrar itself, not a hook
   'tree-lock-guard.js',           // section 8 — a REFUSAL witness, not an injection one
+  'structure-guard-hook.js',      // section 9 — a REFUSAL witness, plus test/structure-guard-hook.test.js
 ]);
 const uncovered = [...new Set(registered)].filter(h => !COVERED.has(h));
 ok(uncovered.length === 0, `every registered hook has a liveness witness${uncovered.length ? ` — missing: ${uncovered.join(', ')}` : ''}`);
@@ -402,7 +403,7 @@ const ALL = ['ground-truth-session-start.js', 'debug-grounding-gate.js',
   // exit non-zero, which makes it the one hook where a crash is indistinguishable from
   // a refusal — so 'fails open on its own bugs' has to be witnessed, not asserted in
   // prose. A guard that blocked whenever it threw would brick a session.
-  'tree-lock-guard.js'];
+  'tree-lock-guard.js', 'structure-guard-hook.js'];
 for (const h of ALL) {
   const bad = spawnSync('node', [path.join(HOOKS, h)], { input: 'not json at all{{', encoding: 'utf8', timeout: 20000 });
   ok(bad.status === 0, `${h}: malformed stdin → exit 0, no crash`);
@@ -531,6 +532,63 @@ try { process.kill(-gate.pid, 'SIGKILL'); } catch { try { gate.kill('SIGKILL'); 
 let released = false;
 for (let i = 0; i < 60 && !released; i++) { nap(50); released = guard(write).exit === 0; }
 ok(released, 'LOCK: the guard RELEASES once the gate exits — it is not wedged on');
+
+// --- 9. structure-guard-hook — the second ENFORCING hook (anvi #443) ---------
+// Same inverse contract as section 8: the observable is a refusal. Its own suite
+// (test/structure-guard-hook.test.js) covers the cases; this section exists so the hook
+// cannot be registered without a witness that it is ALIVE through real stdin — refusing
+// what it must, releasing what it must, and silent where nothing is registered.
+console.log('structure-guard-hook (PreToolUse — refuses an eroding import)');
+{
+  const HOME3 = path.join(tmp, 'home-structure');
+  const PKG3 = path.join(tmp, 'structured-pkg');
+  fs.mkdirSync(path.join(HOME3, '.claude'), { recursive: true });
+  fs.mkdirSync(path.join(PKG3, 'src', 'low'), { recursive: true });
+  fs.mkdirSync(path.join(PKG3, 'src', 'high'), { recursive: true });
+  fs.writeFileSync(path.join(PKG3, 'src', 'low', 'a.ts'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(PKG3, 'src', 'high', 'h.ts'), "import { a } from '../low/a';\nexport const h = a;\n");
+  const EX = path.join(tmp, 'structure-extractor.js');
+  fs.writeFileSync(EX, [
+    "const fs = require('fs'), path = require('path');",
+    'module.exports = { create: pkgDir => ({ id: "liveness@1", configFiles: [], edges(rel, content) {',
+    '  const out = [];',
+    "  for (const m of content.matchAll(/^import\\b[^'\"]*from\\s+['\"](\\.[^'\"]+)['\"]/gm)) {",
+    "    const t = path.posix.join(path.posix.dirname(rel), m[1]) + '.ts';",
+    '    if (fs.existsSync(path.join(pkgDir, t))) out.push([t, false]);',
+    '  }',
+    '  return { edges: out, unresolved: 0 };',
+    '} }) };',
+  ].join('\n'));
+  const designFile = path.join(tmp, 'structure-design.json');
+  const baselineFile = path.join(tmp, 'structure-baseline.json');
+  fs.writeFileSync(designFile, JSON.stringify({ root: 'src', layers: [{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['high'] }] }));
+  fs.writeFileSync(baselineFile, JSON.stringify({ rules: { layer: [], implied: [], cycle: [] } }));
+
+  const sg = (payload, home) => {
+    const r = spawnSync('node', [path.join(HOOKS, 'structure-guard-hook.js')], {
+      input: JSON.stringify(payload), encoding: 'utf8', timeout: 20000,
+      env: Object.assign({}, process.env, { HOME: home }),
+    });
+    let denied = false;
+    try { denied = JSON.parse(r.stdout || '{}').hookSpecificOutput.permissionDecision === 'deny'; } catch { denied = false; }
+    return { exit: r.status, denied, out: (r.stdout || '') + (r.stderr || '') };
+  };
+  const upward = { session_id: 'live-1', cwd: PKG3, tool_name: 'Edit', tool_input: {
+    file_path: path.join(PKG3, 'src', 'low', 'a.ts'), old_string: 'export const a = 1;\n',
+    new_string: "import { h } from '../high/h';\nexport const a = h;\n", replace_all: false } };
+
+  const quiet = sg(upward, HOME3);
+  ok(quiet.exit === 0 && quiet.out === '', 'no registry: even an upward import passes in silence (the hook is inert by default)');
+
+  fs.writeFileSync(path.join(HOME3, '.claude', 'structure-guard.json'), JSON.stringify({ packages: [{
+    dir: PKG3, design: designFile, baseline: baselineFile, extractor: EX, cache: path.join(tmp, 'structure-cache.json') }] }));
+  const refused = sg(upward, HOME3);
+  ok(refused.exit === 2 && refused.denied, 'ALIVE: a registered package\'s upward import is REFUSED (exit 2 + deny payload)');
+  ok(/src\/low\/a\.ts -> src\/high\/h\.ts/.test(refused.out), 'the refusal names the edge');
+
+  const release = sg({ ...upward, tool_input: { ...upward.tool_input, new_string: '// a comment\nexport const a = 1;\n' } }, HOME3);
+  ok(release.exit === 0 && !release.denied, 'RELEASE: a harmless edit to the same file is allowed — the guard is not stuck on');
+}
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);

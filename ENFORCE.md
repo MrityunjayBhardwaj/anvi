@@ -131,6 +131,7 @@ User message
 | Hook | Trigger | File |
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
+| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (an edit that adds a NEW layer, implied or cycle violation starting in the edited file, judged against the package's baseline). Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -549,7 +550,7 @@ Two things it checks that a plain loop would not:
 - `SessionStart`: ground-truth-session-start.js, gsd-check-update.js
 - `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js, absent-warrant-check.js
 - `PreToolUse:Read`: catalogue-context-injector.js
-- `PreToolUse:Write|Edit`: catalogue-context-injector.js, gsd-prompt-guard.js
+- `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js, structure-guard-hook.js (enforcing, first), catalogue-context-injector.js, gsd-prompt-guard.js
 - `PreToolUse:Bash`: experiment-protocol-guard.js, catalogue-id-leak-guard.js
 - `PostToolUse:Bash|Edit|Write|...`: gsd-context-monitor.js
 - `PostToolUse:Read`: anvi-route-logger.js
@@ -1347,8 +1348,32 @@ loosened until it stops firing guards nothing.
   dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
 - **A new module that could have lived elsewhere is REPORTED, never refused**, until a
   replay of real module-adding history measures how often that would fire.
-- **Not yet at edit time.** Refusing before the write lands needs the post-edit graph
-  without writing into the target project; that is its own piece of work.
+- **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
+  Inert unless `~/.claude/structure-guard.json` registers the package —
+  `{ "packages": [ { "dir", "design", "baseline", "cache"?, "extractor"? } ] }` — and with no
+  registry it exits before loading anything. It rebuilds the edited file as the edit
+  proposes it, builds the graph around it (`hooks/structure-graph.js`, the project's own
+  TypeScript 5, a per-file cache) and judges it with the same rules as the report
+  (`hooks/structure-rules.js`). **Only a new violation whose edge starts in the edited file
+  is refused**; one it causes in another file's edge is counted, not refused.
+- **The graph matches the analyser, measured.** On a 297-module package: compile each file,
+  read imports and `export … from` from the output, resolve against the project's tsconfig
+  — 742 of 742 edges, 0 re-export mismatches, identical cycle edges. Cycles are COMPUTED
+  there: a graph built without the analyser has no flag, and reading its absence would call
+  every baselined cycle fixed.
+- **The cache key sees resolution, not just bytes.** Per file, mtime + size, checked on every
+  call. The whole cache is also keyed on the extractor, its config files and the list of
+  files on disk, because an unchanged file resolves differently after a tsconfig change or a
+  new file. A PROPOSED new file does not move the key — it would throw away the cache on
+  every new-file Write — so a proposal that would shadow another import's target is not seen
+  until it lands.
+- **It never blocks on its own ignorance.** An Edit whose `old_string` does not match
+  exactly once, a package without TypeScript 5, an unmeasurable graph, or a crash each
+  ALLOWS the edit and says so once per session (a marker file under
+  `~/.claude/structure-guard-cache/notices/` — a hook is a new process per call, so memory
+  cannot hold "once"). Crashes are appended to `errors.log` beside it.
+- **Cost, observed as separate processes:** no registry ~50 ms (Node startup); a warm refusal
+  ~175 ms; a cold graph build ~0.8 s. Registered at 10 s.
 - **Tests:** `node test/structure-guard.test.js` — graphs built in the test, one real
   dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
   case asserting how much it examined. Falsified by a 37-mutation matrix, **37 of 37
