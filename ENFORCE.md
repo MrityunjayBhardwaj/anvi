@@ -1394,6 +1394,11 @@ loosened until it stops firing guards nothing.
   ALLOWS the edit and says so once per session (a marker file under
   `~/.claude/structure-guard-cache/notices/` — a hook is a new process per call, so memory
   cannot hold "once"). Crashes are appended to `errors.log` beside it.
+- **Its own state stays bounded, trimmed only where it grows.** Writing a new notice marker
+  removes markers older than a day (never the one being written); a crash record holds
+  `errors.log` under 64 KiB by keeping the newest whole lines. An ordinary judged edit —
+  allowed or refused — touches neither. Per-package graph caches are not trimmed: they are
+  bounded by the registry, though one for a package later unregistered stays behind.
 - **Cost, observed as separate processes:** no registry ~50 ms (Node startup); a warm refusal
   ~175 ms; a cold graph build ~0.8 s. Registered at 10 s.
 - **Tests:** `node test/structure-guard.test.js` — graphs built in the test, one real
@@ -1401,4 +1406,4 @@ loosened until it stops firing guards nothing.
   case asserting how much it examined. Plus `test/structure-graph.test.js` (the builder) and
   `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
   assertion reddened by some mutation: rules + command **52 of 52** conclusive over 67
-  assertions · builder **24 of 24** over 29 · hook **35 of 35** over 38.
+  assertions · builder **24 of 24** over 29 · hook **47 of 47** over 52.
