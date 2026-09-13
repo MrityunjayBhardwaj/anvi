@@ -78,7 +78,7 @@ ok '[ "$(readlink "$H2/.claude/anvi")" != "$REPO" ] && [ "$(cd "$H2/.claude/anvi
    "the fixture's link text differs from the clone's path but resolves to it"
 HOME="$H2" bash "$REPO/install.sh" --sync </dev/null >"$T/sync2.txt" 2>&1; SYNC2=$?
 ok '[ "$SYNC2" -eq 0 ] && ! grep -q "are identical" "$T/sync2.txt"' \
-   "--sync treats it as the dev install it is (exit $SYNC2), not as a copy target"
+   "--sync treats it as the dev install it is, not as a copy target (exit $SYNC2)"
 
 echo ""
 echo "a different tree never writes through the links"
