@@ -581,6 +581,67 @@ function projectRootOfDir(dir) {
   }
 }
 
+// Which REPOSITORY is this project root a checkout of — its git COMMON directory,
+// realpath'd, or null when the root holds no `.git`.
+//
+// Two roots can be one project. Branch work in this framework is done in a
+// `git worktree`, so the main checkout can stay on the branch the installed hooks
+// run from, and a worktree's root is its own directory: comparing roots called
+// every read across the two another project's. The identity both share is the
+// repository, which is what this names.
+//
+// Read from disk rather than by running git, because the provenance guard asks it
+// on every file read. The rules are git's own (setup.c, git 2.39.5):
+//   - `.git` a DIRECTORY → that directory is the repository.
+//   - `.git` a FILE `gitdir: <p>` → `<p>`, relative to the directory holding the
+//     file (`read_gitfile_gently`, setup.c:857).
+//   - that gitdir holds `commondir` → the repository is that path, relative to the
+//     gitdir (`get_common_dir_noenv`, setup.c:306-333). No `commondir` → the gitdir
+//     itself: a submodule or a separate git directory IS its own repository, and
+//     must not be folded into whatever repository happens to hold its gitdir.
+function repositoryOf(root) {
+  if (!root) return null;
+  const dotGit = path.join(root, '.git');
+  let st;
+  try { st = fs.statSync(dotGit); } catch { return null; }
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  if (st.isDirectory()) return real(dotGit);
+  let gitdir;
+  try {
+    const m = fs.readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.*?)\s*$/m);
+    if (!m || !m[1]) return null;
+    gitdir = path.resolve(root, m[1]);
+  } catch { return null; }
+  let commondir;
+  try { commondir = fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim(); }
+  catch { return real(gitdir); }
+  // A linked worktree, claimed. git records the claim from the OTHER side too: the
+  // worktree's gitdir holds a `gitdir` file naming the worktree's own `.git`
+  // (`get_linked_worktree`, worktree.c:72-91). A `.git` file anyone can write; the
+  // back-pointer lives inside the repository. Without it matching this root, the
+  // checkout is not one the repository recorded — so no repository is named at
+  // all, and a caller comparing identities over-warns rather than adopting it.
+  let back;
+  try { back = fs.readFileSync(path.join(gitdir, 'gitdir'), 'utf8').trim(); } catch { return null; }
+  if (!back || real(path.resolve(gitdir, back)) !== real(dotGit)) return null;
+  return real(path.resolve(gitdir, commondir));
+}
+
+// The MAIN checkout of the repository this root belongs to — where per-checkout,
+// untracked state such as the `.anvi` link lives — or null.
+//
+// git derives it by stripping a `/.git` suffix from the common directory
+// (`get_main_worktree`, worktree.c:54-55), and that strip silently returns its
+// input for a submodule, whose common directory is `.git/modules/<name>`: git then
+// reports a git directory as though it were a checkout. So only a repository that
+// IS a `.git` directory has a main checkout here; a submodule or a bare repository
+// answers null rather than a git directory posing as one.
+function mainCheckoutOf(root) {
+  const repo = repositoryOf(root);
+  if (!repo || path.basename(repo) !== '.git') return null;
+  return path.dirname(repo);
+}
+
 // resolveDir for the project that owns `filePath`, rather than for the session cwd.
 // Consumers that act ON A FILE must resolve through this, not resolveDir(cwd) — one
 // answer to "whose knowledge governs this file", so the injector and the currency
@@ -669,6 +730,9 @@ function subjectRepoFor(filePath, sessionCwd) {
 
 module.exports = {
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, projectRootOfDir,
+  // "Which repository is this root a checkout of" — so a worktree and its main
+  // checkout can be recognised as one project without each consumer parsing `.git`.
+  repositoryOf, mainCheckoutOf,
   resolveDirForFile,
   subjectRepoFor,
   // "Which project is this directory in" — exported so it has ONE name as well

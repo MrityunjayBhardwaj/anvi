@@ -625,6 +625,172 @@ console.log('\nthe reader\'s own project is named by containment too');
      'and the scope clause drops the word "project" when there is no project to name');
 }
 
+// ── a worktree of this repository is this project (#448) ───────────────────
+// Branch work is done in a `git worktree` so the main checkout can stay on the
+// branch the installed hooks run from. Each side has its own root — a worktree's
+// `.git` is a FILE naming a directory inside the main repository — so a comparison
+// of roots called every read across them another project's, on every read of
+// in-progress work. The identity is the repository both roots are checkouts of:
+// the git COMMON directory.
+//
+// Built with real git rather than hand-made `.git` files, and the fixture's claims
+// are checked with git's own answer rather than the module's — a case that asked
+// the code whether the two share a repository would be answered by the code.
+//
+// Both directions need a firing case from the same cwd, and one of them is the
+// dangerous shape: a repository whose `.git` is a file WITHOUT a common directory
+// (a separate git dir). A fix that treated "has a .git file" as "is a worktree of
+// something" would silence that, and a genuinely different repository with it.
+console.log('\na worktree of this repository is not another project');
+{
+  const REPOS = path.join(TMP, 'repos');
+  fs.mkdirSync(REPOS, { recursive: true });
+  const git = (cwd, ...a) => spawnSync('git', ['-C', cwd, '-c', 'user.name=prov test', '-c', 'user.email=prov@test.local', ...a],
+    { encoding: 'utf8' });
+
+  const MAIN = path.join(REPOS, 'kappa');
+  fs.mkdirSync(path.join(MAIN, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(MAIN, 'src', 'm.js'), '//\n');
+  git(MAIN, 'init', '-q', '-b', 'main');
+  git(MAIN, 'add', '-A');
+  git(MAIN, 'commit', '-q', '-m', 'fixture');
+  const WT = path.join(REPOS, 'kappa-wt-1');
+  git(MAIN, 'worktree', 'add', '-q', '-b', 'feat', WT);
+
+  // A different repository with a similar name, beside them.
+  const STRANGE = path.join(REPOS, 'kappa-wt-2');
+  fs.mkdirSync(STRANGE, { recursive: true });
+  fs.writeFileSync(path.join(STRANGE, 's.js'), '//\n');
+  git(STRANGE, 'init', '-q');
+
+  // A different repository whose `.git` is a file with no common directory.
+  const SEPARATE = path.join(REPOS, 'lambda');
+  fs.mkdirSync(SEPARATE, { recursive: true });
+  fs.writeFileSync(path.join(SEPARATE, 'l.js'), '//\n');
+  // git refuses a separate git dir whose PARENT does not exist ("Invalid path").
+  fs.mkdirSync(path.join(TMP, 'gitdirs'), { recursive: true });
+  spawnSync('git', ['init', '-q', '--separate-git-dir', path.join(TMP, 'gitdirs', 'lambda'), SEPARATE], { encoding: 'utf8' });
+
+  const common = (d) => {
+    const r = git(d, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+    return r.status === 0 ? fs.realpathSync(r.stdout.trim()) : null;
+  };
+  const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+  ok(isFile(path.join(WT, '.git')) && fs.existsSync(path.join(WT, 'src', 'm.js')),
+     'the worktree is real: its .git is a file and it has the checked-out tree');
+  ok(common(WT) && common(WT) === common(MAIN),
+     'and git itself says the worktree and the main checkout share one repository');
+  ok(common(STRANGE) && common(STRANGE) !== common(MAIN),
+     'while the similarly named neighbour is a different repository by git\'s answer');
+  ok(isFile(path.join(SEPARATE, '.git')) && common(SEPARATE) && common(SEPARATE) !== common(MAIN) &&
+     !fs.existsSync(path.join(TMP, 'gitdirs', 'lambda', 'commondir')),
+     'and the separate-git-dir repository has a .git FILE, no commondir, and its own repository');
+
+  ok(!fired(MAIN, path.join(WT, 'src', 'm.js')),
+     'from the main checkout, a file in its own worktree is not another project');
+  ok(!fired(WT, path.join(MAIN, 'src', 'm.js')),
+     'from the worktree, a file in the main checkout is not another project either');
+  ok(!fired(path.join(WT, 'src'), path.join(MAIN, 'src', 'm.js')),
+     'and not from a subdirectory of the worktree');
+
+  // The controls, each from a cwd used above.
+  ok(fired(MAIN, path.join(STRANGE, 's.js')),
+     'a different repository with a similar name is still another project');
+  ok(fired(WT, path.join(STRANGE, 's.js')),
+     'and still is when read from the worktree');
+  ok(fired(MAIN, path.join(SEPARATE, 'l.js')),
+     'a different repository whose .git is a file with no common directory is still another project');
+
+  // The shared resolver's answer against git's, directly.
+  const { repositoryOf } = require(path.join(__dirname, '..', 'hooks', 'anvi-paths.js'));
+  ok(typeof repositoryOf === 'function' && repositoryOf(WT) === common(MAIN) && repositoryOf(MAIN) === common(MAIN),
+     'the resolver names the same repository git does for a worktree and its main checkout');
+  ok(typeof repositoryOf === 'function' && repositoryOf(SEPARATE) === common(SEPARATE),
+     'and for a separate git directory, the directory the .git file names');
+  ok(typeof repositoryOf === 'function' && repositoryOf(path.join(TMP, 'repos')) === null,
+     'and nothing for a directory that is not a checkout');
+
+  // A RELATIVE gitdir — the form a submodule writes. Every `.git` file above holds an
+  // absolute path, so resolving it against the process's directory instead of the
+  // checkout's would pass them all. This test process never runs from REL, which is
+  // what makes the two readings differ.
+  const REL = path.join(REPOS, 'mu');
+  fs.mkdirSync(REL, { recursive: true });
+  fs.writeFileSync(path.join(REL, '.git'), `gitdir: ${path.relative(REL, path.join(TMP, 'gitdirs', 'lambda'))}\n`);
+  ok(!path.isAbsolute(fs.readFileSync(path.join(REL, '.git'), 'utf8').slice('gitdir: '.length).trim()) &&
+     process.cwd() !== REL && common(REL) === common(SEPARATE),
+     'the relative-gitdir checkout is real: its path is relative, the test runs elsewhere, and git resolves it');
+  ok(typeof repositoryOf === 'function' && repositoryOf(REL) === common(REL),
+     'a relative gitdir is resolved against the checkout, not against the process');
+
+  // ── the store: a worktree owns what its main checkout owns ──────────────────
+  // The second route to the same false alarm. Store ownership is decided from the
+  // working directory's `.anvi` link, and that link is untracked — so a worktree,
+  // which is a checkout of tracked files, has none. A session sitting in a worktree
+  // was told the project's own catalogues belonged to another project.
+  //
+  // Two shapes must NOT inherit, and each gets a firing case from its own cwd:
+  //   - a FORGED `.git` file pointing into this repository's worktree records. git
+  //     keeps a back-pointer (`<gitdir>/gitdir` names the worktree's own `.git`), so
+  //     a checkout the repository never recorded is not one of its worktrees.
+  //   - a SUBMODULE. Its common directory is `.git/modules/<name>`, not a `.git`, so
+  //     there is no main checkout to inherit from. git's own main-worktree derivation
+  //     strips a `/.git` suffix and silently returns the git directory when the strip
+  //     does nothing — which is exactly the result this must not reproduce.
+  fs.mkdirSync(storeOf('kappa'), { recursive: true });
+  fs.writeFileSync(path.join(storeOf('kappa'), 'hetvabhasa.md'), '# kappa\n');
+  fs.symlinkSync(storeOf('kappa'), path.join(MAIN, '.anvi'));   // untracked, as in real use
+  const KAPPA_CAT = path.join(storeOf('kappa'), 'hetvabhasa.md');
+
+  const FORGED = path.join(REPOS, 'kappa-forged');
+  fs.mkdirSync(FORGED, { recursive: true });
+  fs.writeFileSync(path.join(FORGED, 'f.js'), '//\n');
+  const wtGitdir = fs.readFileSync(path.join(WT, '.git'), 'utf8').match(/^gitdir:\s*(.*?)\s*$/m)[1];
+  fs.writeFileSync(path.join(FORGED, '.git'), `gitdir: ${wtGitdir}\n`);
+
+  git(STRANGE, 'add', '-A');
+  git(STRANGE, 'commit', '-q', '-m', 'sub');
+  git(MAIN, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', STRANGE, 'sub');
+  const SUB = path.join(MAIN, 'sub');
+
+  ok(!fs.existsSync(path.join(WT, '.anvi')) && fs.realpathSync(path.join(MAIN, '.anvi')) === fs.realpathSync(storeOf('kappa')),
+     'the worktree genuinely has no .anvi, and its main checkout genuinely owns kappa\'s store');
+  ok(fs.realpathSync(fs.readFileSync(path.join(path.resolve(WT, wtGitdir), 'gitdir'), 'utf8').trim()) === fs.realpathSync(path.join(WT, '.git')),
+     'git\'s back-pointer names the worktree\'s own .git file');
+  ok(isFile(path.join(SUB, '.git')) && path.basename(common(SUB)) !== '.git' && !fs.existsSync(path.join(SUB, '.anvi')),
+     'the submodule is real: a .git file, a common directory that is not a .git, and no .anvi');
+
+  ok(!fired(WT, KAPPA_CAT),
+     'from a worktree, the project\'s own store catalogue is not another project\'s');
+  ok(!fired(path.join(WT, 'src'), KAPPA_CAT),
+     'nor from a subdirectory of the worktree');
+  ok(!fired(MAIN, KAPPA_CAT),
+     'and the main checkout still reads it silently, as it always did');
+
+  // A worktree record with NO back-pointer — what git leaves when the record is
+  // half-gone. Claimed through `commondir`, vouched for by nothing.
+  const GHOST = path.join(REPOS, 'kappa-ghost');
+  const GHOST_REC = path.join(MAIN, '.git', 'worktrees', 'ghost');
+  fs.mkdirSync(GHOST_REC, { recursive: true });
+  fs.writeFileSync(path.join(GHOST_REC, 'commondir'), '../..\n');
+  fs.mkdirSync(GHOST, { recursive: true });
+  fs.writeFileSync(path.join(GHOST, 'g.js'), '//\n');
+  fs.writeFileSync(path.join(GHOST, '.git'), `gitdir: ${GHOST_REC}\n`);
+  ok(!fs.existsSync(path.join(GHOST_REC, 'gitdir')) && fs.existsSync(path.join(GHOST_REC, 'commondir')),
+     'the ghost record genuinely has a commondir and no back-pointer');
+  ok(fired(GHOST, path.join(MAIN, 'src', 'm.js')),
+     'a worktree record with no back-pointer is not adopted as one of this repository\'s checkouts');
+
+  ok(fired(FORGED, KAPPA_CAT),
+     'a forged .git file pointing at this repository\'s worktree records does not inherit its store');
+  ok(fired(FORGED, path.join(MAIN, 'src', 'm.js')),
+     'and does not become one of its checkouts either');
+  ok(fired(SUB, KAPPA_CAT),
+     'a submodule does not inherit its superproject\'s store — it is a different repository');
+  ok(fired(WT, BETA_CAT),
+     'and a worktree reading a genuinely different store project is still told so');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
