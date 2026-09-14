@@ -289,6 +289,63 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
      `a genuinely first baseline is written, and says so in words (got ${f1.status})`);
 }
 
+console.log('\nFIXED SINCE THE BASELINE — said loudly, with the command; the baseline is never rewritten by the check (#451):');
+{
+  // A space and an apostrophe in the directory: the printed command is run through a shell below,
+  // so a quoting slip would show up as a command that fails, not as a string that merely differs.
+  const FX = path.join(DIR, "it's fixed");
+  fs.mkdirSync(FX, { recursive: true });
+  const write = (name, obj) => { const f = path.join(FX, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const run = (...args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
+  const commandIn = out => (out.split('\n').find(l => /^\s+node .*--write-baseline /.test(l)) || '').trim();
+  const shell = cmd => spawnSync('/bin/sh', ['-c', cmd], { encoding: 'utf8' });
+  const d = write('design.json', design([{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['mid'] }]));
+  const OLD = 'src/low/a.ts -> src/mid/m.ts';
+  const base = write('base.json', { rules: { layer: [OLD] } });
+  // The violation is gone; a downward edge keeps the graph measurable.
+  const repaired = write('repaired.json', cruise({ 'src/low/a.ts': [], 'src/mid/m.ts': ['src/low/a.ts'] }));
+  const readded = write('readded.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }));
+
+  const r = run('--design', d, '--graph', repaired, '--baseline', base);
+  ok(r.status === 0 && /layer\s+: 0 of 1 examined — 0 grandfathered, 0 NEW, 1 fixed since the baseline/.test(r.stdout),
+     `a repaired violation is counted as fixed, and a repair does not change the exit (got ${r.status})`);
+  ok(/FIXED since the baseline/.test(r.stdout) && r.stdout.includes(`layer    ${OLD}`), 'the report names each fixed violation by rule and key');
+  ok(/grandfathered again, in silence/.test(r.stdout), 'and says what happens if one comes back while the baseline still holds it');
+  const cmd = commandIn(r.stdout);
+  ok(cmd.includes(`--graph '${repaired.replace(/'/g, "'\\''")}'`) && cmd.includes(`--design '${d.replace(/'/g, "'\\''")}'`) &&
+     cmd.includes(`--baseline '${base.replace(/'/g, "'\\''")}' --write-baseline '${base.replace(/'/g, "'\\''")}'`),
+     'it prints the exact command that regenerates the baseline in force, from the same graph and design');
+  ok(cmd !== '' && !/--allow-growth/.test(cmd), 'without --allow-growth — locking a repair in must never also accept growth');
+  ok(JSON.parse(fs.readFileSync(base, 'utf8')).rules.layer.join() === OLD, 'the report itself leaves the baseline untouched');
+
+  // The ruling's accepted trade-off, asserted so that changing it is a decision and not a drift:
+  // before anyone regenerates, the violation coming back is grandfathered and exits 0.
+  const back = run('--design', d, '--graph', readded, '--baseline', base);
+  ok(back.status === 0 && /1 grandfathered, 0 NEW, 0 fixed/.test(back.stdout) && !/FIXED since the baseline/.test(back.stdout),
+     `re-added before the baseline was regenerated, it is grandfathered again and nothing says fixed (got ${back.status})`);
+
+  // Followed literally, through a shell, the printed command locks the repair in.
+  const locked = shell(cmd);
+  ok(locked.status === 0 && JSON.parse(fs.readFileSync(base, 'utf8')).rules.layer.length === 0,
+     `the printed command, run as printed, rewrites the baseline without the fixed key (got ${locked.status}: ${locked.stdout.trim().split('\n').pop()})`);
+  const after = run('--design', d, '--graph', readded, '--baseline', base);
+  ok(after.status === 1 && after.stdout.includes(OLD), `once locked in, the same violation coming back is NEW and refused (got ${after.status})`);
+
+  // A repair and a new violation at once: the write would grow, so the report says so up front.
+  const both = write('both.json', cruise({ 'src/low/a.ts': [], 'src/low/b.ts': ['src/mid/m.ts'], 'src/mid/m.ts': ['src/low/a.ts'] }));
+  const base2 = write('base2.json', { rules: { layer: [OLD] } });
+  const mixed = run('--design', d, '--graph', both, '--baseline', base2);
+  ok(mixed.status === 1 && /FIXED since the baseline/.test(mixed.stdout) && /refused while the NEW violations above stand/.test(mixed.stdout),
+     `with a NEW violation beside the repair, it says the write is refused until the NEW one is resolved (got ${mixed.status})`);
+  const tried = shell(commandIn(mixed.stdout));
+  ok(tried.status === 1 && JSON.parse(fs.readFileSync(base2, 'utf8')).rules.layer.join() === OLD,
+     `and that is true: the printed command refuses and leaves the baseline as it was (got ${tried.status})`);
+
+  const nobase = run('--design', d, '--graph', repaired);
+  ok(nobase.status === 0 && !/FIXED since the baseline/.test(nobase.stdout) && /no baseline given/.test(nobase.stdout),
+     `with no baseline nothing can be fixed, and nothing says so (got ${nobase.status})`);
+}
+
 console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees with the analyser:');
 {
   const PK = path.join(DIR, 'pkg');
@@ -325,6 +382,10 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   ok(/graph built by lines@1/.test(judged.stdout), 'and says which extractor built it');
   ok(run(['--design', d, '--package', PK, '--extractor', EX, '--baseline', base]).status === 0,
      'against a baseline holding that edge, the package graph has nothing new');
+  const stale = write('pkg-base-stale.json', { rules: { layer: [EDGE, 'src/low/gone.ts -> src/mid/m.ts'], implied: [], cycle: [] } });
+  const pf = run(['--design', d, '--package', PK, '--extractor', EX, '--baseline', stale]);
+  ok(pf.status === 0 && pf.stdout.includes(`--package '${fs.realpathSync(PK)}' --design '${d}' --extractor '${EX}' --baseline '${stale}'`),
+     `in package mode, a repair's regenerate command names the package and its extractor, not a graph (got ${pf.status})`);
 
   const agree = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX]);
   ok(agree.status === 0 && /AGREE/.test(agree.stdout) && /analyser 2 modules · 1 edges/.test(agree.stdout),

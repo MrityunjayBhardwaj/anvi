@@ -213,6 +213,56 @@ console.log('\nALLOWED — each release paired with what was examined:');
   ok(garbled.exit === 0 && garbled.stdout === '', 'malformed stdin exits 0 in silence — unreadable input is not the guard failing');
 }
 
+console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed edit; never refused, never rewritten (#451):');
+{
+  const OLD_SRC = "import { up } from '../top/t';\nexport const old = up;\n";
+  const OLD_KEY = 'src/mid/old.ts -> src/top/t.ts';
+  const repair = s => edit('src/mid/old.ts', OLD_SRC, 'export const old = 1;\n', s);
+  const baselineBefore = fs.readFileSync(BASELINE, 'utf8');
+
+  const r = hook(repair('sess-fix'));
+  const d = decide(repair('sess-fix'), registryNow());
+  ok(r.exit === 0 && !r.denied && d.decision === 'allow' && (d.fixed || []).map(f => f.key).join() === OLD_KEY,
+     `an edit that repairs a baselined violation is allowed, and the decision carries it as fixed (got exit ${r.exit})`);
+  ok(/1 violation in pkg fixed since its baseline/.test(r.context) && r.context.includes(OLD_KEY),
+     'the hook says so, naming the fixed violation');
+  ok(/comes back.*allowed in silence/.test(r.context) && /user's (decision|call)/.test(r.context),
+     'and says a return would pass in silence, and that regenerating is the user\'s decision');
+  ok(r.context.includes(`--write-baseline '${BASELINE}'`) && !/--allow-growth/.test(r.context),
+     'with the exact regenerate command, and without --allow-growth');
+  ok(fs.readFileSync(BASELINE, 'utf8') === baselineBefore, 'the hook leaves the baseline file byte-identical');
+
+  const again = hook(edit('src/mid/n.ts', "export const n = 1;\n", "import { a } from '../low/a';\nexport const n = a;\n", 'sess-fix'));
+  ok(again.exit === 0 && again.stdout === '', 'the second allowed edit in the same session is quiet');
+
+  // Its own marker: being told about a repair must not use up the NOT MEASURED notice.
+  register({ broken: 'unmeasured' });
+  const told = hook(edit('src/low/a.ts', "export const a = 1;\n", "import { up } from '../top/t';\nexport const a = up;\n", 'sess-fix'));
+  ok(/NOT MEASURED/.test(told.context), 'a NOT MEASURED notice later in that session is still said');
+  register();
+
+  // Land the repair, then refuse an unrelated upward edit: a refused edit never lands, so it
+  // says nothing about fixes.
+  put('src/mid/old.ts', 'export const old = 1;\n');
+  const upward = edit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-deny');
+  const denied = hook(upward);
+  const dd = decide(upward, registryNow());
+  ok(denied.exit === 2 && denied.context === '' && !fs.existsSync(path.join(STATE, 'notices', 'sess-deny.fixed')),
+     `a refused edit carries no fixed notice and writes no marker for one (got exit ${denied.exit})`);
+  ok(dd.decision === 'deny' && dd.notice === undefined,
+     'and the refusal decision itself carries no notice — only an allowed edit reports repairs');
+
+  // The ruling's accepted trade-off, asserted by name: the violation coming back while the
+  // baseline still holds it is grandfathered — allowed, and silent.
+  const readd = edit('src/mid/old.ts', 'export const old = 1;\n', OLD_SRC, 'sess-readd');
+  const back = hook(readd);
+  const bd = decide(readd, registryNow());
+  ok(back.exit === 0 && back.stdout === '' && bd.decision === 'allow' && Array.isArray(bd.fixed) && bd.fixed.length === 0 && bd.examined.edges >= 1,
+     `re-adding it before the baseline is regenerated is allowed in silence — grandfathered, as ruled (${bd.examined && bd.examined.edges} edges examined)`);
+
+  put('src/mid/old.ts', OLD_SRC);
+}
+
 console.log('\nNOT MEASURED AND FAILED — allowed, and said once per session:');
 {
   register({ broken: 'unmeasured' });

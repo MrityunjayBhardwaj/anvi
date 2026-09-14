@@ -47,7 +47,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, newModules, judge, ratchet, planBaseline, edgeKey } = R;
+const { RULES, loadGraph, notMeasured, newModules, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -184,6 +184,27 @@ function main(argv) {
   if (fresh.length) {
     print('\n  NEW — refused:');
     for (const f of fresh) print(`    ${f.rule.padEnd(8)} ${f.key}   (${f.detail})`);
+  }
+
+  // A repair the baseline still holds is grandfathered again if it comes back — in silence. The
+  // check never rewrites the baseline itself: it is a reviewed file, and changing it is a person's
+  // decision (#451). So the repair is said loudly, with the exact command, and the write is theirs.
+  const fixed = !args['write-baseline'] ? RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key }))) : [];
+  if (fixed.length) {
+    const one = fixed.length === 1;
+    print(`\n  FIXED since the baseline — ${fixed.length} violation${one ? '' : 's'} no longer occur${one ? 's' : ''}, ` +
+          `but the baseline still holds ${one ? 'it' : 'them'}:`);
+    for (const f of fixed) print(`    ${f.rule.padEnd(8)} ${f.key}`);
+    print('  One that comes back is grandfathered again, in silence. Regenerating the baseline locks the repair in — ' +
+          'a person\'s decision, since the baseline is a reviewed file' +
+          (fresh.length ? '; the write is refused while the NEW violations above stand, so resolve those first' : '') + ':');
+    print('    ' + baselineCommand({
+      script: shellWord(path.resolve(__filename)),
+      source: built ? ['--package', built.pkgDir] : ['--graph', path.resolve(args.graph)],
+      design: path.resolve(args.design),
+      extractor: args.extractor && path.resolve(args.extractor),
+      baseline: path.resolve(args.baseline),
+    }));
   }
 
   if (beforeCruise) {

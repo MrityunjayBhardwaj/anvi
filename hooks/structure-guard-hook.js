@@ -94,15 +94,14 @@ function proposedContent(toolName, input, readFile) {
   return current.slice(0, at) + to + current.slice(at + from.length);
 }
 
-// One shell word. Registry paths are absolute and may contain spaces or quotes.
-const shellWord = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
-
 // The exact command that records this package's current graph as its baseline, built from the
 // registry entry the hook judged against — so the remedy names the files that were actually used.
-function baselineCommand(pkgDir, entry) {
-  return `node ~/.claude/anvi/scripts/structure-guard.js --package ${shellWord(pkgDir)} --design ${shellWord(entry.design)}` +
-    (entry.extractor ? ` --extractor ${shellWord(entry.extractor)}` : '') +
-    ` --baseline ${shellWord(entry.baseline)} --write-baseline ${shellWord(entry.baseline)} --allow-growth`;
+// Built beside the rules, shared with the report; required only on the paths that print it, so
+// the no-registry fast path still loads nothing.
+function baselineCommand(pkgDir, entry, allowGrowth) {
+  return require('./structure-rules.js').baselineCommand({
+    script: '~/.claude/anvi/scripts/structure-guard.js', source: ['--package', pkgDir],
+    design: entry.design, extractor: entry.extractor, baseline: entry.baseline, allowGrowth });
 }
 
 // ORDER MATTERS in the last paragraph, observed: the baseline is written from the graph ON DISK,
@@ -121,7 +120,19 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry) {
     'If the edge is deliberate, that is the user\'s decision — ask them. A baseline records only what is already ' +
     'on disk, so regenerating it before the edge lands records nothing. Once the user has landed it, this records ' +
     'it as grandfathered (the growth is then recorded, not silent):\n' +
-    `  ${baselineCommand(pkgDir, entry)}`;
+    `  ${baselineCommand(pkgDir, entry, true)}`;
+}
+
+// A repair the baseline still holds (#451). Said, never acted on: the baseline is a reviewed
+// file, so the hook neither rewrites it nor refuses anything on its account. Without the
+// notice, the violation coming back is grandfathered again and nobody is told.
+function fixedText(pkgName, fixed, pkgDir, entry) {
+  const one = fixed.length === 1;
+  const shown = fixed.slice(0, 3).map(f => `${f.rule}: ${f.key}`).join('; ') + (fixed.length > 3 ? ` (+${fixed.length - 3} more)` : '');
+  return `structure guard: ${fixed.length} violation${one ? '' : 's'} in ${pkgName} fixed since its baseline — ${shown}. ` +
+    `The baseline still holds ${one ? 'it' : 'them'}, so if one comes back it is allowed in silence. Locking the repair in ` +
+    'by regenerating the baseline is the user\'s decision — ask them. Once the repair has landed, this does it:\n' +
+    `  ${baselineCommand(pkgDir, entry, false)}`;
 }
 
 // The whole decision, with every effect injected: { decision: 'allow'|'deny'|'unmeasured', ... }
@@ -164,7 +175,10 @@ function evaluate(payload, deps) {
   // Counted, not refused: new violations this edit caused in OTHER files' edges.
   const elsewhere = all.length - fresh.length;
   const examined = { modules: built.graph.modules.size, edges: built.graph.edges.length, extracted: built.stats.extracted };
-  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere };
+  // Only an ALLOWED edit reports repairs: a refused one never lands, so its graph is not the disk's.
+  const fixed = R.RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key })));
+  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed,
+    notice: fixed.length ? fixedText(pkgName, fixed, owner.dir, owner.entry) : null };
   return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry) };
 }
 
@@ -212,15 +226,18 @@ function recordFailure(logPath, line, maxBytes = LOG_MAX_BYTES) {
   fs.renameSync(tmp, logPath);
 }
 
-// Once per session, by marker file — see the header for why not in memory.
-function noticeOnce(sessionId, text, stateDir) {
+// Once per session, by marker file — see the header for why not in memory. `kind` gives a notice
+// its own marker, so being told one thing never uses up being told another. The dot cannot occur
+// in a sanitised session id, so no session's plain marker can collide with another's kind.
+function noticeOnce(sessionId, text, stateDir, kind) {
   const id = String(sessionId || 'no-session').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'no-session';
-  const marker = path.join(stateDir, 'notices', id);
+  const name = kind ? `${id}.${kind}` : id;
+  const marker = path.join(stateDir, 'notices', name);
   try {
     if (fs.existsSync(marker)) return false;
     fs.mkdirSync(path.dirname(marker), { recursive: true });
     fs.writeFileSync(marker, new Date().toISOString() + '\n');
-    pruneNotices(path.dirname(marker), id);
+    pruneNotices(path.dirname(marker), name);
   } catch { /* an unwritable marker means the notice may repeat — louder, never quieter */ }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } }));
   return true;
@@ -258,6 +275,8 @@ if (require.main === module) {
       }
       if (result.decision === 'unmeasured')
         noticeOnce(payload.session_id, `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`, STATE_DIR);
+      if (result.decision === 'allow' && result.notice)
+        noticeOnce(payload.session_id, result.notice, STATE_DIR, 'fixed');
       process.exit(0);
     } catch (e) {
       // Fail open on its own bugs — and record it, because a crash and "nothing to refuse"
