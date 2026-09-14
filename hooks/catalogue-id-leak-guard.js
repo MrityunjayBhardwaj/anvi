@@ -238,7 +238,11 @@ process.stdin.on('end', () => {
     // command, because a heredoc body is very often the thing being published — a
     // body carrying an ID is exactly the leak this guard exists to catch.
     const classifiable = blankQuotedHeredocs ? blankQuotedHeredocs(command) : command;
-    const rawSegments = classifiable.split(/(?:\|\||&&|[\n;|&()])+/);
+    // Split with the separator runs CAPTURED: the segments at even indices are exactly what
+    // a plain split returns, and the separators at odd indices are kept for the target walk
+    // below, which needs to know where a subshell or a pipeline begins and ends (#427, #464).
+    const pieces = classifiable.split(/((?:\|\||&&|[\n;|&()])+)/);
+    const rawSegments = pieces.filter((_, k) => k % 2 === 0);
     const segments = rawSegments.map(executableText);
     // `commit` is guarded against a following word character or hyphen because
     // `git commit-tree` and `git commit-graph` are DIFFERENT commands that publish
@@ -316,17 +320,56 @@ process.stdin.on('end', () => {
     const CD_TO = /^\s*(?:\w+=\S*\s+)*cd\s+(?:-\S+\s+)*(?:"([^"]*)"|'([^']*)'|(\S+))/;
     const GIT_DIR_ARG = /(?:^|\s)(?:-C|--git-dir)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/;
     const captured = (m) => m && (m[1] || m[2] || m[3]);
+    // ⚠ A cd DOES NOT ALWAYS APPLY TO WHAT FOLLOWS IT (#427, #464, #465). One inside `( )`
+    // or `$( )` ends at the close, one inside a pipeline runs in a subshell, and one ended by
+    // a single `&` runs in the background. Walking the segments while ignoring all three let
+    // such a `cd` keep applying, so a public commit after `(cd ~/.anvideck && …)` inherited
+    // the store's silence.
+    //
+    // So a paren is a SCOPE: `(` saves where we are and `)` restores it. A paren inside a
+    // quoted span is message text, not syntax, and is skipped — otherwise a stray `(` in a
+    // commit message could hold the store open past the real close.
+    //
+    // What the walk cannot model is UNRESOLVED, which is never private, so it warns. That
+    // covers a `)` with nothing to close, and ANY `cd` in a pipeline: the last element of a
+    // pipeline stays in the current shell under zsh and not under bash, and this hook
+    // cannot know which shell will run the command. Over-warning there is the safe side.
+    //
+    // Known remainder, same as before: a `cd` inside a `$( )` that is itself inside double
+    // quotes is still read as applying onward, because quoted text is treated as text
+    // throughout this file.
+    const UNRESOLVED = '';
+    const QUOTED_SPANS = [...classifiable.matchAll(/"(?:[^"\\]|\\.)*"|'[^']*'/g)]
+      .map(m => [m.index, m.index + m[0].length]);
+    const isQuoted = (at) => QUOTED_SPANS.some(([a, b]) => at >= a && at < b);
+    // The unquoted separators in one captured run, starting at offset `at` in the command.
+    const syntaxIn = (run, at) => [...run.matchAll(/\|\||&&|[\n;|&()]/g)]
+      .filter(m => !isQuoted(at + m.index)).map(m => m[0]);
     let here = cwd;
+    const saved = [];
     const commitTargets = [];
-    rawSegments.forEach((raw, i) => {
+    let offset = 0; // where pieces[k] starts in `classifiable`
+    for (let k = 0; k < pieces.length; k += 2) {
+      const raw = pieces[k];
+      const before = k > 0 ? syntaxIn(pieces[k - 1], offset - pieces[k - 1].length) : [];
+      const after = k + 1 < pieces.length ? syntaxIn(pieces[k + 1], offset + raw.length) : [];
+      offset += raw.length + (k + 1 < pieces.length ? pieces[k + 1].length : 0);
+      for (const t of before) {
+        if (t === '(') saved.push(here);
+        else if (t === ')') here = saved.length ? saved.pop() : UNRESOLVED;
+      }
       const dest = captured(raw.match(CD_TO));
-      // A relative `cd` is joined onto where we already are, so `cd ~/.anvideck && cd
-      // projects && git commit` does not lose the store on the second step.
-      if (dest) { here = /^[~/]/.test(dest) ? dest : path.posix.join(here, dest); return; }
-      if (!GIT_COMMIT.test(segments[i])) return;
+      if (dest) {
+        // A relative `cd` is joined onto where we already are, so `cd ~/.anvideck && cd
+        // projects && git commit` does not lose the store on the second step.
+        here = (before.includes('|') || after.includes('|') || after.includes('&')) ? UNRESOLVED
+          : /^[~/]/.test(dest) ? dest : path.posix.join(here, dest);
+        continue;
+      }
+      if (!GIT_COMMIT.test(segments[k / 2])) continue;
       const at = raw.search(/\bcommit\b/);
       commitTargets.push(captured((at < 0 ? raw : raw.slice(0, at)).match(GIT_DIR_ARG)) || here);
-    });
+    }
     // EVERY target must be private. A command committing to the store AND to a public
     // repo leaks into the public one, and exempting it on the strength of the other is
     // the same mistake one level along.
