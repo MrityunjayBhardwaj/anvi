@@ -247,6 +247,42 @@ ok(fired(`git -C ${STORE_DIR} commit -m "${KEY}" && git commit -m "${KEY}"`),
 ok(fired(`git commit -m "next: cd ${STORE_DIR} && git commit — ${KEY}"`),
   'a message that merely DESCRIBES cd-ing into the store — a cd after the commit cannot move it');
 
+// ── A cd WHOSE SCOPE HAS ENDED CANNOT MOVE A LATER COMMIT (#427, #464) ─────────
+// The walk above follows `cd` in order, but the shell does not apply every `cd` to what
+// follows it: one inside parentheses or `$( )` ends at the close, and one inside a
+// pipeline runs in a subshell. The splitter used to discard the parens and pipes, so such
+// a `cd` kept applying — and a public commit after it inherited the store's silence.
+console.log('\nFIRES — a cd confined to a subshell does not carry the store to a later commit:');
+ok(fired(`(cd ${STORE_DIR} && git commit -m "x") && git commit -m "${CLUSTER}"`),
+  'a cd inside parentheses ends at the close paren');
+ok(fired(`x=$(cd ${STORE_DIR} && git rev-parse HEAD) && git commit -m "${CLUSTER}"`),
+  'a cd inside a command substitution ends with it');
+ok(fired(`(cd ${STORE_DIR} && git commit -m "a(b") && git commit -m "${CLUSTER}"`),
+  'a paren inside a quoted message is text, so it cannot keep the store open past the real close');
+ok(fired(`cd ${STORE_DIR} | true && git commit -m "${CLUSTER}"`),
+  'a cd in a pipeline runs in a subshell in every shell');
+// The LAST element of a pipeline stays in the current shell under zsh and not under bash,
+// and the guard cannot know which shell will run the command — so it is treated as
+// unknown, which warns. Over-warning here is the safe direction.
+ok(fired(`true | cd ${STORE_DIR} && git commit -m "${CLUSTER}"`),
+  'a cd as the last pipeline element is unknowable, so it buys no exemption');
+// A single `&` sends the command before it to a background subshell. `&&` is a different
+// operator and is covered by every case above.
+ok(fired(`cd ${STORE_DIR} & git commit -m "${CLUSTER}"`),
+  'a cd sent to the background with & does not move the commit after it');
+ok(fired(`cd ${STORE_DIR} &\ngit commit -m "${CLUSTER}"`),
+  'the same with the commit on the next line');
+
+console.log('\nSILENT — a scope that ends RESTORES the location, it does not discard it:');
+ok(!fired(`(cd ${STORE_DIR} && git commit -m "${CLUSTER}")`),
+  'a store commit inside its own parentheses');
+ok(!fired(`cd ${STORE_DIR} && (cd /tmp && true) && git commit -m "${CLUSTER}"`),
+  'a cd inside parentheses does not leak OUT either — the store is back after the close');
+ok(!fired(`cd ${STORE_DIR} && git commit -m "$(printf '%s' "${CLUSTER}")"`),
+  'a substitution inside the store commit\'s own message');
+ok(!fired(`sleep 1 & cd ${STORE_DIR} && git commit -m "${CLUSTER}"`),
+  'a background job BEFORE the cd does not touch it — only the command the & ends is sent away');
+
 // ── THE HEREDOC SEAM ────────────────────────────────────────────────────────
 // A QUOTED heredoc body is handed to a program verbatim — nothing in it runs — so no
 // line of it can be the publish this guard classifies on. An UNQUOTED body still
