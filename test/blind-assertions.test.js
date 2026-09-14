@@ -181,6 +181,35 @@ ok(typeof single.denominator === 'number' && single.denominator >= 1,
 ok(blind.denominator >= 1 && blind.findings.length <= blind.denominator,
   `findings never exceed the presence checks they are drawn from (${blind.findings.length} of ${blind.denominator})`);
 
+console.log('\nTHE USAGE LINE WORKS AS WRITTEN — a documented command that crashes measures nothing:');
+
+// Read out of the script's own header rather than restated here, so the test and the
+// documentation cannot drift apart. `--require scripts/blind-assertions.js` resolves as a
+// PACKAGE name and dies in preload before any test runs; a reader watching only BLIND_OUT
+// then sees no findings, which is what a clean run looks like too (issue #444).
+{
+  const usage = fs.readFileSync(PROBE, 'utf8').split('\n')
+    .map(l => /^\/\/\s+(node --require \S+) test\/some\.test\.js/.exec(l))
+    .find(Boolean);
+  ok(Boolean(usage), 'CONTROL — the header documents a --require usage line to run');
+  if (usage) {
+    const file = path.join(DIR, 'usage.js');
+    fs.writeFileSync(file, preamble + `ok(/harvest-lease acquire/.test(doc), 'the step spells the command');`);
+    const out = path.join(DIR, 'usage.jsonl');
+    const argv = usage[1].split(/\s+/).slice(1); // drop `node`
+    // Run from the repository root, which is where a relative path in the usage line is
+    // meant to be read from.
+    const r = spawnSync(process.execPath, [...argv, file], {
+      cwd: ROOT, encoding: 'utf8', env: { ...process.env, BLIND_OUT: out, BLIND_ROOTS: DIR },
+    });
+    ok(r.status === 0, `the documented command runs rather than dying in preload (exit ${r.status})`);
+    const rows = fs.existsSync(out)
+      ? fs.readFileSync(out, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+    ok(rows.some(x => x._kind === 'denominator' && x.presenceChecks >= 1),
+      'and the instrument actually loaded — a denominator row is written, so silence means clean');
+  }
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);

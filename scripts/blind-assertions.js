@@ -37,7 +37,9 @@
 // to a suite costs no attention on a clean run.
 //
 // Usage:
-//   node --require scripts/blind-assertions.js test/some.test.js   # instrument one file
+//   node --require ./scripts/blind-assertions.js test/some.test.js   # instrument one file
+//     (the `./` is required: without it Node reads the path as a package name and the run
+//      dies in preload, leaving BLIND_OUT empty — which looks exactly like a clean run)
 //   BLIND_OUT=<path>  where findings are appended as JSON lines
 //   BLIND_ROOTS=<a:b> only frames under these roots are considered user code
 
