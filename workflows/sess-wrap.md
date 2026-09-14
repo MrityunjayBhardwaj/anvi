@@ -113,9 +113,27 @@ Read the output, not the exit status — `live` exits 0 whether or not anything 
 listed, so a silent run is the shape of both answers. If your project is missing,
 re-acquire before committing; the entries are still uncommitted and still exposed.
 
-    git -C ~/.anvideck add -- projects/<project>/.anvi/    # catalogues only; never -A
-    git -C ~/.anvideck commit -m "<what was learned, and why>"   # prints your sha — keep it
-    git -C ~/.anvideck push
+    git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
+      git -C ~/.anvideck commit -m "<what was learned, and why>" -- projects/<project>/.anvi/ ||
+      { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "harvest NOT committed; nothing left staged" >&2; false; }
+    git -C ~/.anvideck push    # the commit above printed your sha — keep it
+
+RUN THE FIRST THREE LINES AS ONE COMMAND. Staging and committing as two steps leaves the
+harvest STAGED in a working tree every session on this machine shares, and the checkpoint
+commits whatever is staged the moment any response ends — so the two are joined, and nothing
+waits staged across the end of your response. Each part is there for a reason:
+
+- The `add` is still needed. A commit given a pathspec silently skips a file git does not
+  track yet — exit 0, the other files land — and a new catalogue file is exactly that.
+- The pathspec keeps the commit to your catalogue even when another session has something
+  staged; without it the commit takes the whole index.
+- If either half fails, the fallback unstages your catalogue and still exits non-zero, so a
+  failure is neither left staged nor reported as success. The files stay in the working tree.
+
+A pathspec commit is a PARTIAL commit: git rebuilds the listed paths from the working tree.
+Scoped to `.anvi/`, it does not reach the store's embedded repositories, so the partial-commit
+failure on one that is not checked out (#422) belongs to the checkpoint's wider pathspec, not
+to this command — checked against a cloned store, where such a repository is an empty directory.
 
 Keep the sha the commit prints; step 3 verifies THAT commit. Take it from the
 commit's own output rather than reading `HEAD` back afterwards — the store is one
