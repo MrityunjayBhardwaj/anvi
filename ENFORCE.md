@@ -1426,5 +1426,5 @@ loosened until it stops firing guards nothing.
   dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
   case asserting how much it examined. Plus `test/structure-graph.test.js` (the builder) and
   `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
-  assertion reddened by some mutation: rules + command **52 of 52** conclusive over 67
-  assertions · builder **24 of 24** over 29 · hook **47 of 47** over 52.
+  assertion reddened by some mutation: rules + command **65 of 65** conclusive over 80
+  assertions · builder **24 of 24** over 29 · hook **58 of 58** over 62.
