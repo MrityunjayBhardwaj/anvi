@@ -84,6 +84,81 @@ console.log('\na record that cannot be reported honestly is DROPPED, not half-re
   ok(banner().length > 0, 'CONTROL — and in neither case does the banner itself break');
 }
 
+// --- the failure is machine-wide, so the project you opened must not decide it (#428) ---
+// The record describes the store's backstop, which commits every project at once. Two early
+// exits in the hook are about the PROJECT — a refused binding, and a catalogue with no
+// entries yet — and the segment used to sit downstream of both, so whether you were told
+// depended on which directory the session happened to start in.
+
+// Same stdin and record as above; only the directory and the store differ.
+function bannerAt(cwd, env) {
+  const r = spawnSync('node', [HOOK], {
+    cwd, encoding: 'utf8',
+    env: { ...process.env, CLAUDE_DIR: CLAUDE, ...(env || {}) },
+    input: JSON.stringify({ hook_event_name: 'SessionStart', cwd }),
+  });
+  try { return JSON.parse(r.stdout).hookSpecificOutput.additionalContext || ''; } catch { return ''; }
+}
+
+const failing = () => {
+  const now = Date.now();
+  record({ firstAt: now - 3 * 3600 * 1000, lastAt: now - 90 * 60 * 1000, count: 4, detail: 'planted cause' });
+};
+
+console.log('\na project with NO entries yet is still told the store is failing');
+{
+  // A catalogue file with a heading and no entry: the shape a freshly initialised project has.
+  const EMPTY = path.join(TMP, 'fresh');
+  fs.mkdirSync(path.join(EMPTY, '.anvi'), { recursive: true });
+  fs.writeFileSync(path.join(EMPTY, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
+
+  record(null);
+  ok(bannerAt(EMPTY) === '', 'CONTROL — healthy and empty says nothing at all, as before');
+
+  failing();
+  const b = bannerAt(EMPTY);
+  has(b, 'STORE CHECKPOINT FAILING', 'failing and empty reports the failure');
+  has(b, 'planted cause', 'with the same cause a populated project is given');
+  hasNot(b, 'GROUNDING:', 'and no grounding line, because there are no entries to count');
+}
+
+console.log('\na REFUSED project is still told the store is failing, alongside why it was refused');
+{
+  const { execFileSync } = require('child_process');
+  const IDENT = require(path.join(__dirname, '..', 'hooks', 'anvi-identity.js'));
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'ignore' });
+  const repo = (d, remote) => { fs.mkdirSync(d, { recursive: true }); git(d, 'init', '-q', '.'); git(d, 'remote', 'add', 'origin', remote); return d; };
+
+  // A store project bound to one repository, opened from another repository of the same
+  // name: the resolver withholds it and the hook emits its refusal notice and exits.
+  const HOME = path.join(TMP, 'home');
+  const sp = path.join(HOME, '.anvideck', 'projects', 'victim');
+  fs.mkdirSync(path.join(sp, '.anvi'), { recursive: true });
+  fs.writeFileSync(path.join(sp, '.anvi', 'hetvabhasa.md'), '# H\n## H1: x\n**REF:** src/a.js\n');
+  const owner = repo(path.join(TMP, 'work', 'victim'), 'git@github.com:acme/victim.git');
+  IDENT.writeProvenance(sp, IDENT.identityOf(owner));
+  const stranger = repo(path.join(TMP, 'elsewhere', 'victim'), 'git@github.com:mallory/other.git');
+
+  failing();
+  has(bannerAt(owner, { HOME }), 'GROUNDING:', 'CONTROL — the bound repository IS served, so the fixture binds');
+  const b = bannerAt(stranger, { HOME });
+  has(b, 'NOT being served', 'CONTROL — the other repository really is refused');
+  has(b, 'STORE CHECKPOINT FAILING', 'and it is told the store is failing too');
+
+  record(null);
+  hasNot(bannerAt(stranger, { HOME }), 'STORE CHECKPOINT FAILING', 'while a healthy store adds nothing to the refusal');
+}
+
+console.log('\na directory that is not an anvi project stays silent, failing or not');
+{
+  // Deliberately out of scope: this hook says nothing outside anvi projects, and a repository
+  // that never opted in is not the place to start.
+  const PLAIN = path.join(TMP, 'plain');
+  fs.mkdirSync(PLAIN, { recursive: true });
+  failing();
+  ok(bannerAt(PLAIN, { HOME: path.join(TMP, 'nohome') }) === '', 'no .anvi and no store project: no output');
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} checkpoint-failure-banner: ${pass} passed, ${fail} failed`);
 fs.rmSync(TMP, { recursive: true, force: true });
 process.exit(fail === 0 ? 0 : 1);
