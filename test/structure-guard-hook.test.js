@@ -232,8 +232,14 @@ console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed 
      'with the exact regenerate command, and without --allow-growth');
   ok(fs.readFileSync(BASELINE, 'utf8') === baselineBefore, 'the hook leaves the baseline file byte-identical');
 
-  const again = hook(edit('src/mid/n.ts', "export const n = 1;\n", "import { a } from '../low/a';\nexport const n = a;\n", 'sess-fix'));
-  ok(again.exit === 0 && again.stdout === '', 'the second allowed edit in the same session is quiet');
+  // Land the repair first: while it is only proposed, the next edit's graph has nothing fixed, and
+  // "quiet" would be true for that reason instead of the marker's.
+  put('src/mid/old.ts', 'export const old = 1;\n');
+  const nextEdit = edit('src/mid/n.ts', "export const n = 1;\n", "import { a } from '../low/a';\nexport const n = a;\n", 'sess-fix');
+  const again = hook(nextEdit);
+  const ad = decide(nextEdit, registryNow());
+  ok(again.exit === 0 && again.stdout === '' && ad.decision === 'allow' && (ad.fixed || []).length === 1,
+     `the second allowed edit in the same session is quiet, though it still sees the repair (${(ad.fixed || []).length} fixed)`);
 
   // Its own marker: being told about a repair must not use up the NOT MEASURED notice.
   register({ broken: 'unmeasured' });
@@ -241,9 +247,8 @@ console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed 
   ok(/NOT MEASURED/.test(told.context), 'a NOT MEASURED notice later in that session is still said');
   register();
 
-  // Land the repair, then refuse an unrelated upward edit: a refused edit never lands, so it
+  // With the repair on disk, refuse an unrelated upward edit: a refused edit never lands, so it
   // says nothing about fixes.
-  put('src/mid/old.ts', 'export const old = 1;\n');
   const upward = edit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-deny');
   const denied = hook(upward);
   const dd = decide(upward, registryNow());
