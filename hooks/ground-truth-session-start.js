@@ -182,6 +182,29 @@ function compactionState(content) {
   return 'log unreadable';
 }
 
+// The store checkpoint's failure as one banner segment, or null while the backstop is
+// healthy. The Stop hook that discovers the failure has no channel into its own session —
+// nothing it emits reaches the transcript the model reads — so this is the read side of
+// that write, and without it the record is a file nobody opens.
+//
+// ⚠ IT DESCRIBES THE MACHINE, NOT THE PROJECT. The checkpoint commits the whole store, so
+// the answer cannot depend on which directory the session opened in. It is read BEFORE the
+// handler's project-shaped early exits (a refused binding, a catalogue with no entries yet)
+// for that reason: behind them, a fresh or unbound project — where the store is least
+// likely to be healthy — was exactly where nothing was said (anvi #428).
+function checkpointFailureText() {
+  if (!readCheckpointFailure) return null;
+  const f = readCheckpointFailure();
+  if (!f) return null;
+  const mins = Math.max(1, Math.round((Date.now() - f.lastAt) / 60000));
+  // "Since" is the first failure and "last" is the most recent, and both are printed: one
+  // failure an hour ago and forty over three days are different situations that a single
+  // timestamp reports identically.
+  const ago = mins >= 1440 ? `${Math.floor(mins / 1440)}d ago` : mins >= 60 ? `${Math.floor(mins / 60)}h ago` : `${mins}m ago`;
+  return `⛔ STORE CHECKPOINT FAILING: ${f.count}× since ${new Date(f.firstAt).toISOString().slice(0, 16).replace('T', ' ')}Z, last ${ago}` +
+         ` — the durability backstop is not committing${f.detail ? `: ${f.detail}` : ''}`;
+}
+
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -198,6 +221,8 @@ process.stdin.on('end', () => {
     // either way, which would read as a hook with nothing to say.
     if (adoptSession) adoptSession(data.session_id);
     const cwd = data.cwd || process.cwd();
+    // Before any exit below — see checkpointFailureText.
+    const failing = checkpointFailureText();
 
     // Find .anvi/ directory — shared resolver spans both layouts
     const anvi = resolveDirForRead(cwd, '.anvi');
@@ -208,7 +233,11 @@ process.stdin.on('end', () => {
       // knowledge is being withheld looked, in the transcript, exactly like a
       // project that never had any — and the one signal that would prompt
       // someone to fix the binding was the signal that disappeared.
-      if (anvi.refused) emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}`);
+      //
+      // A directory that is not an anvi project stays silent even while the store is
+      // failing: this hook says nothing outside anvi projects, and a repository that
+      // never opted in is not where to start.
+      if (anvi.refused) emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}${failing ? ` | ${failing}` : ''}`);
       process.exit(0);
     }
 
@@ -273,7 +302,11 @@ process.stdin.on('end', () => {
     }
 
     const total = grounded + ungrounded;
-    if (total === 0) process.exit(0); // No project-specific entries yet
+    // No project-specific entries yet: nothing to measure, but a failing store is still news.
+    if (total === 0) {
+      if (failing) emit(failing);
+      process.exit(0);
+    }
 
     // Find Ground Truth docs — shared resolver spans both layouts.
     // Reachable while the catalogues above ARE served: a project-local `.anvi`
@@ -316,22 +349,8 @@ process.stdin.on('end', () => {
 
     // FIRST after the headline, because it is the only segment that reports something
     // BROKEN rather than something measured — the store's durability backstop has
-    // stopped committing and nothing else in the session will say so. The Stop hook
-    // that discovers it has no channel into its own session — nothing it emits reaches
-    // the transcript the model reads — so this is the read side of that write, and
-    // without it the record is a file nobody opens.
-    if (readCheckpointFailure) {
-      const f = readCheckpointFailure();
-      if (f) {
-        const mins = Math.max(1, Math.round((Date.now() - f.lastAt) / 60000));
-        // "Since" is the first failure and "last" is the most recent, and both are
-        // printed: one failure an hour ago and forty over three days are different
-        // situations that a single timestamp reports identically.
-        const ago = mins >= 1440 ? `${Math.floor(mins / 1440)}d ago` : mins >= 60 ? `${Math.floor(mins / 60)}h ago` : `${mins}m ago`;
-        message += ` | \u26d4 STORE CHECKPOINT FAILING: ${f.count}\u00d7 since ${new Date(f.firstAt).toISOString().slice(0, 16).replace('T', ' ')}Z, last ${ago}` +
-                   ` \u2014 the durability backstop is not committing${f.detail ? `: ${f.detail}` : ''}`;
-      }
-    }
+    // stopped committing and nothing else in the session will say so.
+    if (failing) message += ` | ${failing}`;
 
     if (gtDocs.length > 0) {
       message += ` | GT docs: ${gtDocs.map(d => `${d.name.replace('GROUND_TRUTH_', '').replace('.md', '')}${d.ageDays > 7 ? ' ('+d.ageDays+'d old)' : ''}`).join(', ')}`;
