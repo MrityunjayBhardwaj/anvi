@@ -1391,6 +1391,14 @@ loosened until it stops firing guards nothing.
   `--allow-growth`). The baseline is written from the graph on disk, so running that command
   while the edge is only proposed records nothing — observed: it reports "baseline written:
   0 layer" and the same edit is refused again.
+- **A repair is said loudly, and no check rewrites the baseline.** A baselined violation that
+  no longer occurs is FIXED. The report lists each one and prints the exact command that
+  regenerates the baseline in force — never with `--allow-growth`, and while a NEW violation
+  stands it says that write will be refused. The hook says the same once per session (its own
+  marker, so it never uses up a NOT MEASURED notice), on an allowed edit only: a refused edit
+  never lands. Regenerating is a person's decision, because the baseline is a reviewed file.
+  Until someone does, a fixed violation that comes back is grandfathered again and allowed in
+  silence — the accepted cost of keeping the baseline manual (#451).
 - **The graph matches the analyser, measured.** On a 297-module package: compile each file,
   read imports and `export … from` from the output, resolve against the project's tsconfig
   — 742 of 742 edges, 0 re-export mismatches, identical cycle edges. Cycles are COMPUTED
@@ -1418,5 +1426,5 @@ loosened until it stops firing guards nothing.
   dependency-cruiser fixture pinning the shape, one graph per rule, and every silence
   case asserting how much it examined. Plus `test/structure-graph.test.js` (the builder) and
   `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
-  assertion reddened by some mutation: rules + command **52 of 52** conclusive over 67
-  assertions · builder **24 of 24** over 29 · hook **47 of 47** over 52.
+  assertion reddened by some mutation: rules + command **65 of 65** conclusive over 80
+  assertions · builder **24 of 24** over 29 · hook **58 of 58** over 62.
