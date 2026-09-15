@@ -203,7 +203,9 @@ function workspaceRootFor(absPath) {
 // Returns the owning foreign project's name if the path is in ANOTHER project's
 // territory, or null if it's in-envelope / not-a-project-path (skip).
 function foreignProjectOf(absPath, cwd, transcriptPath) {
-  if (!absPath || !path.isAbsolute(absPath)) return null; // relative → resolves under cwd → in-repo
+  // Relative only when there was no working directory to resolve it against (the caller
+  // resolves the rest, #476) — then nothing places it, and nothing is claimed.
+  if (!absPath || !path.isAbsolute(absPath)) return null;
 
   const home = os.homedir();
 
@@ -519,7 +521,13 @@ function classify(toolName, toolInput, cwd, transcriptPath) {
 
   // File reads — fire ONLY when the path is in another project's territory.
   if (toolName === 'Read' || toolName === 'Grep' || toolName === 'Glob') {
-    const p = toolInput.file_path || toolInput.path || (toolName === 'Glob' ? globLocation(toolInput.pattern, cwd) : '');
+    const named = toolInput.file_path || toolInput.path || (toolName === 'Glob' ? globLocation(toolInput.pattern, cwd) : '');
+    // A relative path is where the tool looked from the working directory it ran in, so it
+    // is resolved against that before it is judged (#476). Skipped unresolved, it was taken
+    // to stay inside the working directory: true of `src/a.js`, and false of
+    // `../other/a.js`, which reached a neighbouring project while its absolute spelling was
+    // flagged. The payload's `cwd`, never this process's — the hook runs elsewhere.
+    const p = named && !path.isAbsolute(named) && cwd && path.isAbsolute(cwd) ? path.resolve(cwd, named) : named;
     const foreign = foreignProjectOf(p, cwd, transcriptPath);
     if (!foreign) return null;
     if (foreign.memoryFolders) {
