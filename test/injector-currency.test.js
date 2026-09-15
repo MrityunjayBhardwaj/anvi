@@ -193,8 +193,8 @@ ok(!/V2:[^\n]*🔴/.test(r.currency), 'the vendored ref is NOT called dangling �
 ok(/V2:[^\n]*v2\.1\.0/.test(r.currency), 'the 🔵 verdict states the vendored version — the manifest read is live in the injector');
 
 // The verdicts are pinned, not whatever the live corpus happens to say.
-ok(/🟡/.test(r.currency), 'the drifted entry reads yellow');
-ok(/drifted\.js/.test(r.currency), 'the nudge names the file that actually moved');
+ok(/🟡/.test(r.currency), 'the drifted entry reads yellow'); // presence: every fixture entry cites the one moved file, so each reads yellow under the same rule
+ok(/drifted\.js/.test(r.currency), 'the nudge names the file that actually moved'); // presence: every drifted entry names the one file that moved, under the same rule
 ok(!/steady\.js/.test(r.currency), 'the entry anchored at unmoved code produces no nudge — silence is earned here, not faked');
 
 // Class-aware presentation: same computation, different stakes.

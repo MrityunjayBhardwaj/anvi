@@ -118,7 +118,7 @@ console.log('\nWith a repo, each shape is reported and told apart');
 const lint = run(PROJ, '--lint');
 ok(lint.code === 0, 'the lint exits 0 — a worklist, not a gate');
 const lineFor = id => (lint.out.split('\n').find(l => l.trim().startsWith(`${id} →`)) || '');
-ok(/inert-declaration/.test(lint.out), 'the finding fires');
+ok(/inert-declaration/.test(lint.out), 'the finding fires'); // presence: the finding's own section and its tally line both come from the one finding
 ok(/never tracked/i.test(lineFor('B2')), 'a path this repo never had is named as never tracked');
 ok(/delet/i.test(lineFor('B3')), 'a path whose file was removed is named as deleted');
 ok(/no tracked file/i.test(lineFor('B7')),
@@ -162,17 +162,17 @@ ok([...inertIds].sort().join(',') === 'B2,B3,B5,B7',
 console.log('\nWithout a repo the lint still runs, and says what it could not check');
 const bare = run(BARE, '--lint');
 ok(bare.code === 0, 'it exits 0 rather than failing');
-ok(/line-anchored-ref/.test(bare.out),
+ok(/line-anchored-ref/.test(bare.out), // presence: the finding's own section and its tally line both come from the one finding
    'the findings that need no repo still run — otherwise "no inert finding" below is just a dead lint');
 ok(!/inert-declaration/.test(bare.out),
    'and NO declaration is called inert — with no repo the classifier would call them ALL dead');
-ok(/not resolved|no project repo/i.test(bare.out),
+ok(/not resolved|no project repo/i.test(bare.out), // presence: one note sentence contains both alternatives
    'the absence is stated, so silence is not read as a clean bill');
 
 console.log('\nThe full report is untouched by any of it');
 const full = run(PROJ);
 ok(!/inert-declaration/.test(full.out), 'the verdict report carries no lint finding');
-ok(/🟢|🟡|🔴|⚪/.test(full.out), '  (and really is the verdict report)');
+ok(/🟢|🟡|🔴|⚪/.test(full.out), '  (and really is the verdict report)'); // presence: asks only that this is the verdict report at all; any verdict glyph shows that
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

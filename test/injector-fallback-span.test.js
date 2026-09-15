@@ -177,7 +177,7 @@ for (const [tok, entry] of [['wwprose', 'B1'], ['wwbiblio', 'B2'], ['wwplain', '
   ok(hits.length === 1 && hits[0].startsWith(entry),
      `"${tok}" occurs in exactly one entry, and it is ${entry} (found in ${hits.length})`);
 }
-ok(/^\*\*REF:\*\* /m.test(DHARANA), 'the fixture contains a starred REF line');
+ok(/^\*\*REF:\*\* /m.test(DHARANA), 'the fixture contains a starred REF line'); // presence: a fixture precondition that a starred REF line exists at all; any one will do
 ok(/^REF: /m.test(DHARANA), 'the fixture contains an unstarred REF line');
 ok(/^\*\*VALIDATED:\*\* /m.test(DHARANA), 'the fixture contains a freshness stamp');
 // The stamp case is only meaningful if the subject is named there the way the REF

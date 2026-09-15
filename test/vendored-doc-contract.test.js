@@ -243,7 +243,7 @@ console.log('\nthe dated line-count measurement is internally consistent');
 
 // ── the claim must stay re-derivable ────────────────────────────────────────
 console.log('\nthe document points at the tool that re-derives it');
-ok(text.includes('scripts/vendor-drift.js'),
+ok(text.includes('scripts/vendor-drift.js'), // presence: the document names the tool everywhere it points readers to it; any naming is the claim
   'names scripts/vendor-drift.js — a sync claim you cannot re-derive on demand is the defect this file exists for');
 ok(fs.existsSync(path.join(ROOT, 'scripts', 'vendor-drift.js')), 'and that tool exists');
 
@@ -255,7 +255,7 @@ console.log('\nthe re-vendor instruction carries its precondition');
   const sentences = text.split(/\n\n+/).filter(p => /re-vendor/i.test(p) && /wholesale/i.test(p));
   ok(sentences.length > 0, `the document does discuss re-vendoring wholesale (${sentences.length} passages)`);
   for (const s of sentences) {
-    ok(/pristine|unpatched|no anvi commits|listed above|table/i.test(s),
+    ok(/pristine|unpatched|no anvi commits|listed above|table/i.test(s), // presence: both matches are inside the one passage under test
       `a wholesale re-vendor is only ever advised for modules named as pristine: "${s.split('\n')[0].slice(0, 72)}…"`);
   }
 }

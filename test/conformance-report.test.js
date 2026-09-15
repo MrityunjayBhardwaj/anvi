@@ -552,7 +552,7 @@ console.log('\nintegration — spawn the SHIPPED script against the temp store')
 
   const out = run([conformant, broken]);
   has(out, 'store: ~/.anvideck — DURABLE', 'header states the store state');
-  has(out, '✓ link', 'a conformant check prints ✓');
+  has(out, '✓ link', 'a conformant check prints ✓'); // presence: both fixture projects have a conformant link check; either prints the tick
   has(out, '✗ repo     UNIGNORED', 'a finding prints ✗ with its state');
   has(out, '✓ 1 conformant  ✗ 1 with findings', 'tally counts both');
 

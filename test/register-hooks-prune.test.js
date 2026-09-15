@@ -142,7 +142,7 @@ console.log('integration — `register-hooks.cjs --prune` against a temp HOME le
   const after = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   const all = JSON.stringify(after);
   ok(all.includes('gsd-prompt-guard.js'), 'foreign GSD hook survived --prune with empty REMOVED');
-  ok(all.includes('catalogue-context-injector.js'), 'anvi hooks were added (registration still works under --prune)');
+  ok(all.includes('catalogue-context-injector.js'), 'anvi hooks were added (registration still works under --prune)'); // presence: the hook is registered under two matchers; either shows registration worked
   ok(!/Pruned \d/.test(out), 'nothing pruned (empty REMOVED)');
   fs.rmSync(home, { recursive: true, force: true });
 }

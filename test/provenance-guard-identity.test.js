@@ -594,9 +594,9 @@ console.log('\nthe reader\'s own project is named by containment too');
     ['mcp__thing__do', {}], ['Artifact', { action: 'list' }]]) {
     const fromRoot = say(PROJ, tool, input);
     const fromSub = say(path.join(PROJ, 'hooks'), tool, input);
-    ok(fromRoot.includes('omega') && !fromRoot.includes("'hooks'"),
+    ok(fromRoot.includes('omega') && !fromRoot.includes("'hooks'"), // presence: one warning names the project twice; the negative conjunct is what discriminates
        `${tool} names the project from the project root`);
-    ok(fromSub.includes('omega') && !fromSub.includes("'hooks'"),
+    ok(fromSub.includes('omega') && !fromSub.includes("'hooks'"), // presence: one warning names the project twice; the negative conjunct is what discriminates
        `${tool} names it the same way from a subdirectory, not 'hooks'`);
   }
 
@@ -615,7 +615,7 @@ console.log('\nthe reader\'s own project is named by containment too');
     ['mcp__thing__do', {}], ['Artifact', { action: 'list' }]]) {
     const out = say(SCRATCH, tool, input);
     ok(out.trim().length > 0, `${tool} still speaks from a directory that is no project`);
-    ok(out.includes('this working directory') && !out.includes("'scratchpad'"),
+    ok(out.includes('this working directory') && !out.includes("'scratchpad'"), // presence: one warning uses the phrase twice
        `${tool} says "this working directory" rather than naming one`);
   }
 
@@ -1280,7 +1280,7 @@ console.log('\na search of a directory holding this project spans its neighbours
   ok(!say472(storeOf('alpha'), 'Grep', path.dirname(storeOf('alpha'))),
      'while from there a search of that store project\'s own folder stays silent');
   const holdsMsg = say472(path.join(RHO, 'lib'), 'Grep', CODE);
-  ok(holdsMsg.includes("'rho'") && holdsMsg.includes('every project beside it') && !holdsMsg.includes('belongs to'),
+  ok(holdsMsg.includes("'rho'") && holdsMsg.includes('every project beside it') && !holdsMsg.includes('belongs to'), // presence: one warning names the project three times; the sibling phrase about every project beside it is unique
      'the note says the search holds this project and its neighbours, and names no owner');
 
   ok(!say472(path.join(RHO, 'lib'), 'Grep', RHO),

@@ -105,8 +105,8 @@ console.log('\ncatalogue-review: a withheld catalogue is not a missing one');
 
   ok(!/not found/.test(r.out), 'the refused caller is not told the catalogues are `not found`');
   ok(/WITHHELD/.test(r.out), 'it is told they were withheld');
-  ok(/MISMATCH/.test(r.all), 'the state is named');
-  ok(/bind-store\.js|PROVENANCE\.json/.test(r.all), 'and a remedy that will work is carried');
+  ok(/MISMATCH/.test(r.all), 'the state is named'); // presence: the one refusal is printed on both channels, and either copy names the state
+  ok(/bind-store\.js|PROVENANCE\.json/.test(r.all), 'and a remedy that will work is carried'); // presence: the one remedy is printed on both channels, and either copy carries it
   ok(r.code !== 0, `a refusal does not exit 0 (got ${r.code})`);
 
   // The comparison that matters: these two must be DIFFERENT observables. Each
@@ -116,7 +116,7 @@ console.log('\ncatalogue-review: a withheld catalogue is not a missing one');
 
   // Falsification: the plain absence message must still be said where it is TRUE,
   // or a command that simply went mute would pass every assertion above.
-  ok(/not found/.test(e.out), 'a project that genuinely has no catalogues still gets `not found`');
+  ok(/not found/.test(e.out), 'a project that genuinely has no catalogues still gets `not found`'); // presence: each catalogue row reports not found under the same rule, and any row shows it
   ok(e.code === 0, 'and an honest absence is still not an error');
 }
 
@@ -140,8 +140,8 @@ console.log('\ncurrency report: a withheld catalogue is not a missing one');
 
   ok(!/no \.anvi catalogues/.test(r.err), 'the refused caller is not told there are no catalogues');
   ok(/WITHHELD/.test(r.err), 'it is told they were withheld');
-  ok(/MISMATCH/.test(r.all), 'the state is named');
-  ok(/bind-store\.js|PROVENANCE\.json/.test(r.all), 'and a remedy that will work is carried');
+  ok(/MISMATCH/.test(r.all), 'the state is named'); // presence: the one refusal is printed on both channels, and either copy names the state
+  ok(/bind-store\.js|PROVENANCE\.json/.test(r.all), 'and a remedy that will work is carried'); // presence: the one remedy is printed on both channels, and either copy carries it
 
   ok(r.code !== e.code, `refusal and absence exit differently (refused ${r.code}, empty ${e.code})`);
   ok(r.err !== e.err, 'and say different things');
@@ -204,8 +204,8 @@ console.log('\ncurrency report: a pointer into a WITHHELD area is not an unresol
 
   ok(rs.code === 0, `the split caller still gets a report (exit ${rs.code}) — its catalogues are its own`);
   ok(/REFERENCE AREAS WITHHELD/.test(rs.out), 'and is told, before the verdicts, that an area was withheld');
-  ok(/MISMATCH/.test(rs.all), 'with the state named');
-  ok(/🚫/.test(rs.out) && /withheld/.test(rs.out), 'the pointer into that area is marked withheld');
+  ok(/MISMATCH/.test(rs.all), 'with the state named'); // presence: the one refusal is printed on both channels, and either copy names the state
+  ok(/🚫/.test(rs.out) && /withheld/.test(rs.out), 'the pointer into that area is marked withheld'); // presence: the 🚫 conjunct marks only the withheld verdict (its row and its tally), so this line fails without it
   ok(/NOT followed/.test(rs.out), 'and described as not followed, rather than as unresolvable');
   // Match the tally TOKEN, not the word: "withheld" also appears in the partial
   // note, so a looser test passes even when the counter is gone entirely — which is
