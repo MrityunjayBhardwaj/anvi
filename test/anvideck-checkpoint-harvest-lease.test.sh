@@ -62,8 +62,15 @@ set_age(){ node -e 'const fs=require("fs"),t=new Date(Date.now()-process.argv[2]
 # (`Number(env)||90` turns 0 back into 90, and 1s is still longer than the gap), so
 # the anchor is moved instead — and the hook then runs with its SHIPPED default
 # window, which is what users get.
+#
+# It changes the DATE and nothing else. `--only` with no paths amends without taking
+# anything already staged, and `--no-verify` skips the store's commit hooks. Without
+# them the amend swept a case's staged files into HEAD before the hook under test ran,
+# and failed outright under a case's own `pre-commit` — leaving HEAD young, so the quiet
+# period deferred. Both read as the hook misbehaving while the harness was the cause,
+# and three cases had to work around it by hand (#425).
 age_head(){ local d; d="$(node -e "console.log(new Date(Date.now()-600000).toISOString())")"
-  GIT_COMMITTER_DATE="$d" git -C "$STORE" commit -q --amend --no-edit --date="$d"; }
+  GIT_COMMITTER_DATE="$d" git -C "$STORE" commit -q --amend --only --no-edit --no-verify --date="$d"; }
 
 # Drive the hook. The lease is the only guard that can produce a defer in here.
 drive(){ age_head; printf '{}' | ANVIDECK_DIR="$STORE" CLAUDE_DIR="$CLAUDE" \
@@ -304,20 +311,13 @@ echo "TEST 16 — a leased project's STAGED work survives a sweep (#419)"
 # whole index, so the exclusion protecting the `add` never saw them. Observed live:
 # a lease was held and live, liveLeases() returned it, the pathspec excluded all of
 # its files, and the sweep committed them anyway.
-#
-# ⚠ THE HARNESS'S OWN `age_head` IS THE SAME DEFECT ONE LAYER DOWN: it amends with no
-# pathspec, so it would absorb the staged file before the hook ever runs and this case
-# would pass for the wrong reason. Age FIRST, stage SECOND, and drive without ageing.
-drive_staged(){ printf '{}' | ANVIDECK_DIR="$STORE" CLAUDE_DIR="$CLAUDE" \
-  ANVI_HARVEST_LEASE_SECONDS="${1:-900}" node "$HOOK"; }
 lease clear-swept anvi; lease clear-swept basher
 printf '\n## H920: staged by a harvest, mid-commit\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
 printf '\n## H520: another session, also staged\n' >> "$STORE/projects/basher/.anvi/hetvabhasa.md"
-age_head
 git -C "$STORE" add projects/anvi/.anvi/hetvabhasa.md projects/basher/.anvi/hetvabhasa.md
 ok "$(git -C "$STORE" diff --cached --name-only | grep -c 'projects/anvi/')" "1" "precondition: the leased file really is STAGED before the sweep"
 lease acquire anvi >/dev/null
-drive_staged
+drive
 ok "$(committed_in_head 'projects/anvi/')" "0" "(a) the leased project's STAGED work is NOT in the sweep"
 ok "$(committed_in_head 'projects/basher/')" "1" "(b) an unleased STAGED file IS swept in the same run — the fix aims, it does not switch off"
 ok "$(git -C "$STORE" diff --cached --name-only | grep -c 'projects/anvi/')" "1" "the leased file is left staged, exactly as the harvest had it"
@@ -342,11 +342,10 @@ echo "TEST 18 — with no lease, a STAGED file is still swept (the unleased path
 # every command must behave exactly as before the fix. Without this, a scope that
 # silently excluded everything would pass every assertion above.
 printf '\n## H930: staged, and nothing is leased\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
-age_head
 git -C "$STORE" add projects/anvi/.anvi/hetvabhasa.md
 ok "$(lease live)" "" "precondition: no lease is held"
 BEFORE18=$(count)
-drive_staged
+drive
 # ⚠ NOT `committed_in_head 'projects/anvi/'`. When no commit is made, that reads the
 # PREVIOUS commit, which contains the same path prefix from an earlier case — so it
 # passes for the wrong reason, and the mutation matrix found it doing exactly that.
@@ -371,18 +370,12 @@ echo "TEST 19 — a sweep that CANNOT commit records the failure instead of exit
 # committed happily and turned every assertion below red. The cause is not portable; the
 # BEHAVIOUR under test — a commit that fails is recorded rather than swallowed — is, and
 # a fixture that only fails on the author's machine tests the author's machine.
-#
-# ⚠ AGE FIRST, OBSTRUCT SECOND — and this is the THIRD case in this file to need that
-# ordering. `age_head` amends, an amend runs `pre-commit` too, so installing the hook
-# first breaks the AGEING instead of the sweep: HEAD stays young, the quiet period
-# defers, and "no commit was made" passes while the commit path was never reached.
 lease clear-failure
-age_head
 printf '#!/bin/sh\necho "refusing: fixture pre-commit" >&2\nexit 1\n' > "$STORE/.git/hooks/pre-commit"
 chmod +x "$STORE/.git/hooks/pre-commit"
 printf '\n## H901: something for the sweep to want\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
 BEFORE19=$(count)
-drive_staged
+drive
 ok "$(count)" "$BEFORE19" "no commit was made — the sweep really did fail, so the assertions below are about a failure"
 ok "$(lease failure >/dev/null 2>&1; echo $?)" "1" "the failure is RECORDED — exit 1 says the backstop is not healthy"
 ok "$(lease failure | grep -c 'refusing: fixture pre-commit')" "1" "and it names git's CAUSE, not merely that a command failed"
@@ -394,24 +387,17 @@ echo "TEST 20 — a sweep that SUCCEEDS clears the record, and an early exit doe
 # The control for TEST 19 in both directions. Without the first pair, a record that was
 # never cleared would satisfy TEST 19 for the rest of time; without the last, clearing on
 # any exit would report the backstop healthy on runs where it was never asked to commit.
-#
-# ⚠ AGE FIRST, DIRTY SECOND — the same harness trap TEST 16 names, and it caught this case
-# on its first run. `age_head` amends with no pathspec, so driving normally absorbs
-# whatever TEST 19 left STAGED into HEAD; the store is then clean, the hook exits early
-# exactly as it should, and the assertion fails while the code is correct.
 rm -f "$STORE/.git/hooks/pre-commit"
-age_head
-printf '\n## H902: written AFTER the amend, so the sweep has something of its own\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
+printf '\n## H902: written after TEST 19 left its own work staged\n' >> "$STORE/projects/anvi/.anvi/hetvabhasa.md"
 BEFORE20=$(count)
-drive_staged
+drive
 ok "$(count)" "$((BEFORE20+1))" "with the obstruction gone the sweep commits again"
 ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "and the record is CLEARED — the backstop proved it works"
 
-# An early exit is NOT a success. Aged first so the quiet period cannot be the reason the
-# hook stops, leaving "nothing to commit" as the only one.
+# An early exit is NOT a success. `drive` ages HEAD, so the quiet period cannot be the
+# reason the hook stops, leaving "nothing to commit" as the only one.
 lease clear-failure
-age_head
-drive_staged
+drive
 ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "a clean store records nothing — it is not a failure, it is nothing to do"
 ok "$(count)" "$((BEFORE20+1))" "and it committed nothing either, so that really was the clean-store path"
 
