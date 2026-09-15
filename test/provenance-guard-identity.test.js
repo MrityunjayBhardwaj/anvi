@@ -940,6 +940,131 @@ console.log('\na worktree of this repository is not another project');
      'a dot-directory repository searched at its root is still machinery, not a project');
 }
 
+// ── the session's own memory folder, wherever the session has moved to (#468) ──
+// A memory folder is named after the directory a session STARTED in; the payload's
+// `cwd` is wherever the session is NOW. The guard compared the folder against `cwd`,
+// so the moment a session moved — into a subdirectory, a worktree, the store — its
+// own project's memory was announced as another project's, under the encoded folder
+// name as though that were a project.
+//
+// Evidence, never a prefix: `…-nu-landing` extends `…-nu` and is another repository.
+// Three routes, each an exact folder: the one holding `transcript_path` (Claude Code
+// hands it to every hook, and it lives in the session's own folder), the encoded
+// project root and main checkout, and — from the store — the encoded checkouts its
+// provenance record binds.
+console.log('\nthe session\'s own memory folder is this project\'s wherever the session has moved');
+{
+  const git = (cwd, ...a) => spawnSync('git', ['-C', cwd, '-c', 'user.name=prov test', '-c', 'user.email=prov@test.local', ...a],
+    { encoding: 'utf8' });
+  const MR = path.join(TMP, 'memrepos');
+  const NU = path.join(MR, 'nu');
+  const NU_WT = path.join(MR, 'nu-wt-1');
+  const XI = path.join(MR, 'xi');
+  const LANDING = path.join(MR, 'nu-landing');
+  for (const d of [NU, XI, LANDING]) {
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'src', 'a.js'), '//\n');
+    git(d, 'init', '-q', '-b', 'main');
+    git(d, 'add', '-A');
+    git(d, 'commit', '-q', '-m', 'fixture');
+  }
+  git(NU, 'worktree', 'add', '-q', '-b', 'feat', NU_WT);
+  fs.mkdirSync(storeOf('nu'), { recursive: true });
+  fs.symlinkSync(storeOf('nu'), path.join(NU, '.anvi'));
+  const NU_STORE = path.dirname(storeOf('nu'));
+  fs.writeFileSync(path.join(NU_STORE, 'PROVENANCE.json'), JSON.stringify({ remote: null, worktrees: [NU] }, null, 2) + '\n');
+  const NU_INST = path.join(NU_STORE, 'instances');
+  fs.mkdirSync(NU_INST, { recursive: true });
+
+  const PROJECTS = path.join(HOME, '.claude', 'projects');
+  const slug = (p) => p.replace(/[^a-zA-Z0-9]/g, '-');   // Claude Code's folder naming
+  const memOf = (p) => {
+    const f = path.join(PROJECTS, slug(p), 'memory', 'MEMORY.md');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, '# memory\n');
+    return f;
+  };
+  const transcriptOf = (p, ...deeper) => {
+    const f = path.join(PROJECTS, slug(p), ...deeper, 'session.jsonl');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, '{}\n');
+    return f;
+  };
+  const NU_MEM = memOf(NU);
+  const XI_MEM = memOf(XI);
+  const LANDING_MEM = memOf(LANDING);
+  const NU_TX = transcriptOf(NU);
+  const NU_SUBAGENT_TX = transcriptOf(NU, 'sess-1', 'subagents');
+  const WT_TX = transcriptOf(NU_WT);
+  const STORE_TX = transcriptOf(NU_INST);
+  // A transcript OUTSIDE Claude Code's projects folder, in a folder carrying this
+  // project's own name — the forgery a basename test would accept.
+  const FAKE_TX = path.join(TMP, 'not-projects', slug(NU), 'session.jsonl');
+  fs.mkdirSync(path.dirname(FAKE_TX), { recursive: true });
+  fs.writeFileSync(FAKE_TX, '{}\n');
+  // Where a session goes when it leaves the project altogether — a scratch area. No
+  // project root, no store, no record: only the transcript can say whose session it is.
+  const SCRATCH = path.join(TMP, 'scratch-468');
+  fs.mkdirSync(SCRATCH, { recursive: true });
+
+  const say468 = (cwd, target, transcript) => {
+    const payload = { tool_name: 'Read', tool_input: { file_path: target }, cwd,
+      session_id: `prov-468-${process.pid}-${probeN++}` };
+    if (transcript) payload.transcript_path = transcript;
+    const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, HOME } });
+    return r.stdout || '';
+  };
+
+  ok(slug(LANDING).startsWith(slug(NU) + '-') && slug(LANDING) !== slug(NU),
+     'the neighbour\'s folder name genuinely extends this project\'s, so a prefix would claim it');
+  ok(git(NU_WT, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.trim() === path.join(NU, '.git'),
+     'the worktree is a real checkout of the same repository');
+  ok(path.dirname(NU_TX) === path.dirname(path.dirname(NU_MEM)) && slug(path.join(NU, 'src')) !== slug(NU),
+     'the session\'s transcript sits beside its memory, and a subdirectory encodes to a different folder name');
+
+  // Silences. The session started at the repository and moved.
+  ok(!say468(path.join(NU, 'src'), NU_MEM, NU_TX),
+     'from a subdirectory, the session\'s own memory is this project\'s');
+  ok(!say468(NU_WT, NU_MEM, NU_TX),
+     'and from a worktree the session moved into');
+  ok(!say468(NU_INST, NU_MEM, NU_TX),
+     'and from the project\'s store');
+  ok(git(SCRATCH, 'rev-parse', '--git-dir').status !== 0 && !fs.existsSync(path.join(SCRATCH, '.anvi')),
+     'the scratch directory is in no repository and carries no catalogue link');
+  ok(!say468(SCRATCH, NU_MEM, NU_TX),
+     'and from a scratch directory outside every project, which only the transcript can place');
+  ok(!say468(SCRATCH, NU_MEM, NU_SUBAGENT_TX),
+     'and for a subagent, whose transcript sits deeper inside the same folder');
+  // Sessions that STARTED elsewhere in the project, reading the main checkout's memory.
+  ok(!say468(NU_WT, NU_MEM, WT_TX),
+     'a session started in a worktree reads the main checkout\'s memory as this project\'s');
+  ok(!say468(NU_INST, NU_MEM, STORE_TX),
+     'and so does a session started in the store, through the checkout its record binds');
+
+  // Fires, from each of the same working directories.
+  ok(say468(path.join(NU, 'src'), XI_MEM, NU_TX),
+     'while from that subdirectory another project\'s memory still fires');
+  ok(say468(NU_WT, LANDING_MEM, NU_TX),
+     'and from the worktree, a folder whose name only extends this project\'s still fires');
+  ok(say468(NU_INST, XI_MEM, NU_TX),
+     'and from the store, another project\'s memory still fires');
+  ok(say468(NU_INST, LANDING_MEM, STORE_TX),
+     'and a store-started session is not handed the extended name either');
+  ok(say468(SCRATCH, XI_MEM, NU_TX),
+     'while from that scratch directory another project\'s memory still fires');
+  ok(say468(SCRATCH, NU_MEM, FAKE_TX),
+     'a transcript path outside Claude Code\'s projects folder is not evidence, even in a folder carrying this project\'s name');
+  ok(say468(SCRATCH, NU_MEM),
+     'and with no transcript path a scratch directory has no evidence of whose session it is, so it still reports');
+  ok(say468(path.join(NU, 'src'), XI_MEM),
+     'and a payload with no transcript path still reports another project\'s memory');
+
+  // The name. An encoded folder is not a project, and the sentence must not say it is.
+  const msg = say468(path.join(NU, 'src'), XI_MEM, NU_TX);
+  ok(msg.includes('memory folder') && !msg.includes(`belongs to '${slug(XI)}'`),
+     'the message calls it another project\'s memory folder, not a project named after the folder');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

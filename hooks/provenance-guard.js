@@ -29,7 +29,9 @@
 //   - from a cwd inside a store project: the checkouts that project's provenance
 //     record binds to it, and their worktrees
 //   - the other checkouts of cwd's own repository (its worktrees)
-//   - ~/.claude/projects/[encoded-cwd]/memory/ (this project's memory namespace)
+//   - the session's own memory folder, ~/.claude/projects/[encoded path]/ — the one
+//     holding transcript_path, or the encoded cwd, project root, main checkout, or
+//     (from the store) recorded checkout; matched exactly, never by prefix
 //
 // Dedupe: once per (surface, target) per session, via /tmp/anvi-provenance-<sid>.
 // PostToolUse can't block; this hook never blocks — it only injects context and
@@ -93,6 +95,40 @@ process.stdin.on('end', () => {
 // every non-alphanumeric char becomes '-'.
 function encodeCwd(cwd) {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+// Which memory folders are this session's project's own — folder NAMES, each one
+// derived from evidence and compared exactly (#468). A memory folder is named after
+// the directory a session STARTED in, while `cwd` follows every `cd`, so from `cwd`
+// alone the project's own memory was announced as another project's the moment a
+// session moved into a subdirectory, a worktree or the store. Never by prefix:
+// `…-anvi-landing` extends `…-anvi` and is a different repository.
+//   - the folder holding `transcript_path`. Claude Code hands it to every hook and
+//     keeps it inside the session's own folder (a subagent's sits deeper in the same
+//     one). Only a path inside `~/.claude/projects/` counts.
+//   - the encoded working directory, its project root, and that repository's main
+//     checkout — a session started anywhere in the project may read the main
+//     checkout's memory.
+//   - from inside a store project, the encoded checkouts its provenance record binds.
+function ownMemoryFolders(cwd, transcriptPath) {
+  const projRoot = path.join(os.homedir(), '.claude', 'projects');
+  const own = new Set([encodeCwd(cwd)]);
+  if (typeof transcriptPath === 'string' && path.isAbsolute(transcriptPath)) {
+    const rel = path.relative(projRoot, path.resolve(transcriptPath));
+    const segs = rel.split(path.sep);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel) && segs.length > 1) own.add(segs[0]);
+  }
+  const root = projectRootOfDir ? projectRootOfDir(cwd) : null;
+  if (root) {
+    own.add(encodeCwd(root));
+    const main = mainCheckoutOf ? mainCheckoutOf(root) : null;
+    if (main) own.add(encodeCwd(main));
+  }
+  const cwdStore = storeProjectForPath ? storeProjectForPath(cwd) : null;
+  if (cwdStore && recordedCheckoutsOf) {
+    for (const checkout of recordedCheckoutsOf(cwdStore).live) own.add(encodeCwd(checkout));
+  }
+  return own;
 }
 
 // Is absPath inside dir? (prefix match on a normalized, trailing-slash'd dir)
@@ -164,7 +200,7 @@ function workspaceRootFor(absPath) {
 // Classify a filesystem path relative to the current project.
 // Returns the owning foreign project's name if the path is in ANOTHER project's
 // territory, or null if it's in-envelope / not-a-project-path (skip).
-function foreignProjectOf(absPath, cwd) {
+function foreignProjectOf(absPath, cwd, transcriptPath) {
   if (!absPath || !path.isAbsolute(absPath)) return null; // relative → resolves under cwd → in-repo
 
   const home = os.homedir();
@@ -270,7 +306,9 @@ function foreignProjectOf(absPath, cwd) {
   // path into the working directory.
   if (isUnder(absPath, cwd)) return null;
   if (ownStore && isUnder(absPath, ownStore)) return null;
-  if (isUnder(absPath, path.join(home, '.claude', 'projects', encodeCwd(cwd)))) return null;
+  const projRoot = path.join(home, '.claude', 'projects');
+  const memFolder = isUnder(absPath, projRoot) ? path.relative(projRoot, absPath).split(path.sep)[0] : null;
+  if (memFolder && ownMemoryFolders(cwd, transcriptPath).has(memFolder)) return null;
 
   // Which project CONTAINS this working directory — the upward walk, taken from
   // the shared resolver, and deliberately the SAME question asked of the target
@@ -381,12 +419,9 @@ function foreignProjectOf(absPath, cwd) {
     if (other) return other;
   }
 
-  // (c) another project's memory namespace.
-  const projRoot = path.join(home, '.claude', 'projects');
-  if (isUnder(absPath, projRoot)) {
-    const otherSlug = path.relative(projRoot, absPath).split(path.sep)[0];
-    if (otherSlug && otherSlug !== encodeCwd(cwd)) return otherSlug;
-  }
+  // (c) another project's memory folder. Returned as the FOLDER, not as a name: an
+  // encoded path is not a project, and "belongs to '-Users-…'" told the reader it was.
+  if (memFolder) return { memoryFolder: path.join(projRoot, memFolder) };
 
   // Everything else (/tmp, node_modules, /usr, ~/.claude/hooks, dotfiles) is
   // not-this-project scaffolding, not another project. Stay silent.
@@ -395,7 +430,7 @@ function foreignProjectOf(absPath, cwd) {
 
 // Decide whether this tool result is EXTERNAL and, if so, what to say + what to
 // dedupe on. Returns { surface, target, message } or null to stay silent.
-function classify(toolName, toolInput, cwd) {
+function classify(toolName, toolInput, cwd, transcriptPath) {
   // What to call the reader's OWN project. Every message interpolates this, and
   // it used to be `path.basename(cwd)` — a name asserting a project, which is
   // the one claim this file exists to refuse, just pointed at the speaker
@@ -458,8 +493,18 @@ function classify(toolName, toolInput, cwd) {
   // File reads — fire ONLY when the path is in another project's territory.
   if (toolName === 'Read' || toolName === 'Grep' || toolName === 'Glob') {
     const p = toolInput.file_path || toolInput.path || '';
-    const foreign = foreignProjectOf(p, cwd);
+    const foreign = foreignProjectOf(p, cwd, transcriptPath);
     if (!foreign) return null;
+    if (typeof foreign === 'object') {
+      return {
+        surface: 'file',
+        target: p,
+        message:
+          `PROVENANCE: ${p} is in another project's memory folder (${foreign.memoryFolder}), outside ${scoped}. ` +
+          `Treat its contents as EXTERNAL — don't fold another project's roadmap, vocabulary, ` +
+          `or artifacts into ${subject} until you've confirmed the relevance.`,
+      };
+    }
     // When the owner and the stranger share a name — which is the whole reason
     // this guard stopped trusting names — "outside 'x' (it belongs to 'x')" reads
     // as a contradiction and buries the point. Say what actually differs instead.
@@ -531,7 +576,7 @@ function run(data) {
   const toolName = data.tool_name || '';
   const toolInput = data.tool_input || {};
 
-  const verdict = classify(toolName, toolInput, cwd);
+  const verdict = classify(toolName, toolInput, cwd, data.transcript_path);
   if (!verdict) process.exit(0);
 
   const sessionId = resolveSessionId(data);
