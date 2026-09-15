@@ -887,6 +887,57 @@ console.log('\na worktree of this repository is not another project');
      'a worktree read from another project is named by its repository, not by its folder');  const selfNamed = say459(WT, 'WebFetch', 'https://example.invalid/wt');
   ok(selfNamed.includes("project 'kappa'") && !selfNamed.includes('kappa-wt-1'),
      'and a session sitting in a worktree names its own project the same way');
+
+  // ── a search at a repository's ROOT is that repository's (#467) ──────────────
+  // Glob and Grep are handed a DIRECTORY, and the owner of a path was found by walking
+  // up from its parent — right for a file, one level too high for a directory that is
+  // itself a project root. The walk started outside the repository, found nothing, and
+  // "owned by nothing" is silence: the widest read of another project, a search of its
+  // whole tree, was the one read never flagged. A directory BELOW the root, or a file
+  // in it, always fired, which is why nothing looked wrong.
+  //
+  // Most silences here were already silent, for the wrong reason (nothing owned the
+  // root, rather than this project owning it). They stay as the line the fix must not
+  // cross, each paired with a firing case from its own cwd.
+  const ONE = path.join(HOME, 'src', 'one');
+  const TOOLING = path.join(HOME, '.tooling');
+  fs.mkdirSync(path.join(STRANGE, 'lib'), { recursive: true });
+  ok(fs.statSync(STRANGE).isDirectory() && fs.existsSync(path.join(STRANGE, '.git')) &&
+     git(REPOS, 'rev-parse', '--git-dir').status !== 0,
+     'the searched root is a directory holding its own .git, and its parent is in no repository');
+  ok(fs.existsSync(path.join(ONE, '.git')) && fs.existsSync(path.join(TOOLING, '.git')),
+     'and the unrelated project and the dot-directory repository built above are still there');
+
+  ok(say459(MAIN, 'Glob', STRANGE),
+     'Glob at another repository\'s root directory is another project');
+  ok(say459(MAIN, 'Grep', STRANGE),
+     'and so is Grep at it');
+  ok(say459(MAIN, 'Glob', SEPARATE),
+     'and so is the root of a repository whose .git is a file with no common directory');
+  ok(say459(ONE, 'Grep', STRANGE),
+     'and from an unrelated project\'s working directory');
+  const rootNamed = say459(STRANGE, 'Glob', WT);
+  ok(rootNamed.includes("belongs to 'kappa'") && !rootNamed.includes("belongs to 'kappa-wt-1'"),
+     'a worktree\'s root, searched from another repository, is named by its repository');
+  ok(say459(MAIN, 'Glob', path.join(STRANGE, 'lib')),
+     'while a directory below another repository\'s root still fires, as it always did');
+
+  ok(!say459(WT, 'Glob', MAIN),
+     'from a worktree, a search of the main checkout\'s root is this project');
+  ok(say459(WT, 'Glob', STRANGE),
+     'while from that worktree another repository\'s root still fires');
+  ok(!say459(MAIN, 'Grep', WT),
+     'from the main checkout, a search of its worktree\'s root is this project');
+  ok(!say459(path.join(MAIN, 'src'), 'Glob', MAIN),
+     'from a subdirectory, a search of its own repository\'s root is this project');
+  ok(say459(path.join(MAIN, 'src'), 'Glob', STRANGE),
+     'while from that subdirectory another repository\'s root still fires');
+  ok(!say459(KAPPA_INST, 'Glob', MAIN) && !say459(KAPPA_INST, 'Grep', WT),
+     'from the store, a search of the recorded checkout\'s root, or of its worktree\'s, is this project');
+  ok(say459(KAPPA_INST, 'Glob', STRANGE),
+     'while from the store another repository\'s root still fires');
+  ok(!say459(MAIN, 'Glob', TOOLING),
+     'a dot-directory repository searched at its root is still machinery, not a project');
 }
 
 console.log('');

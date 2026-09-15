@@ -44,11 +44,11 @@ const os = require('os');
 // these exports must degrade, not throw inside a hook. Absent, the store checks
 // below fall back to over-warning rather than to the basename guess they replaced.
 let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
-  isInside = null, projectRootOfDir = null, projectRootFor = null, repositoryOf = null,
+  isInside = null, projectRootOfDir = null, repositoryOf = null,
   mainCheckoutOf = null, recordedCheckoutsOf = null;
 try {
   ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
-    projectRootOfDir, projectRootFor, repositoryOf, mainCheckoutOf,
+    projectRootOfDir, repositoryOf, mainCheckoutOf,
     recordedCheckoutsOf } = require('./anvi-paths.js'));
 } catch { /* older install */ }
 
@@ -143,9 +143,16 @@ function isMachinerySegment(dir) {
 // Where nothing above is a workspace either, there is no project to name and the
 // caller stays silent, which is what the closing comment has always said should
 // happen to scaffolding.
+//
+// The walk starts AT the path, not at its parent (#467). Glob and Grep are handed a
+// directory, and a directory that is itself a project root was otherwise looked up
+// from one level above it: outside the repository, owned by nothing, and so silent —
+// the widest read of another project was the one never flagged. For a file, or a
+// path not yet on disk, the two starting points agree: nothing that is not a
+// directory has a `.git` or `.anvi` inside it.
 function workspaceRootFor(absPath) {
-  if (!projectRootFor) return null; // older install — unproven ownership names nothing
-  let r = projectRootFor(absPath);
+  if (!projectRootOfDir) return null; // older install — unproven ownership names nothing
+  let r = projectRootOfDir(absPath);
   while (r && isMachinerySegment(r)) {
     const up = path.dirname(r);
     if (up === r) return null;
@@ -402,7 +409,7 @@ function classify(toolName, toolInput, cwd) {
   // there is no project to name. Then the honest sentence says so rather than
   // inventing one, which is why every message below has two shapes instead of a
   // single interpolated name.
-  const selfRoot = workspaceRootFor(path.join(cwd, 'x'));
+  const selfRoot = workspaceRootFor(cwd);
   const project = selfRoot ? projectNameOf(selfRoot) : null;
   // The subject of "belongs to …" / "fold into …", and the scope of "not scoped
   // to …". They differ: "not scoped to project 'anvi'" has no project to name a
