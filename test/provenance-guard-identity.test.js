@@ -1178,6 +1178,40 @@ console.log('\nthe session\'s own memory folder is this project\'s wherever the 
      'and a Glob that passes the location as a path still fires as it did');
   ok(!sayGlob(NU, { pattern: path.join(XI, 'src') }, NU_TX, 'Grep'),
      'a Grep pattern is a regular expression over contents, never a location, and is not read as one');
+
+  // ── a relative path that climbs OUT of the working directory (#476) ──────────
+  // Every relative `file_path` and `path` was skipped as though it resolved under the
+  // working directory. `src/a.js` does; `../xi/src/a.js` does not — it reaches the
+  // neighbouring repository, whose absolute spelling was flagged while this one was
+  // silent. Resolved against the payload's working directory, never the process's.
+  const relTo = (from, to) => path.relative(from, to);
+  ok(relTo(NU, path.join(XI, 'src', 'a.js')).startsWith('..') && relTo(path.join(NU, 'src'), NU_MEM).startsWith('..'),
+     'the relative spellings below genuinely climb out of their working directories');
+
+  ok(sayGlob(NU, { file_path: relTo(NU, path.join(XI, 'src', 'a.js')) }, NU_TX, 'Read'),
+     'a relative Read that climbs into another repository fires');
+  ok(sayGlob(NU, { path: relTo(NU, XI), pattern: 'x' }, NU_TX, 'Grep'),
+     'and so does a Grep whose relative path is that repository\'s root');
+  ok(sayGlob(path.join(NU, 'src'), { file_path: relTo(path.join(NU, 'src'), path.join(XI, 'src', 'a.js')) }, NU_TX, 'Read'),
+     'and a deeper climb from a subdirectory');
+  ok(sayGlob(NU, { file_path: relTo(NU, XI_MEM) }, NU_TX, 'Read'),
+     'and a relative path into another project\'s memory folder');
+  const relMsg = sayGlob(path.join(NU, 'src'), { path: relTo(path.join(NU, 'src'), path.join(XI, 'src')), pattern: 'x' }, NU_TX, 'Grep');
+  ok(relMsg.includes(path.join(XI, 'src')) && relMsg.includes("belongs to 'xi'") && !relMsg.includes('..'),
+     'the note names the resolved directory and its owner, not the relative spelling');
+
+  ok(!sayGlob(NU, { file_path: path.join('src', 'a.js') }, NU_TX, 'Read'),
+     'while a relative Read inside the working directory stays silent');
+  ok(!sayGlob(NU, { path: 'src', pattern: 'x' }, NU_TX, 'Grep'),
+     'and so does a relative Grep path inside it');
+  ok(!sayGlob(path.join(NU, 'src'), { file_path: path.join('..', 'src', 'a.js') }, NU_TX, 'Read'),
+     'and a climb that lands back inside the working directory');
+  ok(!sayGlob(path.join(NU, 'src'), { path: '..', pattern: 'x' }, NU_TX, 'Grep'),
+     'and one up to this repository\'s own root from a subdirectory');
+  ok(!sayGlob(NU, { file_path: relTo(NU, path.join(NU_WT, 'src', 'a.js')) }, NU_TX, 'Read'),
+     'and one into a worktree of this same repository');
+  ok(!sayGlob(path.join(NU, 'src'), { file_path: relTo(path.join(NU, 'src'), NU_MEM) }, NU_TX, 'Read'),
+     'and one into the session\'s own memory folder');
 }
 
 console.log('');
