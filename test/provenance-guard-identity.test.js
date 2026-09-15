@@ -1063,6 +1063,73 @@ console.log('\nthe session\'s own memory folder is this project\'s wherever the 
   const msg = say468(path.join(NU, 'src'), XI_MEM, NU_TX);
   ok(msg.includes('memory folder') && !msg.includes(`belongs to '${slug(XI)}'`),
      'the message calls it another project\'s memory folder, not a project named after the folder');
+
+  // ── a search across EVERY project's memory folder at once (#471) ─────────────
+  // The memory check judges the first path segment below the projects folder. A
+  // search AT that folder, or at the directory holding it, has no segment to judge,
+  // so it fell through to silence: one search reading every project's memory was
+  // the one memory read never flagged. Same shape as a search at a repository's root.
+  //
+  // The line: only a directory that CONTAINS the projects folder, and only inside
+  // Claude Code's own directory. A sibling of the projects folder holds no memory,
+  // a name that merely starts with `projects` is another folder, and the session's
+  // own folder stays its own — each silence reached from a cwd that also fires.
+  const CLAUDE_DIR = path.join(HOME, '.claude');
+  const CLAUDE_HOOKS = path.join(CLAUDE_DIR, 'hooks');
+  const LOOKALIKE = path.join(CLAUDE_DIR, 'projects-archive');
+  for (const d of [CLAUDE_HOOKS, LOOKALIKE]) fs.mkdirSync(d, { recursive: true });
+  const sayAll = (cwd, tool, target, transcript) => {
+    const payload = { tool_name: tool, tool_input: tool === 'Read' ? { file_path: target } : { path: target, pattern: 'x' },
+      cwd, session_id: `prov-471-${process.pid}-${probeN++}` };
+    if (transcript) payload.transcript_path = transcript;
+    const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, HOME } });
+    return r.stdout || '';
+  };
+
+  const folders = fs.readdirSync(PROJECTS);
+  ok(folders.includes(slug(NU)) && folders.includes(slug(XI)) && folders.includes(slug(LANDING)),
+     'the projects folder genuinely holds this project\'s memory folder and other projects\' beside it');
+  ok(path.dirname(PROJECTS) === CLAUDE_DIR && !LOOKALIKE.startsWith(PROJECTS + path.sep),
+     'the Claude directory holds it, and the lookalike folder only shares its name\'s start');
+
+  ok(sayAll(NU, 'Grep', PROJECTS, NU_TX),
+     'Grep at the projects folder itself spans every project\'s memory, and fires');
+  ok(sayAll(NU, 'Glob', PROJECTS, NU_TX),
+     'and so does Glob at it');
+  ok(sayAll(NU, 'Grep', PROJECTS + path.sep, NU_TX),
+     'and the same folder spelled with a trailing separator');
+  ok(sayAll(NU, 'Grep', CLAUDE_DIR, NU_TX),
+     'and a search of the Claude directory, which holds the projects folder');
+  ok(sayAll(path.join(NU, 'src'), 'Glob', PROJECTS, NU_TX),
+     'from a subdirectory too');
+  ok(sayAll(NU_INST, 'Grep', PROJECTS, NU_TX),
+     'and from the project\'s store');
+  ok(sayAll(SCRATCH, 'Grep', PROJECTS, NU_TX),
+     'and from a scratch directory, where the transcript places the session');
+  ok(sayAll(NU, 'Grep', PROJECTS),
+     'and with no transcript path at all');
+
+  ok(!sayAll(NU, 'Grep', path.join(PROJECTS, slug(NU)), NU_TX),
+     'while a search of the session\'s own memory folder, from the same cwd, stays silent');
+  ok(!sayAll(NU, 'Glob', path.dirname(NU_MEM), NU_TX),
+     'and so does one of the memory directory inside it');
+  ok(sayAll(NU, 'Glob', path.join(PROJECTS, slug(XI)), NU_TX),
+     'and another single project\'s folder still fires as it did');
+  ok(!sayAll(NU, 'Grep', CLAUDE_HOOKS, NU_TX),
+     'a directory beside the projects folder holds no memory and stays silent');
+  ok(!sayAll(NU, 'Grep', LOOKALIKE, NU_TX),
+     'and so does a folder whose name only starts like the projects folder\'s');
+  ok(!sayAll(CLAUDE_DIR, 'Grep', PROJECTS, NU_TX),
+     'a session working in the Claude directory itself is not warned about searching inside it');
+  // The home directory holds the projects folder too, but a search of it spans every
+  // repository as well, so the memory-only sentence would understate it. Whether and
+  // how a home-wide search is reported is its own question; this only holds the bound.
+  ok(!sayAll(NU, 'Grep', HOME, NU_TX).includes('every project\'s memory folder'),
+     'a search of the home directory is not described as a search of memory folders alone');
+
+  const allMsg = sayAll(path.join(NU, 'src'), 'Grep', PROJECTS, NU_TX);
+  ok(allMsg.includes('every project\'s memory folder') && !allMsg.includes('belongs to'),
+     'the message says the search spans every project\'s memory folder, and names no project as its owner');
 }
 
 console.log('');
