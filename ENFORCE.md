@@ -485,8 +485,11 @@ allowed to be silent in production must be loud in a test, or it has no witness.
   advisory, not a gate: it reports rather than fails, because a guard at this precision
   that could block a merge would be weakened or deleted by whoever hit it first. Read the
   findings; the remedy is to count the occurrence that carries the rule, or to narrow the
-  needle until it is unique. The check itself is silent when it finds nothing, which is
-  what makes attaching it to a whole run cost nothing.
+  needle until it is unique. Where any occurrence genuinely will do, say why on the
+  assertion's own line — `// presence: <why>` — and the check sets it aside; a marker with
+  no reason changes nothing, and the report counts every assertion a marker set aside
+  beside the rate, so the list cannot shrink unseen. The check itself is silent when it
+  finds nothing, which is what makes attaching it to a whole run cost nothing.
 - **Falsify, don't assert.** Break the thing each case guards and confirm it goes
   red. An integration test that has never failed is a claim, not a witness.
   `node scripts/falsify.js <spec.js>` runs the matrix and is the part worth not

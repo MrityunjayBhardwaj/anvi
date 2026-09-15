@@ -33,6 +33,13 @@
 //   4. the assertion ALREADY counts occurrences. This is the shape a correct fix
 //      produces, and flagging it would punish exactly the repair being asked for.
 //
+// Beside those, one DECLARED exception (issue #480). Some presence assertions are right to be
+// broad: any occurrence will do. A person who has judged one so says it on the assertion's own
+// line, `// presence: <why any occurrence will do>`. It is not a shape — it records a judgement
+// at a named line — and the report counts every assertion it set aside, so a marker cannot
+// shorten the list without the count showing it. A marker with no reason records nothing and
+// changes nothing.
+//
 // SILENT WHEN CLEAN. Nothing is printed when there is nothing to say, so attaching this
 // to a suite costs no attention on a clean run.
 //
@@ -59,6 +66,7 @@ const ROOTS = (process.env.BLIND_ROOTS || '').split(':').filter(Boolean);
 const findings = [];
 const seen = new Set();
 let presenceChecks = 0;          // the DENOMINATOR: every presence check at an assertion site
+let marked = 0;                  // flagged-but-for a `// presence:` marker, reported beside it
 
 const srcCache = Object.create(null);
 function sourceLine(file, line) {
@@ -82,6 +90,24 @@ const COUNTS      = /\.length\s*(>=|>|===|==|!==)|\bfilter\s*\(|\/g\b|\bsplit\s*
 // quantifier over the set, not from where any single member sits. Each member's own
 // multiplicity says nothing about whether the claim could pass wrongly.
 const QUANTIFIED  = /\.every\s*\(/;
+// A presence assertion judged defensible, with the judgement's reason (the declared exception).
+const PRESENCE_MARKER = /\/\/\s*presence:(.*)$/;
+
+// Split a site line into its code and a marker's reason. The other exclusions read the CODE
+// only: were the whole line read, a reason that happened to say "control —" or `split(` would
+// be set aside under that exclusion instead, and the marker count would not show it.
+// A `// presence:` inside a string literal is message text, not a comment. An odd number of any
+// quote character before it means it sits inside one, and the line is read as unmarked — the
+// safe direction, since an unhonoured marker leaves an assertion flagged rather than hidden.
+function splitMarker(text) {
+  const m = PRESENCE_MARKER.exec(text);
+  if (!m) return { code: text, reason: '' };
+  const before = text.slice(0, m.index);
+  for (const q of ["'", '"', '`']) {
+    if ((before.split(q).length - 1) % 2 === 1) return { code: text, reason: '' };
+  }
+  return { code: before, reason: m[1].trim() };
+}
 
 // Walk the stack for the first USER frame that is an assertion call site. Returns null
 // when no such frame exists, which is exclusion 1 and exclusion 2 in one step: a
@@ -161,13 +187,16 @@ function consider(kind, needle, haystack, count) {
   if (!site) return;                                   // exclusion 1 + 2
   presenceChecks++;                                    // denominator: counted at the SITE
   if (count <= 1) return;
-  if (IS_CONTROL.test(site.text)) return;              // exclusion 3
-  if (COUNTS.test(site.text)) return;                  // exclusion 4
-  if (QUANTIFIED.test(site.text)) return;              // exclusion 5
+  const { code, reason } = splitMarker(site.text);
+  if (IS_CONTROL.test(code)) return;                   // exclusion 3
+  if (COUNTS.test(code)) return;                       // exclusion 4
+  if (QUANTIFIED.test(code)) return;                   // exclusion 5
   if (isStructuralPattern(needle)) return;             // exclusion 6
   const key = `${site.file}:${site.line}:${needle}`;
   if (seen.has(key)) return;
   seen.add(key);
+  // Consulted LAST, so the count holds only assertions nothing else would have set aside.
+  if (reason) { marked++; return; }                    // the declared exception, counted
   findings.push({
     kind, needle: String(needle).slice(0, 120), count,
     haystackLength: haystack.length, file: site.file, line: site.line,
@@ -204,13 +233,13 @@ process.on('exit', () => {
   if (!OUT) return;
   try {
     const payload = findings.map(f => JSON.stringify({ ...f, _kind: 'finding' }));
-    payload.push(JSON.stringify({ _kind: 'denominator', presenceChecks }));
+    payload.push(JSON.stringify({ _kind: 'denominator', presenceChecks, marked }));
     fs.appendFileSync(OUT, payload.join('\n') + '\n');
   } catch { /* the instrument must never break the suite it is measuring */ }
 });
 
 module.exports = { MIN_HAYSTACK, MIN_NEEDLE, ASSERT_CALL, HELPER_DEF, IS_CONTROL, COUNTS,
-                   countRegExp, countString, render };
+                   PRESENCE_MARKER, countRegExp, countString, render, summarise };
 
 // --- report mode -------------------------------------------------------------------
 // `node scripts/blind-assertions.js [pattern]` runs the suite with this file preloaded and
@@ -221,10 +250,13 @@ module.exports = { MIN_HAYSTACK, MIN_NEEDLE, ASSERT_CALL, HELPER_DEF, IS_CONTROL
 // A count with nothing to divide by is not a rate. The denominator is every presence check
 // the run actually reached, so a small finding count on a suite that barely uses presence
 // assertions cannot read as a clean bill of health.
-function render(findings, presenceChecks) {
+// The marker count is printed on every run, zero included, beside the figure it was taken
+// from: a count that appears only when non-zero cannot be told apart from one never taken.
+function render(findings, presenceChecks, marked = 0) {
   const out = [];
+  const byMarker = 'set aside by a // presence: marker';
   if (!findings.length) {
-    out.push(`No blind assertions found (${presenceChecks} presence checks examined).`);
+    out.push(`No blind assertions found (${presenceChecks} presence checks examined, ${marked} ${byMarker}).`);
     return out.join('\n');
   }
   const byFile = new Map();
@@ -242,10 +274,22 @@ function render(findings, presenceChecks) {
     }
   }
   const pct = presenceChecks ? ((findings.length / presenceChecks) * 100).toFixed(1) : '?';
-  out.push(`\n${findings.length} of ${presenceChecks} presence checks cannot discriminate (${pct}%), in ${byFile.size} file(s).`);
+  out.push(`\n${findings.length} of ${presenceChecks} presence checks cannot discriminate (${pct}%), in ${byFile.size} file(s); ${marked} more ${byMarker}.`);
   out.push('Each names a rule whose deletion the assertion would not notice. Count the');
-  out.push('occurrence that carries the rule, or narrow the needle until it is unique.');
+  out.push('occurrence that carries the rule, or narrow the needle until it is unique. Where any');
+  out.push('occurrence will do, say why on the same line: `// presence: <why>`.');
   return out.join('\n');
+}
+
+// Every test file runs in its own process and appends its own rows, so a run's totals are
+// the SUM over those rows. A row written before markers existed carries no count: none.
+function summarise(rows) {
+  const denominators = rows.filter(x => x._kind === 'denominator');
+  return {
+    findings: rows.filter(x => x._kind === 'finding'),
+    checks: denominators.reduce((n, x) => n + (x.presenceChecks || 0), 0),
+    marked: denominators.reduce((n, x) => n + (x.marked || 0), 0),
+  };
 }
 
 if (require.main === module) {
@@ -276,10 +320,8 @@ if (require.main === module) {
     console.error('\nThe instrument produced no output — the suite did not run under it.');
     process.exit(2);
   }
-  const findings = rows.filter(x => x._kind === 'finding');
-  const checks = rows.filter(x => x._kind === 'denominator')
-                     .reduce((n, x) => n + (x.presenceChecks || 0), 0);
-  console.log('\n' + render(findings, checks));
+  const { findings, checks, marked } = summarise(rows);
+  console.log('\n' + render(findings, checks, marked));
   try { fs.unlinkSync(tmp); } catch { /* best effort */ }
   process.exit(r.status === 0 ? 0 : 1);
 }
