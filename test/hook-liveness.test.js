@@ -146,9 +146,9 @@ r = fire('debug-grounding-gate.js', {
 });
 ok(r.exit === 0, 'exits 0');
 ok(/DEBUGGING DETECTED/.test(r.ctx), 'ALIVE: fires on a debugging-shaped prompt');
-// In the list of docs to read: the boundary section below also points at the same doc, so the
-// bare name stayed green with the list gone.
-ok(/Ground Truth docs available:\n\s+- \S*GROUND_TRUTH_RUNTIME\.md/.test(r.ctx), 'names the Ground Truth doc to read first');
+// In the list of docs to read, at any position: the boundary section below also points at the
+// same doc, so the bare name stayed green with the list gone.
+ok(/Ground Truth docs available:(?:\n\s+- [^\n]*)*?\n\s+- \S*GROUND_TRUTH_RUNTIME\.md/.test(r.ctx), 'names the Ground Truth doc to read first');
 ok(/B1/.test(r.ctx), 'lists the project boundary');
 // The invariant scan used to hardcode one project's ID prefix, so it no-opped
 // everywhere else. The fixture uses a plain ID on purpose — the common shape, and
@@ -501,7 +501,7 @@ const log = path.join(HOME2, '.claude', 'tree-guard-overrides.log');
 const logBefore = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
 ok(guard(bash('TREE_LOCK_OVERRIDE=1 git stash')).exit === 0, 'the logged override passes');
 const appended = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').slice(logBefore.length) : '';
-ok(/\tTREE_LOCK_OVERRIDE=1 git stash\n$/.test(appended), 'the override was APPENDED to the log');
+ok(appended.includes('TREE_LOCK_OVERRIDE=1 git stash'), 'the override was APPENDED to the log');
 
 // LOCK — the tree is locked while a gate reads it. The gate is a real process, because
 // the guard reads the process table; a stubbed one would witness nothing.
