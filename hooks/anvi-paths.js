@@ -652,27 +652,6 @@ function resolveDirForFile(filePath, kind) {
   return resolveDir(root, kind);
 }
 
-// Which REPOSITORY are this file's CONTENTS written relative to?
-//
-// A different question from projectRootFor above, and the difference is invisible
-// for almost every file — a source file is stored in the repo it talks about, so
-// the walk answers both at once. A CATALOGUE is the exception the walk cannot see:
-// it lives in the central store and its REF paths name files in the project's
-// working tree. Walking up from one stops at `<store>/projects/<name>/`, inside
-// the STORE's git repo, which has never contained any of those paths. Every ref
-// then classifies as "outside this repo", every entry falls through to unanchored,
-// and the freshness block reads uniformly blank at exactly the moment it is meant
-// to steer a re-validation pass — which IS an edit to the catalogue.
-//
-// Both spellings land there: a repo-local `.anvi` is a symlink into the store and
-// the walk resolves through realpath first.
-//
-// The store project's PROVENANCE record already holds the answer — it lists the
-// worktrees bound to that project. Reading it HERE means the drift question and
-// the binding gate consult the SAME record, so the two can never disagree about
-// which working tree a store project belongs to. The record decides; the store
-// directory's NAME never does.
-//
 // The checkouts a store project's provenance record binds to it that exist on this
 // machine — `{ live, reason }`, with `reason` null exactly when `live` is non-empty.
 //
@@ -709,6 +688,27 @@ function recordedCheckoutsOf(storeProject) {
   return { live, reason: null };
 }
 
+// Which REPOSITORY are this file's CONTENTS written relative to?
+//
+// A different question from projectRootFor above, and the difference is invisible
+// for almost every file — a source file is stored in the repo it talks about, so
+// the walk answers both at once. A CATALOGUE is the exception the walk cannot see:
+// it lives in the central store and its REF paths name files in the project's
+// working tree. Walking up from one stops at `<store>/projects/<name>/`, inside
+// the STORE's git repo, which has never contained any of those paths. Every ref
+// then classifies as "outside this repo", every entry falls through to unanchored,
+// and the freshness block reads uniformly blank at exactly the moment it is meant
+// to steer a re-validation pass — which IS an edit to the catalogue.
+//
+// Both spellings land there: a repo-local `.anvi` is a symlink into the store and
+// the walk resolves through realpath first.
+//
+// The store project's PROVENANCE record already holds the answer — it lists the
+// worktrees bound to that project. Reading it HERE means the drift question and
+// the binding gate consult the SAME record, so the two can never disagree about
+// which working tree a store project belongs to. The record decides; the store
+// directory's NAME never does.
+//
 // Returns `{ repo, reason }` and never a bare null: "I could not work out which
 // repository to ask" and "there is nothing here" must arrive as different values
 // at the point the caller acts. This resolver answers on a SMALLER domain
