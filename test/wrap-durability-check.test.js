@@ -134,7 +134,7 @@ ok(/merge-base\s+--is-ancestor/.test(step3),
 // not that a particular inflection is used, so the verb is allowed to inflect.
 ok(/exits?\s+0/i.test(step3) && /exits?\s+1/i.test(step3),
    'step 3 states both exit codes — a check that communicates only by exit status is unreadable without them');
-ok(/-S\b/.test(step3) && /\bdiff\b/i.test(step3),
+ok(/-S\b/.test(step3) && /\bdiff\b/i.test(step3), // presence: the diff conjunct occurs only in the explanation of -S, so this line fails without it
    'step 3 says what `-S` actually searches, so the reader can see why the two searches are not interchangeable');
 
 // The defect itself, as a rule over the recommendations rather than over this file's

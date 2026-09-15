@@ -131,7 +131,7 @@ console.log('ground-truth-session-start (SessionStart)');
 let r = fire('ground-truth-session-start.js', { cwd: P, hook_event_name: 'SessionStart', source: 'startup' });
 ok(r.exit === 0, 'exits 0');
 ok(/GROUNDING/.test(r.ctx), 'ALIVE: reports grounding status');
-ok(/GT docs|GROUND_TRUTH|RUNTIME/.test(r.ctx), 'names the Ground Truth doc it found');
+ok(/GT docs|GROUND_TRUTH|RUNTIME/.test(r.ctx), 'names the Ground Truth doc it found'); // presence: one GT docs segment contains both alternatives
 
 // --- 3. debug-grounding-gate ------------------------------------------------
 // Contract: a debugging-shaped prompt gets Ground Truth injected BEFORE reasoning
@@ -153,7 +153,7 @@ ok(/B1/.test(r.ctx), 'lists the project boundary');
 // The invariant scan used to hardcode one project's ID prefix, so it no-opped
 // everywhere else. The fixture uses a plain ID on purpose — the common shape, and
 // the one the old regex could never match.
-ok(/MISALIGNED|LIVENESS-MISALIGNED-MARKER/.test(r.ctx),
+ok(/MISALIGNED|LIVENESS-MISALIGNED-MARKER/.test(r.ctx), // presence: both matches sit in the one injected invariant line
   'flags a misaligned invariant regardless of the project’s ID prefix');
 
 // Correctly quiet: a non-debugging prompt must stay silent. Without this, a hook
@@ -245,7 +245,7 @@ r = fire('provenance-guard.js', {
   tool_name: 'WebFetch', tool_input: { url: 'https://example.com/doc' }, tool_response: {},
 });
 ok(r.exit === 0, 'exits 0');
-ok(/PROVENANCE|EXTERNAL/.test(r.ctx), 'ALIVE: flags a web result as external');
+ok(/PROVENANCE|EXTERNAL/.test(r.ctx), 'ALIVE: flags a web result as external'); // presence: one provenance warning contains both words
 
 // The dedupe itself is a contract worth pinning: the same surface twice in one
 // session must remind once, not nag.
@@ -281,7 +281,7 @@ ok(r.exit === 0, 'exits 0 (reminds, never blocks)');
 // check counted 14 matches — so the old form passed whenever the hook emitted anything at
 // all, including on input it had failed to recognise. What has to be true is that the guard
 // names the key it found.
-ok(/vyapti:184/.test(r.ctx + r.stdout), 'ALIVE: names the index key it caught bound for public content');
+ok(/vyapti:184/.test(r.ctx + r.stdout), 'ALIVE: names the index key it caught bound for public content'); // presence: the same warning, read from context and stdout together
 
 // Precision: an ordinary command carrying no index key earns silence.
 r = fire('catalogue-id-leak-guard.js', {
@@ -301,7 +301,7 @@ r = fire('shell-rewrite-guard.js', {
   tool_input: { command: 'SHAS=$(git log --format=%H); for s in $SHAS; do git cat-file -t "$s"; done' },
 });
 ok(r.exit === 0, 'exits 0 (reminds, never blocks)');
-ok(/iterates ONCE|rewrites part of this command/.test(r.ctx),
+ok(/iterates ONCE|rewrites part of this command/.test(r.ctx), // presence: one shell-rewrite warning contains both phrases
    'ALIVE: reacts to a bare unquoted expansion in a for list');
 ok(/while IFS= read -r/.test(r.ctx), 'and names the remedy rather than only the fault');
 
@@ -457,7 +457,7 @@ const bash = (command, cwd) => ({ tool_name: 'Bash', tool_input: { command }, cw
 // BAN — a banned op, gate or no gate.
 let g = guard(bash('git stash'));
 ok(g.exit === 2 && g.denied, 'BAN: a banned tree op is REFUSED (exit 2 + deny payload)');
-ok(/git worktree add|scratchpad/.test(g.why), 'BAN: the refusal carries the remedy, not just the verdict');
+ok(/git worktree add|scratchpad/.test(g.why), 'BAN: the refusal carries the remedy, not just the verdict'); // presence: the one refusal, present both escaped and plain; either copy lists the remedy
 
 // ⚠ A MENTION IS NOT A COMMAND. This is one of the two bugs the guard found in itself:
 // it refused an inspection whose sample string quoted the banned op.
@@ -590,7 +590,7 @@ console.log('structure-guard-hook (PreToolUse — refuses an eroding import)');
     dir: PKG3, design: designFile, baseline: baselineFile, extractor: EX, cache: path.join(tmp, 'structure-cache.json') }] }));
   const refused = sg(upward, HOME3);
   ok(refused.exit === 2 && refused.denied, 'ALIVE: a registered package\'s upward import is REFUSED (exit 2 + deny payload)');
-  ok(/src\/low\/a\.ts -> src\/high\/h\.ts/.test(refused.out), 'the refusal names the edge');
+  ok(/src\/low\/a\.ts -> src\/high\/h\.ts/.test(refused.out), 'the refusal names the edge'); // presence: the refusal names the edge under each rule it breaks, on both channels; any naming is the claim
 
   const release = sg({ ...upward, tool_input: { ...upward.tool_input, new_string: '// a comment\nexport const a = 1;\n' } }, HOME3);
   ok(release.exit === 0 && !release.denied, 'RELEASE: a harmless edit to the same file is allowed — the guard is not stuck on');

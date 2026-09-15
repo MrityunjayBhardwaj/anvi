@@ -116,7 +116,7 @@ ok(rule !== '',
    'the prose states a rule tying the reported count to the ceiling it was read under');
 ok(/at least/i.test(rule),
    'that rule says a ceiling-length count is reported as "at least N", not as N');
-ok(/totalCount/.test(prose),
+ok(/totalCount/.test(prose), // presence: one sentence names totalCount twice while stating where the denominator comes from
    'the prose says where the board\'s denominator comes from, so the next author keeps it');
 
 console.log('\n— the denominators survive as far as the rendered map —');

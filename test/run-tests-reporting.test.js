@@ -169,7 +169,7 @@ console.log('\nverdictLines — the closing block reports the stall as a stall')
   ok(text.includes('never finished'), 'and the report says what a timeout did not decide');
   ok(text.includes('Check the machine before the code'),
      'the cluster is named as an environment signal');
-  ok(text.includes('the cap did not hold'), 'the 3x overrun is surfaced in the same block');
+  ok(text.includes('the cap did not hold'), 'the 3x overrun is surfaced in the same block'); // presence: one row per overrunning file, each from the same rule; any row surfaces it
 
   // A clean run must stay quiet: none of the new lines may appear when nothing failed.
   const clean = verdictLines({ results: passed(72), discovered: 72, selected: 72, untracked: [] });

@@ -37,7 +37,7 @@ console.log('the canonical document exists and carries the facts commands rely o
     ['the identity record', /PROVENANCE\.json/],
     ['the durability states', /NO_REMOTE/],
     ['how to create the backup repo', /ensure-store-durable\.sh/],
-  ]) ok(re.test(t), `${CANON} states ${claim}`);
+  ]) ok(re.test(t), `${CANON} states ${claim}`); // presence: the canonical document states each fact in several places; any statement is the claim
 }
 
 // Tracked command files only — untracked scratch must not fail the suite.
@@ -87,7 +87,7 @@ console.log('\nwhat the document promises about declining, some entry point perf
       // the part that was declined — the local `git init` was never the question.
       const localOnly = invocations.filter(l => !l.includes('--create-remote'));
       ok(localOnly.length >= 1, `${d} has an --apply invocation WITHOUT --create-remote — its decline path keeps history`);
-      ok(/declin/i.test(t), `${d} names the decline case, so the invocation is not read as a stray duplicate`);
+      ok(/declin/i.test(t), `${d} names the decline case, so the invocation is not read as a stray duplicate`); // presence: the document discusses declining throughout; any mention names the case
       // An answer nobody writes down is an answer nobody can honour.
       ok(t.includes('--record-decline'), `${d} records the answer rather than asking again next time`);
     }
@@ -98,13 +98,13 @@ console.log('\nwhat the document promises about declining, some entry point perf
     // just as happily if both re-offered forever.
     const init = fs.readFileSync(path.join(ROOT, 'skills', 'anvi-init', 'SKILL.md'), 'utf8');
     const upd = fs.readFileSync(path.join(ROOT, 'workflows', 'update.md'), 'utf8');
-    ok(init.includes('DECLINED:'), 'init reads the standing answer before offering');
+    ok(init.includes('DECLINED:'), 'init reads the standing answer before offering'); // presence: both mentions are init's own instruction about the DECLINED line
     ok(/do not re-open|not re-open the question|does not ask again/i.test(init), 'and is told not to re-open it');
-    ok(upd.includes('DECLINED:') && /revisit|re-rais/i.test(upd), 'update is the one door that revisits the question');
+    ok(upd.includes('DECLINED:') && /revisit|re-rais/i.test(upd), 'update is the one door that revisits the question'); // presence: both matches are the one paragraph saying update revisits a decline
 
     // The canonical document must describe the file that now sits beside the
     // store, or the layout it claims to be the single description of is stale.
-    ok(/backup-decision\.json/.test(storage), `${CANON} documents where the answer is kept`);
+    ok(/backup-decision\.json/.test(storage), `${CANON} documents where the answer is kept`); // presence: the layout listing and the prose both document where the answer is kept
 
     // The seam the instruction depends on. If the script ever folds the local
     // half into --create-remote, the instruction above silently becomes a no-op.

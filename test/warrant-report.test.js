@@ -186,7 +186,7 @@ console.log('\nGROUP 2 — nothing to report is said, never counted');
   const b = run(noStore);
   eq(b.status, R.EXIT.NO_STORE, 'catalogues but no instance store → exit 4');
   eq(b.stdout.trim(), '', 'and stdout is empty — THE case the refusal exists for');
-  ok(/never ran|never permitted/.test(b.stderr), 'and it says the store may never have been written, not that no claims were made');
+  ok(/never ran|never permitted/.test(b.stderr), 'and it says the store may never have been written, not that no claims were made'); // presence: one sentence contains both alternatives
   ok(/warrants\.jsonl/.test(b.stderr), 'and it names the path it looked at');
 
   const emptyStore = mk('r-empty');

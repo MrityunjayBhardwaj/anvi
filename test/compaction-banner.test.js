@@ -215,7 +215,7 @@ console.log('\nthe templates and the hook state the same threshold');
   eq(templates.length, 3, 'three catalogue templates were found to check');
   for (const t of templates) {
     const src = fs.readFileSync(path.join(refs, t), 'utf8');
-    has(src, `~${kb} KB`, `${t} states the same threshold the hook compares against`);
+    has(src, `~${kb} KB`, `${t} states the same threshold the hook compares against`); // presence: both mentions are this template stating its one compaction threshold; either matching the hook is the claim
     hasNot(src, '1500 lines', `${t} no longer states the threshold as a line count`);
   }
 }

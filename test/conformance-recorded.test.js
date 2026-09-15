@@ -147,8 +147,8 @@ function run(args, home = HOME) {
 {
   const out = run(['--recorded']);
   has(out, "subjects from the store's records", 'the output states WHICH subject list produced it');
-  has(out, 'buried', 'and the directory only a record could name is audited');
-  has(out, 'not reachable this way', 'the blind spot is stated rather than left to be inferred');
+  has(out, 'buried', 'and the directory only a record could name is audited'); // presence: every occurrence is a line of the buried project's own audit section
+  has(out, 'not reachable this way', 'the blind spot is stated rather than left to be inferred'); // presence: each unreachable kind of store project gets the same stated blind spot; any row states it
   has(out, 'unrecorded', 'the unreachable project is named in the output, not just counted');
   has(out, 'no longer on disk', 'the vanished path gets its own section');
 
@@ -156,8 +156,8 @@ function run(args, home = HOME) {
   // with no `.anvi` anywhere in its ancestry. It must arrive as a link finding
   // with the command that fixes it — the classifier already knew how to say
   // this, and only the subject list was keeping it out of the report.
-  has(out, 'CENTRALIZED_ONLY', 'a recorded-but-unlinked working copy surfaces as a link finding');
-  has(out, 'link-catalogues.sh', 'carrying the remedy that makes it actionable');
+  has(out, 'CENTRALIZED_ONLY', 'a recorded-but-unlinked working copy surfaces as a link finding'); // presence: buried and plain are both recorded but unlinked; either surfacing is the claim
+  has(out, 'link-catalogues.sh', 'carrying the remedy that makes it actionable'); // presence: the same remedy line under each recorded-but-unlinked copy; either carries it
 
   // Without the option the same store is invisible: the default audits cwd, and
   // this assertion is what makes the one above mean something.
@@ -170,8 +170,8 @@ console.log('\n▸ spawned: a named directory is audited even when no record kno
 {
   const stranger = workdir('stranger');            // on disk, in no record
   const out = run(['--recorded', stranger]);
-  has(out, 'stranger', 'an explicitly named directory survives the record-derived list');
-  has(out, 'buried', 'and the recorded ones are still there — the two lists are unioned, not swapped');
+  has(out, 'stranger', 'an explicitly named directory survives the record-derived list'); // presence: both occurrences are the stranger section's own header and path
+  has(out, 'buried', 'and the recorded ones are still there — the two lists are unioned, not swapped'); // presence: every occurrence is a line of the buried project's own audit section
   has(out, 'plus 1 named on the command line', 'the output says how many came from the caller');
 }
 

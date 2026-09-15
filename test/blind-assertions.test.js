@@ -67,6 +67,7 @@ function runFixture(name, body) {
     stdout: (r.stdout || '') + (r.stderr || ''),
     findings: lines.filter(l => l._kind === 'finding'),
     denominator: (lines.find(l => l._kind === 'denominator') || {}).presenceChecks,
+    marked: (lines.find(l => l._kind === 'denominator') || {}).marked,
   };
 }
 
@@ -158,6 +159,85 @@ ok(single.findings.length === 0,
   `a needle occurring ONCE is not flagged — it can only pass for the right reason (got ${single.findings.length})`);
 ok(single.stdout.trim() === '',
   'and the instrument prints NOTHING on a clean run, which is what licenses attaching it to every run');
+
+console.log('\nTHE MARKER — a presence assertion judged defensible says so where the check can read it:');
+
+// Some presence assertions are right to be broad: any occurrence will do. A comment saying
+// so was invisible to the check, so a judged assertion and one nobody had looked at read the
+// same (issue #480). The marker is a same-line `// presence: <why>`. This fixture isolates it
+// from every other exclusion — no control label, no counting construct, no quantifier, a
+// token needle, a real assertion site — so deleting the marker rule alone turns it red.
+const marked = runFixture('marked.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire'); // presence: any mention of the procedure will do`);
+ok(marked.status === 0, 'CONTROL — the marked fixture passes, so the marker is judged on a GREEN test');
+ok(marked.findings.length === 0, 'a presence assertion carrying a reasoned marker is not flagged');
+ok(marked.marked === 1, 'and it is COUNTED as set aside, so a marker cannot shrink the list unseen');
+
+// The reason is the point. A bare marker records no judgement, so it changes nothing.
+const bareMarker = runFixture('bare-marker.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire'); // presence:   `);
+ok(bareMarker.findings.length === 1, 'a marker with no reason is still flagged');
+ok(bareMarker.marked === 0, 'and a marker with no reason is not counted as set aside');
+
+// Marker text inside the assertion's MESSAGE is not a comment. Honouring it would let a
+// string hide an assertion; refusing it errs toward flagging, which is the safe direction.
+const quoted = runFixture('quoted-marker.js',
+  `ok(/re-acquire/i.test(doc), 'quotes // presence: inside its message');`);
+ok(quoted.findings.length === 1, 'marker text inside a string literal is not a marker, so the assertion is still flagged');
+
+// The other exclusions read the same line. A reason that uses their words must still be
+// counted as a marker; were the line read whole, this one would vanish under the control
+// label instead and the marker count would not show it.
+const reasonWords = runFixture('reason-words.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire'); // presence: not a control — any mention will do`);
+ok(reasonWords.findings.length === 0 && reasonWords.marked === 1,
+  'a reason using the control label words is counted as a marker, not as a control');
+
+// The count means "set aside that would otherwise have been flagged". A marker on an
+// assertion that was never going to be flagged sets nothing aside.
+const markedSingle = runFixture('marked-single.js',
+  `ok(/harvest-lease acquire/.test(doc), 'the step spells the command'); // presence: the command is named once`);
+ok(markedSingle.denominator >= 1, 'CONTROL — the marked single-occurrence fixture was measured');
+ok(markedSingle.marked === 0, 'a marker on a needle that occurs once sets nothing aside');
+
+// One site reached many times is one judgement, exactly as it would be one finding.
+const markedLoop = runFixture('marked-loop.js',
+  `for (let i = 0; i < 3; i++) ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire'); // presence: any mention will do`);
+ok(markedLoop.marked === 1, 'a marked assertion reached three times is counted once');
+
+console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
+
+// Run in a child so this process's own RegExp and String methods stay uninstrumented.
+{
+  const script = `
+    const b = require(${JSON.stringify(PROBE)});
+    const f = { file: '/x/test/a.test.js', line: 1, count: 2, needle: '/n/', source: 'ok(1)' };
+    const rows = [
+      { _kind: 'finding', ...f },
+      { _kind: 'denominator', presenceChecks: 4, marked: 1 },
+      { _kind: 'denominator', presenceChecks: 6, marked: 2 },
+      { _kind: 'denominator', presenceChecks: 5 },
+    ];
+    const s = b.summarise(rows);
+    process.stdout.write(JSON.stringify({
+      s: { findings: s.findings.length, checks: s.checks, marked: s.marked },
+      clean: b.render([], 15, 3),
+      flagged: b.render([f], 15, 3),
+    }));`;
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+  let got = null;
+  try { got = JSON.parse(r.stdout); } catch { /* reported below */ }
+  ok(got !== null, 'CONTROL — the report helpers load and answer');
+  if (got) {
+    ok(got.s.checks === 15 && got.s.findings === 1,
+      'the summary adds every process denominator and keeps every finding');
+    ok(got.s.marked === 3, 'the summary adds every process marker count, reading a row without one as none');
+    ok(/15 presence checks examined, 3 set aside by a \/\/ presence: marker/.test(got.clean),
+      'a run with no findings states how many were set aside by marker');
+    ok(/1 of 15 presence checks cannot discriminate \(6\.7%\), in 1 file\(s\); 3 more set aside by a \/\/ presence: marker/.test(got.flagged),
+      'a run with findings states the marker count on the same line as the rate');
+  }
+}
 
 console.log('\nTHE FINDING NAMES THE CALLER, not the helper that ran the comparison:');
 

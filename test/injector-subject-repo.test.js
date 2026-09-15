@@ -132,7 +132,7 @@ const code = inject(WT, path.join(WT, 'src', 'engine.js'));
 ok(code.exit === 0, 'code target: hook exits 0');
 ok(/DHYANA/.test(code.ctx), 'code target: the checks still inject');
 ok(code.verdicts > 0, `code target: the currency block carries verdicts (got ${code.verdicts}) — the control is non-trivial`);
-ok(/🟡/.test(code.currency), 'code target: the moved file is reported as drifted, so the fixture really drifts');
+ok(/🟡/.test(code.currency), 'code target: the moved file is reported as drifted, so the fixture really drifts'); // presence: every fixture entry cites the one moved file, so each reads yellow under the same rule
 ok(code.outside === 0, 'code target: nothing reads "outside this repo"');
 
 // --- 2. THE DEFECT: the catalogue target, both spellings ---------------------
@@ -143,7 +143,7 @@ for (const [label, r] of [['store spelling', catStore], ['repo spelling', catRep
   ok(r.exit === 0, `${label}: hook exits 0`);
   ok(r.verdicts > 0, `${label}: the currency block carries verdicts (got ${r.verdicts}), not a uniform blank`);
   ok(r.outside === 0, `${label}: no reference reads "outside this repo" — the drift question reached the right repo`);
-  ok(/🟡/.test(r.currency), `${label}: the drifted file is reported as drifted, exactly as it is for the code target`);
+  ok(/🟡/.test(r.currency), `${label}: the drifted file is reported as drifted, exactly as it is for the code target`); // presence: every fixture entry cites the one moved file, so each reads yellow under the same rule
 }
 
 // The two spellings are one file; they must not disagree about anything.

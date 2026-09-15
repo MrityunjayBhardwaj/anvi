@@ -143,7 +143,7 @@ const out = spawnSync('node', [REPORT, PROJ],
   { cwd: PROJ, encoding: 'utf8', env: { ...process.env, ANVI_CATALOGUE_DIR: path.join(PROJ, '.anvi') } }).stdout || '';
 
 ok(/🟢/.test(out), 'control — the fixture really does produce fresh verdicts');
-ok(/no drift in 1 cited file since anchor/.test(out), 'a fresh row states how many files it compared');
+ok(/no drift in 1 cited file since anchor/.test(out), 'a fresh row states how many files it compared'); // presence: both fixture entries are fresh over one cited file; any fresh row states the count
 const notices = (out.match(/fresh = no cited file changed since/g) || []).length;
 eq(notices, 1, 'the scope statement appears exactly ONCE, not once per fresh row');
 ok(/claim about\n?\s*commits/.test(out) || /claim about/.test(out),

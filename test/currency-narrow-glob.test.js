@@ -172,7 +172,7 @@ ok(gateSays === hookSelects,
 
 console.log('\nAnd the narrowing is REPORTED, which is what makes it a decision and not a loss');
 ok(lint.code === 0, 'the lint exits 0 — a worklist, not a gate');
-ok(/narrow-glob/.test(lint.out), 'the finding fires');
+ok(/narrow-glob/.test(lint.out), 'the finding fires'); // presence: the finding's own section and its tally line both come from the one finding
 ok(/selects 1\b/.test(lineFor('B1')), 'it says how many the declaration selects (1)');
 ok(/selects 6\b/.test(lineFor('B1')), '  ... and how many the wider reading would (6)');
 ok(lineFor('B1').includes('qqpub/**/*.glb'),
