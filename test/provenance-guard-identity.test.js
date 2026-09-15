@@ -1130,6 +1130,54 @@ console.log('\nthe session\'s own memory folder is this project\'s wherever the 
   const allMsg = sayAll(path.join(NU, 'src'), 'Grep', PROJECTS, NU_TX);
   ok(allMsg.includes('every project\'s memory folder') && !allMsg.includes('belongs to'),
      'the message says the search spans every project\'s memory folder, and names no project as its owner');
+
+  // ── a Glob whose PATTERN carries the location (#473) ─────────────────────────
+  // Glob takes where to look in one of two ways: a `path` plus a relative pattern, or a
+  // pattern that says where on its own. Only `path` was read, so the second spelling of the
+  // same search reached another project — its files, or its memory — with no note at all.
+  //
+  // The location is the pattern's literal part, up to the last separator before the first
+  // glob character; a relative one resolves against the working directory. Grep's
+  // `pattern` is a regular expression over file CONTENTS, not a location, and must stay
+  // unread — each silence below is reached from a cwd that also fires.
+  const sayGlob = (cwd, toolInput, transcript, tool = 'Glob') => {
+    const payload = { tool_name: tool, tool_input: toolInput, cwd, session_id: `prov-473-${process.pid}-${probeN++}` };
+    if (transcript) payload.transcript_path = transcript;
+    const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, HOME } });
+    return r.stdout || '';
+  };
+  ok(path.dirname(NU) === path.dirname(XI) && fs.existsSync(path.join(XI, '.git')) && fs.existsSync(path.join(XI, 'src', 'a.js')),
+     'the other repository sits beside this one, is a repository, and holds the file the patterns reach');
+
+  ok(sayGlob(NU, { pattern: path.join(XI, 'src', '*.js') }, NU_TX),
+     'a Glob with no path whose absolute pattern reaches another repository fires');
+  ok(sayGlob(NU, { pattern: path.join(XI, '**', '*.js') }, NU_TX),
+     'and so does one with a recursive wildcard');
+  ok(sayGlob(NU, { pattern: path.join(XI, 'src', 'a.js') }, NU_TX),
+     'and a pattern with no glob character at all, which names one file');
+  ok(sayGlob(NU, { pattern: path.join('..', 'xi', 'src', '*.js') }, NU_TX),
+     'and a relative pattern that climbs out of the working directory into it');
+  ok(sayGlob(path.join(NU, 'src'), { pattern: path.join(path.dirname(XI_MEM), '*.md') }, NU_TX),
+     'and an absolute pattern over another project\'s memory folder');
+  const everyMem = sayGlob(NU, { pattern: path.join(PROJECTS, '*', 'memory', '*.md') }, NU_TX);
+  ok(everyMem.includes('every project\'s memory folder'),
+     'and one over every project\'s memory folder at once says so');
+  const namedMsg = sayGlob(path.join(NU, 'src'), { pattern: path.join(XI, 'src', '*.js') }, NU_TX);
+  ok(namedMsg.includes(path.join(XI, 'src')) && namedMsg.includes("belongs to 'xi'") && !namedMsg.includes('*'),
+     'the note names the directory the pattern starts from, and its owner, not the raw pattern');
+
+  ok(!sayGlob(NU, { pattern: path.join('src', '*.js') }, NU_TX),
+     'while a relative pattern inside the working directory stays silent');
+  ok(!sayGlob(NU, { pattern: '*.js' }, NU_TX),
+     'and so does a bare wildcard');
+  ok(!sayGlob(NU, { pattern: path.join(NU, 'src', '*.js') }, NU_TX),
+     'and an absolute pattern into this repository');
+  ok(!sayGlob(path.join(NU, 'src'), { pattern: path.join(path.dirname(NU_MEM), '*.md') }, NU_TX),
+     'and one over the session\'s own memory folder');
+  ok(sayGlob(NU, { path: XI, pattern: '*.js' }, NU_TX),
+     'and a Glob that passes the location as a path still fires as it did');
+  ok(!sayGlob(NU, { pattern: path.join(XI, 'src') }, NU_TX, 'Grep'),
+     'a Grep pattern is a regular expression over contents, never a location, and is not read as one');
 }
 
 console.log('');

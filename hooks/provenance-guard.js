@@ -22,6 +22,7 @@
 //                          project envelope stay silent; so do /tmp, node_modules,
 //                          and arbitrary system paths — those aren't "another
 //                          project", they're just not-this-project scaffolding.
+//                          A Glob with no `path` is placed by its pattern.
 //
 // Project envelope (in-scope) =
 //   - the repo working dir (cwd)
@@ -437,6 +438,23 @@ function foreignProjectOf(absPath, cwd, transcriptPath) {
   return null;
 }
 
+// Where a Glob with no `path` searches: the literal part of its pattern, up to the last
+// separator before the first glob character, resolved against the working directory
+// (#473). Glob takes its location either as `path` or inside the pattern, and only `path`
+// was read — so the same search, spelled the second way, reached another project with no
+// note. A pattern with no glob character is itself a path; one that starts at a wildcard
+// searches the working directory, and is empty here.
+//
+// Glob only. Grep's `pattern` is a regular expression over file contents, not a place.
+function globLocation(pattern, cwd) {
+  if (typeof pattern !== 'string' || !pattern) return '';
+  const meta = pattern.search(/[*?[{]/);
+  const literal = meta === -1 ? pattern : pattern.slice(0, pattern.lastIndexOf('/', meta) + 1);
+  if (!literal) return '';
+  if (path.isAbsolute(literal)) return path.resolve(literal);
+  return cwd && path.isAbsolute(cwd) ? path.resolve(cwd, literal) : '';
+}
+
 // Decide whether this tool result is EXTERNAL and, if so, what to say + what to
 // dedupe on. Returns { surface, target, message } or null to stay silent.
 function classify(toolName, toolInput, cwd, transcriptPath) {
@@ -501,7 +519,7 @@ function classify(toolName, toolInput, cwd, transcriptPath) {
 
   // File reads — fire ONLY when the path is in another project's territory.
   if (toolName === 'Read' || toolName === 'Grep' || toolName === 'Glob') {
-    const p = toolInput.file_path || toolInput.path || '';
+    const p = toolInput.file_path || toolInput.path || (toolName === 'Glob' ? globLocation(toolInput.pattern, cwd) : '');
     const foreign = foreignProjectOf(p, cwd, transcriptPath);
     if (!foreign) return null;
     if (foreign.memoryFolders) {
