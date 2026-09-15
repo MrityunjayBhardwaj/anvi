@@ -319,6 +319,13 @@ does. Where a record lists several worktrees the session's directory picks which
 checkout to ask; it can never pick a different project, so this is not the ambient
 anchor returning through a side door.
 
+The record is read in one place, `recordedCheckoutsOf(storeProject)`, and the
+provenance guard asks it too. That covers the other direction: from a working
+directory inside a store project, the checkouts its record lists, together with
+their worktrees, are this project and not another one. Without the record nothing
+on disk links the store to the repository, and the project's own checkout was
+reported as foreign from the place its catalogue entries are written.
+
 It answers on a **smaller domain** than the walk — it declines where the walk
 always produced something — so the gap is handed back as a stated `reason` rather
 than left to fall to the permissive side. A consumer that cannot determine the
