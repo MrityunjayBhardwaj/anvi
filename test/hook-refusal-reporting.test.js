@@ -210,7 +210,9 @@ console.log('control: the verified worktree is actually served');
   const inj = fire('catalogue-context-injector.js', served);
   const ctx = contextOf(inj);
   ok(ctx.includes(MARKERS.boundary), 'injector serves the boundary to the recorded worktree');
-  ok(ctx.includes(MARKERS.pattern), 'injector serves the error pattern to the recorded worktree');
+  // Followed by its separator: the fixture's second pattern is `${MARKERS.pattern}-LATE`, so the
+  // bare marker is also a prefix of an entry this control is not about.
+  ok(ctx.includes(`${MARKERS.pattern} —`), 'injector serves the error pattern to the recorded worktree');
 
   const ss = contextOf(fire('ground-truth-session-start.js', served));
   ok(/GROUNDING: \d+\/\d+/.test(ss), `session-start reports grounding to the recorded worktree (${ss.slice(0, 40)})`);

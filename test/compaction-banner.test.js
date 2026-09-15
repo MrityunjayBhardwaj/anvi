@@ -117,7 +117,9 @@ console.log('\nthe log is bounded by the next heading, because it is not at the 
 console.log('\nthe banner names something to do, and only fires when it should');
 {
   const b = banner(project('action', ''));
-  has(b, '/anvi:currency', 'the banner names a command that exists');
+  // The compaction segment only: a health segment can follow it after ` | `, and it names
+  // `/anvi:currency --fleet`, which kept this green with the compaction advice gone.
+  has(b.split(' | ')[0], '/anvi:currency', 'the banner names a command that exists');
   hasNot(b, 'see Compaction Log', 'and no longer sends the reader to a section that is usually absent');
   has(b, 'human-invoked', 'and says removal is not automated');
   // ⚠ AND IT CARRIES NO TALLY (anvi #375). The banner used to say "the one recorded

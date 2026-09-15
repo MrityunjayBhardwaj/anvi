@@ -148,7 +148,7 @@ ok(!line(mDeclared, DECLARED_TRAPS).includes('H901'),
 console.log('\nThe coarse selector is retained, and labelled apart');
 ok(line(mDeclared, SCRAPED_TRAPS).includes('H901'),
    'the boundary-named entry still arrives, under its own label');
-ok(inject('src/qqinside.ts').includes('H901'),
+ok(line(inject('src/qqinside.ts'), SCRAPED_TRAPS).includes('H901'),
    'a file the boundary covers but no entry names still receives the boundary set');
 
 console.log('\nReach: a file at no boundary');
