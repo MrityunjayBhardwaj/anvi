@@ -275,6 +275,19 @@ const twoChecks = runFixture('two-checks.js',
   `ok(/harvest-lease acquire/.test(doc), 'the step spells the command');\nok(doc.includes('anvi-tools harvest-lease'), 'and names the tool that runs it');`);
 ok(twoChecks.denominator === 2, 'two presence checks, one of each kind, are counted as two');
 
+// The `includes` half of the guard is only load-bearing where one of the instrument's own
+// `includes` calls comes back TRUE on a long string, and in the fixtures above none does. The
+// shape that makes it true is common: a matcher library under node_modules runs the presence
+// check, so the stack walk meets a frame whose path contains `node_modules` above the user's
+// line. Found by falsification — the unguarded `includes` channel changed nothing until this case.
+fs.mkdirSync(path.join(DIR, 'node_modules', 'matcher'), { recursive: true });
+fs.writeFileSync(path.join(DIR, 'node_modules', 'matcher', 'index.js'),
+  'module.exports = (hay, re) => re.test(hay);\n');
+const viaLibrary = runFixture('via-library.js',
+  `const match = require('./node_modules/matcher');\nok(match(doc, /harvest-lease acquire/), 'the step spells the command, matched by a library');`);
+ok(viaLibrary.status === 0, 'CONTROL — the library-matcher fixture passes');
+ok(viaLibrary.denominator === 1, 'a presence check run inside a node_modules library is counted exactly once');
+
 console.log('\nTHE USAGE LINE WORKS AS WRITTEN — a documented command that crashes measures nothing:');
 
 // Read out of the script's own header rather than restated here, so the test and the
