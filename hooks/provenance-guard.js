@@ -17,7 +17,8 @@
 //   - mcp__*             — every MCP server is account/workspace-wide
 //   - Read|Grep|Glob     — ONLY when the path lands in ANOTHER project's territory
 //                          (a sibling repo, a different ~/.anvideck/projects/<other>,
-//                          or a different memory namespace). Reads inside the
+//                          a different memory namespace, or a search spanning
+//                          every one of them at once). Reads inside the
 //                          project envelope stay silent; so do /tmp, node_modules,
 //                          and arbitrary system paths — those aren't "another
 //                          project", they're just not-this-project scaffolding.
@@ -307,7 +308,15 @@ function foreignProjectOf(absPath, cwd, transcriptPath) {
   if (isUnder(absPath, cwd)) return null;
   if (ownStore && isUnder(absPath, ownStore)) return null;
   const projRoot = path.join(home, '.claude', 'projects');
-  const memFolder = isUnder(absPath, projRoot) ? path.relative(projRoot, absPath).split(path.sep)[0] : null;
+  // A search AT the projects folder, or at the Claude directory holding it, reads every
+  // project's memory folder at once (#471). The per-folder check below judges the first
+  // segment beneath the projects folder, and a path that IS that folder or sits above
+  // it has none — so the widest memory read was the one that fell through to silence.
+  // Bounded to Claude's own directory: a search of the home directory spans every
+  // repository too, which is a different sentence to say.
+  const target = path.resolve(absPath);
+  if (isUnder(projRoot, target) && isUnder(target, path.join(home, '.claude'))) return { memoryFolders: projRoot };
+  const memFolder =isUnder(absPath, projRoot) ? path.relative(projRoot, absPath).split(path.sep)[0] : null;
   if (memFolder && ownMemoryFolders(cwd, transcriptPath).has(memFolder)) return null;
 
   // Which project CONTAINS this working directory — the upward walk, taken from
@@ -495,6 +504,17 @@ function classify(toolName, toolInput, cwd, transcriptPath) {
     const p = toolInput.file_path || toolInput.path || '';
     const foreign = foreignProjectOf(p, cwd, transcriptPath);
     if (!foreign) return null;
+    if (foreign.memoryFolders) {
+      return {
+        surface: 'file',
+        target: p,
+        message:
+          `PROVENANCE: ${p} holds every project's memory folder` +
+          `${path.resolve(p) === foreign.memoryFolders ? '' : ` (in ${foreign.memoryFolders})`}, not just the one belonging to ${subject}. ` +
+          `Treat what it returns from other projects' folders as EXTERNAL — don't fold another project's roadmap, ` +
+          `vocabulary, or artifacts into ${subject} until you've confirmed the relevance.`,
+      };
+    }
     if (typeof foreign === 'object') {
       return {
         surface: 'file',
