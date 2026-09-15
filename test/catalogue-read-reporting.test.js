@@ -221,7 +221,10 @@ console.log('\ncurrency report: a pointer into a WITHHELD area is not an unresol
   // withheld — and identically for the entry that points at neither.
   ok(!/REFERENCE AREAS WITHHELD/.test(ra.out), 'the absent-area caller gets no withheld banner');
   ok(!/🚫/.test(ra.out), 'and no withheld verdict');
-  ok(/⚪/.test(ra.out), 'its unfollowable pointer is still an honest unknown');
+  // The pointer's OWN row, not any ⚪ in the report: H3 (nothing followable, a different
+  // rule) is also ⚪, and the tally prints "⚪ N unknown" on every run, so a bare ⚪ stayed
+  // green when H2 was graded red.
+  ok(/^  ⚪ H2 /m.test(ra.out), 'its unfollowable pointer is still an honest unknown');
   // Compare the VERDICTS, not the whole text — the two fixtures sit at different
   // paths, so any byte comparison differs for a reason that proves nothing.
   // Entry ROWS only. The footer prints every symbol as a legend, so scanning the
