@@ -261,6 +261,20 @@ ok(typeof single.denominator === 'number' && single.denominator >= 1,
 ok(blind.denominator >= 1 && blind.findings.length <= blind.denominator,
   `findings never exceed the presence checks they are drawn from (${blind.findings.length} of ${blind.denominator})`);
 
+// "At least one" cannot see the denominator growing, and it did (issue #483): judging a
+// presence check runs regex tests and `includes` calls of the instrument's own, which went
+// back through the patched methods and were each counted as another check at the same line.
+// One real check read as 3. So the count is pinned exactly, per channel and together. Each
+// fixture's assertion line is longer than MIN_HAYSTACK, so the instrument's own tests of that
+// line are long enough to have been counted — a short line would pass for the wrong reason.
+ok(single.denominator === 1, 'one regex presence check is counted exactly once');
+const oneIncludes = runFixture('one-includes.js',
+  `ok(doc.includes('harvest-lease acquire'), 'the step spells the command in full');`);
+ok(oneIncludes.denominator === 1, 'one includes presence check is counted exactly once');
+const twoChecks = runFixture('two-checks.js',
+  `ok(/harvest-lease acquire/.test(doc), 'the step spells the command');\nok(doc.includes('anvi-tools harvest-lease'), 'and names the tool that runs it');`);
+ok(twoChecks.denominator === 2, 'two presence checks, one of each kind, are counted as two');
+
 console.log('\nTHE USAGE LINE WORKS AS WRITTEN — a documented command that crashes measures nothing:');
 
 // Read out of the script's own header rather than restated here, so the test and the
