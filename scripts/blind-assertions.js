@@ -205,12 +205,26 @@ function consider(kind, needle, haystack, count) {
 }
 
 // --- instrument --------------------------------------------------------------------
+// The instrument must not measure its own work. Judging a presence check runs regex tests and
+// `includes` calls of its own — on the site's source line, on the stack's file paths, with the
+// exclusion patterns — and those reach the same patched methods. Unguarded, each was considered
+// as another presence check at the same user line, so one real check was counted about three
+// times (issue #483); the recursion stopped only because a stack trace holds ten frames and the
+// user frame eventually fell out of view. Findings survived it only because every one of the
+// instrument's own patterns happens to be a structural pattern (exclusion 6). While a check is
+// being judged, the patched methods answer and consider nothing.
+let judging = false;
+function judge(kind, needle, haystack, count) {
+  judging = true;
+  try { consider(kind, needle, haystack, count); } finally { judging = false; }
+}
+
 const realTest = RegExp.prototype.test;
 RegExp.prototype.test = function (str) {
   const result = realTest.call(this, str);
-  if (result === true && typeof str === 'string' && str.length >= MIN_HAYSTACK) {
+  if (!judging && result === true && typeof str === 'string' && str.length >= MIN_HAYSTACK) {
     const n = countRegExp(this.source, this.flags, str);
-    if (n >= 1) consider('regexp', String(this), str, n);
+    if (n >= 1) judge('regexp', String(this), str, n);
   }
   return result;
 };
@@ -218,10 +232,10 @@ RegExp.prototype.test = function (str) {
 const realIncludes = String.prototype.includes;
 String.prototype.includes = function (needle, position) {
   const result = realIncludes.call(this, needle, position);
-  if (result === true && typeof needle === 'string'
+  if (!judging && result === true && typeof needle === 'string'
       && needle.length >= MIN_NEEDLE && this.length >= MIN_HAYSTACK) {
     const n = countString(needle, String(this));
-    if (n >= 1) consider('includes', needle, String(this), n);
+    if (n >= 1) judge('includes', needle, String(this), n);
   }
   return result;
 };
