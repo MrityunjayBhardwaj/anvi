@@ -594,9 +594,9 @@ console.log('\nthe reader\'s own project is named by containment too');
     ['mcp__thing__do', {}], ['Artifact', { action: 'list' }]]) {
     const fromRoot = say(PROJ, tool, input);
     const fromSub = say(path.join(PROJ, 'hooks'), tool, input);
-    ok(fromRoot.includes('omega') && !fromRoot.includes("'hooks'"), // presence: one warning names the project twice; the negative conjunct is what discriminates
+    ok(fromRoot.includes('omega') && !fromRoot.includes("'hooks'"), // presence: one warning names the project twice; either occurrence is that one naming
        `${tool} names the project from the project root`);
-    ok(fromSub.includes('omega') && !fromSub.includes("'hooks'"), // presence: one warning names the project twice; the negative conjunct is what discriminates
+    ok(fromSub.includes('omega') && !fromSub.includes("'hooks'"), // presence: one warning names the project twice; either occurrence is that one naming
        `${tool} names it the same way from a subdirectory, not 'hooks'`);
   }
 
