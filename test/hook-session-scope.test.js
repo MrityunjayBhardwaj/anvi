@@ -41,7 +41,10 @@ ok(doors.length > 0, `the derivation finds doors at all (${doors.length} of ${ho
 
 for (const d of doors) {
   const src = fs.readFileSync(path.join(HOOKS, d), 'utf8');
-  ok(/adoptSession/.test(src), `${d} adopts the session`);
+  // The CALL, not the name: every door also imports `adoptSession` and guards on it, so a
+  // door that kept both and dropped the call used to pass. Neither of those spells `(` after
+  // the name, and what the payload variable is called is the door's own business.
+  ok(/\badoptSession\s*\(/.test(src), `${d} adopts the session`);
 }
 
 const paths = require(path.join(HOOKS, 'anvi-paths.js'));

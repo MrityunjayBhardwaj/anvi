@@ -162,7 +162,10 @@ console.log('\nGROUP 6 — the bound is shared, and the callers actually pass it
     `the bound is a number above the 1MB default (got ${GIT_MAX_BUFFER})`);
   for (const rel of ['scripts/currency-report.js', 'hooks/catalogue-context-injector.js']) {
     const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    ok(/GIT_MAX_BUFFER/.test(src), `${rel} imports the shared bound`);
+    // The import itself — the uses below also spell the name, so a file that defined its own
+    // bound and used it would have passed on the name alone. Anywhere in the destructuring
+    // list, since that list grows.
+    ok(/\{[^}]*\bGIT_MAX_BUFFER\b[^}]*\}\s*=\s*(?:require|loadFromCandidates)\(/.test(src), `${rel} imports the shared bound`);
     ok(/maxBuffer:\s*GIT_MAX_BUFFER/.test(src), `${rel} passes it to its git helper`);
     // EVERY git helper in the file, not just one — the defect was a second helper
     // nobody looked at. `A || B` where B is always true is not an assertion; this

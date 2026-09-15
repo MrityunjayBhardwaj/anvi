@@ -136,7 +136,10 @@ ok(names.length === 2 && new Set(names).size === 2,
 
 console.log('\nAn entry that cannot be graded says so');
 ok(alpha.includes(NOT_GRADED), 'an unnumbered boundary is reported as not graded');
-ok(alpha.includes(TITLE_A), 'and the not-graded line names which entry it means');
+// Scoped to that line: the header names the same title, so the whole message could not tell
+// a not-graded line that names nothing from one that names the entry.
+const notGradedLine = alpha.split('\n').find(l => l.includes(NOT_GRADED)) || '';
+ok(notGradedLine.includes(TITLE_A), 'and the not-graded line names which entry it means');
 ok(/no id/.test(alpha), 'and says why — it has no id to key a verdict to');
 // The partition: if this fired for everything it would be noise rather than a report,
 // and the assertion above would hold with the id check deleted entirely.
