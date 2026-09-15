@@ -789,6 +789,104 @@ console.log('\na worktree of this repository is not another project');
      'a submodule does not inherit its superproject\'s store — it is a different repository');
   ok(fired(WT, BETA_CAT),
      'and a worktree reading a genuinely different store project is still told so');
+
+  // ── from the store, the project's own repository is not another project (#459) ──
+  // The reverse direction of the case above. Catalogue entries are written in the
+  // STORE about files in the REPOSITORY, so a session's working directory moves into
+  // the store during exactly that work — and from there the repository was announced
+  // as another project's, main checkout and worktrees alike. The store has no `.git`
+  // and no `.anvi` link back, so neither containment nor repository identity connects
+  // the two. What does is the store project's provenance record: it lists the
+  // checkouts bound to that project, and the binding gate already trusts it.
+  //
+  // Every silence has a firing case from the SAME cwd, and two neighbouring store
+  // projects must not borrow the record — one with none, one naming another repository.
+  const say459 = (cwd, tool, target) => {
+    const r = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({
+        tool_name: tool,
+        tool_input: tool === 'Read' ? { file_path: target } : { path: target },
+        cwd,
+        session_id: `prov-459-${process.pid}-${probeN++}`,
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME },
+    });
+    return r.stdout || '';
+  };
+  const recordAt = (storeProject, worktrees) => fs.writeFileSync(path.join(storeProject, 'PROVENANCE.json'),
+    JSON.stringify({ remote: null, worktrees }, null, 2) + '\n');
+
+  const KAPPA_PROJ = path.dirname(storeOf('kappa'));
+  const KAPPA_INST = path.join(KAPPA_PROJ, 'instances');
+  fs.mkdirSync(KAPPA_INST, { recursive: true });
+  recordAt(KAPPA_PROJ, [MAIN]);
+  const MAIN_FILE = path.join(MAIN, 'src', 'm.js');
+  const WT_FILE = path.join(WT, 'src', 'm.js');
+
+  // A store project bound to a DIFFERENT repository, and one bound to nothing.
+  const RHO_ANVI = storeOf('rho');
+  fs.mkdirSync(RHO_ANVI, { recursive: true });
+  recordAt(path.dirname(RHO_ANVI), [STRANGE]);
+  const SIGMA_PROJ = path.dirname(storeOf('sigma'));
+  fs.mkdirSync(storeOf('sigma'), { recursive: true });
+  fs.writeFileSync(path.join(SIGMA_PROJ, 'PROVENANCE.json'), '{ not json\n');
+
+  // A link inside the recorded checkout, pointing at another repository.
+  fs.symlinkSync(STRANGE, path.join(MAIN, 'linked'));
+
+  const listed = JSON.parse(fs.readFileSync(path.join(KAPPA_PROJ, 'PROVENANCE.json'), 'utf8')).worktrees;
+  ok(listed.length === 1 && listed[0] === MAIN && fs.realpathSync(MAIN) === MAIN,
+     'the record lists the main checkout alone, by its real path, as the binding tool writes it');
+  ok(git(KAPPA_INST, 'rev-parse', '--git-dir').status !== 0 && !isInsideCwd(KAPPA_INST, MAIN_FILE) && !isInsideCwd(MAIN, KAPPA_INST),
+     'and the store directory is in no repository and shares no containment with the checkout');
+  ok(!fs.existsSync(path.join(path.dirname(BETA_CAT), '..', 'PROVENANCE.json')),
+     'beta\'s store project genuinely has no record');
+  ok(fs.realpathSync(path.join(MAIN, 'linked', 's.js')) === fs.realpathSync(path.join(STRANGE, 's.js')),
+     'and the link inside the checkout really does reach the other repository');
+
+  ok(!say459(KAPPA_INST, 'Read', MAIN_FILE),
+     'from the store, a file in the project\'s own main checkout is not another project');
+  ok(!say459(storeOf('kappa'), 'Read', MAIN_FILE),
+     'nor from the catalogue directory itself');
+  ok(!say459(KAPPA_INST, 'Read', WT_FILE),
+     'nor a file in one of its worktrees, which the record does not list');
+  ok(!say459(KAPPA_INST, 'Grep', path.join(WT, 'src')),
+     'nor a search of a directory in that worktree');
+  ok(!say459(KAPPA_INST, 'Read', path.join(SUB, 's.js')),
+     'and a file physically inside the recorded checkout is silent, as it is from the checkout itself');
+
+  ok(say459(KAPPA_INST, 'Read', path.join(STRANGE, 's.js')),
+     'while a different repository is still another project from the store');
+  ok(say459(KAPPA_INST, 'Read', path.join(SEPARATE, 'l.js')),
+     'and so is one whose .git is a file with no common directory');
+  ok(say459(KAPPA_INST, 'Read', path.join(FORGED, 'f.js')),
+     'and a forged .git file pointing at this repository\'s worktree records');
+  ok(say459(KAPPA_INST, 'Read', path.join(GHOST, 'g.js')),
+     'and a worktree record with no back-pointer');
+  ok(say459(KAPPA_INST, 'Read', path.join(MAIN, 'linked', 's.js')),
+     'and a link inside the recorded checkout cannot launder another repository');
+
+  ok(say459(RHO_ANVI, 'Read', MAIN_FILE),
+     'a store project whose record names a different repository is told this one is another project');
+  ok(!say459(RHO_ANVI, 'Read', path.join(STRANGE, 's.js')),
+     'while the repository its own record names is silent from it');
+  ok(say459(storeOf('beta'), 'Read', MAIN_FILE),
+     'a store project with no record does not borrow a neighbour\'s');
+  ok(say459(storeOf('sigma'), 'Read', MAIN_FILE),
+     'and neither does one whose record cannot be parsed');
+
+  // A worktree is named by its repository. The folder is a place to put a branch; a
+  // reader told "belongs to 'kappa-wt-1'" is being introduced to a project that does
+  // not exist. The session's own project is named by the same rule, or the two names
+  // in one sentence could disagree about the same repository.
+  // Asserted on the "belongs to" clause alone: the message opens with the path read,
+  // and that path names the worktree's folder whichever way the owner is named.
+  const wtNamed = say459(storeOf('beta'), 'Read', WT_FILE);
+  ok(wtNamed.includes("belongs to 'kappa'") && !wtNamed.includes("belongs to 'kappa-wt-1'"),
+     'a worktree read from another project is named by its repository, not by its folder');  const selfNamed = say459(WT, 'WebFetch', 'https://example.invalid/wt');
+  ok(selfNamed.includes("project 'kappa'") && !selfNamed.includes('kappa-wt-1'),
+     'and a session sitting in a worktree names its own project the same way');
 }
 
 console.log('');

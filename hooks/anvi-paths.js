@@ -673,6 +673,42 @@ function resolveDirForFile(filePath, kind) {
 // which working tree a store project belongs to. The record decides; the store
 // directory's NAME never does.
 //
+// The checkouts a store project's provenance record binds to it that exist on this
+// machine — `{ live, reason }`, with `reason` null exactly when `live` is non-empty.
+//
+// ONE reader of the record for every question that asks it which working trees a
+// store project belongs to. Two ask today: the drift question below, and the
+// provenance guard, which from a working directory inside the store needs to know
+// which repository is this project's own (#459). Read twice, the two could come to
+// disagree about which working tree a store project belongs to, and a guard and
+// the injector disagreeing about ownership is the defect this file exists to end.
+function recordedCheckoutsOf(storeProject) {
+  const name = path.basename(storeProject);
+  if (!IDENTITY || typeof IDENTITY.readProvenance !== 'function') {
+    return { live: [], reason: `cannot read the provenance record for ${name}` };
+  }
+  const rec = IDENTITY.readProvenance(storeProject);
+  // Absent and corrupt are deliberately different: absent means never bound,
+  // corrupt means the binding cannot be trusted. Neither may be graded, and
+  // neither may be reported as the other.
+  if (!rec) {
+    return { live: [], reason: `no provenance record for ${name} — nothing records which working tree these references name` };
+  }
+  if (rec.malformed) {
+    return { live: [], reason: `the provenance record for ${name} could not be parsed` };
+  }
+  const live = rec.worktrees.filter((w) => { try { return fs.existsSync(w); } catch { return false; } });
+  if (!live.length) {
+    return {
+      live: [],
+      reason: rec.worktrees.length
+        ? `every working tree recorded for ${name} is missing from this machine`
+        : `the provenance record for ${name} lists no working tree`,
+    };
+  }
+  return { live, reason: null };
+}
+
 // Returns `{ repo, reason }` and never a bare null: "I could not work out which
 // repository to ask" and "there is nothing here" must arrive as different values
 // at the point the caller acts. This resolver answers on a SMALLER domain
@@ -692,29 +728,8 @@ function subjectRepoFor(filePath, sessionCwd) {
       : { repo: null, reason: 'the file belongs to no project' };
   }
 
-  const name = path.basename(storeProject);
-  if (!IDENTITY || typeof IDENTITY.readProvenance !== 'function') {
-    return { repo: null, reason: `cannot read the provenance record for ${name}` };
-  }
-  const rec = IDENTITY.readProvenance(storeProject);
-  // Absent and corrupt are deliberately different: absent means never bound,
-  // corrupt means the binding cannot be trusted. Neither may be graded, and
-  // neither may be reported as the other.
-  if (!rec) {
-    return { repo: null, reason: `no provenance record for ${name} — nothing records which working tree these references name` };
-  }
-  if (rec.malformed) {
-    return { repo: null, reason: `the provenance record for ${name} could not be parsed` };
-  }
-  const live = rec.worktrees.filter((w) => { try { return fs.existsSync(w); } catch { return false; } });
-  if (!live.length) {
-    return {
-      repo: null,
-      reason: rec.worktrees.length
-        ? `every working tree recorded for ${name} is missing from this machine`
-        : `the provenance record for ${name} lists no working tree`,
-    };
-  }
+  const { live, reason } = recordedCheckoutsOf(storeProject);
+  if (!live.length) return { repo: null, reason };
 
   // Two checkouts of ONE repository can sit at different commits, so which one is
   // asked matters. The record has already chosen the PROJECT; the session only
@@ -735,6 +750,9 @@ module.exports = {
   repositoryOf, mainCheckoutOf,
   resolveDirForFile,
   subjectRepoFor,
+  // "Which checkouts does this store project's record bind to it" — the one reader
+  // of the record, so the injector and the provenance guard cannot disagree.
+  recordedCheckoutsOf,
   // "Which project is this directory in" — exported so it has ONE name as well
   // as one implementation. A consumer that needs the question answered must ask
   // this rather than re-deriving a walk, which is how the resolution and

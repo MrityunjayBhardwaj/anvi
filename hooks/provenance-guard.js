@@ -26,6 +26,9 @@
 //   - the repo working dir (cwd)
 //   - the store project this cwd OWNS — resolved from where `.anvi` lands, not
 //     from basename(cwd) (Ground Truth + .anvi catalogues)
+//   - from a cwd inside a store project: the checkouts that project's provenance
+//     record binds to it, and their worktrees
+//   - the other checkouts of cwd's own repository (its worktrees)
 //   - ~/.claude/projects/[encoded-cwd]/memory/ (this project's memory namespace)
 //
 // Dedupe: once per (surface, target) per session, via /tmp/anvi-provenance-<sid>.
@@ -42,10 +45,11 @@ const os = require('os');
 // below fall back to over-warning rather than to the basename guess they replaced.
 let storeProjectOf = null, ownStoreProject = null, adoptSession = null, storeProjectForPath = null,
   isInside = null, projectRootOfDir = null, projectRootFor = null, repositoryOf = null,
-  mainCheckoutOf = null;
+  mainCheckoutOf = null, recordedCheckoutsOf = null;
 try {
   ({ storeProjectOf, ownStoreProject, adoptSession, storeProjectForPath, isInside,
-    projectRootOfDir, projectRootFor, repositoryOf, mainCheckoutOf } = require('./anvi-paths.js'));
+    projectRootOfDir, projectRootFor, repositoryOf, mainCheckoutOf,
+    recordedCheckoutsOf } = require('./anvi-paths.js'));
 } catch { /* older install */ }
 
 // Are these two project roots checkouts of the same repository? Asked of the
@@ -56,6 +60,17 @@ function sameRepository(a, b) {
   if (!repositoryOf || !a || !b) return false;
   const ra = repositoryOf(a);
   return !!ra && ra === repositoryOf(b);
+}
+
+// What to CALL a project root in a message: its repository's main checkout, so a
+// worktree reads as the project it is a checkout of. A worktree's folder is a place
+// to put a branch — "belongs to 'anvi-wt-451'" introduces the reader to a project
+// that does not exist. Used for both names a message carries, the subject's and the
+// session's own, so one sentence cannot name one repository two ways. A root with
+// no main checkout (a submodule, a separate git directory, no repository at all) is
+// named as itself, as before.
+function projectNameOf(root) {
+  return path.basename((mainCheckoutOf && mainCheckoutOf(root)) || root);
 }
 
 // Timeout guard: exit if stdin doesn't close in 5s
@@ -324,7 +339,29 @@ function foreignProjectOf(absPath, cwd) {
   // repository's own branch work as a stranger's on every read of it — noise on
   // the very workflow that keeps the main checkout on the branch hooks run from.
   const theirs = workspaceRootFor(absPath);
-  if (theirs && !sameDir(theirs, root) && !sameRepository(theirs, root)) return path.basename(theirs);
+
+  // A working directory inside a store project reaches that project's REPOSITORY
+  // through nothing on disk: the store holds no `.git` and no link back, so
+  // containment and repository identity both come up empty and the project's own
+  // checkout was announced as another project's (#459) — from the place catalogue
+  // entries about it are written. The store project's provenance record is what
+  // binds the two, and it is the record the binding gate already trusts; a name
+  // plays no part.
+  //
+  // Each recorded checkout gets the envelope a session sitting IN it gets: whatever
+  // physically lives inside it (resolved, so a link inside it pointing elsewhere
+  // does not count), and any root that is a checkout of the same repository — its
+  // worktrees, which the record does not list. Reached only after the resolved store
+  // question above, and it can only grant silence.
+  const cwdStore = storeProjectForPath ? storeProjectForPath(cwd) : null;
+  if (cwdStore && recordedCheckoutsOf) {
+    for (const checkout of recordedCheckoutsOf(cwdStore).live) {
+      if (sameDir(checkout, absPath) || (isInside && isInside(checkout, absPath))) return null;
+      if (theirs && (sameDir(theirs, checkout) || sameRepository(theirs, checkout))) return null;
+    }
+  }
+
+  if (theirs && !sameDir(theirs, root) && !sameRepository(theirs, root)) return projectNameOf(theirs);
 
   // The resolver is unavailable (a partial install), or the path resolves
   // nowhere at all. The literal spelling is still worth checking: it is the only
@@ -366,7 +403,7 @@ function classify(toolName, toolInput, cwd) {
   // inventing one, which is why every message below has two shapes instead of a
   // single interpolated name.
   const selfRoot = workspaceRootFor(path.join(cwd, 'x'));
-  const project = selfRoot ? path.basename(selfRoot) : null;
+  const project = selfRoot ? projectNameOf(selfRoot) : null;
   // The subject of "belongs to …" / "fold into …", and the scope of "not scoped
   // to …". They differ: "not scoped to project 'anvi'" has no project to name a
   // project WITH when there is none, so it drops the word rather than reading
