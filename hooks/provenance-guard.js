@@ -23,6 +23,7 @@
 //                          and arbitrary system paths — those aren't "another
 //                          project", they're just not-this-project scaffolding.
 //                          A Glob with no `path` is placed by its pattern.
+//                          A search of a directory that holds this project fires too.
 //
 // Project envelope (in-scope) =
 //   - the repo working dir (cwd)
@@ -420,6 +421,16 @@ function foreignProjectOf(absPath, cwd, transcriptPath) {
 
   if (theirs && !sameDir(theirs, root) && !sameRepository(theirs, root)) return projectNameOf(theirs);
 
+  // A directory no project owns can still HOLD this project (#472): the home directory, or
+  // the folder the project sits in. A search of it reaches every neighbouring project at
+  // once, and with no owner to name, the comparison above fell through to silence. Asked
+  // only from inside a project — with no root at the working directory there is no "this
+  // project" for the target to hold — and strictly, so the project's own root does not
+  // hold itself. After the ownership comparison, so a target that is itself a repository
+  // keeps "belongs to", which says more.
+  const ownRoot = projectRootOfDir ? projectRootOfDir(cwd) : null;
+  if (ownRoot && isInside && isInside(absPath, ownRoot)) return { holdsProject: absPath };
+
   // The resolver is unavailable (a partial install), or the path resolves
   // nowhere at all. The literal spelling is still worth checking: it is the only
   // route left, and ownership is unproven either way. The asymmetry is
@@ -530,6 +541,16 @@ function classify(toolName, toolInput, cwd, transcriptPath) {
     const p = named && !path.isAbsolute(named) && cwd && path.isAbsolute(cwd) ? path.resolve(cwd, named) : named;
     const foreign = foreignProjectOf(p, cwd, transcriptPath);
     if (!foreign) return null;
+    if (foreign.holdsProject) {
+      return {
+        surface: 'file',
+        target: p,
+        message:
+          `PROVENANCE: ${p} holds ${subject} and every project beside it — other repositories, their store ` +
+          `catalogues and memory can all be in what it returns. Treat anything from outside ${subject} as EXTERNAL — ` +
+          `don't fold another project's roadmap, vocabulary, or artifacts into ${subject} until you've confirmed the relevance.`,
+      };
+    }
     if (foreign.memoryFolders) {
       return {
         surface: 'file',

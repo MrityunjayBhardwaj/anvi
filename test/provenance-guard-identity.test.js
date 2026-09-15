@@ -1214,6 +1214,92 @@ console.log('\nthe session\'s own memory folder is this project\'s wherever the 
      'and one into the session\'s own memory folder');
 }
 
+// ── a search of a directory that HOLDS this project (#472) ───────────────────
+// A Grep or Glob of the home directory, or of the folder the project sits in, reaches
+// every neighbouring project at once — their repositories, store catalogues and memory.
+// No project owns such a directory, so the ownership comparison had nothing to name and
+// fell through to silence: the widest search was the one never flagged.
+//
+// The line: the target must CONTAIN this project's root, on resolved paths, and the
+// working directory must be in a project at all. A directory that is itself a repository
+// keeps its own note, and a target that does not contain this project stays as it was —
+// every silence reached from a cwd that also fires.
+console.log('\na search of a directory holding this project spans its neighbours too');
+{
+  const CODE = path.join(HOME, 'code');
+  const RHO = path.join(CODE, 'rho');
+  const SIGMA = path.join(CODE, 'sigma');
+  for (const d of [RHO, SIGMA]) {
+    fs.mkdirSync(path.join(d, 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(d, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'lib', 'x.js'), '//\n');
+  }
+  const INNER = path.join(RHO, 'vendor', 'inner');
+  fs.mkdirSync(path.join(INNER, '.git'), { recursive: true });
+  const LOOSE = path.join(HOME, 'loose', 'scratch');
+  fs.mkdirSync(LOOSE, { recursive: true });
+
+  const say472 = (cwd, tool, target) => {
+    const r = spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({ tool_name: tool, tool_input: { path: target, pattern: 'x' }, cwd,
+        session_id: `prov-472-${process.pid}-${probeN++}` }),
+      encoding: 'utf8', env: { ...process.env, HOME },
+    });
+    return r.stdout || '';
+  };
+  const markerAt = (d) => fs.existsSync(path.join(d, '.git')) || fs.existsSync(path.join(d, '.anvi'));
+  let markerAboveLoose = false;
+  for (let d = LOOSE, r = path.parse(d).root; ; d = path.dirname(d)) {
+    if (markerAt(d)) { markerAboveLoose = true; break; }
+    if (d === r) break;
+  }
+  ok(markerAt(RHO) && markerAt(SIGMA) && markerAt(INNER) && !markerAt(CODE) && !markerAt(HOME),
+     'rho, sigma and the nested checkout are repositories, while the folder holding them and the home directory are not');
+  ok(!markerAboveLoose, 'and the scratch directory sits under no project at any level');
+
+  ok(say472(RHO, 'Grep', CODE),
+     'Grep of the folder holding this project fires');
+  ok(say472(RHO, 'Glob', HOME),
+     'and Glob of the home directory');
+  ok(say472(path.join(RHO, 'lib'), 'Grep', CODE),
+     'and from a subdirectory of the project');
+  ok(say472(RHO, 'Grep', CODE + path.sep),
+     'and the folder spelled with a trailing separator');
+  ok(say472(RHO, 'Grep', path.parse(RHO).root),
+     'and the filesystem root, which holds everything');
+  ok(say472(INNER, 'Grep', CODE),
+     'and from a checkout nested inside another, a folder above both');
+  // From inside a store project, where catalogue entries get written: its folder holds a
+  // `.anvi`, so it is a project root, and the store's projects folder holds every one of them.
+  const STORE_PROJECTS = path.join(HOME, '.anvideck', 'projects');
+  ok(path.dirname(path.dirname(storeOf('alpha'))) === STORE_PROJECTS && fs.existsSync(storeOf('beta')),
+     'the store\'s projects folder genuinely holds this store project and another');
+  const storeMsg = say472(storeOf('alpha'), 'Grep', STORE_PROJECTS);
+  ok(storeMsg.includes('every project beside it') && !storeMsg.includes("'.anvideck'") && !storeMsg.includes("'.anvi'"),
+     'from a store project, a search of the store\'s projects folder fires, and names no machinery folder as a project');
+  ok(!say472(storeOf('alpha'), 'Grep', path.dirname(storeOf('alpha'))),
+     'while from there a search of that store project\'s own folder stays silent');
+  const holdsMsg = say472(path.join(RHO, 'lib'), 'Grep', CODE);
+  ok(holdsMsg.includes("'rho'") && holdsMsg.includes('every project beside it') && !holdsMsg.includes('belongs to'),
+     'the note says the search holds this project and its neighbours, and names no owner');
+
+  ok(!say472(path.join(RHO, 'lib'), 'Grep', RHO),
+     'while a search of this project\'s own root stays silent');
+  ok(!say472(RHO, 'Grep', path.join(HOME, 'loose')),
+     'and so does a directory that does not hold this project');
+  ok(!say472(LOOSE, 'Grep', CODE),
+     'and a working directory in no project has no project for a target to hold');
+  ok(!say472(LOOSE, 'Glob', HOME),
+     'even for the home directory');
+
+  const sigmaMsg = say472(RHO, 'Grep', SIGMA);
+  ok(sigmaMsg.includes("belongs to 'sigma'"),
+     'a neighbouring repository searched at its root still says whose it is');
+  const hostMsg = say472(INNER, 'Grep', RHO);
+  ok(hostMsg.includes("belongs to 'rho'") && !hostMsg.includes('every project beside it'),
+     'and the repository a nested checkout sits inside keeps its own note, not the new one');
+}
+
 console.log('');
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
