@@ -307,7 +307,7 @@ process.on('exit', () => {
 });
 
 module.exports = { MIN_HAYSTACK, MIN_NEEDLE, ASSERT_CALL, HELPER_DEF, IS_CONTROL, COUNTS,
-                   PRESENCE_MARKER, countRegExp, countString, render, summarise };
+                   PRESENCE_MARKER, countRegExp, countString, render, summarise, rate };
 
 // --- report mode -------------------------------------------------------------------
 // `node scripts/blind-assertions.js [pattern]` runs the suite with this file preloaded and
@@ -324,6 +324,19 @@ module.exports = { MIN_HAYSTACK, MIN_NEEDLE, ASSERT_CALL, HELPER_DEF, IS_CONTROL
 // suite was (issue #488). A figure whose unit is unstated invites the wrong comparison.
 // The marker count is printed on every run, zero included, beside the figure it was taken
 // from: a count that appears only when non-zero cannot be told apart from one never taken.
+// A rate is only worth printing if it can be read correctly. One decimal place rounds a real
+// finding away whenever it is under 0.05% of the sites — one in more than 2000 — and "0.0%"
+// standing beside a non-empty list states exactly what the rate exists to deny (issue #485).
+// Below that threshold the honest figure is a BOUND, not a rounded number: it says the share is
+// small without claiming it is nothing. More decimal places were the alternative and are worse,
+// because "0.048%" invites a precision the denominator does not support.
+function rate(count, total) {
+  if (!total) return '?';
+  const shown = ((count / total) * 100).toFixed(1);
+  if (count > 0 && Number(shown) === 0) return '< 0.1';
+  return shown;
+}
+
 function render(findings, siteCount, marked = 0) {
   const out = [];
   const byMarker = 'set aside by a // presence: marker';
@@ -349,7 +362,7 @@ function render(findings, siteCount, marked = 0) {
       }
     }
   }
-  const pct = siteCount ? ((findings.length / siteCount) * 100).toFixed(1) : '?';
+  const pct = rate(findings.length, siteCount);
   out.push(`\n${findings.length} of ${siteCount} presence-check sites cannot discriminate (${pct}%), in ${byFile.size} file(s); ${marked} more ${byMarker}.`);
   out.push('Each names a rule whose deletion the assertion would not notice. Count the');
   out.push('occurrence that carries the rule, or narrow the needle until it is unique. Where any');

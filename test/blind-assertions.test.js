@@ -292,6 +292,9 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
       clean: b.render([], 15, 3),
       flagged: b.render([f], 15, 3),
       withStray: b.render([{ ...f, markerLine: 4 }], 15, 3),
+      // Both sides of the rounding threshold, and the zero that is really zero.
+      rates: [[2, 4188], [1, 2001], [1, 1000], [2, 1113], [0, 100]].map(([n, t]) => b.rate(n, t)),
+      tiny: b.render([f, g], 4188, 3),
     }));`;
   const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
   let got = null;
@@ -316,6 +319,17 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
       'a finding whose marker went unread says so, naming the line it was found on and the line it belongs on');
     ok(!/marker was found/.test(got.flagged),
       'CONTROL — a finding with no stray marker says nothing about one');
+    // A rate that rounds a real finding to 0.0% states the opposite of what it measured, and
+    // the list standing right above it is what makes the contradiction easy to miss (#485).
+    // The boundary is pinned from BOTH sides: 1 in 1000 still prints a figure, 1 in 2001 is
+    // where one decimal place runs out. Without the second half a rule that dropped every
+    // rate would pass just as well.
+    ok(got.rates.join(' | ') === '< 0.1 | < 0.1 | 0.1 | 0.2 | 0.0',
+      `below the threshold the rate is a BOUND, above it a figure, and a true zero stays 0.0 (got ${got.rates.join(' | ')})`);
+    ok(/2 of 4188 presence-check sites cannot discriminate \(< 0\.1%\)/.test(got.tiny),
+      'the report line carries the bound rather than a rounded zero');
+    ok(!/\(0\.0%\)/.test(got.tiny),
+      'and two real findings are never printed beside 0.0%, which reads as a clean run');
     ok(/15 presence-check sites examined, 3 set aside by a \/\/ presence: marker/.test(got.clean),
       'a run with no findings states its unit, and how many were set aside by marker');
     ok(/1 of 15 presence-check sites cannot discriminate \(6\.7%\), in 1 file\(s\); 3 more set aside by a \/\/ presence: marker/.test(got.flagged),
