@@ -324,15 +324,19 @@ function summarise(rows) {
     for (const row of denominators) for (const v of row[key] || []) all.add(v);
     return all.size;
   };
-  const findings = [];
-  const seenKeys = new Set();
+  // Of rows sharing a key, the one with the GREATEST count survives, not the one read first
+  // (issue #492). File, line and needle are the key, so they agree by construction; `count` is
+  // the occurrence count in a haystack, and two processes can reach one helper line with
+  // different haystacks. That figure is the actionable one — it is what the reader is being
+  // asked to make discriminate — so arrival order must not decide it, and the strongest
+  // statement of the problem is the largest multiplicity.
+  const byKey = new Map();
   for (const f of rows.filter(x => x._kind === 'finding')) {
     const key = `${f.file}:${f.line}:${f.needle}`;
-    if (seenKeys.has(key)) continue;
-    seenKeys.add(key);
-    findings.push(f);
+    const held = byKey.get(key);
+    if (!held || (f.count || 0) > (held.count || 0)) byKey.set(key, f);
   }
-  return { findings, checks: union('sites'), marked: union('markedSites') };
+  return { findings: [...byKey.values()], checks: union('sites'), marked: union('markedSites') };
 }
 
 if (require.main === module) {

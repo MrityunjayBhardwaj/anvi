@@ -221,7 +221,9 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
     const g = { file: '/x/test/a.test.js', line: 9, count: 2, needle: '/other/', source: 'ok(1)' };
     const rows = [
       { _kind: 'finding', ...f },
-      { _kind: 'finding', ...f },        // the same site, written by a second process
+      // The same site, written by a second process that saw the needle more often. Only the
+      // count can differ: file, line and needle are the key.
+      { _kind: 'finding', ...f, count: 7 },
       { _kind: 'finding', ...g },
       { _kind: 'denominator', sites: ['a:1', 'a:2', 'b:3'], markedSites: ['m:1'] },
       { _kind: 'denominator', sites: ['b:3', 'c:4'], markedSites: ['m:1', 'm:2'] },
@@ -229,7 +231,8 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
     ];
     const s = b.summarise(rows);
     process.stdout.write(JSON.stringify({
-      s: { findings: s.findings.length, checks: s.checks, marked: s.marked },
+      s: { findings: s.findings.length, checks: s.checks, marked: s.marked,
+           counts: s.findings.map(x => x.count) },
       clean: b.render([], 15, 3),
       flagged: b.render([f], 15, 3),
     }));`;
@@ -245,6 +248,10 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
       `and keeps one finding per site: a repeat is dropped, a different one is kept (got ${got.s.findings})`);
     ok(got.s.marked === 2,
       `the marker count is unioned the same way, reading a row without one as none (got ${got.s.marked})`);
+    // Pinned EXACTLY: `>= 2` is satisfied by the smaller reading too, so it could not tell
+    // "kept the largest" from "kept whichever arrived first".
+    ok(got.s.counts.join(',') === '7,2',
+      `of rows sharing a key the GREATEST count survives, not the first read (got ${got.s.counts.join(',')})`);
     ok(/15 presence-check sites examined, 3 set aside by a \/\/ presence: marker/.test(got.clean),
       'a run with no findings states its unit, and how many were set aside by marker');
     ok(/1 of 15 presence-check sites cannot discriminate \(6\.7%\), in 1 file\(s\); 3 more set aside by a \/\/ presence: marker/.test(got.flagged),
