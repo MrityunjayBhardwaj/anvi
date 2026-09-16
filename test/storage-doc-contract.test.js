@@ -99,7 +99,11 @@ console.log('\nwhat the document promises about declining, some entry point perf
     const init = fs.readFileSync(path.join(ROOT, 'skills', 'anvi-init', 'SKILL.md'), 'utf8');
     const upd = fs.readFileSync(path.join(ROOT, 'workflows', 'update.md'), 'utf8');
     ok(init.includes('DECLINED:'), 'init reads the standing answer before offering'); // presence: both mentions are init's own instruction about the DECLINED line
-    ok(/do not re-open|not re-open the question|does not ask again/i.test(init), 'and is told not to re-open it');
+    // The instruction itself, not "does not ask again": that phrase belongs to the step that
+    // RECORDS the decline, so it kept this green with the instruction deleted. Whitespace is
+    // folded because the sentence wraps across a line, and a rewrap must not redden it.
+    const initFlat = init.replace(/\s+/g, ' ');
+    ok(initFlat.includes('not re-open the question'), 'and is told not to re-open it');
     ok(upd.includes('DECLINED:') && /revisit|re-rais/i.test(upd), 'update is the one door that revisits the question'); // presence: both matches are the one paragraph saying update revisits a decline
 
     // The canonical document must describe the file that now sits beside the
