@@ -206,6 +206,62 @@ const markedSingle = runFixture('marked-single.js',
 ok(markedSingle.denominator >= 1, 'CONTROL — the marked single-occurrence fixture was measured');
 ok(markedSingle.marked === 0, 'a marker on a needle that occurs once sets nothing aside');
 
+// An ESCAPED quote inside the message is not an open quote. `'it\'s'` is a closed string and
+// the marker after it is a real comment, but counting the backslashed quote made the parity odd
+// and the judgement was dropped in silence (issue #486). Handled rather than merely reported:
+// the marker is correct as written, so telling its author it cannot be read would be wrong.
+const escapedQuote = runFixture('escaped-quote.js',
+  `ok(/re-acquire/i.test(doc), 'it\\'s the step that instructs'); // presence: any mention will do`);
+ok(escapedQuote.status === 0, 'CONTROL — the escaped-quote fixture passes');
+ok(escapedQuote.findings.length === 0 && escapedQuote.marked === 1,
+  `a marker behind a string holding an escaped quote is read and honoured (got ${escapedQuote.findings.length} flagged, ${escapedQuote.marked} set aside)`);
+
+// A marker on a LATER line of the same statement cannot be honoured — the stack names the
+// site's line, and that is the only line a judgement can be attributed to. It can be SAID,
+// which is the whole of this case: silence sends the author to the message or the control
+// label instead, which is the blurring the marker exists to prevent.
+const laterLine = runFixture('later-line.js',
+  `ok(/re-acquire/i.test(doc),\n  'the step instructs a re-acquire'); // presence: any mention will do`);
+ok(laterLine.findings.length === 1 && laterLine.marked === 0,
+  `a marker on a later line is still not honoured (got ${laterLine.findings.length} flagged, ${laterLine.marked} set aside)`);
+const strayLine = laterLine.findings[0] && laterLine.findings[0].markerLine;
+ok(strayLine === (laterLine.findings[0] || {}).line + 1,
+  `and the finding carries the line the marker was actually found on (got ${strayLine} against a site at ${(laterLine.findings[0] || {}).line})`);
+
+// PRECISION. The scan stops when the statement's parentheses close, so a marker belonging to
+// the NEXT statement is never attributed to this one. Without this case the rule could scan
+// forward indefinitely and every assertion above a marked one would claim it.
+const neighbour = runFixture('neighbour.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire');\nconst other = 1; // presence: this reason belongs to a different statement\nok(other === 1, 'control — the neighbour statement runs');`);
+ok(neighbour.findings.length === 1,
+  `CONTROL — the neighbouring-statement fixture still flags its one assertion (got ${neighbour.findings.length})`);
+ok(!(neighbour.findings[0] || {}).markerLine,
+  'a marker on the following STATEMENT is not claimed by this assertion');
+
+// Only parentheses in CODE say where a statement ends (issue #495). Counted across the whole
+// line, an unmatched one inside a MESSAGE — ordinary prose — held the scan open and the next
+// statement's marker was reported against this assertion: the same wrong instruction this hint
+// exists to prevent, arriving by another route.
+const unbalanced = runFixture('unbalanced-paren.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs (see the note above');\nconst other = 1; // presence: this reason belongs to a different statement\nok(other === 1, 'control — the neighbour statement runs');`);
+ok(unbalanced.findings.length === 1 && !unbalanced.findings[0].markerLine,
+  `an unmatched parenthesis inside a message does not hold the scan open into the next statement (got ${(unbalanced.findings[0] || {}).markerLine})`);
+
+// The paired case: the SAME unmatched parenthesis, with a marker that really does belong to
+// this statement. Silence above could be had by never hinting at all; this is what makes the
+// difference between stripping strings and disabling the feature.
+const unbalancedReal = runFixture('unbalanced-real.js',
+  `ok(/re-acquire/i.test(doc),\n  'the step instructs (see the note above'); // presence: any mention will do`);
+ok(unbalancedReal.findings.length === 1 && unbalancedReal.findings[0].markerLine === unbalancedReal.findings[0].line + 1,
+  `and a marker that DOES belong to such a statement is still reported (got ${(unbalancedReal.findings[0] || {}).markerLine})`);
+
+// Marker text inside a string is message text, not an unread marker. Hinting there would tell
+// an author to move something they never wrote.
+const quotedNoHint = runFixture('quoted-no-hint.js',
+  `ok(/re-acquire/i.test(doc), 'quotes // presence: inside its message');`);
+ok(quotedNoHint.findings.length === 1 && !quotedNoHint.findings[0].markerLine,
+  'marker text inside a string is not reported as a marker that went unread');
+
 // One site reached many times is one judgement, exactly as it would be one finding.
 const markedLoop = runFixture('marked-loop.js',
   `for (let i = 0; i < 3; i++) ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire'); // presence: any mention will do`);
@@ -235,6 +291,7 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
            counts: s.findings.map(x => x.count) },
       clean: b.render([], 15, 3),
       flagged: b.render([f], 15, 3),
+      withStray: b.render([{ ...f, markerLine: 4 }], 15, 3),
       // Both sides of the rounding threshold, and the zero that is really zero.
       rates: [[2, 4188], [1, 2001], [1, 1000], [2, 1113], [0, 100]].map(([n, t]) => b.rate(n, t)),
       tiny: b.render([f, g], 4188, 3),
@@ -255,6 +312,13 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
     // "kept the largest" from "kept whichever arrived first".
     ok(got.s.counts.join(',') === '7,2',
       `of rows sharing a key the GREATEST count survives, not the first read (got ${got.s.counts.join(',')})`);
+    // The hint is printed on the finding's own row, where the person who wrote the marker is
+    // looking, and names both lines: the one it was found on and the one it has to sit on.
+    ok(/marker was found on line 4 but not read/.test(got.withStray)
+       && /must sit on line 1/.test(got.withStray),
+      'a finding whose marker went unread says so, naming the line it was found on and the line it belongs on');
+    ok(!/marker was found/.test(got.flagged),
+      'CONTROL — a finding with no stray marker says nothing about one');
     // A rate that rounds a real finding to 0.0% states the opposite of what it measured, and
     // the list standing right above it is what makes the contradiction easy to miss (#485).
     // The boundary is pinned from BOTH sides: 1 in 1000 still prints a figure, 1 in 2001 is

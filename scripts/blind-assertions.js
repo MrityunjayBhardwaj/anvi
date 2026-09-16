@@ -105,14 +105,55 @@ const PRESENCE_MARKER = /\/\/\s*presence:(.*)$/;
 // A `// presence:` inside a string literal is message text, not a comment. An odd number of any
 // quote character before it means it sits inside one, and the line is read as unmarked — the
 // safe direction, since an unhonoured marker leaves an assertion flagged rather than hidden.
+// An ESCAPED quote is not a quote for this purpose (issue #486). `'it\'s escaped'` is a closed
+// string, but counting the backslashed quote makes the parity odd, and a real marker after it
+// was read as message text and silently ignored. Escapes are dropped before the count, which is
+// the same reading `isStructuralPattern` already takes of a needle. Marker text genuinely inside
+// a string — `'quotes // presence: inside its message'` — still has odd parity and is still
+// refused, so the safe direction is unchanged.
 function splitMarker(text) {
   const m = PRESENCE_MARKER.exec(text);
   if (!m) return { code: text, reason: '' };
   const before = text.slice(0, m.index);
+  const unescaped = before.replace(/\\./g, '');
   for (const q of ["'", '"', '`']) {
-    if ((before.split(q).length - 1) % 2 === 1) return { code: text, reason: '' };
+    if ((unescaped.split(q).length - 1) % 2 === 1) return { code: text, reason: '' };
   }
   return { code: before, reason: m[1].trim() };
+}
+
+// A marker written on a LATER line of the same statement (issue #486). The marker is read from
+// the site's own line, because that is the line the stack names and therefore the only one a
+// judgement can be attributed to. A person who writes it on the closing line of a multi-line
+// call got silence: the assertion stayed on the list and nothing said why, and the likeliest
+// next move is to put the reason in the message or the control label instead — the very
+// blurring the marker exists to avoid.
+// REPORTED, not honoured. Honouring a line the stack never names would make a marker's location
+// unverifiable, and "any line near the assertion" is a shape rather than a named judgement.
+// The scan stops when the statement's parentheses close, so a marker belonging to the NEXT
+// statement is never attributed to this one.
+const MAX_STATEMENT_LINES = 5;
+// Only parentheses in CODE say where a statement ends. Counted across the whole line, an
+// unmatched one inside a message — ordinary prose like `'the step instructs (see the note
+// above'` — held the depth open, the scan walked into what followed, and the NEXT statement's
+// marker was reported against this assertion (issue #495). That is the failure this hint exists
+// to prevent, arriving by another route, so strings and comments are removed before counting.
+const STRINGS_AND_COMMENTS = /(['"`])(?:\\[\s\S]|(?!\1)[^\\])*\1|\/\/.*$/g;
+function markerOnLaterLine(file, line) {
+  let depth = 0, opened = false;
+  for (let n = line; n < line + MAX_STATEMENT_LINES; n++) {
+    const text = sourceLine(file, n);
+    if (!text) break;
+    if (n > line) {
+      const { reason } = splitMarker(text);
+      if (reason) return { line: n, reason };
+    }
+    for (const ch of text.replace(STRINGS_AND_COMMENTS, '')) {
+      if (ch === '(') { depth++; opened = true; } else if (ch === ')') depth--;
+    }
+    if (opened && depth <= 0) break;            // the statement closed here
+  }
+  return null;
 }
 
 // Walk the stack for the first USER frame that is an assertion call site. Returns null
@@ -203,10 +244,12 @@ function consider(kind, needle, haystack, count) {
   seen.add(key);
   // Consulted LAST, so the count holds only assertions nothing else would have set aside.
   if (reason) { markedSites.add(key); return; }        // the declared exception, counted
+  const stray = markerOnLaterLine(site.file, site.line);
   findings.push({
     kind, needle: String(needle).slice(0, 120), count,
     haystackLength: haystack.length, file: site.file, line: site.line,
     source: site.text.slice(0, 200),
+    ...(stray ? { markerLine: stray.line } : {}),
   });
 }
 
@@ -313,6 +356,10 @@ function render(findings, siteCount, marked = 0) {
     for (const r of rows) {
       out.push(`  :${r.line}  ${r.count}× ${r.needle}`);
       out.push(`      ${r.source}`);
+      // Said on the finding's own row, where the person who wrote the marker is looking.
+      if (r.markerLine) {
+        out.push(`      a // presence: marker was found on line ${r.markerLine} but not read — it must sit on line ${r.line}, the line this assertion is reported at`);
+      }
     }
   }
   const pct = rate(findings.length, siteCount);
