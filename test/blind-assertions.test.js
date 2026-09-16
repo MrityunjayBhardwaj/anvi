@@ -206,6 +206,45 @@ const markedSingle = runFixture('marked-single.js',
 ok(markedSingle.denominator >= 1, 'CONTROL — the marked single-occurrence fixture was measured');
 ok(markedSingle.marked === 0, 'a marker on a needle that occurs once sets nothing aside');
 
+// An ESCAPED quote inside the message is not an open quote. `'it\'s'` is a closed string and
+// the marker after it is a real comment, but counting the backslashed quote made the parity odd
+// and the judgement was dropped in silence (issue #486). Handled rather than merely reported:
+// the marker is correct as written, so telling its author it cannot be read would be wrong.
+const escapedQuote = runFixture('escaped-quote.js',
+  `ok(/re-acquire/i.test(doc), 'it\\'s the step that instructs'); // presence: any mention will do`);
+ok(escapedQuote.status === 0, 'CONTROL — the escaped-quote fixture passes');
+ok(escapedQuote.findings.length === 0 && escapedQuote.marked === 1,
+  `a marker behind a string holding an escaped quote is read and honoured (got ${escapedQuote.findings.length} flagged, ${escapedQuote.marked} set aside)`);
+
+// A marker on a LATER line of the same statement cannot be honoured — the stack names the
+// site's line, and that is the only line a judgement can be attributed to. It can be SAID,
+// which is the whole of this case: silence sends the author to the message or the control
+// label instead, which is the blurring the marker exists to prevent.
+const laterLine = runFixture('later-line.js',
+  `ok(/re-acquire/i.test(doc),\n  'the step instructs a re-acquire'); // presence: any mention will do`);
+ok(laterLine.findings.length === 1 && laterLine.marked === 0,
+  `a marker on a later line is still not honoured (got ${laterLine.findings.length} flagged, ${laterLine.marked} set aside)`);
+const strayLine = laterLine.findings[0] && laterLine.findings[0].markerLine;
+ok(strayLine === (laterLine.findings[0] || {}).line + 1,
+  `and the finding carries the line the marker was actually found on (got ${strayLine} against a site at ${(laterLine.findings[0] || {}).line})`);
+
+// PRECISION. The scan stops when the statement's parentheses close, so a marker belonging to
+// the NEXT statement is never attributed to this one. Without this case the rule could scan
+// forward indefinitely and every assertion above a marked one would claim it.
+const neighbour = runFixture('neighbour.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire');\nconst other = 1; // presence: this reason belongs to a different statement\nok(other === 1, 'control — the neighbour statement runs');`);
+ok(neighbour.findings.length === 1,
+  `CONTROL — the neighbouring-statement fixture still flags its one assertion (got ${neighbour.findings.length})`);
+ok(!(neighbour.findings[0] || {}).markerLine,
+  'a marker on the following STATEMENT is not claimed by this assertion');
+
+// Marker text inside a string is message text, not an unread marker. Hinting there would tell
+// an author to move something they never wrote.
+const quotedNoHint = runFixture('quoted-no-hint.js',
+  `ok(/re-acquire/i.test(doc), 'quotes // presence: inside its message');`);
+ok(quotedNoHint.findings.length === 1 && !quotedNoHint.findings[0].markerLine,
+  'marker text inside a string is not reported as a marker that went unread');
+
 // One site reached many times is one judgement, exactly as it would be one finding.
 const markedLoop = runFixture('marked-loop.js',
   `for (let i = 0; i < 3; i++) ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire'); // presence: any mention will do`);
@@ -235,6 +274,7 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
            counts: s.findings.map(x => x.count) },
       clean: b.render([], 15, 3),
       flagged: b.render([f], 15, 3),
+      withStray: b.render([{ ...f, markerLine: 4 }], 15, 3),
     }));`;
   const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
   let got = null;
@@ -252,6 +292,13 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
     // "kept the largest" from "kept whichever arrived first".
     ok(got.s.counts.join(',') === '7,2',
       `of rows sharing a key the GREATEST count survives, not the first read (got ${got.s.counts.join(',')})`);
+    // The hint is printed on the finding's own row, where the person who wrote the marker is
+    // looking, and names both lines: the one it was found on and the one it has to sit on.
+    ok(/marker was found on line 4 but not read/.test(got.withStray)
+       && /must sit on line 1/.test(got.withStray),
+      'a finding whose marker went unread says so, naming the line it was found on and the line it belongs on');
+    ok(!/marker was found/.test(got.flagged),
+      'CONTROL — a finding with no stray marker says nothing about one');
     ok(/15 presence-check sites examined, 3 set aside by a \/\/ presence: marker/.test(got.clean),
       'a run with no findings states its unit, and how many were set aside by marker');
     ok(/1 of 15 presence-check sites cannot discriminate \(6\.7%\), in 1 file\(s\); 3 more set aside by a \/\/ presence: marker/.test(got.flagged),
