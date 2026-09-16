@@ -133,6 +133,12 @@ function splitMarker(text) {
 // The scan stops when the statement's parentheses close, so a marker belonging to the NEXT
 // statement is never attributed to this one.
 const MAX_STATEMENT_LINES = 5;
+// Only parentheses in CODE say where a statement ends. Counted across the whole line, an
+// unmatched one inside a message — ordinary prose like `'the step instructs (see the note
+// above'` — held the depth open, the scan walked into what followed, and the NEXT statement's
+// marker was reported against this assertion (issue #495). That is the failure this hint exists
+// to prevent, arriving by another route, so strings and comments are removed before counting.
+const STRINGS_AND_COMMENTS = /(['"`])(?:\\[\s\S]|(?!\1)[^\\])*\1|\/\/.*$/g;
 function markerOnLaterLine(file, line) {
   let depth = 0, opened = false;
   for (let n = line; n < line + MAX_STATEMENT_LINES; n++) {
@@ -142,7 +148,7 @@ function markerOnLaterLine(file, line) {
       const { reason } = splitMarker(text);
       if (reason) return { line: n, reason };
     }
-    for (const ch of text) {
+    for (const ch of text.replace(STRINGS_AND_COMMENTS, '')) {
       if (ch === '(') { depth++; opened = true; } else if (ch === ')') depth--;
     }
     if (opened && depth <= 0) break;            // the statement closed here

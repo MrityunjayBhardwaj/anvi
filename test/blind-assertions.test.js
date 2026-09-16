@@ -238,6 +238,23 @@ ok(neighbour.findings.length === 1,
 ok(!(neighbour.findings[0] || {}).markerLine,
   'a marker on the following STATEMENT is not claimed by this assertion');
 
+// Only parentheses in CODE say where a statement ends (issue #495). Counted across the whole
+// line, an unmatched one inside a MESSAGE — ordinary prose — held the scan open and the next
+// statement's marker was reported against this assertion: the same wrong instruction this hint
+// exists to prevent, arriving by another route.
+const unbalanced = runFixture('unbalanced-paren.js',
+  `ok(/re-acquire/i.test(doc), 'the step instructs (see the note above');\nconst other = 1; // presence: this reason belongs to a different statement\nok(other === 1, 'control — the neighbour statement runs');`);
+ok(unbalanced.findings.length === 1 && !unbalanced.findings[0].markerLine,
+  `an unmatched parenthesis inside a message does not hold the scan open into the next statement (got ${(unbalanced.findings[0] || {}).markerLine})`);
+
+// The paired case: the SAME unmatched parenthesis, with a marker that really does belong to
+// this statement. Silence above could be had by never hinting at all; this is what makes the
+// difference between stripping strings and disabling the feature.
+const unbalancedReal = runFixture('unbalanced-real.js',
+  `ok(/re-acquire/i.test(doc),\n  'the step instructs (see the note above'); // presence: any mention will do`);
+ok(unbalancedReal.findings.length === 1 && unbalancedReal.findings[0].markerLine === unbalancedReal.findings[0].line + 1,
+  `and a marker that DOES belong to such a statement is still reported (got ${(unbalancedReal.findings[0] || {}).markerLine})`);
+
 // Marker text inside a string is message text, not an unread marker. Hinting there would tell
 // an author to move something they never wrote.
 const quotedNoHint = runFixture('quoted-no-hint.js',
