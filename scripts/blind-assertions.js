@@ -65,8 +65,14 @@ const ROOTS = (process.env.BLIND_ROOTS || '').split(':').filter(Boolean);
 
 const findings = [];
 const seen = new Set();
-let presenceChecks = 0;          // the DENOMINATOR: every presence check at an assertion site
-let marked = 0;                  // flagged-but-for a `// presence:` marker, reported beside it
+// THE UNIT IS AN ASSERTION SITE, never a call. A finding is one line an author must go and
+// repair, so counting anything else against it states a rate whose halves are not comparable:
+// a counter here counted every CALL, and one assertion line inside a four-pass loop weighed
+// once as a finding and four times as the denominator (issue #488). Sites are collected rather
+// than counted because the union has to be taken across processes, not summed — see the
+// report's `summarise`.
+const sites = new Set();         // the DENOMINATOR: every assertion site a check was judged at
+const markedSites = new Set();   // set aside by a `// presence:` marker, reported beside it
 
 const srcCache = Object.create(null);
 function sourceLine(file, line) {
@@ -185,7 +191,7 @@ function isStructuralPattern(needle) {
 function consider(kind, needle, haystack, count) {
   const site = assertionSite();
   if (!site) return;                                   // exclusion 1 + 2
-  presenceChecks++;                                    // denominator: counted at the SITE
+  sites.add(`${site.file}:${site.line}`);              // denominator: the SITE, not the call
   if (count <= 1) return;
   const { code, reason } = splitMarker(site.text);
   if (IS_CONTROL.test(code)) return;                   // exclusion 3
@@ -196,7 +202,7 @@ function consider(kind, needle, haystack, count) {
   if (seen.has(key)) return;
   seen.add(key);
   // Consulted LAST, so the count holds only assertions nothing else would have set aside.
-  if (reason) { marked++; return; }                    // the declared exception, counted
+  if (reason) { markedSites.add(key); return; }        // the declared exception, counted
   findings.push({
     kind, needle: String(needle).slice(0, 120), count,
     haystackLength: haystack.length, file: site.file, line: site.line,
@@ -243,11 +249,16 @@ String.prototype.includes = function (needle, position) {
 // --- report ------------------------------------------------------------------------
 // Appended rather than written: a suite runs each file in its own process, and the
 // findings of all of them belong to one run.
+// The KEYS travel, not their counts. Two processes can reach the same assertion site — a
+// shared helper module whose inner `ok(...)` line is the site, so the stack walk stops there
+// rather than at each caller — and per-process counts can only be summed, which counts that
+// one site twice (issues #488, #490). Sent as keys, the reader can take a union instead.
 process.on('exit', () => {
   if (!OUT) return;
   try {
     const payload = findings.map(f => JSON.stringify({ ...f, _kind: 'finding' }));
-    payload.push(JSON.stringify({ _kind: 'denominator', presenceChecks, marked }));
+    payload.push(JSON.stringify({ _kind: 'denominator',
+                                  sites: [...sites], markedSites: [...markedSites] }));
     fs.appendFileSync(OUT, payload.join('\n') + '\n');
   } catch { /* the instrument must never break the suite it is measuring */ }
 });
@@ -261,16 +272,20 @@ module.exports = { MIN_HAYSTACK, MIN_NEEDLE, ASSERT_CALL, HELPER_DEF, IS_CONTROL
 // a suite: `--require` loads this into every test process, and orchestrating from there
 // would fork the suite once per test file.
 
-// A count with nothing to divide by is not a rate. The denominator is every presence check
-// the run actually reached, so a small finding count on a suite that barely uses presence
+// A count with nothing to divide by is not a rate. The denominator is every assertion SITE the
+// run reached a presence check at, so a small finding count on a suite that barely uses presence
 // assertions cannot read as a clean bill of health.
+// The line NAMES its unit — "presence-check sites", not "presence checks". The two differ by a
+// factor a reader cannot see: a single line inside a loop is one site and many checks, and a
+// denominator that silently used the larger of the two made every rate read better than the
+// suite was (issue #488). A figure whose unit is unstated invites the wrong comparison.
 // The marker count is printed on every run, zero included, beside the figure it was taken
 // from: a count that appears only when non-zero cannot be told apart from one never taken.
-function render(findings, presenceChecks, marked = 0) {
+function render(findings, siteCount, marked = 0) {
   const out = [];
   const byMarker = 'set aside by a // presence: marker';
   if (!findings.length) {
-    out.push(`No blind assertions found (${presenceChecks} presence checks examined, ${marked} ${byMarker}).`);
+    out.push(`No blind assertions found (${siteCount} presence-check sites examined, ${marked} ${byMarker}).`);
     return out.join('\n');
   }
   const byFile = new Map();
@@ -287,23 +302,41 @@ function render(findings, presenceChecks, marked = 0) {
       out.push(`      ${r.source}`);
     }
   }
-  const pct = presenceChecks ? ((findings.length / presenceChecks) * 100).toFixed(1) : '?';
-  out.push(`\n${findings.length} of ${presenceChecks} presence checks cannot discriminate (${pct}%), in ${byFile.size} file(s); ${marked} more ${byMarker}.`);
+  const pct = siteCount ? ((findings.length / siteCount) * 100).toFixed(1) : '?';
+  out.push(`\n${findings.length} of ${siteCount} presence-check sites cannot discriminate (${pct}%), in ${byFile.size} file(s); ${marked} more ${byMarker}.`);
   out.push('Each names a rule whose deletion the assertion would not notice. Count the');
   out.push('occurrence that carries the rule, or narrow the needle until it is unique. Where any');
   out.push('occurrence will do, say why on the same line: `// presence: <why>`.');
   return out.join('\n');
 }
 
-// Every test file runs in its own process and appends its own rows, so a run's totals are
-// the SUM over those rows. A row written before markers existed carries no count: none.
+// Every test file runs in its own process and appends its own rows, so a run's totals are the
+// UNION over those rows, not the sum. Every figure here is a count of assertion SITES, and one
+// site is reachable from several processes — a shared helper module's own `ok(...)` line is the
+// site for every test file that calls it — so summing would count it once per process while the
+// author still has exactly one line to go and repair (issues #488, #490). Deduplicated by the
+// same key the instrument uses within a process, which is what makes the three figures
+// comparable: findings and markers are both drawn from the sites counted below them.
 function summarise(rows) {
   const denominators = rows.filter(x => x._kind === 'denominator');
-  return {
-    findings: rows.filter(x => x._kind === 'finding'),
-    checks: denominators.reduce((n, x) => n + (x.presenceChecks || 0), 0),
-    marked: denominators.reduce((n, x) => n + (x.marked || 0), 0),
+  const union = (key) => {
+    const all = new Set();
+    for (const row of denominators) for (const v of row[key] || []) all.add(v);
+    return all.size;
   };
+  // Of rows sharing a key, the one with the GREATEST count survives, not the one read first
+  // (issue #492). File, line and needle are the key, so they agree by construction; `count` is
+  // the occurrence count in a haystack, and two processes can reach one helper line with
+  // different haystacks. That figure is the actionable one — it is what the reader is being
+  // asked to make discriminate — so arrival order must not decide it, and the strongest
+  // statement of the problem is the largest multiplicity.
+  const byKey = new Map();
+  for (const f of rows.filter(x => x._kind === 'finding')) {
+    const key = `${f.file}:${f.line}:${f.needle}`;
+    const held = byKey.get(key);
+    if (!held || (f.count || 0) > (held.count || 0)) byKey.set(key, f);
+  }
+  return { findings: [...byKey.values()], checks: union('sites'), marked: union('markedSites') };
 }
 
 if (require.main === module) {
