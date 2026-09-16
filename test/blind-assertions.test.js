@@ -62,12 +62,18 @@ function runFixture(name, body) {
   const lines = fs.existsSync(out)
     ? fs.readFileSync(out, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
     : [];
+  // Both figures are counts of assertion SITES, read from the keys the row carries. A run that
+  // wrote no row at all reads `undefined` rather than 0: an instrument that never loaded must
+  // not be indistinguishable from one that loaded and saw nothing, which is what every silence
+  // case below would then be resting on.
+  const row = lines.find(l => l._kind === 'denominator');
+  const count = (key) => (row && row[key] ? row[key].length : undefined);
   return {
     status: r.status,
     stdout: (r.stdout || '') + (r.stderr || ''),
     findings: lines.filter(l => l._kind === 'finding'),
-    denominator: (lines.find(l => l._kind === 'denominator') || {}).presenceChecks,
-    marked: (lines.find(l => l._kind === 'denominator') || {}).marked,
+    denominator: count('sites'),
+    marked: count('markedSites'),
   };
 }
 
@@ -212,15 +218,21 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
   const script = `
     const b = require(${JSON.stringify(PROBE)});
     const f = { file: '/x/test/a.test.js', line: 1, count: 2, needle: '/n/', source: 'ok(1)' };
+    const g = { file: '/x/test/a.test.js', line: 9, count: 2, needle: '/other/', source: 'ok(1)' };
     const rows = [
       { _kind: 'finding', ...f },
-      { _kind: 'denominator', presenceChecks: 4, marked: 1 },
-      { _kind: 'denominator', presenceChecks: 6, marked: 2 },
-      { _kind: 'denominator', presenceChecks: 5 },
+      // The same site, written by a second process that saw the needle more often. Only the
+      // count can differ: file, line and needle are the key.
+      { _kind: 'finding', ...f, count: 7 },
+      { _kind: 'finding', ...g },
+      { _kind: 'denominator', sites: ['a:1', 'a:2', 'b:3'], markedSites: ['m:1'] },
+      { _kind: 'denominator', sites: ['b:3', 'c:4'], markedSites: ['m:1', 'm:2'] },
+      { _kind: 'denominator', sites: ['d:5'] },
     ];
     const s = b.summarise(rows);
     process.stdout.write(JSON.stringify({
-      s: { findings: s.findings.length, checks: s.checks, marked: s.marked },
+      s: { findings: s.findings.length, checks: s.checks, marked: s.marked,
+           counts: s.findings.map(x => x.count) },
       clean: b.render([], 15, 3),
       flagged: b.render([f], 15, 3),
     }));`;
@@ -229,13 +241,21 @@ console.log('\nTHE REPORT STATES THE MARKER COUNT beside the denominator:');
   try { got = JSON.parse(r.stdout); } catch { /* reported below */ }
   ok(got !== null, 'CONTROL — the report helpers load and answer');
   if (got) {
-    ok(got.s.checks === 15 && got.s.findings === 1,
-      'the summary adds every process denominator and keeps every finding');
-    ok(got.s.marked === 3, 'the summary adds every process marker count, reading a row without one as none');
-    ok(/15 presence checks examined, 3 set aside by a \/\/ presence: marker/.test(got.clean),
-      'a run with no findings states how many were set aside by marker');
-    ok(/1 of 15 presence checks cannot discriminate \(6\.7%\), in 1 file\(s\); 3 more set aside by a \/\/ presence: marker/.test(got.flagged),
-      'a run with findings states the marker count on the same line as the rate');
+    // Five distinct sites across three rows, one of them named by two of the rows.
+    ok(got.s.checks === 5,
+      `the summary takes the UNION over processes, so a site two of them reached counts once (got ${got.s.checks})`);
+    ok(got.s.findings === 2,
+      `and keeps one finding per site: a repeat is dropped, a different one is kept (got ${got.s.findings})`);
+    ok(got.s.marked === 2,
+      `the marker count is unioned the same way, reading a row without one as none (got ${got.s.marked})`);
+    // Pinned EXACTLY: `>= 2` is satisfied by the smaller reading too, so it could not tell
+    // "kept the largest" from "kept whichever arrived first".
+    ok(got.s.counts.join(',') === '7,2',
+      `of rows sharing a key the GREATEST count survives, not the first read (got ${got.s.counts.join(',')})`);
+    ok(/15 presence-check sites examined, 3 set aside by a \/\/ presence: marker/.test(got.clean),
+      'a run with no findings states its unit, and how many were set aside by marker');
+    ok(/1 of 15 presence-check sites cannot discriminate \(6\.7%\), in 1 file\(s\); 3 more set aside by a \/\/ presence: marker/.test(got.flagged),
+      'a run with findings names the unit both halves are counted in, and the marker count beside the rate');
   }
 }
 
@@ -288,6 +308,108 @@ const viaLibrary = runFixture('via-library.js',
 ok(viaLibrary.status === 0, 'CONTROL — the library-matcher fixture passes');
 ok(viaLibrary.denominator === 1, 'a presence check run inside a node_modules library is counted exactly once');
 
+// THE UNIT. A denominator counted per CALL is not in the numerator's unit: one assertion line
+// inside a loop is one line to go and repair, so it weighs once as a finding, and it must weigh
+// once here too. Counted per call it read 4, and every rate over a suite that loops came out
+// lower than the suite deserved (issue #488). The fixture reports its own pass count, because a
+// denominator of 1 is also what a loop that never ran would produce.
+const loop = runFixture('loop.js',
+  `let passes = 0;\nfor (let i = 0; i < 4; i++) { passes++; ok(/harvest-lease acquire/.test(doc), 'the step spells the command'); }\nconsole.log('PASSES=' + passes);`);
+ok(/PASSES=4/.test(loop.stdout),
+  `CONTROL — the loop body really ran four times, so the count below is of one line reached repeatedly (got ${JSON.stringify(loop.stdout.trim())})`);
+ok(loop.denominator === 1,
+  `one assertion line reached four times is ONE presence-check site (got ${loop.denominator})`);
+
+// The same line, but now BLIND. The numerator already collapsed repeats; this pins that the two
+// halves collapse the same way, which is the whole of what makes them a rate.
+const loopBlind = runFixture('loop-blind.js',
+  `for (let i = 0; i < 4; i++) ok(/re-acquire/i.test(doc), 'the step instructs a re-acquire');`);
+ok(loopBlind.findings.length === 1 && loopBlind.denominator === 1,
+  `a blind assertion in a four-pass loop is one finding of one site (got ${loopBlind.findings.length} of ${loopBlind.denominator})`);
+
+console.log('\nACROSS PROCESSES — one site reached by two test files is still one site:');
+
+// A suite runs each test file in its own process, and the instrument's own de-duplication is
+// per process, so the rows of a run can name the same site twice (issue #490). The shape is a
+// shared helper MODULE whose inner `ok(...)` line is itself the assertion site: it is not a
+// helper DEFINITION line, so the stack walk stops there instead of stepping out to each caller,
+// and every test file that calls the helper reports that one line. Summed, one line to repair
+// read as two findings of two sites; and once the denominator became a union while the
+// numerator stayed a sum, a shared site could state more findings than sites — a rate above
+// 100%. Both halves are unioned, and this case is what holds them together.
+{
+  fs.writeFileSync(path.join(DIR, 'shared-helper.js'),
+    "const ok = (c, m) => { if (!c) { console.log('FIXTURE FAILED: ' + m); process.exit(1); } };\n"
+    + 'function check(hay, needle) {\n'
+    + "  ok(hay.includes(needle), 'the document names the procedure');\n"
+    + '}\n'
+    + 'module.exports = { check };\n');
+  const out = path.join(DIR, 'shared.jsonl');
+  try { fs.unlinkSync(out); } catch { /* first run */ }
+  const body = "const { check } = require('./shared-helper.js');\ncheck(doc, 're-acquire');";
+  const statuses = [];
+  for (const name of ['user-one.js', 'user-two.js']) {
+    const file = path.join(DIR, name);
+    fs.writeFileSync(file, preamble + body);
+    const r = spawnSync(process.execPath, ['--require', PROBE, file], {
+      encoding: 'utf8', env: { ...process.env, BLIND_OUT: out, BLIND_ROOTS: DIR },
+    });
+    statuses.push(r.status);
+  }
+  const rows = fs.existsSync(out)
+    ? fs.readFileSync(out, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+  const raw = rows.filter(r => r._kind === 'finding');
+  ok(statuses.join(',') === '0,0', `CONTROL — both fixtures pass (exits ${statuses.join(',')})`);
+  ok(raw.length === 2,
+    `CONTROL — both processes really did write the finding, so the union below has something to collapse (got ${raw.length})`);
+  ok(new Set(raw.map(f => `${f.file}:${f.line}`)).size === 1,
+    'CONTROL — and both name the SAME line, inside the shared helper');
+
+  // Run in a child so this process's own RegExp and String methods stay uninstrumented.
+  const script = `
+    const b = require(${JSON.stringify(PROBE)});
+    const s = b.summarise(${JSON.stringify(rows)});
+    process.stdout.write(JSON.stringify({ findings: s.findings.length, checks: s.checks }));`;
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+  let got = null;
+  try { got = JSON.parse(r.stdout); } catch { /* reported below */ }
+  ok(got !== null, 'CONTROL — the summary answers for these rows');
+  if (got) {
+    ok(got.findings === 1, `two rows naming one site are ONE finding (got ${got.findings})`);
+    ok(got.checks === 1, `and ONE presence-check site (got ${got.checks})`);
+  }
+}
+
+// The marker count is the third figure in the same unit, and it was kept per process too.
+{
+  fs.writeFileSync(path.join(DIR, 'shared-marked.js'),
+    "const ok = (c, m) => { if (!c) { console.log('FIXTURE FAILED: ' + m); process.exit(1); } };\n"
+    + 'function check(hay, needle) {\n'
+    + "  ok(hay.includes(needle), 'the document names it'); // presence: any mention will do\n"
+    + '}\n'
+    + 'module.exports = { check };\n');
+  const out = path.join(DIR, 'shared-marked.jsonl');
+  try { fs.unlinkSync(out); } catch { /* first run */ }
+  const body = "const { check } = require('./shared-marked.js');\ncheck(doc, 're-acquire');";
+  for (const name of ['marked-one.js', 'marked-two.js']) {
+    const file = path.join(DIR, name);
+    fs.writeFileSync(file, preamble + body);
+    spawnSync(process.execPath, ['--require', PROBE, file], {
+      encoding: 'utf8', env: { ...process.env, BLIND_OUT: out, BLIND_ROOTS: DIR },
+    });
+  }
+  const rows = fs.existsSync(out)
+    ? fs.readFileSync(out, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+  const perProcess = rows.filter(r => r._kind === 'denominator').map(r => (r.markedSites || []).length);
+  ok(perProcess.join(',') === '1,1',
+    `CONTROL — each process set the assertion aside on its own (got ${perProcess.join(',')})`);
+  const script = `
+    const b = require(${JSON.stringify(PROBE)});
+    process.stdout.write(JSON.stringify(b.summarise(${JSON.stringify(rows)}).marked));`;
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+  ok(r.stdout.trim() === '1', `one marked site judged in two processes is set aside once (got ${r.stdout.trim()})`);
+}
+
 console.log('\nTHE USAGE LINE WORKS AS WRITTEN — a documented command that crashes measures nothing:');
 
 // Read out of the script's own header rather than restated here, so the test and the
@@ -312,7 +434,7 @@ console.log('\nTHE USAGE LINE WORKS AS WRITTEN — a documented command that cra
     ok(r.status === 0, `the documented command runs rather than dying in preload (exit ${r.status})`);
     const rows = fs.existsSync(out)
       ? fs.readFileSync(out, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
-    ok(rows.some(x => x._kind === 'denominator' && x.presenceChecks >= 1),
+    ok(rows.some(x => x._kind === 'denominator' && (x.sites || []).length >= 1),
       'and the instrument actually loaded — a denominator row is written, so silence means clean');
   }
 }
