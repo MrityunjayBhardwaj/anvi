@@ -1,0 +1,30 @@
+{
+  "about": "Size limits for the always-loaded surface (issue #501, for #435). These limit SIZE, not compliance. Read and enforced by scripts/surface-count.js; change a limit only with --write-limits, in the same diff as the growth.",
+  "groups": {
+    "shipped": {
+      "enforced": true,
+      "unit": "content",
+      "limit": 213,
+      "source": "measured",
+      "files": [
+        "cognitive-os/base-layer.md",
+        "cognitive-os/dharana-spec.md",
+        "cognitive-os/dhyana-spec.md"
+      ]
+    },
+    "machine": {
+      "enforced": false,
+      "unit": "content",
+      "limit": 168,
+      "source": "measured",
+      "files": ["~/.claude/CLAUDE.md"]
+    },
+    "memory": {
+      "enforced": false,
+      "unit": "lines",
+      "limit": 140,
+      "source": "declared: MEMORY.md's own 140-line limit",
+      "files": ["<memory>"]
+    }
+  }
+}
