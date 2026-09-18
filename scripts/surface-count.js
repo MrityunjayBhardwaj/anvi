@@ -14,6 +14,13 @@
 //      framework instructions land; one is a private machine file the repo cannot see;
 //      one is session state rewritten every session. So each GROUP carries its own limit
 //      and its own unit, and only the group this repo can see is enforced.
+//   3. A limit lives where the thing it limits lives (issue #503). The shipped group's
+//      limit is in `references/surface-limits.json`, because every install ships those
+//      files. The machine `CLAUDE.md` and `MEMORY.md` limits are one machine's numbers,
+//      so they live in that project's store (`<store>/surface-limits.json`) — in the
+//      repo they would describe someone else's files on every other install. A
+//      per-machine file may only REPORT: were it allowed to enforce, the suite would
+//      pass or fail by whose machine it ran on.
 //
 // ⚠ THIS LIMITS SIZE, NOT COMPLIANCE. Nothing here measures whether a larger surface is
 // followed less. A limit set from a count answers "did it grow", never "is it too big".
@@ -24,11 +31,15 @@
 // contain — and new instructions are exactly where new vocabulary shows up. #435's
 // baseline calls the same count "directive-bearing lines"; the rule is unchanged.
 //
-// Usage: node scripts/surface-count.js [--limits FILE] [--root DIR] [--memory FILE] [--write-limits]
-//   --root   where repo-relative files resolve (default: this checkout)
+// Usage: node scripts/surface-count.js [--limits FILE] [--local FILE] [--root DIR]
+//                                      [--memory FILE] [--write-limits]
+//   --limits  the shipped limits (default: references/surface-limits.json)
+//   --local   the per-machine limits (default: <store>/surface-limits.json, the store
+//             resolved from the main checkout; absent is fine — nothing is reported)
+//   --root    where repo-relative files resolve (default: this checkout)
 // Exit: 0 every enforced group measured and within its limit
 //       1 an enforced group is over its limit, or could not be measured
-//       2 bad usage / unreadable limits file
+//       2 bad usage / an unreadable limits file / a per-machine group that tries to enforce
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -65,10 +76,28 @@ const UNITS = { content: 'content lines', lines: 'raw lines' };
 // that does not exist — which would report NOT MEASURED, correctly, but uselessly.
 function defaultMemoryPath() {
   try {
-    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const slug = path.dirname(common).replace(/[/.]/g, '-');
+    const slug = mainCheckout().replace(/[/.]/g, '-');
     return path.join(os.homedir(), '.claude', 'projects', slug, 'memory', 'MEMORY.md');
+  } catch { return null; }
+}
+
+// The store is resolved from the MAIN checkout, for the same reason as the memory
+// path: a worktree has no `.anvi` of its own, so resolving from it finds nothing and
+// every per-machine group would silently vanish from a run made there. Through the
+// shared resolver, so this cannot disagree with the hooks about which store is ours —
+// and a store the resolver declines to serve is not read.
+function mainCheckout() {
+  const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+    { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  return path.dirname(common);
+}
+
+function defaultLocalLimitsPath() {
+  try {
+    const P = require(path.join(ROOT, 'hooks', 'anvi-paths.js'));
+    const { dir } = P.resolveDirForRead(mainCheckout(), '.anvi');
+    const store = dir && P.storeProjectOf(dir);
+    return store ? path.join(store, 'surface-limits.json') : null;
   } catch { return null; }
 }
 
@@ -101,11 +130,23 @@ function judge(m) {
   return 'within';
 }
 
-function run({ limits, root = ROOT, home = os.homedir(), memory = defaultMemoryPath() }) {
-  const groups = Object.entries(limits.groups).map(([name, g]) => {
-    if (!UNITS[g.unit]) throw new Error(`group "${name}" has unknown unit "${g.unit}"`);
-    if (!Number.isInteger(g.limit)) throw new Error(`group "${name}" has no integer limit`);
-    return measureGroup({ name, ...g }, { root, home, memory });
+// `origin` records which file a group came from, so `--write-limits` writes each limit
+// back where it was read and never moves a machine's number into the repo.
+function collectGroups(limits, local) {
+  const out = Object.entries(limits.groups).map(([name, g]) => ({ name, origin: 'shipped', ...g }));
+  for (const [name, g] of Object.entries((local && local.groups) || {})) {
+    if (g.enforced) throw new Error(`per-machine group "${name}" is marked enforced — a per-machine limit may only report, or the suite would pass or fail by whose machine it ran on`);
+    if (out.some(o => o.name === name)) throw new Error(`per-machine group "${name}" has the same name as a shipped group`);
+    out.push({ name, origin: 'local', ...g, enforced: false });
+  }
+  return out;
+}
+
+function run({ limits, local = null, root = ROOT, home = os.homedir(), memory = defaultMemoryPath() }) {
+  const groups = collectGroups(limits, local).map(g => {
+    if (!UNITS[g.unit]) throw new Error(`group "${g.name}" has unknown unit "${g.unit}"`);
+    if (!Number.isInteger(g.limit)) throw new Error(`group "${g.name}" has no integer limit`);
+    return measureGroup(g, { root, home, memory });
   });
   for (const g of groups) g.verdict = judge(g);
   const failed = groups.filter(g => g.verdict.endsWith('FAIL'));
@@ -113,9 +154,14 @@ function run({ limits, root = ROOT, home = os.homedir(), memory = defaultMemoryP
 }
 
 // ── report ──────────────────────────────────────────────────────────────────
-function report({ groups, failed }) {
+// `localNote` says where per-machine limits came from — or that there were none, and
+// where they would be read from. Without it a run with no per-machine file and a run
+// whose per-machine file was never found print the same thing: nothing.
+function report({ groups, failed }, localNote = null) {
   const out = ['ALWAYS-LOADED SURFACE — size against stored limits (issue #501, for #435)',
-    'This limits SIZE. It does not measure whether the surface is followed.', ''];
+    'This limits SIZE. It does not measure whether the surface is followed.'];
+  if (localNote) out.push(localNote);
+  out.push('');
   for (const g of groups) {
     const tag = g.enforced ? 'enforced' : 'reported';
     const shown = g.value == null ? '—' : g.value;
@@ -141,35 +187,55 @@ function report({ groups, failed }) {
 
 // Only `measured` groups are rewritten — MEMORY.md's limit is a declared ceiling, not a
 // snapshot, and a group that could not be read keeps the limit it had rather than
-// inheriting nothing.
-function writeLimits(limits, result) {
-  const next = JSON.parse(JSON.stringify(limits));
+// inheriting nothing. Each group is written back to the file it was read from.
+function writeLimits(files, result) {
+  const next = Object.fromEntries(Object.entries(files).map(([o, f]) => [o, f && JSON.parse(JSON.stringify(f))]));
   const changed = [];
   for (const g of result.groups) {
     if (g.source !== 'measured' || g.value == null || g.value === g.limit) continue;
-    changed.push(`${g.name}: ${g.limit} → ${g.value}`);
-    next.groups[g.name].limit = g.value;
+    changed.push({ origin: g.origin, text: `${g.name}: ${g.limit} → ${g.value}` });
+    next[g.origin].groups[g.name].limit = g.value;
   }
   return { next, changed };
 }
 
 function main(argv) {
   const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
-  const limitsFile = arg('--limits') || DEFAULT_LIMITS;
-  let limits;
-  try { limits = JSON.parse(fs.readFileSync(limitsFile, 'utf8')); } catch (e) {
-    console.error(`cannot read limits file ${limitsFile}: ${e.message}`); return 2;
+  const paths = { shipped: arg('--limits') || DEFAULT_LIMITS, local: arg('--local') || defaultLocalLimitsPath() };
+  const files = {};
+  try { files.shipped = JSON.parse(fs.readFileSync(paths.shipped, 'utf8')); } catch (e) {
+    console.error(`cannot read limits file ${paths.shipped}: ${e.message}`); return 2;
+  }
+  // An ABSENT per-machine file is ordinary — a fresh install has none — and is said so.
+  // A PRESENT one that does not parse is an error: reading it as absent would drop its
+  // groups from the report without a word.
+  let localNote;
+  if (!paths.local) {
+    files.local = null;
+    localNote = 'per-machine limits: none — no store resolves for this project';
+  } else if (!fs.existsSync(paths.local)) {
+    files.local = null;
+    localNote = `per-machine limits: none (would be read from ${paths.local})`;
+  } else {
+    try { files.local = JSON.parse(fs.readFileSync(paths.local, 'utf8')); } catch (e) {
+      console.error(`cannot read per-machine limits ${paths.local}: ${e.message}`); return 2;
+    }
+    localNote = `per-machine limits: ${paths.local}`;
   }
   let result;
   try {
-    result = run({ limits, root: arg('--root') || ROOT, memory: arg('--memory') || defaultMemoryPath() });
+    result = run({ limits: files.shipped, local: files.local, root: arg('--root') || ROOT,
+      memory: arg('--memory') || defaultMemoryPath() });
   } catch (e) { console.error(e.message); return 2; }
-  console.log(report(result));
+  console.log(report(result, localNote));
   if (argv.includes('--write-limits')) {
-    const { next, changed } = writeLimits(limits, result);
+    const { next, changed } = writeLimits(files, result);
     if (!changed.length) { console.log('\n--write-limits: nothing to change'); return 0; }
-    fs.writeFileSync(limitsFile, JSON.stringify(next, null, 2) + '\n');
-    console.log(`\n--write-limits: ${changed.join('; ')} (written to ${limitsFile})`);
+    for (const origin of new Set(changed.map(c => c.origin))) {
+      fs.writeFileSync(paths[origin], JSON.stringify(next[origin], null, 2) + '\n');
+      const which = changed.filter(c => c.origin === origin).map(c => c.text).join('; ');
+      console.log(`\n--write-limits: ${which} (written to ${paths[origin]})`);
+    }
     return 0;
   }
   return result.failed.length ? 1 : 0;

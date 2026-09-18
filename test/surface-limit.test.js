@@ -37,11 +37,12 @@ ok(shipped.value > 0, `the shipped count is a real number, not an empty read (go
 eq(shipped.verdict, 'within',
    `shipped surface ${shipped.value} ≤ limit ${shipped.limit} content lines — if this fails, the growth` +
    ' needs its limit raised in the same change');
-// Enforced groups may only name files this repo holds, or the suite would pass or fail
-// by whose machine it ran on.
-for (const g of real.groups.filter(g => g.enforced)) {
+// The shipped file may only name files this repo holds (#503): a machine path in it
+// is a number describing someone else's file on every other install, and an enforced
+// one would make the suite pass or fail by whose machine it ran on.
+for (const g of real.groups) {
   ok(g.files.every(f => !f.spec.startsWith('~/') && f.spec !== '<memory>'),
-     `enforced group "${g.name}" names only repo files`);
+     `shipped-file group "${g.name}" names only repo files`);
 }
 
 // ── the counting rule ───────────────────────────────────────────────────────
@@ -70,25 +71,36 @@ eq(verdict(3), 'OVER — FAIL', 'growth in unlisted vocabulary (4 of 3) → FAIL
 fs.unlinkSync(path.join(tmp, 'b.md'));
 eq(verdict(3), 'NOT MEASURED — FAIL', 'a missing enforced file → NOT MEASURED, FAIL — never a count of zero');
 
-const reported = { groups: { memory: { enforced: false, unit: 'lines', limit: 140, source: 'declared', files: ['<memory>'] } } };
-eq(S.run({ limits: reported, root: tmp, home: tmp, memory: null }).groups[0].verdict, 'NOT MEASURED',
-   'a reported group that cannot be read says NOT MEASURED and does not fail the run');
-ok(S.run({ limits: reported, root: tmp, home: tmp, memory: null }).failed.length === 0,
-   'an unreadable reported group leaves the run passing');
+const none = { groups: {} };
+const reported = { groups: { memory: { unit: 'lines', limit: 140, source: 'declared', files: ['<memory>'] } } };
+const local = (loc, mem = null) => S.run({ limits: none, local: loc, root: tmp, home: tmp, memory: mem });
+eq(local(reported).groups[0].verdict, 'NOT MEASURED',
+   'a per-machine group that cannot be read says NOT MEASURED');
+ok(local(reported).failed.length === 0, 'and leaves the run passing');
 write('MEMORY.md', 'x\n'.repeat(150));
-const overMem = S.run({ limits: reported, root: tmp, home: tmp, memory: path.join(tmp, 'MEMORY.md') });
+const overMem = local(reported, path.join(tmp, 'MEMORY.md'));
 eq(overMem.groups[0].verdict, 'OVER (reported, not enforced)', 'a reported group over its limit says OVER');
 eq(overMem.failed.length, 0, 'and does not fail the run — only this repo\'s own files can');
+
+console.log('\n— a per-machine file may only report (#503) —');
+const throws = fn => { try { fn(); return null; } catch (e) { return e.message; } };
+ok(/may only report/.test(throws(() => local({ groups: { memory: { ...reported.groups.memory, enforced: true } } })) || ''),
+   'a per-machine group marked enforced is refused, not quietly downgraded');
+ok(/same name as a shipped group/.test(throws(() => S.run({ limits: fixture(3), local: { groups: { shipped: reported.groups.memory } }, root: tmp, home: tmp, memory: null })) || ''),
+   'a per-machine group cannot shadow a shipped one');
 
 // ── the CLI: exit codes, and reading never rewrites the reference ───────────
 console.log('\n— the command line —');
 write('b.md', 'Third rule.\n');
 const lf = path.join(tmp, 'limits.json');
+const noLocal = path.join(tmp, 'no-local.json');
 const cli = (lim, extra = []) => {
   fs.writeFileSync(lf, JSON.stringify(fixture(lim)));
-  return spawnSync('node', [SCRIPT, '--limits', lf, '--root', tmp, '--memory', path.join(tmp, 'none'), ...extra], { encoding: 'utf8' });
+  return spawnSync('node', [SCRIPT, '--limits', lf, '--local', noLocal, '--root', tmp, '--memory', path.join(tmp, 'none'), ...extra], { encoding: 'utf8' });
 };
 eq(cli(3).status, 0, 'within the limit → exit 0');
+ok(cli(3).stdout.includes(`per-machine limits: none (would be read from ${noLocal})`),
+   'an absent per-machine file is said, with the path it would be read from');
 const over = cli(2);
 eq(over.status, 1, 'over the limit → exit 1');
 ok(/grew by 1/.test(over.stdout), 'the failure says by how much it grew');
@@ -108,11 +120,29 @@ const committed = fs.readFileSync(LIMITS, 'utf8');
 ok(committed === JSON.stringify(JSON.parse(committed), null, 2) + '\n',
    'the committed limits file is in the exact format --write-limits writes');
 
-const declared = { groups: { memory: { enforced: false, unit: 'lines', limit: 140, source: 'declared', files: ['<memory>'] } } };
+// --write-limits sends each limit back to the file it came from: a machine's number
+// must never land in the shipped file.
+const locf = path.join(tmp, 'local.json');
+write('home/.claude/CLAUDE.md', 'One.\nTwo.\n');
 write('MEMORY.md', 'x\n'.repeat(10));
-fs.writeFileSync(lf, JSON.stringify(declared));
-spawnSync('node', [SCRIPT, '--limits', lf, '--root', tmp, '--memory', path.join(tmp, 'MEMORY.md'), '--write-limits'], { encoding: 'utf8' });
-eq(JSON.parse(fs.readFileSync(lf, 'utf8')).groups.memory.limit, 140, '--write-limits leaves a declared limit alone');
+// Both files change in ONE run — the case where a machine group could ride along into
+// the shipped file, which a run changing only the machine limit never writes.
+fs.writeFileSync(lf, JSON.stringify(fixture(2)));
+fs.writeFileSync(locf, JSON.stringify({ groups: {
+  machine: { unit: 'content', limit: 9, source: 'measured', files: ['~/.claude/CLAUDE.md'] },
+  memory: reported.groups.memory } }));
+const wl = spawnSync('node', [SCRIPT, '--limits', lf, '--local', locf, '--root', tmp, '--memory', path.join(tmp, 'MEMORY.md'), '--write-limits'],
+  { encoding: 'utf8', env: { ...process.env, HOME: path.join(tmp, 'home') } });
+eq(wl.status, 0, '--write-limits with a per-machine file exits 0');
+eq(JSON.parse(fs.readFileSync(locf, 'utf8')).groups.machine.limit, 2, 'the machine limit is written to the per-machine file');
+const shippedAfter = JSON.parse(fs.readFileSync(lf, 'utf8'));
+eq(shippedAfter.groups.shipped.limit, 3, 'the shipped limit is written to the shipped file');
+eq(Object.keys(shippedAfter.groups).join(','), 'shipped', 'and no per-machine group rode along into it');
+eq(JSON.parse(fs.readFileSync(locf, 'utf8')).groups.memory.limit, 140, '--write-limits leaves a declared limit alone');
+
+fs.writeFileSync(locf, '{ not json');
+eq(spawnSync('node', [SCRIPT, '--limits', lf, '--local', locf, '--root', tmp], { encoding: 'utf8' }).status, 2,
+   'a per-machine file that exists but does not parse → exit 2, never read as absent');
 
 eq(spawnSync('node', [SCRIPT, '--limits', path.join(tmp, 'absent.json')], { encoding: 'utf8' }).status, 2,
    'an unreadable limits file → exit 2, not a pass');
