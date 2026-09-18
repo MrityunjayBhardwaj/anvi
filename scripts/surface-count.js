@@ -92,13 +92,25 @@ function mainCheckout() {
   return path.dirname(common);
 }
 
-function defaultLocalLimitsPath() {
+//
+// Returns { path } or { why }. The three ways to get no path are kept apart, because
+// they call for different things: no store is ordinary, a store the resolver
+// declined to serve has a remedy, and a resolver that threw is a bug. Folding all
+// three into "none" would report the last two as the first.
+function defaultLocalLimits() {
+  let P;
+  try { P = require(path.join(ROOT, 'hooks', 'anvi-paths.js')); } catch (e) {
+    return { why: `the path resolver could not be loaded (${e.message.split('\n')[0]})` };
+  }
   try {
-    const P = require(path.join(ROOT, 'hooks', 'anvi-paths.js'));
-    const { dir } = P.resolveDirForRead(mainCheckout(), '.anvi');
-    const store = dir && P.storeProjectOf(dir);
-    return store ? path.join(store, 'surface-limits.json') : null;
-  } catch { return null; }
+    const v = P.resolveDirForRead(mainCheckout(), '.anvi');
+    if (v.refused) return { why: `the store was declined: ${v.notice}` };
+    const store = v.dir && P.storeProjectOf(v.dir);
+    return store ? { path: path.join(store, 'surface-limits.json') }
+      : { why: 'no store resolves for this project' };
+  } catch (e) {
+    return { why: `resolving the store failed (${e.message.split('\n')[0]})` };
+  }
 }
 
 function resolveFile(spec, opts) {
@@ -201,7 +213,8 @@ function writeLimits(files, result) {
 
 function main(argv) {
   const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
-  const paths = { shipped: arg('--limits') || DEFAULT_LIMITS, local: arg('--local') || defaultLocalLimitsPath() };
+  const found = arg('--local') ? { path: arg('--local') } : defaultLocalLimits();
+  const paths = { shipped: arg('--limits') || DEFAULT_LIMITS, local: found.path || null };
   const files = {};
   try { files.shipped = JSON.parse(fs.readFileSync(paths.shipped, 'utf8')); } catch (e) {
     console.error(`cannot read limits file ${paths.shipped}: ${e.message}`); return 2;
@@ -212,7 +225,7 @@ function main(argv) {
   let localNote;
   if (!paths.local) {
     files.local = null;
-    localNote = 'per-machine limits: none — no store resolves for this project';
+    localNote = `per-machine limits: none — ${found.why}`;
   } else if (!fs.existsSync(paths.local)) {
     files.local = null;
     localNote = `per-machine limits: none (would be read from ${paths.local})`;

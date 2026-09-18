@@ -140,6 +140,17 @@ eq(shippedAfter.groups.shipped.limit, 3, 'the shipped limit is written to the sh
 eq(Object.keys(shippedAfter.groups).join(','), 'shipped', 'and no per-machine group rode along into it');
 eq(JSON.parse(fs.readFileSync(locf, 'utf8')).groups.memory.limit, 140, '--write-limits leaves a declared limit alone');
 
+// With no --local, a resolver that cannot load must say so — not "no store", which is
+// the ordinary answer and would hide a broken install behind it.
+const tree = path.join(tmp, 'tree');
+fs.mkdirSync(path.join(tree, 'scripts'), { recursive: true });
+fs.mkdirSync(path.join(tree, 'references'), { recursive: true });
+fs.copyFileSync(SCRIPT, path.join(tree, 'scripts', 'surface-count.js'));
+fs.writeFileSync(path.join(tree, 'references', 'surface-limits.json'), JSON.stringify(fixture(9)));
+const noResolver = spawnSync('node', [path.join(tree, 'scripts', 'surface-count.js'), '--root', tmp], { encoding: 'utf8' });
+ok(/per-machine limits: none — the path resolver could not be loaded/.test(noResolver.stdout),
+   'an unloadable resolver is named as such, not reported as "no store"');
+
 fs.writeFileSync(locf, '{ not json');
 eq(spawnSync('node', [SCRIPT, '--limits', lf, '--local', locf, '--root', tmp], { encoding: 'utf8' }).status, 2,
    'a per-machine file that exists but does not parse → exit 2, never read as absent');
