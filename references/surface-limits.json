@@ -17,14 +17,18 @@
       "unit": "content",
       "limit": 168,
       "source": "measured",
-      "files": ["~/.claude/CLAUDE.md"]
+      "files": [
+        "~/.claude/CLAUDE.md"
+      ]
     },
     "memory": {
       "enforced": false,
       "unit": "lines",
       "limit": 140,
       "source": "declared: MEMORY.md's own 140-line limit",
-      "files": ["<memory>"]
+      "files": [
+        "<memory>"
+      ]
     }
   }
 }

@@ -24,7 +24,8 @@
 // contain — and new instructions are exactly where new vocabulary shows up. #435's
 // baseline calls the same count "directive-bearing lines"; the rule is unchanged.
 //
-// Usage: node scripts/surface-count.js [--limits FILE] [--memory FILE] [--write-limits]
+// Usage: node scripts/surface-count.js [--limits FILE] [--root DIR] [--memory FILE] [--write-limits]
+//   --root   where repo-relative files resolve (default: this checkout)
 // Exit: 0 every enforced group measured and within its limit
 //       1 an enforced group is over its limit, or could not be measured
 //       2 bad usage / unreadable limits file
@@ -128,6 +129,11 @@ function report({ groups, failed }) {
       out.push(`    grew by ${g.value - g.limit}. If the growth is intended, raise the limit in the SAME`,
         `    change (node scripts/surface-count.js --write-limits) so review sees it.`);
     }
+    // A limit left above a shrunk surface is slack: the same number of lines can come
+    // back later and nothing will say so. Tightening stays explicit, like raising.
+    if (g.value != null && g.value < g.limit && g.source === 'measured') {
+      out.push(`    shrank by ${g.limit - g.value}; the limit still allows it back. Tighten with --write-limits.`);
+    }
   }
   out.push('', failed.length ? `FAIL: ${failed.map(g => g.name).join(', ')}` : 'OK: every enforced group measured and within its limit');
   return out.join('\n');
@@ -170,4 +176,4 @@ function main(argv) {
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
-module.exports = { countText, run, judge, report, writeLimits, main, UNITS };
+module.exports = { countText, run };

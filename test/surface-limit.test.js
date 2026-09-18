@@ -101,6 +101,12 @@ const w = cli(2, ['--write-limits']);
 eq(w.status, 0, '--write-limits exits 0');
 eq(JSON.parse(fs.readFileSync(lf, 'utf8')).groups.shipped.limit, 3, '--write-limits raises a measured limit to the count');
 eq(cli(3).status, 0, 'and the next plain run passes against it');
+eq(cli(5).stdout.match(/shrank by (\d+)/)?.[1], '2', 'a surface below its limit says by how much, so the slack is visible');
+
+// Raising a limit must be a one-number diff, or review reads a reformatted file.
+const committed = fs.readFileSync(LIMITS, 'utf8');
+ok(committed === JSON.stringify(JSON.parse(committed), null, 2) + '\n',
+   'the committed limits file is in the exact format --write-limits writes');
 
 const declared = { groups: { memory: { enforced: false, unit: 'lines', limit: 140, source: 'declared', files: ['<memory>'] } } };
 write('MEMORY.md', 'x\n'.repeat(10));
