@@ -5,8 +5,7 @@
 // WHAT IS BEING PINNED. `scripts/structure-guard.js` reads dependency-cruiser's JSON and an
 // authored design, and answers three questions per edge — does it point up a layer, is it
 // already implied by another path, is it on a cycle — then subtracts a stored baseline so
-// only new violations are refused. A fourth question, whether a new module could have
-// lived in an existing one, is reported and never refused.
+// only new violations are refused.
 //
 // WHY THE GRAPHS ARE BUILT HERE AND NOT CRUISED. anvi ships no dependencies, and the rules
 // are functions of a graph, not of source text. But a builder can drift from the shape the
@@ -216,34 +215,6 @@ console.log('\nTHE RATCHET — only what the baseline does not already hold is r
   ok(swap.refused, 'a write that swaps one fixed entry for one new one is still growth — keys are compared, not totals');
 }
 
-console.log('\nNEW MODULE — reported when an existing module could have held it:');
-{
-  const d = design([{ n: 0, dirs: ['lib'] }, { n: 1, dirs: ['mid'] }, { n: 2, dirs: ['app'] }]);
-  const base = {
-    'src/app/u1.ts': ['src/lib/lib.ts'], 'src/app/u2.ts': ['src/lib/lib.ts'], 'src/app/u3.ts': [],
-    'src/lib/lib.ts': [], 'src/lib/leaf.ts': ['src/lib/lib.ts'], 'src/mid/hi.ts': [],
-  };
-  const before = G.loadGraph(cruise(base), d);
-  const after = G.loadGraph(cruise({
-    ...base,
-    'src/app/u1.ts': ['src/lib/lib.ts', 'src/lib/n.ts', 'src/lib/k.ts', 'src/lib/j.ts', 'src/lib/h.ts'],
-    'src/app/u2.ts': ['src/lib/lib.ts', 'src/lib/n.ts', 'src/lib/j.ts', 'src/lib/h.ts'],
-    'src/app/u3.ts': ['src/lib/k.ts'],
-    'src/lib/n.ts': [],                   // both users already reach lib: lib could hold it
-    'src/lib/k.ts': [],                   // u3 reaches nothing: no module both can already see
-    'src/lib/j.ts': ['src/lib/leaf.ts'],  // leaf reaches lib: holding j in lib would close a cycle
-    'src/lib/h.ts': ['src/mid/hi.ts'],    // hi sits above lib: holding h in lib would break layer order
-    'src/lib/orphan.ts': [],              // nothing uses it: nothing to judge
-  }), d);
-  const r = G.newModules(before, after, d);
-  const hostsOf = m => (r.found.find(f => f.key === m) || { hosts: [] }).hosts;
-  ok(r.fresh === 5 && r.examined === 4, `five new modules, four with an existing importer are examined (got ${r.fresh} / ${r.examined})`);
-  ok(hostsOf('src/lib/n.ts').join() === 'src/lib/lib.ts', 'a new module every user already reaches an existing home for is reported, naming that home');
-  ok(r.examined === 4 && hostsOf('src/lib/k.ts').length === 0, `a new module whose users share nothing already is not reported (of ${r.examined} examined)`);
-  ok(r.examined === 4 && !hostsOf('src/lib/j.ts').includes('src/lib/lib.ts'), `a home that would close a cycle through the new module's imports is not offered (of ${r.examined} examined)`);
-  ok(r.examined === 4 && !hostsOf('src/lib/h.ts').includes('src/lib/lib.ts'), `a home below one of the new module's imports is not offered (of ${r.examined} examined)`);
-}
-
 console.log('\nTHE COMMAND — exit status and what it prints:');
 {
   const write = (name, obj) => { const f = path.join(DIR, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
@@ -264,13 +235,6 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   const legacy = run('--design', d, '--graph', clean, '--baseline', write('legacy.json', { grandfathered: [OLD] }));
   ok(legacy.status === 2 && /no "rules" section/.test(legacy.stdout),
      `a baseline in another shape is refused rather than read as empty (got ${legacy.status})`);
-  // The new module here HAS a home (m already reaches a), so there is a finding that could
-  // have been turned into a refusal — without one, exit 0 would prove nothing.
-  const nm = run('--design', d, '--graph', write('nm.json', cruise({ 'src/mid/m.ts': ['src/low/a.ts', 'src/low/z.ts'], 'src/low/a.ts': [], 'src/low/z.ts': [] })),
-                 '--before', write('nm-before.json', cruise({ 'src/mid/m.ts': ['src/low/a.ts'], 'src/low/a.ts': [] })));
-  ok(/new modules \(report only\): 1 of 1 examined/.test(nm.stdout) && nm.status === 0,
-     `a new module with an existing home is reported, never refused (got ${nm.status})`);
-
   const out = path.join(DIR, 'written.json');
   fs.writeFileSync(out, JSON.stringify({ rules: { layer: [OLD] } }));
   const g1 = run('--design', d, '--graph', dirty, '--write-baseline', out);

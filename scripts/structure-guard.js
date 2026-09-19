@@ -21,7 +21,7 @@
 //
 // Usage:
 //   node scripts/structure-guard.js --design <design.json> (--graph <depcruise.json> | --package <dir>)
-//        [--extractor <module>] [--baseline <baseline.json>] [--before <depcruise.json>]
+//        [--extractor <module>] [--baseline <baseline.json>]
 //        [--write-baseline <out.json> [--allow-growth]]
 //   node scripts/structure-guard.js --design <design.json> --graph <depcruise.json> --package <dir>
 //        [--extractor <module>] [--arm --baseline <baseline.json>]
@@ -47,7 +47,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, newModules, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
+const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -103,12 +103,11 @@ function main(argv) {
   if (!args.design || (!args.graph && !args.package))
     return stop('usage: --design <design.json> and --graph <depcruise.json> and/or --package <dir>');
 
-  let design, cruise = null, baseline = null, beforeCruise = null;
+  let design, cruise = null, baseline = null;
   try {
     design = readJson(args.design, 'design');
     if (args.graph) cruise = readJson(args.graph, 'graph');
     if (args.baseline) baseline = readJson(args.baseline, 'baseline');
-    if (args.before) beforeCruise = readJson(args.before, 'before-graph');
   } catch (e) { return stop(e.message); }
 
   if (!Array.isArray(design.layers) || design.layers.length === 0) return stop('the design declares no layers');
@@ -205,14 +204,6 @@ function main(argv) {
       extractor: args.extractor && path.resolve(args.extractor),
       baseline: path.resolve(args.baseline),
     }));
-  }
-
-  if (beforeCruise) {
-    const before = loadGraph(beforeCruise, design);
-    const nm = newModules(before, graph, design);
-    print(`\n  new modules (report only): ${nm.found.length} of ${nm.examined} examined could live in an existing module ` +
-          `(${nm.fresh} new in all)`);
-    for (const f of nm.found) print(`    ${f.key}   (${f.detail})`);
   }
 
   if (args['write-baseline']) {
