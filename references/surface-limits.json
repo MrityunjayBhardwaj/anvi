@@ -4,12 +4,13 @@
     "shipped": {
       "enforced": true,
       "unit": "content",
-      "limit": 213,
+      "limit": 302,
       "source": "measured",
       "files": [
         "cognitive-os/base-layer.md",
         "cognitive-os/dharana-spec.md",
-        "cognitive-os/dhyana-spec.md"
+        "cognitive-os/dhyana-spec.md",
+        "cognitive-os/rules.md"
       ]
     }
   }
