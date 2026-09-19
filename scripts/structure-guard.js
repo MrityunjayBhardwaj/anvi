@@ -90,16 +90,31 @@ function arm(entry) {
   return file;
 }
 
+// Every flag this command accepts, and every flag it USED to accept. An unrecognised flag is
+// NOT MEASURED, never ignored: silently dropping one means a stale command line — a script, a
+// note, a CI step — runs with an argument that does nothing and still exits 0, which reads as
+// "measured, nothing new" (#511). A typo lands the same way: `--baselien b.json` would run with
+// no baseline at all and judge every grandfathered violation as new.
+const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm']);
+const REMOVED = { before: 'the new-module report was removed (#509): it flagged 85% of new files' };
+
 function main(argv) {
   const args = {};
+  const unknown = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--allow-growth') args.allowGrowth = true;
     else if (a === '--arm') args.arm = true;
-    else if (a.startsWith('--')) args[a.slice(2)] = argv[++i];
+    else if (a.startsWith('--')) {
+      const name = a.slice(2);
+      const value = argv[++i];
+      if (FLAGS.has(name)) args[name] = value;
+      else unknown.push(name in REMOVED ? `--${name}: ${REMOVED[name]}` : `--${name}: not a flag of this command`);
+    }
   }
   const print = s => console.log(s);
   const stop = why => { print(`structure-guard: NOT MEASURED — ${why}`); return 2; };
+  if (unknown.length) return stop(`unrecognised argument${unknown.length > 1 ? 's' : ''} — ${unknown.join(' · ')}`);
   if (!args.design || (!args.graph && !args.package))
     return stop('usage: --design <design.json> and --graph <depcruise.json> and/or --package <dir>');
 

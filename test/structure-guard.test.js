@@ -235,6 +235,21 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   const legacy = run('--design', d, '--graph', clean, '--baseline', write('legacy.json', { grandfathered: [OLD] }));
   ok(legacy.status === 2 && /no "rules" section/.test(legacy.stdout),
      `a baseline in another shape is refused rather than read as empty (got ${legacy.status})`);
+  // An unrecognised flag must not be dropped: a stale command line would otherwise run with an
+  // argument that does nothing and still exit 0, which reads as "measured, nothing new" (#511).
+  const typo = run('--design', d, '--graph', clean, '--baselien', base);
+  ok(typo.status === 2 && /--baselien/.test(typo.stdout),
+     `a misspelled flag is NOT MEASURED and is named, never run with the flag dropped (got ${typo.status})`);
+  const removed = run('--design', d, '--graph', clean, '--before', clean);
+  ok(removed.status === 2 && /--before/.test(removed.stdout) && /#509/.test(removed.stdout),
+     `a flag this command USED to have says the report was removed, not that it was misspelled (got ${removed.status})`);
+  // The case that reddens if the check refuses everything: each known flag still parses. Derived
+  // from the command's own FLAGS set, so a flag added later without a case here is caught.
+  const FLAGS = [...fs.readFileSync(GUARD, 'utf8').match(/const FLAGS = new Set\(\[([^\]]*)\]\)/)[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
+  const known = run('--design', d, '--graph', clean, '--baseline', base, '--write-baseline', path.join(DIR, 'known.json'), '--allow-growth');
+  ok(FLAGS.length === 8 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
+     `the ${FLAGS.length} known flags all still parse — the check refuses the unknown, not everything (got ${known.status})`);
+
   const out = path.join(DIR, 'written.json');
   fs.writeFileSync(out, JSON.stringify({ rules: { layer: [OLD] } }));
   const g1 = run('--design', d, '--graph', dirty, '--write-baseline', out);
