@@ -18,6 +18,8 @@
 > checks, the framework should defer — it is approximating what they access
 > directly. The scaffolding serves the building, not the other way around.
 
+Rules for the moment of deciding load with this file: @~/.claude/anvi/cognitive-os/rules.md
+
 ## On Every Action
 
 ### Sequence Check
