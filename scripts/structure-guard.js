@@ -21,7 +21,7 @@
 //
 // Usage:
 //   node scripts/structure-guard.js --design <design.json> (--graph <depcruise.json> | --package <dir>)
-//        [--extractor <module>] [--baseline <baseline.json>] [--before <depcruise.json>]
+//        [--extractor <module>] [--baseline <baseline.json>]
 //        [--write-baseline <out.json> [--allow-growth]]
 //   node scripts/structure-guard.js --design <design.json> --graph <depcruise.json> --package <dir>
 //        [--extractor <module>] [--arm --baseline <baseline.json>]
@@ -47,7 +47,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, newModules, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
+const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -90,25 +90,39 @@ function arm(entry) {
   return file;
 }
 
+// Every flag this command accepts, and every flag it USED to accept. An unrecognised flag is
+// NOT MEASURED, never ignored: silently dropping one means a stale command line — a script, a
+// note, a CI step — runs with an argument that does nothing and still exits 0, which reads as
+// "measured, nothing new" (#511). A typo lands the same way: `--baselien b.json` would run with
+// no baseline at all and judge every grandfathered violation as new.
+const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm']);
+const REMOVED = { before: 'the new-module report was removed (#509): it flagged 85% of new files' };
+
 function main(argv) {
   const args = {};
+  const unknown = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--allow-growth') args.allowGrowth = true;
     else if (a === '--arm') args.arm = true;
-    else if (a.startsWith('--')) args[a.slice(2)] = argv[++i];
+    else if (a.startsWith('--')) {
+      const name = a.slice(2);
+      const value = argv[++i];
+      if (FLAGS.has(name)) args[name] = value;
+      else unknown.push(name in REMOVED ? `--${name}: ${REMOVED[name]}` : `--${name}: not a flag of this command`);
+    }
   }
   const print = s => console.log(s);
   const stop = why => { print(`structure-guard: NOT MEASURED — ${why}`); return 2; };
+  if (unknown.length) return stop(`unrecognised argument${unknown.length > 1 ? 's' : ''} — ${unknown.join(' · ')}`);
   if (!args.design || (!args.graph && !args.package))
     return stop('usage: --design <design.json> and --graph <depcruise.json> and/or --package <dir>');
 
-  let design, cruise = null, baseline = null, beforeCruise = null;
+  let design, cruise = null, baseline = null;
   try {
     design = readJson(args.design, 'design');
     if (args.graph) cruise = readJson(args.graph, 'graph');
     if (args.baseline) baseline = readJson(args.baseline, 'baseline');
-    if (args.before) beforeCruise = readJson(args.before, 'before-graph');
   } catch (e) { return stop(e.message); }
 
   if (!Array.isArray(design.layers) || design.layers.length === 0) return stop('the design declares no layers');
@@ -205,14 +219,6 @@ function main(argv) {
       extractor: args.extractor && path.resolve(args.extractor),
       baseline: path.resolve(args.baseline),
     }));
-  }
-
-  if (beforeCruise) {
-    const before = loadGraph(beforeCruise, design);
-    const nm = newModules(before, graph, design);
-    print(`\n  new modules (report only): ${nm.found.length} of ${nm.examined} examined could live in an existing module ` +
-          `(${nm.fresh} new in all)`);
-    for (const f of nm.found) print(`    ${f.key}   (${f.detail})`);
   }
 
   if (args['write-baseline']) {

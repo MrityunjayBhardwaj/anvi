@@ -1348,7 +1348,7 @@ it carries. A guard that fires on hundreds of old edges is switched off; one tha
 loosened until it stops firing guards nothing.
 
 - **Report:** `node ~/.claude/anvi/scripts/structure-guard.js --design <design.json>
-  --graph <depcruise.json> [--baseline <b.json>] [--before <depcruise.json>]
+  --graph <depcruise.json> [--baseline <b.json>]
   [--write-baseline <out.json> [--allow-growth]]`. Exit **0** nothing new, **1** a
   new violation or a baseline write that would grow, **2** NOT MEASURED. It parses no
   source: the graph is `depcruise --output-type json`, and the design names layers by
@@ -1373,8 +1373,6 @@ loosened until it stops firing guards nothing.
   are set aside and COUNTED, still count as paths, and still face layer and cycle rules.
 - **Only imports that survive compilation are judged.** Without `tsPreCompilationDeps`,
   dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
-- **A new module that could have lived elsewhere is REPORTED, never refused**, until a
-  replay of real module-adding history measures how often that would fire.
 - **Two sources for the graph, and a check that they agree.** `--package <dir>` judges the
   graph the edit-time hook builds (the project's own TypeScript) instead of an analyser's.
   Given `--graph` AND `--package`, it judges nothing: it compares the two — modules, edges,

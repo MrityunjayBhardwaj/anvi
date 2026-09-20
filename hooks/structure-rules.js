@@ -15,11 +15,7 @@
 //   1. A TRANSITIVELY IMPLIED EDGE, REFUSED. If `a` already reaches `c` through `b`, a
 //      direct `a -> c` adds coupling without adding capability. Transitive reduction is
 //      textbook, but it appears only as simplification or visualisation, never as a refusal.
-//   2. WHEN A NEW MODULE IS JUSTIFIED. The form checked here: an existing module is already
-//      reachable from every module that imports the new one, and could hold its contents
-//      without breaking layer order or closing a cycle. REPORT ONLY — as a refusal it is
-//      unmeasured, and a guard that fires on nearly every new file is one nobody keeps on.
-//   3. A RATCHET. Existing violations are recorded in a baseline and allowed to stand; only
+//   2. A RATCHET. Existing violations are recorded in a baseline and allowed to stand; only
 //      NEW ones are refused. Measured on the corpus this was built against: 153 of the 565
 //      production imports the implied rule judges were already implied before any edit.
 //
@@ -214,48 +210,6 @@ function cycleEdges(graph) {
   };
 }
 
-// ── report only: a new module that an existing one could hold ────────────────────────
-
-function newModules(before, after, design) {
-  const of = layerOf(design, after.root);
-  const memo = new Map();
-  const reach = s => {                      // everything s reaches in the BEFORE graph
-    if (!memo.has(s)) {
-      const seen = new Set(), stack = [...(before.adj.get(s) || [])];
-      while (stack.length) {
-        const u = stack.pop();
-        if (seen.has(u)) continue;
-        seen.add(u);
-        for (const v of before.adj.get(u) || []) stack.push(v);
-      }
-      memo.set(s, seen);
-    }
-    return memo.get(s);
-  };
-
-  const fresh = [...after.modules].filter(s => !before.modules.has(s));
-  const found = [];
-  let examined = 0;
-  for (const n of fresh) {
-    const importers = after.edges.filter(([a, b]) => b === n && before.modules.has(a)).map(([a]) => a);
-    if (importers.length === 0) continue;   // nothing existing uses it yet: nothing to judge
-    examined++;
-    const deps = [...after.adj.get(n)].filter(d => before.modules.has(d));
-    const hosts = [...before.modules].filter(e => {
-      const le = of(e);
-      if (le === undefined) return false;
-      if (!importers.every(u => reach(u).has(e) && of(u) !== undefined && le <= of(u))) return false;
-      if (!deps.every(d => of(d) !== undefined && of(d) <= le)) return false;     // layer order
-      return !deps.some(d => d !== e && reach(d).has(e));                          // no cycle
-    });
-    if (hosts.length) {
-      const shown = hosts.slice(0, 3).join(', ') + (hosts.length > 3 ? ` (+${hosts.length - 3} more)` : '');
-      found.push({ key: n, hosts, detail: `could live in: ${shown}` });
-    }
-  }
-  return { found, examined, fresh: fresh.length };
-}
-
 // ── the ratchet ──────────────────────────────────────────────────────────────────────
 
 function judge(graph, design) {
@@ -298,5 +252,5 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 
 module.exports = {
   RULES, edgeKey, shellWord, baselineCommand, loadGraph, notMeasured, onCycle, layerOf, layerViolations, witness,
-  impliedEdges, cycleEdges, newModules, judge, ratchet, planBaseline,
+  impliedEdges, cycleEdges, judge, ratchet, planBaseline,
 };
