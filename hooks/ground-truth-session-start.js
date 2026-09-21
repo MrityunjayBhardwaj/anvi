@@ -141,6 +141,24 @@ function snapshotState(dir, today) {
   return { kind: 'stale', newest, days };
 }
 
+// The series line, or '' while it is healthy. Silent while the series is healthy:
+// the only states that speak are the ones a reader can act on, or the one where
+// we cannot tell. MACHINE-WIDE, like the checkpoint banner — so it is computed
+// before any per-project exit, not after one (anvi #516).
+function healthSnapshotText() {
+  const snap = snapshotState(snapshotDir(), new Date().toISOString().slice(0, 10));
+  if (snap.kind === 'stale') {
+    return `📅 HEALTH: newest catalogue-health snapshot is ${snap.days}d old` +
+      ` (${snap.newest}, cadence ${SNAPSHOT_CADENCE_DAYS}d) — /anvi:currency --fleet`;
+  }
+  if (snap.kind === 'none') return '📅 HEALTH: no catalogue-health snapshot yet — /anvi:currency --fleet starts the series';
+  if (snap.kind === 'unreadable') {
+    return `📅 HEALTH: the snapshot directory could not be read (${snap.code})` +
+      ' — whether the series is current is UNKNOWN, not fine';
+  }
+  return '';
+}
+
 /**
  * What a catalogue's Compaction Log actually says, as FOUR outcomes that must
  * never be folded together (anvi #313):
@@ -221,8 +239,10 @@ process.stdin.on('end', () => {
     // either way, which would read as a hook with nothing to say.
     if (adoptSession) adoptSession(data.session_id);
     const cwd = data.cwd || process.cwd();
-    // Before any exit below — see checkpointFailureText.
+    // Before any exit below — see checkpointFailureText. The health series is
+    // machine-wide for the same reason, so it is read here too (anvi #516, #522).
     const failing = checkpointFailureText();
+    const health = healthSnapshotText();
 
     // Find .anvi/ directory — shared resolver spans both layouts
     const anvi = resolveDirForRead(cwd, '.anvi');
@@ -237,7 +257,10 @@ process.stdin.on('end', () => {
       // A directory that is not an anvi project stays silent even while the store is
       // failing: this hook says nothing outside anvi projects, and a repository that
       // never opted in is not where to start.
-      if (anvi.refused) emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}${failing ? ` | ${failing}` : ''}`);
+      if (anvi.refused) {
+        const news = [failing, health].filter(Boolean).map(t => ` | ${t}`).join('');
+        emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}${news}`);
+      }
       process.exit(0);
     }
 
@@ -302,9 +325,10 @@ process.stdin.on('end', () => {
     }
 
     const total = grounded + ungrounded;
-    // No project-specific entries yet: nothing to measure, but a failing store is still news.
+    // No project-specific entries yet: nothing to measure, but machine-wide news is still news.
     if (total === 0) {
-      if (failing) emit(failing);
+      const news = [failing, health].filter(Boolean).join(' | ');
+      if (news) emit(news);
       process.exit(0);
     }
 
@@ -387,18 +411,7 @@ process.stdin.on('end', () => {
         ` — run /anvi:currency first (every recorded pass so far found drift, not bloat); removal stays human-invoked`;
     }
 
-    // Silent while the series is healthy. The only states that speak are the
-    // ones a reader can act on, or the one where we cannot tell.
-    const snap = snapshotState(snapshotDir(), new Date().toISOString().slice(0, 10));
-    if (snap.kind === 'stale') {
-      message += ` | 📅 HEALTH: newest catalogue-health snapshot is ${snap.days}d old` +
-        ` (${snap.newest}, cadence ${SNAPSHOT_CADENCE_DAYS}d) — /anvi:currency --fleet`;
-    } else if (snap.kind === 'none') {
-      message += ' | 📅 HEALTH: no catalogue-health snapshot yet — /anvi:currency --fleet starts the series';
-    } else if (snap.kind === 'unreadable') {
-      message += ` | 📅 HEALTH: the snapshot directory could not be read (${snap.code})` +
-        ' — whether the series is current is UNKNOWN, not fine';
-    }
+    if (health) message += ` | ${health}`;
 
     if (ungrounded > 0 && ungroundedList.length <= 3) {
       message += ` | Ungrounded: ${ungroundedList.join('; ')}`;

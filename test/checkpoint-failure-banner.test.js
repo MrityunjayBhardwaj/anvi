@@ -112,11 +112,16 @@ console.log('\na project with NO entries yet is still told the store is failing'
   fs.mkdirSync(path.join(EMPTY, '.anvi'), { recursive: true });
   fs.writeFileSync(path.join(EMPTY, '.anvi', 'hetvabhasa.md'), '# Hetvabhasa\n');
 
+  // A HOME with no store: since #516 this exit also carries the machine-wide health
+  // series, and the real machine's series is whatever age it is. With no store there is
+  // no fleet to measure, so the only thing this case can hear is the checkpoint.
+  const NOSTORE = { HOME: path.join(TMP, 'nostore-home') };
+
   record(null);
-  ok(bannerAt(EMPTY) === '', 'CONTROL — healthy and empty says nothing at all, as before');
+  ok(bannerAt(EMPTY, NOSTORE) === '', 'CONTROL — healthy and empty says nothing at all, as before');
 
   failing();
-  const b = bannerAt(EMPTY);
+  const b = bannerAt(EMPTY, NOSTORE);
   has(b, 'STORE CHECKPOINT FAILING', 'failing and empty reports the failure');
   has(b, 'planted cause', 'with the same cause a populated project is given');
   hasNot(b, 'GROUNDING:', 'and no grounding line, because there are no entries to count');
@@ -147,6 +152,18 @@ console.log('\na REFUSED project is still told the store is failing, alongside w
 
   record(null);
   hasNot(bannerAt(stranger, { HOME }), 'STORE CHECKPOINT FAILING', 'while a healthy store adds nothing to the refusal');
+
+  // (#522) The health series is machine-wide for the same reason the checkpoint is, so
+  // it rides on the refusal too — and says nothing there while it is current.
+  const inst = path.join(HOME, '.anvideck', 'projects', 'anvi', 'instances');
+  fs.mkdirSync(inst, { recursive: true });
+  const day = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  fs.writeFileSync(path.join(inst, `health-${day(12)}.json`), '{}\n');
+  const stale = bannerAt(stranger, { HOME });
+  has(stale, 'NOT being served', 'CONTROL — still the refusal');
+  has(stale, '12d old', 'a refused project is told the health series is stale');
+  fs.writeFileSync(path.join(inst, `health-${day(1)}.json`), '{}\n');
+  hasNot(bannerAt(stranger, { HOME }), 'HEALTH', 'and a current series adds nothing to the refusal');
 }
 
 console.log('\na directory that is not an anvi project stays silent, failing or not');

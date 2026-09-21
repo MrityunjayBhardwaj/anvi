@@ -50,10 +50,15 @@ const PROJ = path.join(TMP, 'proj');
 fs.mkdirSync(path.join(PROJ, '.anvi'), { recursive: true });
 fs.writeFileSync(path.join(PROJ, '.anvi', 'hetvabhasa.md'), '# H\n## H1: x\n**REF:** src/a.js\nbody\n');
 
+/** A project that IS an anvi project but has no catalogue entries yet (anvi #516). */
+const EMPTY = path.join(TMP, 'empty-proj');
+fs.mkdirSync(path.join(EMPTY, '.anvi'), { recursive: true });
+fs.writeFileSync(path.join(EMPTY, '.anvi', 'hetvabhasa.md'), '# H\n');
+
 /** Just the health segment of the banner, or '' when none is emitted. */
-function healthLine(h) {
+function healthLine(h, cwd = PROJ) {
   const r = spawnSync('node', [HOOK], {
-    cwd: PROJ, encoding: 'utf8', env: { ...process.env, HOME: h },
+    cwd, encoding: 'utf8', env: { ...process.env, HOME: h },
     input: JSON.stringify({ hook_event_name: 'SessionStart' }),
   });
   let ctx = '';
@@ -119,6 +124,34 @@ console.log('\nage is read from the NAME, not from mtime');
   const f = path.join(h, '.anvideck', 'projects', 'anvi', 'instances', `health-${iso(30)}.json`);
   fs.utimesSync(f, new Date(), new Date());
   has(healthLine(h).line, '30d old', 'a just-touched file 30 days old by name still reads as 30d');
+}
+
+console.log('\na machine-wide fact does not depend on which project is open (anvi #516)');
+{
+  // The series measures every project in the store, so a project with no entries of
+  // its own is no reason to hide it — the same reasoning #428 applied to the
+  // store-checkpoint banner, which used to sit behind this same exit.
+  const r = healthLine(home('empty-stale', [`health-${iso(12)}.json`]), EMPTY);
+  has(r.line, '12d old', 'a zero-entry project still hears that the series is stale');
+  hasNot(r.all, 'GROUNDING', 'and gets no grounding count — there are no entries to count');
+  ok(r.exit === 0, 'and the hook exits 0');
+}
+{
+  const r = healthLine(home('empty-locked', [], { chmod: 0o000 }), EMPTY);
+  has(r.line, 'UNKNOWN, not fine', 'an unreadable series is reported there too');
+  fs.chmodSync(path.join(TMP, 'empty-locked', '.anvideck', 'projects', 'anvi', 'instances'), 0o755);
+}
+{
+  // The silence that must survive the move: healthy says nothing, here as anywhere.
+  const r = healthLine(home('empty-fresh', [`health-${iso(1)}.json`]), EMPTY);
+  ok(r.all === '', 'a zero-entry project with a current series emits nothing at all');
+}
+{
+  // Not an anvi project: stays silent whatever the series says (the #463 ruling).
+  const plain = path.join(TMP, 'plain');
+  fs.mkdirSync(plain, { recursive: true });
+  const r = healthLine(home('plain-stale', [`health-${iso(12)}.json`]), plain);
+  ok(r.all === '', 'a directory that is not an anvi project stays silent even when the series is stale');
 }
 
 console.log('\nthe reader and the writer agree on where the series lives');
