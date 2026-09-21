@@ -239,8 +239,10 @@ process.stdin.on('end', () => {
     // either way, which would read as a hook with nothing to say.
     if (adoptSession) adoptSession(data.session_id);
     const cwd = data.cwd || process.cwd();
-    // Before any exit below — see checkpointFailureText.
+    // Before any exit below — see checkpointFailureText. The health series is
+    // machine-wide for the same reason, so it is read here too (anvi #516, #522).
     const failing = checkpointFailureText();
+    const health = healthSnapshotText();
 
     // Find .anvi/ directory — shared resolver spans both layouts
     const anvi = resolveDirForRead(cwd, '.anvi');
@@ -255,7 +257,10 @@ process.stdin.on('end', () => {
       // A directory that is not an anvi project stays silent even while the store is
       // failing: this hook says nothing outside anvi projects, and a repository that
       // never opted in is not where to start.
-      if (anvi.refused) emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}${failing ? ` | ${failing}` : ''}`);
+      if (anvi.refused) {
+        const news = [failing, health].filter(Boolean).map(t => ` | ${t}`).join('');
+        emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}${news}`);
+      }
       process.exit(0);
     }
 
@@ -318,11 +323,6 @@ process.stdin.on('end', () => {
         }
       }
     }
-
-    // Before the exit below, for the reason checkpointFailureText is: the series
-    // measures every project in the store, so a project with no entries of its own
-    // is no reason to hide it (anvi #516).
-    const health = healthSnapshotText();
 
     const total = grounded + ungrounded;
     // No project-specific entries yet: nothing to measure, but machine-wide news is still news.
