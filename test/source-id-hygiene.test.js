@@ -96,16 +96,31 @@ ok(idsIn('// nothing to see here, just prose about resolution').length === 0,
    'and does not invent them in ordinary prose');
 
 const offenders = [];
+const unread = [];
+let listed = 0;
 for (const rel of shipped || []) {
   if (EXEMPT_FILES.has(rel)) continue;
+  listed++;
   let text;
   // Read through fs, never a shell grep: one of these files contains a NUL byte, and
   // grep treats it as binary and skips it. The measurement that first sized this
   // problem undercounted for exactly that reason, missing the largest module.
-  try { text = fs.readFileSync(path.join(ROOT, rel), 'utf8'); } catch { continue; }
+  //
+  // A file that cannot be read is RECORDED, not skipped (#515). Skipping it let a file
+  // the index still lists — deleted from disk, say — drop out of the scan with the
+  // check still green: the same shrinking domain the derivation above exists to stop.
+  try { text = fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
+  catch (e) { unread.push(`${rel} (${e.code || e.message})`); continue; }
   const hits = idsIn(text);
   if (hits.length) offenders.push(`${rel}: ${hits.join(' ')}`);
 }
+
+// What this cannot see, stated: a file removed from the INDEX leaves the listing and the
+// scan together, because both are derived from it. That gap stays open (#515).
+ok(unread.length === 0,
+   unread.length
+     ? `${listed - unread.length} read of ${listed} listed — the index lists files the scan could not read:\n      ${unread.join('\n      ')}`
+     : `every listed file was read (${listed} of ${listed})`);
 
 ok(offenders.length === 0,
    offenders.length
