@@ -61,6 +61,7 @@
   /anvi:complete-milestone  Archive and tag milestone
   /anvi:cleanup         Archive accumulated phase directories
   /anvi:pr-branch       Create a clean PR branch (filters .anvi/project_management/)
+  /anvi:update-board    Put an issue on the project board and set its Status
   /anvi:pause-work      Save state for later
 
 ## Notes & Ideas
