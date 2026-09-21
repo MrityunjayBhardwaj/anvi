@@ -46,6 +46,13 @@
 //        formats (`✓ name: N passed`, `✓ N passed`, `✓ PASS — N passed`), so a regex
 //        written against the summary's wording would have missed 3 of 21. Indentation
 //        is the discriminator that is actually true.
+//      → …until a RUNNER is the test under mutation (#514): `scripts/run-tests.js`
+//        reports each file on an indented line, `  ✓ x.test.js   46 passed` or, red,
+//        `  ✗ x.test.js   exit 1`. So an indented line whose message OPENS with a test
+//        file's name is a per-file report and goes with the summaries. Measured over
+//        the suite: 0 of 4600 real assertion lines open that way; 107 of the runner's
+//        107 per-file lines do. The name alone is the rule, not `N passed` — a red
+//        file's line carries no tally, and red lines are the ones breadth counts.
 //
 //   7. The matrix asks only "does reddening happen?", which measures half a guard.
 //      Every verdict above is directional — WITNESSED is good — so the matrix can only
@@ -118,11 +125,13 @@ let PER_RUN_TIMEOUT_MS = 300000;
 // mode 6 is a rule about one line, and a rule nothing can redden is a claim.
 const ASSERTION_RE = /^[ \t]+([✓✗])[ \t]+(.*)$/;
 const SUMMARY_RE = /^([✓✗])[ \t]/;
+const PER_FILE_RE = /^\S+\.test\.(?:js|cjs|mjs|sh)(?::|\s{2,}|$)/;
 
 function parseRun(out) {
   const assertions = [], summaries = [];
   for (const line of out.split('\n')) {
     const a = line.match(ASSERTION_RE);
+    if (a && PER_FILE_RE.test(a[2].trim())) { summaries.push(line.trim()); continue; }
     if (a) { assertions.push({ ok: a[1] === '✓', msg: a[2].trim() }); continue; }
     if (SUMMARY_RE.test(line)) summaries.push(line.trim());
   }
@@ -569,6 +578,6 @@ function main() {
   process.exit(0);
 }
 
-module.exports = { parseRun, applyEdit, grade, matches, instrumentProblems, specProblems, coverageKey, ASSERTION_RE, SUMMARY_RE };
+module.exports = { parseRun, applyEdit, grade, matches, instrumentProblems, specProblems, coverageKey, ASSERTION_RE, SUMMARY_RE, PER_FILE_RE };
 
 if (require.main === module) main();
