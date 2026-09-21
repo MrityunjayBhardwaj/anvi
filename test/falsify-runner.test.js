@@ -307,6 +307,25 @@ ok(!/· the limit is five/.test(broad.out),
   ok(p.assertions.filter(a => !a.ok).length === 1, 'and exactly one red is counted, not four');
 }
 
+{
+  // (#514) Indentation stops discriminating when a RUNNER reports other test files: its
+  // per-file lines are indented too. Both forms are here — a file's tally, and the red
+  // `exit N` a failing file gets — because a rule written against `N passed` alone would
+  // leave exactly the red lines counted, which are the ones that inflate breadth.
+  const { parseRun } = require(FALSIFY);
+  const p = parseRun([
+    '  ✗ x.test.js: 2 passed, 1 failed',
+    '  ✓ compaction-banner.test.js                 46 passed                          0.8s',
+    '  ✗ compaction-banner.test.js                 exit 1                             0.8s',
+    '  ✗ run-tests.test.sh',
+    '  ✗ the banner does not state how many passes the log records',
+    '  ✓ the name compaction-banner.test.js appears inside a message',
+  ].join('\n'));
+  ok(p.assertions.length === 2, `a line opening with a test file's name is a per-file report, not an assertion (got ${p.assertions.length})`);
+  ok(p.assertions.filter(a => !a.ok).length === 1, 'so one red is counted — the real one, not the three per-file reds');
+  ok(p.summaries.length === 4, `and all four per-file lines are kept as summaries (got ${p.summaries.length})`);
+}
+
 // ── the mutation that crashes prints no ✗ at all ────────────────────────────
 // Counting reds calls that zero, and zero reads as NOT WITNESSED — which points the
 // reader at rewriting a healthy assertion. It is a separate outcome with its own name.
