@@ -60,6 +60,14 @@ process.stdin.on('end', () => {
     // Find Ground Truth docs — shared resolver spans both layouts
     const ref = resolveDirForRead(cwd, 'ref');
     const refDir = ref.dir;
+
+    // Not an anvi project: nothing resolves for either kind, and nothing was
+    // refused. Stay silent, as the other hooks do outside anvi projects. The
+    // absence message below ends by advising /anvi:ground, which CREATES a
+    // store project named after this directory — opting in a directory that
+    // never asked to be one. A refusal is not this case: something exists and
+    // the caller was declined it, and that is still reported below.
+    if (!anviDir && !refDir && !anvi.refused && !ref.refused) process.exit(0);
     let gtDocs = [];
     if (refDir) {
       gtDocs = fs.readdirSync(refDir)
