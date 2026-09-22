@@ -20,7 +20,7 @@ $ARGUMENTS — optional scope. Examples:
                 the last snapshot rather than a worklist. Execute
                 `~/.claude/anvi/workflows/refresh.md` for this mode and stop
                 here; it reports only and hands back for one project.
-                Costs about four minutes — say so before starting.
+                Costs about 45 minutes — say so before starting.
 - `--stale`   → only the worklist (RED / YELLOW / GRAY), skipping fresh + reference.
 - `--lint`    → the grounding-completeness view (a pure function of catalogue
                 text: no-computable-ref, no-validated, line-anchored-ref) — asks

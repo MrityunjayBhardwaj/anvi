@@ -45,10 +45,13 @@ two processes committing at once.
 </paths>
 
 <cost>
-About four minutes: it runs the currency machinery over every project's live
-working copy (most recently 256s for 18 projects and 4539 entries). Say so before
-starting if the user did not ask for it directly — this is not a command to fire
-speculatively mid-task.
+About 45 minutes: it runs the currency machinery over every project's live
+working copy (43 minutes for 18 projects on 2026-09-21, by wall clock). It grows
+with catalogue size: since 2026-09-06 each entry in a catalogue over 1MB is dated
+with its own `git log -L`, where it used to fail instantly and grade GRAY — the
+256s recorded before then was a run that could not read those catalogues. Say so
+before starting if the user did not ask for it directly — this is not a command
+to fire speculatively mid-task.
 </cost>
 
 <process>
@@ -124,5 +127,5 @@ currency gate exists to kill.
   knowledge stays human-invoked: git history is the only archive, so an entry
   removed unattended is recoverable only by someone who already knows to look.
 - Do not commit the snapshot by hand; the checkpoint hook does it.
-- Do not run this speculatively mid-task. It costs about four minutes.
+- Do not run this speculatively mid-task. It costs about 45 minutes.
 </guardrails>
