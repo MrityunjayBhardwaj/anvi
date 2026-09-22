@@ -439,6 +439,21 @@ console.log('\nfalsification: the forbidden phrases are still said where they ar
     'a project genuinely without a protocol is still told to create one');
 }
 
+// The other side of that absence message: a directory that is not an anvi
+// project at all — no catalogues, no reference directory, no store project.
+// `/anvi:ground` would CREATE a store project named after it, so advising it
+// there opts a stranger directory in. The gate says nothing, like the other
+// hooks outside anvi projects. The bare-project case above is the control that
+// keeps "says nothing" from passing on a gate that has simply gone dead.
+console.log('\na directory that is not an anvi project is left alone');
+{
+  const stranger = repo(path.join(TMP, 'stranger', 'scratchdir'), null);
+  const r = fire('debug-grounding-gate.js', stranger);
+  ok(r.code === 0, 'non-anvi dir: debug gate exits 0');
+  ok(contextOf(r) === '', 'non-anvi dir: debug gate injects nothing, so it advises no command that would create a store project');
+  ok(!fs.existsSync(path.join(TMP, '.anvideck', 'projects', 'scratchdir')), 'non-anvi dir: no store project exists for it (the fixture is truly a stranger)');
+}
+
 console.log(`\n${fail === 0 ? '✓ PASS' : '✗ FAIL'} — ${pass} passed, ${fail} failed`);
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ }
 process.exit(fail === 0 ? 0 : 1);
