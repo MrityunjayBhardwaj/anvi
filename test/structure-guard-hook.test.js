@@ -428,6 +428,65 @@ console.log('\nBOUNDED STATE — old notice markers and an overgrown log are tri
      `the hook's own crash record holds the log under ${H.LOG_MAX_BYTES} bytes, newest kept, oldest dropped (${Buffer.byteLength(after)} bytes)`);
 }
 
+console.log('\nLANDED OUTSIDE THE HOOK — refuse only what the edit adds, say what is already on disk (#544):');
+{
+  register();
+  // Written straight to disk, as a Bash heredoc or a `git pull` would: the hook never saw it,
+  // so the baseline does not hold it.
+  const N_ORIG = fs.readFileSync(path.join(PKG, 'src/mid/n.ts'), 'utf8');
+  const LANDED = "import { up } from '../top/t';\nexport const n = up;\n";
+  const LANDED_KEY = 'src/mid/n.ts -> src/top/t.ts';
+  put('src/mid/n.ts', LANDED);
+  put('src/top/u.ts', "export const u = 1;\n");
+
+  const comment = s => edit('src/mid/n.ts', 'export const n = up;\n', '// a comment, nothing else\nexport const n = up;\n', s);
+  const d = decide(comment('sess-landed'), registryNow());
+  ok(d.decision === 'allow' && (d.onDisk || []).map(f => f.key).join() === LANDED_KEY,
+     `a comment-only edit to a file carrying a violation that landed outside the hook is allowed, and the decision names it (${d.decision}${d.reason ? ': ' + d.reason.split('\n')[0] : ''})`);
+  const r = hook(comment('sess-landed'));
+  ok(r.exit === 0 && !r.denied, `the spawned hook allows it (exit ${r.exit})`);
+  ok(r.context.includes(LANDED_KEY) && /already on disk/.test(r.context) && /outside the hook/.test(r.context),
+     'and says the violation is already on disk and landed outside the hook');
+  ok(/user's decision/.test(r.context) && r.context.includes('--allow-growth') && r.context.includes(`--write-baseline '${BASELINE}'`),
+     'that grandfathering it is the user\'s decision, with the exact command');
+  ok(!/adds \d+ import/.test(r.context), 'and never claims this edit added it');
+  ok(hook(comment('sess-landed')).stdout === '', 'once per session');
+
+  // The file already carries a landed violation; an edit that adds ANOTHER is still refused, and
+  // the refusal names only the edge this edit adds.
+  const more = edit('src/mid/n.ts', LANDED, "import { up } from '../top/t';\nimport { u } from '../top/u';\nexport const n = up + u;\n", 'sess-landed-2');
+  const md = decide(more, registryNow());
+  ok(md.decision === 'deny' && md.fresh.map(f => f.key).join() === 'src/mid/n.ts -> src/top/u.ts',
+     `an edit that adds a new violation beside a landed one is still refused, naming only what it adds (${md.decision}: ${(md.fresh || []).map(f => f.key).join(', ')})`);
+  const mr = hook(more);
+  ok(mr.exit === 2 && mr.reason.includes('src/mid/n.ts -> src/top/u.ts') && !mr.reason.includes(LANDED_KEY),
+     'the spawned refusal lists the added edge and not the landed one');
+
+  // A Write replacing the whole file with the same imports adds nothing either.
+  const rewrite = write('src/mid/n.ts', '// rewritten\n' + LANDED, 'sess-landed-3');
+  ok(decide(rewrite, registryNow()).decision === 'allow', 'a Write that keeps the landed import and adds none is allowed');
+
+  // Its own notice kind: being told about a landed violation must not use up NOT MEASURED.
+  register({ broken: 'unmeasured' });
+  const told = hook(edit('src/low/a.ts', "export const a = 1;\n", "export const a = 2;\n", 'sess-landed'));
+  register();
+  ok(/NOT MEASURED/.test(told.context), 'a NOT MEASURED notice later in that session is still said');
+
+  // Both notices due on one edit — a baselined violation repaired elsewhere, and this file's
+  // landed one: a hook prints ONE JSON object, so the two are joined into it.
+  const OLD_SRC = fs.readFileSync(path.join(PKG, 'src/mid/old.ts'), 'utf8');
+  put('src/mid/old.ts', 'export const old = 1;\n');
+  const both = hook(comment('sess-both'));
+  let objects = 0;
+  try { JSON.parse(both.stdout); objects = 1; } catch { objects = both.stdout.split('}{').length; }
+  ok(both.exit === 0 && objects === 1 && /fixed since its baseline/.test(both.context) && /already on disk/.test(both.context),
+     `a repair and a landed violation due on the same edit are said in ONE hook output (${objects} object${objects === 1 ? '' : 's'})`);
+  put('src/mid/old.ts', OLD_SRC);
+
+  put('src/mid/n.ts', N_ORIG);
+  fs.unlinkSync(path.join(PKG, 'src/top/u.ts'));
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
