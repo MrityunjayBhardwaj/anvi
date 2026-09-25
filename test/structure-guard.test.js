@@ -352,6 +352,8 @@ console.log('\nTHE DESIGN ID — a baseline names the design it was measured und
     'the root changed': { ...clone(), root: 'lib' },
     'a layer renumbered': (() => { const x = clone(); x.layers[1].n = 2; return x; })(),
     'a dir added to a layer': (() => { const x = clone(); x.layers[1].dirs.push('api'); return x; })(),
+    // Changes no verdict, kept on purpose: per-layer evidence is reported under the name (#536).
+    'a layer renamed': (() => { const x = clone(); x.layers[1].name = 'features'; return x; })(),
   };
   for (const [what, d] of Object.entries(moved)) ok(G.designId(d) !== id, `sensitive: ${what}`);
 

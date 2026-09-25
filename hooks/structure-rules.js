@@ -59,10 +59,12 @@ function baselineCommand({ script, source, design, extractor, baseline, allowGro
 // THE MEANING, NOT THE BYTES. A design carries commentary beside substance (`_`, `_layers`, a
 // layer's `why`, a `measured` block). Hashing the file would move the id on a comment edit and
 // invalidate every baseline for nothing — and a guard that fires on prose gets switched off.
-// So only what changes a verdict is kept, normalised the way the rules read it: the root and
-// dirs without trailing slashes (as `loadGraph` and `layerOf` strip them), excludes as a set
-// (they are tested with `some`), each layer's number, name, dirs and files as sets, and the
-// layers in number order (the array's order decides nothing; `n` does).
+// So what changes a verdict is kept, normalised the way the rules read it: the root and dirs
+// without trailing slashes (as `loadGraph` and `layerOf` strip them), excludes as a set (they
+// are tested with `some`), each layer's number, dirs and files as sets, and the layers in
+// number order (the array's order decides nothing; `n` does). One field is kept that changes
+// no verdict: a layer's NAME, because per-layer evidence is reported under it (#536), and a
+// renamed layer is a different series to anyone reading that evidence.
 const crypto = require('crypto');
 const stripSlash = s => String(s).replace(/\/+$/, '');
 const sortedSet = xs => [...new Set((Array.isArray(xs) ? xs : []).map(String))].sort();

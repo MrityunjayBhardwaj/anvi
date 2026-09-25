@@ -1368,8 +1368,9 @@ loosened until it stops firing guards nothing.
   judged (#535).** Keys mean nothing without the design that produced them: after a layer
   moves, growth compared by key answers two questions as one, and a layering change that
   legalises an edge reads as a clean sprint. `--write-baseline` stamps a `designId` — a hash
-  of the design's MEANING only (`root`, excludes as a set, each layer's number, name, dirs
-  and files as sets; every `_` key, a layer's `why` and the `measured` block dropped), so a
+  of the design's MEANING only (`root`, excludes as a set, each layer's number, dirs and
+  files as sets, plus its name, which per-layer evidence is reported under; every `_` key, a
+  layer's `why` and the `measured` block dropped), so a
   comment edit or reformat never moves it and a moved file always does. A baseline whose id
   differs from the design in force is NOT MEASURED (exit 2) with the re-baseline command;
   the write itself proceeds and says the design changed. Withheld only on a POSITIVE
