@@ -1418,6 +1418,14 @@ loosened until it stops firing guards nothing.
   judged at edit time. The report over the package — `--package <dir> --design <d>
   --baseline <b>` — is what catches those, after they land. That is a stated blind spot, not
   a bypass to use: the refusal tells an agent a deliberate edge is the user's decision.
+- **New means added by THIS edit, not merely absent from the baseline (#544).** A violation
+  that landed outside the hook is on disk but not in the baseline, so judging the proposed graph
+  against the baseline alone refused the next ordinary edit of that file — observed on stave: a
+  comment-only Edit of `LiveCodingRuntime.ts` was denied as "adds 1 import" for an import that
+  landed through Bash days earlier. When something looks new, the graph on disk is judged too
+  (from the cache); what is already there is allowed and said once per session, with the
+  `--allow-growth` command that records it if it is meant. An edit that adds a violation beside
+  a landed one is still refused, naming only what it adds.
 - **A deliberate edge is grandfathered AFTER it lands, never before.** The refusal prints the
   exact command, built from the registry entry it judged against (`--package`, `--design`,
   `--extractor` when registered, `--baseline` and `--write-baseline` on the same file,

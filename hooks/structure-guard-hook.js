@@ -13,7 +13,9 @@
 // package's graph is rebuilt around it (`structure-graph.js`) and judged (`structure-rules.js`)
 // against the package's stored baseline. Only a NEW violation whose edge STARTS in the edited
 // file is refused: that is the edit that can fix it. A distant edge made redundant by this one
-// is not this edit's to answer for.
+// is not this edit's to answer for. And NEW means added by this edit (#544): a violation already
+// on disk that the baseline lacks — landed through Bash, a pull, a hand edit — is said once per
+// session, never refused, because refusing it would refuse an edit that did not add it.
 //
 // WHAT IT NEVER DOES: BLOCK ON ITS OWN IGNORANCE. An edit shape it does not recognise, an Edit
 // whose `old_string` does not match exactly once (the tool will refuse that itself), a package
@@ -191,15 +193,43 @@ function evaluate(payload, deps) {
   const ledger = R.ratchet(R.judge(built.graph, design), baseline);
   const prefix = `${owner.rel} -> `;
   const all = R.RULES.flatMap(rule => ledger[rule].fresh.map(f => ({ rule, ...f })));
-  const fresh = all.filter(f => f.key.startsWith(prefix));
+  let fresh = all.filter(f => f.key.startsWith(prefix));
+  // Not in the baseline is not the same as added by this edit (#544). A violation that landed
+  // outside the hook — a Bash heredoc, a `git pull`, a hand edit — is on disk already, and
+  // refusing the next ordinary edit of its file would refuse the wrong thing and say it was
+  // added. So only when something here looks new, judge the graph as it stands on disk too
+  // (from the cache, so cheap): what is already there is said, not refused.
+  let onDisk = [];
+  if (fresh.length) {
+    const disk = S.buildGraph({ pkgDir: owner.dir, design, extractor, cachePath, proposed: null });
+    if (disk.notMeasured) return { decision: 'unmeasured', why: `${pkgName}: ${disk.notMeasured}` };
+    const judged = R.judge(disk.graph, design);
+    const present = new Set(R.RULES.flatMap(rule => judged[rule].found.map(f => `${rule}|${f.key}`)));
+    onDisk = fresh.filter(f => present.has(`${f.rule}|${f.key}`));
+    fresh = fresh.filter(f => !present.has(`${f.rule}|${f.key}`));
+  }
   // Counted, not refused: new violations this edit caused in OTHER files' edges.
   const elsewhere = all.length - fresh.length;
   const examined = { modules: built.graph.modules.size, edges: built.graph.edges.length, extracted: built.stats.extracted };
   // Only an ALLOWED edit reports repairs: a refused one never lands, so its graph is not the disk's.
   const fixed = R.RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key })));
-  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed,
-    notice: fixed.length ? fixedText(pkgName, fixed, owner.dir, owner.entry) : null };
+  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk,
+    notice: fixed.length ? fixedText(pkgName, fixed, owner.dir, owner.entry) : null,
+    landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, owner.dir, owner.entry) : null };
   return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry) };
+}
+
+// A violation on disk that the baseline does not hold, in the file being edited (#544). The edit
+// did not add it, so it is not refused; but allowing it in silence would grandfather it by
+// neglect, so it is said — once per session — with the command that records it if it is meant.
+function landedText(pkgName, rel, onDisk, pkgDir, entry) {
+  const one = onDisk.length === 1;
+  const shown = onDisk.map(f => `${f.rule}: ${f.key} (${f.detail})`).join('; ');
+  return `structure guard: ${rel} carries ${onDisk.length} violation${one ? '' : 's'} of ${pkgName}'s declared structure that ` +
+    `${one ? 'is' : 'are'} already on disk but not in its baseline — ${shown}. ${one ? 'It' : 'They'} landed outside the hook ` +
+    '(a Bash command, another program, or a hand edit), so this edit is not refused for it. Fixing it, or recording it as ' +
+    'grandfathered, is the user\'s decision — ask them. If it is meant, this records it:\n' +
+    `  ${baselineCommand(pkgDir, entry, true)}`;
 }
 
 // State below grows only on the rare paths — a new notice, a crash — so it is trimmed there and
@@ -250,20 +280,31 @@ function recordFailure(logPath, line, maxBytes = LOG_MAX_BYTES) {
 // its own marker, so being told one thing never uses up being told another. The dot cannot occur
 // in a sanitised session id, so no session's plain marker can collide with another's kind.
 function noticeOnce(sessionId, text, stateDir, kind) {
+  return noticesOnce(sessionId, [[kind, text]], stateDir);
+}
+
+// Several notices, one output: a hook prints ONE JSON object, so two notices due on the same
+// edit (a repair and a landed violation, #544) are joined rather than written one after another.
+function noticesOnce(sessionId, notices, stateDir) {
   const id = String(sessionId || 'no-session').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'no-session';
-  const name = kind ? `${id}.${kind}` : id;
-  const marker = path.join(stateDir, 'notices', name);
-  try {
-    if (fs.existsSync(marker)) return false;
-    fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(marker, new Date().toISOString() + '\n');
-    pruneNotices(path.dirname(marker), name);
-  } catch { /* an unwritable marker means the notice may repeat — louder, never quieter */ }
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } }));
+  const due = notices.filter(([kind]) => {
+    const name = kind ? `${id}.${kind}` : id;
+    const marker = path.join(stateDir, 'notices', name);
+    try {
+      if (fs.existsSync(marker)) return false;
+      fs.mkdirSync(path.dirname(marker), { recursive: true });
+      fs.writeFileSync(marker, new Date().toISOString() + '\n');
+      pruneNotices(path.dirname(marker), name);
+    } catch { /* an unwritable marker means the notice may repeat — louder, never quieter */ }
+    return true;
+  });
+  if (!due.length) return false;
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse',
+    additionalContext: due.map(([, text]) => text).join('\n\n') } }));
   return true;
 }
 
-module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, pruneNotices, recordFailure,
+module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
   REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {
@@ -297,8 +338,8 @@ if (require.main === module) {
         noticeOnce(payload.session_id, result.noticeKind
           ? `structure guard: NOT MEASURED — ${result.why}. Edits made with it are not being checked; Write and Edit still are.`
           : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`, STATE_DIR, result.noticeKind);
-      if (result.decision === 'allow' && result.notice)
-        noticeOnce(payload.session_id, result.notice, STATE_DIR, 'fixed');
+      if (result.decision === 'allow')
+        noticesOnce(payload.session_id, [['fixed', result.notice], ['landed', result.landedNotice]].filter(([, t]) => t), STATE_DIR);
       process.exit(0);
     } catch (e) {
       // Fail open on its own bugs — and record it, because a crash and "nothing to refuse"
