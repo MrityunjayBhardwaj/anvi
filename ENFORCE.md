@@ -1389,6 +1389,14 @@ loosened until it stops firing guards nothing.
   TypeScript 5, a per-file cache) and judges it with the same rules as the report
   (`hooks/structure-rules.js`). **Only a new violation whose edge starts in the edited file
   is refused**; one it causes in another file's edge is counted, not refused.
+- **Before arming: replay the project's real sessions (`scripts/structure-replay.js`, #540).**
+  Every Write/Edit call in a window of the session transcripts is placed on the tree that was on
+  disk when it happened (the checkout's own HEAD reflog first) and run through the hook's own
+  decision, against a baseline derived from that tree. The edited file's prior content is the
+  tool's recorded `originalFile` when there is one (a mismatch is resynced and counted), the
+  replayed copy when the edit applies to it cleanly, and otherwise the edit is DIVERGED and not
+  judged. It prints every would-be refusal for a person to rule right or wrong, what landed on
+  the branch in the window, and how many Bash calls changed the corpus — which the hook never sees.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
