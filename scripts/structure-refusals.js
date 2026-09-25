@@ -17,11 +17,16 @@
 // Every Write/Edit/MultiEdit call whose file is under the package, in the window, is counted,
 // so a zero is printed as 0 OF N edits the guard judged or passed — never as a bare zero.
 //
-// A SHAPE BELONGS TO A VERSION (#549). If a later Claude Code records a denial differently, this
-// reader finds nothing and a zero would read as "no refusal". So each edit carries the version
-// its record names, and an edit from a version not in VERIFIED_VERSIONS is UNVERIFIED: no clean
-// "no refusal" is printed while any are in the window. Adding a version means re-observing a
-// real refusal on it (the probe #547 used) and keeping that capture beside the golden one.
+// THE SHAPE HAS ALREADY CHANGED ONCE — measured over every `permission-rule` record on this
+// machine: a hook's refusal was recorded BARE (`BLOCKED: …`) on 2.1.260–2.1.277 (123 records)
+// and WRAPPED (`PreToolUse:<Tool> hook error: BLOCKED: …`) from 2.1.278. Both are read.
+// A CHANGED SHAPE IS SAID, NEVER READ AS ZERO (#549): the guard's own words survive a change of
+// wrapper, so on every errored call in the package, those words outside both known shapes are
+// UNRECOGNISED, and while any exist no clean zero is printed. That fires on the first drifted
+// refusal and never on a version that did not drift, so no per-version capture is kept. A
+// denial WITHOUT the guard's words is another hook's or a permission rule's — the two cannot
+// be told apart from the record (2.1.281 recorded a settings rule the same way) — so it is
+// counted where it can be seen, not called drift.
 //
 // Usage:
 //   node scripts/structure-refusals.js --package <dir> --since <ISO time>
@@ -31,7 +36,7 @@
 //
 // Exit: 0 read, no refusal · 1 read, at least one refusal (each needs a person's ruling: right
 //       or wrong) · 2 not measured (no transcripts, no edit in the package in the window, or no refusal
-//       recognised while some edits come from a Claude Code version whose denial shape is unverified)
+//       recognised while some denial was recorded in a shape this reader does not know)
 
 'use strict';
 
@@ -40,9 +45,11 @@ const os = require('os');
 const path = require('path');
 
 const TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
-// The versions on which a real refusal was captured and read in the shapes below.
-const VERIFIED_VERSIONS = new Set(['2.1.282']);
-const REFUSAL = /^PreToolUse:(Write|Edit|MultiEdit) hook error: BLOCKED: this edit to /;
+// The guard's opening words, bare or in Claude Code's wrapper.
+const REFUSAL = /^(?:PreToolUse:(?:Write|Edit|MultiEdit) hook error: )?BLOCKED: this edit to /;
+// The guard's own words: they survive a change of wrapper, so finding them outside the known
+// shape means the shape moved, not that the guard went quiet.
+const GUARD_WORDS = /BLOCKED: this edit to .* adds \d+ import/;
 const VIOLATION = /^\s*·\s*(layer|cycle):\s*(\S+ -> \S+)\s*$/gm;
 // What each notice says, by its own opening words (hooks/structure-guard-hook.js).
 const NOTICE_KINDS = [
@@ -104,19 +111,23 @@ function readTranscript(file, prefixes, since, until) {
           session: r.sessionId || r.session_id || path.basename(file, '.jsonl'), transcript: file,
           outcome: 'no result', violations: [], notices: [] });
       } else if (b.type === 'tool_result') {
-        results.push(b);
+        results.push({ block: b, denialKind: r.toolDenialKind || null });
       }
     }
   }
-  for (const b of results) {
+  for (const { block: b, denialKind } of results) {
     const c = calls.get(b.tool_use_id);
     if (!c) continue;
     const text = textOf(b.content);
-    if (b.is_error && REFUSAL.test(text)) {
+    if (!b.is_error) { c.outcome = 'applied'; continue; }
+    if (REFUSAL.test(text)) {
       c.outcome = 'refused';
       c.reason = text;
       c.violations = [...text.matchAll(VIOLATION)].map(m => ({ rule: m[1], key: m[2] }));
-    } else c.outcome = b.is_error ? 'errored' : 'applied';
+    } else if (GUARD_WORDS.test(text)) { c.outcome = 'unrecognised'; c.reason = text; }
+    // A user's rejection is its own kind, and is not this.
+    else if (denialKind === 'permission-rule' || /^PreToolUse:\w+ hook error: /.test(text)) c.outcome = 'denied otherwise';
+    else c.outcome = 'errored';
   }
   for (const a of attachments) {
     const c = calls.get(a.toolUseID);
@@ -169,23 +180,23 @@ function main(argv) {
   print(`  read: ${files.length} transcripts under ${dir}` + (unreadable ? ` (${unreadable} unreadable)` : '') +
         (badLines ? ` · ${badLines} unparseable lines skipped` : ''));
   print(`  edits in the package: ${calls.length} Write/Edit/MultiEdit calls in ${sessions.size} sessions — ` +
-        `${count('applied')} applied · ${refused.length} REFUSED by the guard · ${count('errored')} errored otherwise · ${count('no result')} with no result`);
+        `${count('applied')} applied · ${refused.length} REFUSED by the guard · ${count('denied otherwise')} denied by another hook or a permission rule · ` +
+        `${count('errored')} errored otherwise · ${count('no result')} with no result`);
   print(`  notices said (not refused): ` + NOTICE_KINDS.map(([k]) => `${k} ${notices[k] || 0}`).join(' · '));
+  const unrecognised = calls.filter(c => c.outcome === 'unrecognised');
   const byVersion = {};
   for (const c of calls) { const v = c.version || 'unknown'; byVersion[v] = (byVersion[v] || 0) + 1; }
-  const unverified = calls.filter(c => !VERIFIED_VERSIONS.has(c.version));
-  const unverifiedNames = Object.keys(byVersion).filter(v => !VERIFIED_VERSIONS.has(v));
-  if (calls.length) print(`  Claude Code versions among these edits: ` + Object.entries(byVersion).sort()
-    .map(([v, k]) => `${v} ×${k}${VERIFIED_VERSIONS.has(v) ? '' : ' UNVERIFIED'}`).join(' · '));
+  if (calls.length) print(`  Claude Code versions among these edits: ` + Object.entries(byVersion).sort().map(([v, k]) => `${v} ×${k}`).join(' · '));
+  print(`  denials in an UNRECOGNISED shape: ${unrecognised.length}`);
   if (!calls.length) {
     print('');
     return stop('no edit in the package in this window — a zero here is not evidence of anything');
   }
-  // Said beside every outcome it qualifies, including a refusal: a version whose denial shape
-  // was never observed can hide further refusals behind the ones that were recognised.
-  const unverifiedText = `${unverified.length} of ${calls.length} edits come from Claude Code ${unverifiedNames.join(', ')}, ` +
-    'on which no refusal has been observed — a refusal there may not be recognised. Capture one on that version ' +
-    "(a refused Edit against a scratch registered package, as #547 did) and add it to VERIFIED_VERSIONS before reading this as zero.";
+  // Said beside every outcome it qualifies, including a refusal: a shape that moved can hide
+  // further refusals behind the ones that were recognised.
+  const unrecognisedText = `${unrecognised.length} of ${calls.length} edits were denied in a shape this reader does not know ` +
+    `(${unrecognised.slice(0, 3).map(c => `${c.at} ${c.file} on ${c.version || 'unknown'}: "${String(c.reason).slice(0, 70)}"`).join('; ')}) — ` +
+    'Claude Code has likely changed how it records a hook denial. Read those calls, then update the shape here before reading this as zero.';
   if (refused.length) {
     print(`\n  REFUSALS — ${refused.length} of ${calls.length} edits; each needs a ruling, right or wrong:`);
     refused.forEach((c, i) => {
@@ -193,20 +204,20 @@ function main(argv) {
       for (const v of c.violations) print(`         ${v.rule.padEnd(6)} ${v.key}`);
       if (!c.violations.length) print('         (no violation line could be read from the reason — read the transcript)');
     });
-    if (unverified.length) print(`  UNVERIFIED: ${unverifiedText}`);
-  } else if (unverified.length) {
-    print(`\n  no refusal RECOGNISED — but UNVERIFIED: ${unverifiedText}`);
-  } else print(`\n  no refusal in ${calls.length} edits, all from versions whose refusal shape was observed.`);
+    if (unrecognised.length) print(`  UNRECOGNISED: ${unrecognisedText}`);
+  } else if (unrecognised.length) {
+    print(`\n  no refusal RECOGNISED — but UNRECOGNISED: ${unrecognisedText}`);
+  } else print(`\n  no refusal in ${calls.length} edits.`);
 
   if (args.json) {
     fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: prefixes[0], since, until, transcripts: files.length,
-      unreadable, badLines, verifiedVersions: [...VERIFIED_VERSIONS], calls: calls.map(({ reason, ...c }) => c) }, null, 1) + '\n');
+      unreadable, badLines, calls: calls.map(({ reason, ...c }) => c) }, null, 1) + '\n');
     print(`  report: ${path.resolve(args.json)}`);
   }
-  // Refused → a ruling is owed · nothing recognised but unverified edits → not measured, not clean.
-  return refused.length ? 1 : unverified.length ? 2 : 0;
+  // Refused → a ruling is owed · nothing recognised but denials unread → not measured, not clean.
+  return refused.length ? 1 : unrecognised.length ? 2 : 0;
 }
 
-module.exports = { readTranscript, spellings, REFUSAL, VIOLATION, NOTICE_KINDS, VERIFIED_VERSIONS };
+module.exports = { readTranscript, spellings, REFUSAL, GUARD_WORDS, VIOLATION, NOTICE_KINDS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

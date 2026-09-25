@@ -1424,10 +1424,15 @@ loosened until it stops firing guards nothing.
   also marks ordinary permission rules); a notice is a `hook_success` attachment whose stdout
   carries `structure guard:` context. A window with no edit in the package is NOT MEASURED
   (exit 2), never a clean zero; a refusal exits 1 and needs a ruling, right or wrong.
-  **A shape belongs to a version (#549):** each edit's record names its Claude Code version,
-  and one not in `VERIFIED_VERSIONS` (a real refusal captured and read on it) is UNVERIFIED —
-  a later version that records a denial differently would otherwise read as "no refusal". With
-  any in the window, no clean zero is printed (exit 2), and a refusal list says so beside it.
+  **The shape has already changed once, so a changed shape is said, never read as zero
+  (#549).** Over every `permission-rule` record on this machine, a hook's refusal was recorded
+  bare (`BLOCKED: …`) on 2.1.260–2.1.277 and wrapped (`PreToolUse:<Tool> hook error: BLOCKED:
+  …`) from 2.1.278; both are read. The guard's own words survive a change of wrapper, so on every
+  errored call in the package those words outside both shapes are UNRECOGNISED, and while any
+  exist no clean zero is printed (exit 2); a refusal list says so beside it. That fires on the
+  first drifted refusal and never on a version that did not drift, so no per-version capture is
+  kept. A denial without the guard's words (another hook's, or a settings permission rule — the
+  record cannot tell them apart) is counted where it can be seen, not called drift.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>

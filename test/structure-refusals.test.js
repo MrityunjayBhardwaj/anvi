@@ -82,7 +82,7 @@ console.log('\nWHAT IS NOT A REFUSAL BY THIS GUARD:');
   // 2 sessions: the golden record keeps the real session it was captured from.
   ok(/3 Write\/Edit\/MultiEdit calls in 2 sessions/.test(r.out),
      `edits outside the package, before the window, and Bash calls are not counted; a subagent's transcript is (${(r.out.match(/(\d+) Write\/Edit/) || [])[1]} counted)`);
-  ok(/1 applied · 1 REFUSED by the guard · 1 errored otherwise/.test(r.out),
+  ok(/1 applied · 1 REFUSED by the guard · 1 denied by another hook or a permission rule · 0 errored otherwise/.test(r.out) && /UNRECOGNISED shape: 0/.test(r.out),
      'another hook\'s block is an error, not this guard\'s refusal; the golden refusal is still the only one');
   ok(!/src\/a\.ts -> src\/z\.ts/.test(r.out) && !/src\/c\.ts/.test(r.out), 'neither the outside nor the early refusal is listed');
 }
@@ -125,35 +125,65 @@ console.log('\nTHE PACKAGE AS THE TRANSCRIPTS SPELL IT:');
      `--json writes every call with its outcome (${rep.calls.length}), without the full reason text`);
 }
 
-console.log('\nA SHAPE BELONGS TO A VERSION — an unverified one never reads as a clean zero (#549):');
+console.log('\nA CHANGED DENIAL SHAPE IS SAID, never read as a clean zero (#549):');
 {
-  const tx = path.join(DIR, 'versions');
+  const tx = path.join(DIR, 'shapes');
   const window = ['--package', PKG, '--since', '2026-09-25T00:00:00Z'];
   const put = (name, lines) => { fs.mkdirSync(tx, { recursive: true }); fs.writeFileSync(path.join(tx, name), lines.join('\n') + '\n'); };
-  const ok1 = use('Edit', path.join(PKG, 'src/v1.ts'));
-  put('verified.jsonl', [ok1.line, result(ok1.id, 'The file has been updated successfully.', false)]);
+  const denied = (id, text, kind, at = T0, version = V) => JSON.stringify({ type: 'user', timestamp: at, sessionId: 'sess-s', version,
+    ...(kind ? { toolDenialKind: kind } : {}), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, is_error: true }] } });
+
+  // A later version with no drift is read like any other: no per-version capture is needed.
+  const later = use('Edit', path.join(PKG, 'src/s1.ts'), T0, 'sess-s', '2.1.300');
+  put('a.jsonl', [later.line, result(later.id, 'The file has been updated successfully.', false, T0, '2.1.300')]);
   const clean = runIn(tx, ...window);
-  ok(clean.exit === 0 && /no refusal in 1 edits, all from versions whose refusal shape was observed/.test(clean.out) && /2\.1\.282 ×1(?! UNVERIFIED)/.test(clean.out),
-     `edits only from a verified version give a clean zero, and name the version (exit ${clean.exit})`);
+  ok(clean.exit === 0 && /no refusal in 1 edits/.test(clean.out) && /2\.1\.300 ×1/.test(clean.out) && /UNRECOGNISED shape: 0/.test(clean.out),
+     `edits from a version never seen before give a clean zero when nothing drifted, and name it (exit ${clean.exit})`);
 
-  // A later version whose denial record changed: the refusal is present but in a shape not read.
-  const later = use('Edit', path.join(PKG, 'src/v2.ts'), T0, 'sess-v', '2.1.300');
-  put('later.jsonl', [later.line, result(later.id, 'Hook PreToolUse:Edit denied this call: BLOCKED: this edit to src/v2.ts adds 1 import', true, T0, '2.1.300')]);
-  const hidden = runIn(tx, ...window);
-  ok(hidden.exit === 2 && /no refusal RECOGNISED/.test(hidden.out) && /UNVERIFIED: 1 of 2 edits come from Claude Code 2\.1\.300/.test(hidden.out),
-     `a refusal in a changed shape is not read — and the report exits 2 and says why, instead of a clean zero (exit ${hidden.exit})`);
-  ok(/2\.1\.300 ×1 UNVERIFIED/.test(hidden.out) && !/all from versions/.test(hidden.out), 'the version line marks it, and no clean line is printed');
+  // The guard's reason in a changed wrapper: read as drift, not as nothing.
+  const wrapped = use('Edit', path.join(PKG, 'src/s2.ts'), T0, 'sess-s', '2.1.300');
+  put('b.jsonl', [wrapped.line, denied(wrapped.id, 'Hook denied Edit: BLOCKED: this edit to src/s2.ts adds 1 import that erode editor\'s declared structure', 'permission-rule', T0, '2.1.300')]);
+  const drift = runIn(tx, ...window);
+  ok(drift.exit === 2 && /no refusal RECOGNISED/.test(drift.out) && /UNRECOGNISED shape: 1/.test(drift.out) && /src\/s2\.ts on 2\.1\.300/.test(drift.out),
+     `the guard's words in a changed wrapper are UNRECOGNISED, exit 2, naming the call and version (exit ${drift.exit})`);
 
-  const bare = use('Write', path.join(PKG, 'src/v3.ts'), T0, 'sess-v', null);
-  put('later.jsonl', [bare.line, result(bare.id, 'File created successfully', false, T0, null)]);
-  const unknown = runIn(tx, ...window);
-  ok(unknown.exit === 2 && /unknown ×1 UNVERIFIED/.test(unknown.out), 'a record naming no version is unverified, not assumed verified');
+  // A version that also stops marking the record: the guard's own words are still enough.
+  put('b.jsonl', [wrapped.line, denied(wrapped.id, 'Hook denied Edit: BLOCKED: this edit to src/s2.ts adds 1 import that erode x', null, T0, '2.1.300')]);
+  const unmarked = runIn(tx, ...window);
+  ok(unmarked.exit === 2 && /UNRECOGNISED shape: 1/.test(unmarked.out), 'the guard\'s words with no denial marker on the record are UNRECOGNISED');
 
-  // A recognised refusal still exits 1 — and the unverified edits beside it are still said.
+  // The SHAPE OBSERVED on 2.1.260–2.1.277: the reason bare, no wrapper. Read as a refusal.
+  fs.unlinkSync(path.join(tx, 'b.jsonl'));
+  const old = use('Edit', path.join(PKG, 'src/s5.ts'), T0, 'sess-s', '2.1.270');
+  put('e.jsonl', [old.line, denied(old.id, "BLOCKED: this edit to src/s5.ts adds 1 import that erode editor's declared structure:\n  · layer: src/s5.ts -> src/z.ts\n      layer 0 imports layer 2", 'permission-rule', T0, '2.1.270')]);
+  const bareRef = runIn(tx, ...window);
+  ok(bareRef.exit === 1 && /1 REFUSED/.test(bareRef.out) && /layer\s+src\/s5\.ts -> src\/z\.ts/.test(bareRef.out) && /UNRECOGNISED shape: 0/.test(bareRef.out),
+     `a refusal in the bare shape of 2.1.260–2.1.277 is read as a refusal, violation and all (exit ${bareRef.exit})`);
+  fs.unlinkSync(path.join(tx, 'e.jsonl'));
+
+  // Another hook's bare block, and a settings permission rule (as 2.1.281 recorded one): denied,
+  // not by this guard, and not drift — counted where it can be seen.
+  const other = use('Edit', path.join(PKG, 'src/s6.ts'), T0, 'sess-s', '2.1.270');
+  const rule = use('Write', path.join(PKG, 'src/s3.ts'), T0, 'sess-s', '2.1.281');
+  put('c.jsonl', [other.line, denied(other.id, 'BLOCKED: a gate is running against this tree — Edit → packages/editor', 'permission-rule', T0, '2.1.270'),
+    rule.line, denied(rule.id, 'Permission for this command was denied by a rule in your settings.', 'permission-rule', T0, '2.1.281')]);
+  const bare = runIn(tx, ...window);
+  ok(bare.exit === 0 && /UNRECOGNISED shape: 0/.test(bare.out) && /2 denied by another hook or a permission rule/.test(bare.out),
+     `another hook's bare block and a settings rule are counted as denied otherwise, not drift (exit ${bare.exit})`);
+
+  // A person rejecting the call is its own kind, and is not drift.
+  fs.unlinkSync(path.join(tx, 'c.jsonl'));
+  const rejected = use('Edit', path.join(PKG, 'src/s4.ts'), T0, 'sess-s', '2.1.301');
+  put('d.jsonl', [rejected.line, denied(rejected.id, "The user doesn't want to proceed with this tool use.", 'user-rejected', T0, '2.1.301')]);
+  const user = runIn(tx, ...window);
+  ok(user.exit === 0 && /UNRECOGNISED shape: 0/.test(user.out) && /1 errored otherwise/.test(user.out), 'a user\'s rejection is not read as drift');
+
+  // A recognised refusal still exits 1 — and a drifted one beside it is still said.
+  put('b.jsonl', [wrapped.line, denied(wrapped.id, 'Hook denied Edit: BLOCKED: this edit to src/s2.ts adds 1 import that erode x', 'permission-rule', T0, '2.1.300')]);
   fs.writeFileSync(path.join(tx, 'golden.jsonl'), golden);
   const both = runIn(tx, ...window);
-  ok(both.exit === 1 && /1 REFUSED/.test(both.out) && /UNVERIFIED: 1 of 3 edits/.test(both.out),
-     `a refusal alongside unverified edits exits 1 and still says what could not be read (exit ${both.exit})`);
+  ok(both.exit === 1 && /1 REFUSED/.test(both.out) && /UNRECOGNISED: 1 of 4 edits/.test(both.out),
+     `a refusal beside a drifted denial exits 1 and still says what could not be read (exit ${both.exit})`);
 }
 
 console.log('\nBAD INPUT IS NOT MEASURED, never a clean zero:');
