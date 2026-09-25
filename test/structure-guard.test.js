@@ -311,6 +311,80 @@ console.log('\nFIXED SINCE THE BASELINE — said loudly, with the command; the b
      `with no baseline nothing can be fixed, and nothing says so (got ${nobase.status})`);
 }
 
+console.log('\nTHE DESIGN ID — a baseline names the design it was measured under, and a mismatched pair is not judged (#535):');
+{
+  // Commentary sits beside substance in a real design (`_`, `_layers`, a layer's `why`, a
+  // `measured` block). The id must hash only what changes a verdict: an id that moved on a
+  // comment edit would invalidate every baseline for nothing, and get the guard switched off.
+  const BASE = { _: 'why this design', root: 'src', excludes: ['.test.', '__tests__'], measured: { modules: 3 },
+    layers: [{ n: 0, name: 'low', dirs: ['low', 'util'], files: ['x/k.ts'], why: 'foundations' },
+             { n: 1, name: 'mid', dirs: ['mid'], why: 'features' }] };
+  const id = G.designId(BASE);
+  ok(/^[0-9a-f]{12}$/.test(id), `the id is 12 hex characters (${id})`);
+  const clone = () => JSON.parse(JSON.stringify(BASE));
+  const same = {
+    'keys reordered': Object.fromEntries(Object.entries(clone()).reverse()),
+    'a comment edited': { ...clone(), _: 'reworded entirely', _layers: 'new note' },
+    'a layer\'s why edited': (() => { const x = clone(); x.layers[1].why = 'other'; return x; })(),
+    'the measured block changed': { ...clone(), measured: { modules: 999, written: 'now' } },
+    'layers listed in another order': (() => { const x = clone(); x.layers.reverse(); return x; })(),
+    'dirs and excludes reordered': (() => { const x = clone(); x.layers[0].dirs.reverse(); x.excludes.reverse(); return x; })(),
+    'a trailing slash on root and a dir': (() => { const x = clone(); x.root = 'src/'; x.layers[1].dirs = ['mid/']; return x; })(),
+  };
+  for (const [what, d] of Object.entries(same)) ok(G.designId(d) === id, `stable: ${what}`);
+  const moved = {
+    'a file moved between layers': (() => { const x = clone(); x.layers[0].files = []; x.layers[1].files = ['x/k.ts']; return x; })(),
+    'an exclude added': { ...clone(), excludes: ['.test.', '__tests__', '.spec.'] },
+    'the root changed': { ...clone(), root: 'lib' },
+    'a layer renumbered': (() => { const x = clone(); x.layers[1].n = 2; return x; })(),
+    'a dir added to a layer': (() => { const x = clone(); x.layers[1].dirs.push('api'); return x; })(),
+    // Changes no verdict, kept on purpose: per-layer evidence is reported under the name (#536).
+    'a layer renamed': (() => { const x = clone(); x.layers[1].name = 'features'; return x; })(),
+  };
+  for (const [what, d] of Object.entries(moved)) ok(G.designId(d) !== id, `sensitive: ${what}`);
+
+  const IDD = path.join(DIR, 'design-id');
+  fs.mkdirSync(IDD, { recursive: true });
+  const write = (name, obj) => { const f = path.join(IDD, name); fs.writeFileSync(f, JSON.stringify(obj, null, 2)); return f; };
+  const run = (...args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
+  const LAYERS = [{ n: 0, name: 'low', dirs: ['low'] }, { n: 1, name: 'mid', dirs: ['mid'] }];
+  const d = write('design.json', design(LAYERS, { _: 'first wording' }));
+  const OLD = 'src/low/a.ts -> src/mid/m.ts';
+  const graph = write('graph.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }));
+  const base = path.join(IDD, 'base.json');
+
+  const w = run('--design', d, '--graph', graph, '--write-baseline', base, '--allow-growth');
+  const stamped = JSON.parse(fs.readFileSync(base, 'utf8'));
+  ok(w.status === 0 && stamped.designId === G.designId(JSON.parse(fs.readFileSync(d, 'utf8'))),
+     `a written baseline carries the design's id (got ${w.status}, ${stamped.designId})`);
+  const judged = run('--design', d, '--graph', graph, '--baseline', base);
+  ok(judged.status === 0 && /1 grandfathered/.test(judged.stdout) && judged.stdout.includes(`design ${stamped.designId}`),
+     `the same design judges as before, and prints the id it judged under (got ${judged.status})`);
+
+  fs.writeFileSync(d, JSON.stringify({ layers: LAYERS, root: 'src', _: 'reworded, reformatted, reordered' }));
+  ok(run('--design', d, '--graph', graph, '--baseline', base).status === 0, 'a comment-and-format-only edit of the design keeps verdicts coming');
+
+  // The move legalises the grandfathered edge — exactly the change that would read as a clean sprint.
+  const d2 = write('design-moved.json', design([{ n: 0, name: 'low', dirs: ['low'] }, { n: 1, name: 'mid', dirs: ['mid'], files: ['low/a.ts'] }]));
+  const mm = run('--design', d2, '--graph', graph, '--baseline', base);
+  ok(mm.status === 2 && /NOT MEASURED/.test(mm.stdout) && mm.stdout.includes(stamped.designId) && mm.stdout.includes(G.designId(JSON.parse(fs.readFileSync(d2, 'utf8')))),
+     `a design that differs in substance from the baseline's is NOT MEASURED, naming both ids (got ${mm.status})`);
+  ok(!/grandfathered|NEW|fixed since/.test(mm.stdout), 'and it gives no verdict at all');
+  const remedy = (mm.stdout.split('\n').find(l => /^\s+node .*--write-baseline /.test(l)) || '').trim();
+  ok(remedy.includes(`--design '${d2}'`) && remedy.includes(`--baseline '${base}' --write-baseline '${base}'`),
+     'it prints the re-baseline command, under the design in force');
+  const rebased = spawnSync('/bin/sh', ['-c', remedy], { encoding: 'utf8' });
+  ok(rebased.status === 0 && /design changed since the previous baseline/.test(rebased.stdout) &&
+     JSON.parse(fs.readFileSync(base, 'utf8')).designId === G.designId(JSON.parse(fs.readFileSync(d2, 'utf8'))),
+     `run as printed, it re-baselines, says the design changed, and stamps the new id (got ${rebased.status})`);
+  ok(run('--design', d2, '--graph', graph, '--baseline', base).status === 0, 'after which the new design judges again');
+
+  const legacy = write('legacy.json', { rules: { layer: [OLD], implied: [], cycle: [] } });
+  const lg = run('--design', d, '--graph', graph, '--baseline', legacy);
+  ok(lg.status === 0 && /names no design/.test(lg.stdout),
+     `a baseline written before designs were identified is still judged, and says it names no design (got ${lg.status})`);
+}
+
 console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees with the analyser:');
 {
   const PK = path.join(DIR, 'pkg');
@@ -381,15 +455,26 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   ok(run(['--design', d, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]).status === 2 && !fs.existsSync(REG),
      '--arm without an analyser graph to agree with is not measured, and registers nothing');
 
-  const armed = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  // Arming needs a baseline that names the design in force (#535): the registry records that id.
+  const unstampedArm = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  ok(unstampedArm.status === 2 && /names no design/.test(unstampedArm.stdout) && /--write-baseline/.test(unstampedArm.stdout) && !fs.existsSync(REG),
+     `--arm on a baseline that names no design registers nothing, and prints the command that stamps it (got ${unstampedArm.status})`);
+  const ID = G.designId(JSON.parse(fs.readFileSync(d, 'utf8')));
+  const otherArm = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline',
+    write('pkg-base-other.json', { designId: '000000000000', rules: { layer: [EDGE], implied: [], cycle: [] } })]);
+  ok(otherArm.status === 2 && /000000000000/.test(otherArm.stdout) && !fs.existsSync(REG),
+     `--arm on a baseline measured under another design registers nothing (got ${otherArm.status})`);
+  const sbase = write('pkg-base-stamped.json', { designId: ID, rules: { layer: [EDGE], implied: [], cycle: [] } });
+  const armed = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', sbase]);
   const entries = fs.existsSync(REG) ? JSON.parse(fs.readFileSync(REG, 'utf8')).packages : [];
   ok(armed.status === 0 && entries.length === 1 && entries[0].dir === fs.realpathSync(PK) && entries[0].extractor === EX,
      `--arm on graphs that agree registers the package, by its real path, with its extractor (got ${armed.status}, ${entries.length} entries)`);
-  run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  ok(entries.length === 1 && entries[0].designId === ID, `and records the design it was armed under (${entries[0] && entries[0].designId})`);
+  run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', sbase]);
   ok(JSON.parse(fs.readFileSync(REG, 'utf8')).packages.length === 1, 'arming the same package again replaces its entry rather than adding one');
 
   fs.writeFileSync(REG, '{"not":"a registry"}');
-  const clobber = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
+  const clobber = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', sbase]);
   ok(clobber.status === 2 && fs.readFileSync(REG, 'utf8') === '{"not":"a registry"}',
      'a registry of an unexpected shape is refused, not overwritten — it may hold other packages');
 

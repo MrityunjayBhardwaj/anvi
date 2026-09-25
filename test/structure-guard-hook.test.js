@@ -212,6 +212,39 @@ console.log('\nALLOWED — each release paired with what was examined:');
   ok(garbled.exit === 0 && garbled.stdout === '', 'malformed stdin exits 0 in silence — unreadable input is not the guard failing');
 }
 
+console.log('\nTHE REGISTERED MATCHER — every tool it names is judged, or declared unjudged and said (#533):');
+{
+  // Derived from the registration, not restated: widening the matcher without deciding what the
+  // hook does with the new tool reddens here, instead of reaching the hook as "not an edit".
+  const REG = require(path.join(__dirname, '..', 'scripts', 'register-hooks.cjs'));
+  const rows = REG.REGISTRATIONS.filter(r => r[2] === 'structure-guard-hook.js');
+  ok(rows.length === 1, `the guard is registered once (${rows.length})`);
+  const tokens = [...REG.matcherTools(rows[0][1])].sort();
+  const handled = [...H.JUDGED_TOOLS, ...Object.keys(H.UNJUDGED_TOOLS)].sort();
+  ok(tokens.join('|') === handled.join('|'), `the matcher's tools (${tokens.join('|')}) are exactly the judged plus the declared-unjudged (${handled.join('|')})`);
+  ok(!H.JUDGED_TOOLS.some(t => t in H.UNJUDGED_TOOLS), 'and no tool is both');
+
+  // MultiEdit is registered but not offered by Claude Code 2.1.270 or 2.1.282, so its edit shape
+  // has never been observed. Silence would read as approval; guessing the shape could refuse wrongly.
+  const multi = (session, file = path.join(PKG, 'src/low/a.ts')) => ({ session_id: session, cwd: PKG, tool_name: 'MultiEdit',
+    tool_input: { file_path: file, edits: [{ old_string: "export const a = 1;\n", new_string: "import { up } from '../top/t';\nexport const a = up;\n" }] } });
+  const d = decide(multi('sess-me'), registryNow());
+  ok(d.decision === 'unmeasured' && /MultiEdit/.test(d.why) && /not judged/.test(d.why),
+     `a MultiEdit in a registered package is NOT MEASURED, and says which tool (${d.decision}: ${d.why})`);
+  const first = hook(multi('sess-me'));
+  ok(first.exit === 0 && !first.denied && /NOT MEASURED/.test(first.context) && /MultiEdit/.test(first.context),
+     'the spawned hook allows it and tells the session so');
+  ok(hook(multi('sess-me')).stdout === '', 'once per session');
+  // Its own notice kind: being told about MultiEdit must not use up the package's real NOT MEASURED.
+  register({ broken: 'unmeasured' });
+  const real = hook(edit('src/low/a.ts', "export const a = 1;\n", "import { up } from '../top/t';\nexport const a = up;\n", 'sess-me'));
+  register();
+  ok(/NOT MEASURED/.test(real.context) && !/MultiEdit/.test(real.context),
+     'a real NOT MEASURED later in the same session is still said');
+  const outsideMulti = hook(multi('sess-me2', path.join(DIR, 'elsewhere.ts')));
+  ok(outsideMulti.exit === 0 && outsideMulti.stdout === '', 'a MultiEdit outside every registered package stays silent');
+}
+
 console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed edit; never refused, never rewritten (#451):');
 {
   const OLD_SRC = "import { up } from '../top/t';\nexport const old = up;\n";
@@ -265,6 +298,44 @@ console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed 
      `re-adding it before the baseline is regenerated is allowed in silence — grandfathered, as ruled (${bd.examined && bd.examined.edges} edges examined)`);
 
   put('src/mid/old.ts', OLD_SRC);
+}
+
+console.log('\nTHE DESIGN ID — no verdict across two designs (#535):');
+{
+  const designObj = JSON.parse(fs.readFileSync(DESIGN, 'utf8'));
+  const ID = R.designId(designObj);
+  const rules = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).rules;
+  const D2 = path.join(DIR, 'design-id-2.json');       // src/low/a.ts moved to the top layer
+  const d2 = { ...designObj, layers: designObj.layers.map(l => l.n === 2 ? { ...l, files: ['low/a.ts'] } : l) };
+  fs.writeFileSync(D2, JSON.stringify(d2));
+  const ID2 = R.designId(d2);
+  const SB = path.join(DIR, 'baseline-stamped.json');
+  const stamp = id => fs.writeFileSync(SB, JSON.stringify({ designId: id, rules }));
+  const reg = (design, extra = {}) => ({ packages: [{ dir: PKG, design, baseline: SB, extractor: EXTRACTOR, cache: path.join(DIR, 'cache.json'), ...extra }] });
+  const upward = s => edit('src/low/b.ts', "import { a } from './a';\n", "import { a } from './a';\nimport { up } from '../top/t';\n", s);
+
+  stamp(ID);
+  ok(decide(upward('sess-d1'), reg(DESIGN)).decision === 'deny', 'a baseline stamped with the design in force judges as before');
+
+  const moved = decide(upward('sess-d2'), reg(D2));
+  ok(moved.decision === 'unmeasured' && moved.why.includes(ID) && moved.why.includes(ID2) && /--write-baseline/.test(moved.why),
+     `a design that moved a file since the baseline is NOT MEASURED, naming both ids and the command (${moved.decision})`);
+  fs.writeFileSync(REGISTRY, JSON.stringify(reg(D2)));
+  const spawned = hook(upward('sess-d2'));
+  ok(spawned.exit === 0 && !spawned.denied && /NOT MEASURED/.test(spawned.context) && spawned.context.includes(ID2),
+     'the spawned hook allows the edit and says why, instead of refusing across two frames');
+
+  ok(decide(upward('sess-d3'), reg(DESIGN, { designId: ID })).decision === 'deny', 'armed under the design in force, it judges');
+  stamp(ID2);   // design AND baseline swapped together after arming — only the registry's id can tell
+  const swapped = decide(upward('sess-d4'), reg(D2, { designId: ID }));
+  ok(swapped.decision === 'unmeasured' && /since the package was armed/.test(swapped.why) && /re-arm/.test(swapped.why),
+     'a design and baseline swapped together after arming are caught by the id the registry recorded');
+  fs.writeFileSync(SB, JSON.stringify({ rules }));
+  const bare = decide(upward('sess-d5'), reg(DESIGN, { designId: ID }));
+  ok(bare.decision === 'unmeasured' && /names no design/.test(bare.why), 'an armed package whose baseline names no design is not judged');
+  ok(decide(upward('sess-d6'), reg(DESIGN)).decision === 'deny',
+     'a package armed before designs were identified, with an unstamped baseline, is judged as given');
+  register();
 }
 
 console.log('\nNOT MEASURED AND FAILED — allowed, and said once per session:');

@@ -134,7 +134,7 @@ User message
 | Hook | Trigger | File |
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
-| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (an edit that adds a NEW layer or cycle violation starting in the edited file, judged against the package's baseline). Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
+| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW layer or cycle violation starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -1363,6 +1363,19 @@ loosened until it stops firing guards nothing.
   fixed violation for one new one is still growth. Growth is judged against the
   `--baseline` in force, not only against whatever sits at the output path — a write to a
   new path is still refused.
+- **A baseline names the design it was measured under, and a mismatched pair is not
+  judged (#535).** Keys mean nothing without the design that produced them: after a layer
+  moves, growth compared by key answers two questions as one, and a layering change that
+  legalises an edge reads as a clean sprint. `--write-baseline` stamps a `designId` — a hash
+  of the design's MEANING only (`root`, excludes as a set, each layer's number, dirs and
+  files as sets, plus its name, which per-layer evidence is reported under; every `_` key, a
+  layer's `why` and the `measured` block dropped), so a
+  comment edit or reformat never moves it and a moved file always does. A baseline whose id
+  differs from the design in force is NOT MEASURED (exit 2) with the re-baseline command;
+  the write itself proceeds and says the design changed. Withheld only on a POSITIVE
+  mismatch: a baseline with no id is judged and says it names no design. `--arm` requires a
+  stamped, matching baseline and records the id in the registry entry, so a design and
+  baseline swapped together after arming are caught too.
 - **There is no "implied" rule — it was removed (#542).** It refused a direct `a -> c`
   when `a` already reached `c` through another module. But reaching a module through `b`
   does not give `a` its exports, so the only way to obey was to make `b` re-export `c` —
@@ -1386,12 +1399,20 @@ loosened until it stops firing guards nothing.
   built; arming is how every other package earns that trust instead of inheriting it.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —
-  `{ "packages": [ { "dir", "design", "baseline", "cache"?, "extractor"? } ] }` — and with no
+  `{ "packages": [ { "dir", "design", "baseline", "designId"?, "cache"?, "extractor"? } ] }` — and with no
   registry it exits before loading anything. It rebuilds the edited file as the edit
   proposes it, builds the graph around it (`hooks/structure-graph.js`, the project's own
   TypeScript 5, a per-file cache) and judges it with the same rules as the report
   (`hooks/structure-rules.js`). **Only a new violation whose edge starts in the edited file
   is refused**; one it causes in another file's edge is counted, not refused.
+- **Before arming: replay the project's real sessions (`scripts/structure-replay.js`, #540).**
+  Every Write/Edit call in a window of the session transcripts is placed on the tree that was on
+  disk when it happened (the checkout's own HEAD reflog first) and run through the hook's own
+  decision, against a baseline derived from that tree. The edited file's prior content is the
+  tool's recorded `originalFile` when there is one (a mismatch is resynced and counted), the
+  replayed copy when the edit applies to it cleanly, and otherwise the edit is DIVERGED and not
+  judged. It prints every would-be refusal for a person to rule right or wrong, what landed on
+  the branch in the window, and how many Bash calls changed the corpus — which the hook never sees.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
