@@ -24,20 +24,23 @@ const TX = path.join(DIR, 'transcripts');
 fs.mkdirSync(PKG, { recursive: true });
 fs.mkdirSync(path.join(TX, 'project-a', 'subagents'), { recursive: true });
 
-const run = (...args) => {
-  const r = spawnSync('node', [SCRIPT, '--transcripts', TX, ...args], { encoding: 'utf8', timeout: 60000 });
+const runIn = (tx, ...args) => {
+  const r = spawnSync('node', [SCRIPT, '--transcripts', tx, ...args], { encoding: 'utf8', timeout: 60000 });
   return { exit: r.status, out: r.stdout + r.stderr };
 };
+const run = (...args) => runIn(TX, ...args);
 const golden = fs.readFileSync(GOLDEN, 'utf8').split('__PKG__').join(PKG);
 const T0 = '2026-09-25T20:00:00.000Z';
 
 let n = 0;
-const use = (tool, file, at = T0, session = 'sess-a') => {
+// Built records carry the verified version unless a case says otherwise, as real ones do.
+const V = '2.1.282';
+const use = (tool, file, at = T0, session = 'sess-a', version = V) => {
   const id = `toolu_fixture_${++n}`;
-  return { id, line: JSON.stringify({ type: 'assistant', timestamp: at, sessionId: session,
+  return { id, line: JSON.stringify({ type: 'assistant', timestamp: at, sessionId: session, ...(version ? { version } : {}),
     message: { role: 'assistant', content: [{ type: 'tool_use', id, name: tool, input: { file_path: file, old_string: 'a', new_string: 'b' } }] } }) };
 };
-const result = (id, content, isError, at = T0) => JSON.stringify({ type: 'user', timestamp: at, sessionId: 'sess-a',
+const result = (id, content, isError, at = T0, version = V) => JSON.stringify({ type: 'user', timestamp: at, sessionId: 'sess-a', ...(version ? { version } : {}),
   ...(isError ? { toolDenialKind: 'permission-rule' } : {}),
   message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, ...(isError ? { is_error: true } : {}) }] } });
 const notice = (id, tool, text) => JSON.stringify({ type: 'attachment', timestamp: T0, attachment: { type: 'hook_success',
@@ -120,6 +123,37 @@ console.log('\nTHE PACKAGE AS THE TRANSCRIPTS SPELL IT:');
   const rep = JSON.parse(fs.readFileSync(json, 'utf8'));
   ok(rep.calls.filter(c => c.outcome === 'refused').length === 1 && rep.calls.every(c => !('reason' in c)),
      `--json writes every call with its outcome (${rep.calls.length}), without the full reason text`);
+}
+
+console.log('\nA SHAPE BELONGS TO A VERSION — an unverified one never reads as a clean zero (#549):');
+{
+  const tx = path.join(DIR, 'versions');
+  const window = ['--package', PKG, '--since', '2026-09-25T00:00:00Z'];
+  const put = (name, lines) => { fs.mkdirSync(tx, { recursive: true }); fs.writeFileSync(path.join(tx, name), lines.join('\n') + '\n'); };
+  const ok1 = use('Edit', path.join(PKG, 'src/v1.ts'));
+  put('verified.jsonl', [ok1.line, result(ok1.id, 'The file has been updated successfully.', false)]);
+  const clean = runIn(tx, ...window);
+  ok(clean.exit === 0 && /no refusal in 1 edits, all from versions whose refusal shape was observed/.test(clean.out) && /2\.1\.282 ×1(?! UNVERIFIED)/.test(clean.out),
+     `edits only from a verified version give a clean zero, and name the version (exit ${clean.exit})`);
+
+  // A later version whose denial record changed: the refusal is present but in a shape not read.
+  const later = use('Edit', path.join(PKG, 'src/v2.ts'), T0, 'sess-v', '2.1.300');
+  put('later.jsonl', [later.line, result(later.id, 'Hook PreToolUse:Edit denied this call: BLOCKED: this edit to src/v2.ts adds 1 import', true, T0, '2.1.300')]);
+  const hidden = runIn(tx, ...window);
+  ok(hidden.exit === 2 && /no refusal RECOGNISED/.test(hidden.out) && /UNVERIFIED: 1 of 2 edits come from Claude Code 2\.1\.300/.test(hidden.out),
+     `a refusal in a changed shape is not read — and the report exits 2 and says why, instead of a clean zero (exit ${hidden.exit})`);
+  ok(/2\.1\.300 ×1 UNVERIFIED/.test(hidden.out) && !/all from versions/.test(hidden.out), 'the version line marks it, and no clean line is printed');
+
+  const bare = use('Write', path.join(PKG, 'src/v3.ts'), T0, 'sess-v', null);
+  put('later.jsonl', [bare.line, result(bare.id, 'File created successfully', false, T0, null)]);
+  const unknown = runIn(tx, ...window);
+  ok(unknown.exit === 2 && /unknown ×1 UNVERIFIED/.test(unknown.out), 'a record naming no version is unverified, not assumed verified');
+
+  // A recognised refusal still exits 1 — and the unverified edits beside it are still said.
+  fs.writeFileSync(path.join(tx, 'golden.jsonl'), golden);
+  const both = runIn(tx, ...window);
+  ok(both.exit === 1 && /1 REFUSED/.test(both.out) && /UNVERIFIED: 1 of 3 edits/.test(both.out),
+     `a refusal alongside unverified edits exits 1 and still says what could not be read (exit ${both.exit})`);
 }
 
 console.log('\nBAD INPUT IS NOT MEASURED, never a clean zero:');

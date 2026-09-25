@@ -1424,6 +1424,10 @@ loosened until it stops firing guards nothing.
   also marks ordinary permission rules); a notice is a `hook_success` attachment whose stdout
   carries `structure guard:` context. A window with no edit in the package is NOT MEASURED
   (exit 2), never a clean zero; a refusal exits 1 and needs a ruling, right or wrong.
+  **A shape belongs to a version (#549):** each edit's record names its Claude Code version,
+  and one not in `VERIFIED_VERSIONS` (a real refusal captured and read on it) is UNVERIFIED —
+  a later version that records a denial differently would otherwise read as "no refusal". With
+  any in the window, no clean zero is printed (exit 2), and a refusal list says so beside it.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>

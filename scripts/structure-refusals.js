@@ -17,6 +17,12 @@
 // Every Write/Edit/MultiEdit call whose file is under the package, in the window, is counted,
 // so a zero is printed as 0 OF N edits the guard judged or passed — never as a bare zero.
 //
+// A SHAPE BELONGS TO A VERSION (#549). If a later Claude Code records a denial differently, this
+// reader finds nothing and a zero would read as "no refusal". So each edit carries the version
+// its record names, and an edit from a version not in VERIFIED_VERSIONS is UNVERIFIED: no clean
+// "no refusal" is printed while any are in the window. Adding a version means re-observing a
+// real refusal on it (the probe #547 used) and keeping that capture beside the golden one.
+//
 // Usage:
 //   node scripts/structure-refusals.js --package <dir> --since <ISO time>
 //        [--until <ISO time>] [--transcripts <dir>] [--json <out.json>]
@@ -24,7 +30,8 @@
 //   so a session started in another project that edits the package is read too.
 //
 // Exit: 0 read, no refusal · 1 read, at least one refusal (each needs a person's ruling: right
-//       or wrong) · 2 not measured (no transcripts, or no edit in the package in the window)
+//       or wrong) · 2 not measured (no transcripts, no edit in the package in the window, or no refusal
+//       recognised while some edits come from a Claude Code version whose denial shape is unverified)
 
 'use strict';
 
@@ -33,6 +40,8 @@ const os = require('os');
 const path = require('path');
 
 const TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+// The versions on which a real refusal was captured and read in the shapes below.
+const VERIFIED_VERSIONS = new Set(['2.1.282']);
 const REFUSAL = /^PreToolUse:(Write|Edit|MultiEdit) hook error: BLOCKED: this edit to /;
 const VIOLATION = /^\s*·\s*(layer|cycle):\s*(\S+ -> \S+)\s*$/gm;
 // What each notice says, by its own opening words (hooks/structure-guard-hook.js).
@@ -91,7 +100,7 @@ function readTranscript(file, prefixes, since, until) {
         if (typeof fp !== 'string' || ts < since || (until && ts >= until)) continue;
         const pre = prefixes.find(p => fp.startsWith(p));
         if (!pre) continue;
-        calls.set(b.id, { id: b.id, tool: b.name, file: fp.slice(pre.length), at: ts,
+        calls.set(b.id, { id: b.id, tool: b.name, file: fp.slice(pre.length), at: ts, version: r.version || null,
           session: r.sessionId || r.session_id || path.basename(file, '.jsonl'), transcript: file,
           outcome: 'no result', violations: [], notices: [] });
       } else if (b.type === 'tool_result') {
@@ -162,10 +171,21 @@ function main(argv) {
   print(`  edits in the package: ${calls.length} Write/Edit/MultiEdit calls in ${sessions.size} sessions — ` +
         `${count('applied')} applied · ${refused.length} REFUSED by the guard · ${count('errored')} errored otherwise · ${count('no result')} with no result`);
   print(`  notices said (not refused): ` + NOTICE_KINDS.map(([k]) => `${k} ${notices[k] || 0}`).join(' · '));
+  const byVersion = {};
+  for (const c of calls) { const v = c.version || 'unknown'; byVersion[v] = (byVersion[v] || 0) + 1; }
+  const unverified = calls.filter(c => !VERIFIED_VERSIONS.has(c.version));
+  const unverifiedNames = Object.keys(byVersion).filter(v => !VERIFIED_VERSIONS.has(v));
+  if (calls.length) print(`  Claude Code versions among these edits: ` + Object.entries(byVersion).sort()
+    .map(([v, k]) => `${v} ×${k}${VERIFIED_VERSIONS.has(v) ? '' : ' UNVERIFIED'}`).join(' · '));
   if (!calls.length) {
     print('');
     return stop('no edit in the package in this window — a zero here is not evidence of anything');
   }
+  // Said beside every outcome it qualifies, including a refusal: a version whose denial shape
+  // was never observed can hide further refusals behind the ones that were recognised.
+  const unverifiedText = `${unverified.length} of ${calls.length} edits come from Claude Code ${unverifiedNames.join(', ')}, ` +
+    'on which no refusal has been observed — a refusal there may not be recognised. Capture one on that version ' +
+    "(a refused Edit against a scratch registered package, as #547 did) and add it to VERIFIED_VERSIONS before reading this as zero.";
   if (refused.length) {
     print(`\n  REFUSALS — ${refused.length} of ${calls.length} edits; each needs a ruling, right or wrong:`);
     refused.forEach((c, i) => {
@@ -173,16 +193,20 @@ function main(argv) {
       for (const v of c.violations) print(`         ${v.rule.padEnd(6)} ${v.key}`);
       if (!c.violations.length) print('         (no violation line could be read from the reason — read the transcript)');
     });
-  } else print(`\n  no refusal in ${calls.length} edits.`);
+    if (unverified.length) print(`  UNVERIFIED: ${unverifiedText}`);
+  } else if (unverified.length) {
+    print(`\n  no refusal RECOGNISED — but UNVERIFIED: ${unverifiedText}`);
+  } else print(`\n  no refusal in ${calls.length} edits, all from versions whose refusal shape was observed.`);
 
   if (args.json) {
     fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: prefixes[0], since, until, transcripts: files.length,
-      unreadable, badLines, calls: calls.map(({ reason, ...c }) => c) }, null, 1) + '\n');
+      unreadable, badLines, verifiedVersions: [...VERIFIED_VERSIONS], calls: calls.map(({ reason, ...c }) => c) }, null, 1) + '\n');
     print(`  report: ${path.resolve(args.json)}`);
   }
-  return refused.length ? 1 : 0;
+  // Refused → a ruling is owed · nothing recognised but unverified edits → not measured, not clean.
+  return refused.length ? 1 : unverified.length ? 2 : 0;
 }
 
-module.exports = { readTranscript, spellings, REFUSAL, VIOLATION, NOTICE_KINDS };
+module.exports = { readTranscript, spellings, REFUSAL, VIOLATION, NOTICE_KINDS, VERIFIED_VERSIONS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
