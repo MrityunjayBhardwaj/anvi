@@ -301,6 +301,44 @@ console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed 
   put('src/mid/old.ts', OLD_SRC);
 }
 
+console.log('\nTHE DESIGN ID — no verdict across two designs (#535):');
+{
+  const designObj = JSON.parse(fs.readFileSync(DESIGN, 'utf8'));
+  const ID = R.designId(designObj);
+  const rules = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).rules;
+  const D2 = path.join(DIR, 'design-id-2.json');       // src/low/a.ts moved to the top layer
+  const d2 = { ...designObj, layers: designObj.layers.map(l => l.n === 2 ? { ...l, files: ['low/a.ts'] } : l) };
+  fs.writeFileSync(D2, JSON.stringify(d2));
+  const ID2 = R.designId(d2);
+  const SB = path.join(DIR, 'baseline-stamped.json');
+  const stamp = id => fs.writeFileSync(SB, JSON.stringify({ designId: id, rules }));
+  const reg = (design, extra = {}) => ({ packages: [{ dir: PKG, design, baseline: SB, extractor: EXTRACTOR, cache: path.join(DIR, 'cache.json'), ...extra }] });
+  const upward = s => edit('src/low/b.ts', "import { a } from './a';\n", "import { a } from './a';\nimport { up } from '../top/t';\n", s);
+
+  stamp(ID);
+  ok(decide(upward('sess-d1'), reg(DESIGN)).decision === 'deny', 'a baseline stamped with the design in force judges as before');
+
+  const moved = decide(upward('sess-d2'), reg(D2));
+  ok(moved.decision === 'unmeasured' && moved.why.includes(ID) && moved.why.includes(ID2) && /--write-baseline/.test(moved.why),
+     `a design that moved a file since the baseline is NOT MEASURED, naming both ids and the command (${moved.decision})`);
+  fs.writeFileSync(REGISTRY, JSON.stringify(reg(D2)));
+  const spawned = hook(upward('sess-d2'));
+  ok(spawned.exit === 0 && !spawned.denied && /NOT MEASURED/.test(spawned.context) && spawned.context.includes(ID2),
+     'the spawned hook allows the edit and says why, instead of refusing across two frames');
+
+  ok(decide(upward('sess-d3'), reg(DESIGN, { designId: ID })).decision === 'deny', 'armed under the design in force, it judges');
+  stamp(ID2);   // design AND baseline swapped together after arming — only the registry's id can tell
+  const swapped = decide(upward('sess-d4'), reg(D2, { designId: ID }));
+  ok(swapped.decision === 'unmeasured' && /since the package was armed/.test(swapped.why) && /re-arm/.test(swapped.why),
+     'a design and baseline swapped together after arming are caught by the id the registry recorded');
+  fs.writeFileSync(SB, JSON.stringify({ rules }));
+  const bare = decide(upward('sess-d5'), reg(DESIGN, { designId: ID }));
+  ok(bare.decision === 'unmeasured' && /names no design/.test(bare.why), 'an armed package whose baseline names no design is not judged');
+  ok(decide(upward('sess-d6'), reg(DESIGN)).decision === 'deny',
+     'a package armed before designs were identified, with an unstamped baseline, is judged as given');
+  register();
+}
+
 console.log('\nNOT MEASURED AND FAILED — allowed, and said once per session:');
 {
   register({ broken: 'unmeasured' });

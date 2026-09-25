@@ -37,7 +37,8 @@
 //
 // Registry: { "packages": [ { "dir": "<abs package dir>", "design": "<abs design.json>",
 //                             "baseline": "<abs baseline.json>", "cache"?: "<abs path>",
-//                             "extractor"?: "<abs module exporting create(pkgDir, entry)>" } ] }
+//                             "extractor"?: "<abs module exporting create(pkgDir, entry)>",
+//                             "designId"?: "<the design id it was armed under, #535>" } ] }
 
 'use strict';
 
@@ -167,6 +168,12 @@ function evaluate(payload, deps) {
   catch (e) { return { decision: 'unmeasured', why: `cannot read the design or baseline for ${pkgName}: ${e.message}` }; }
   if (!Array.isArray(design.layers) || !design.layers.length) return { decision: 'unmeasured', why: `the design for ${pkgName} declares no layers` };
   if (!baseline.rules) return { decision: 'unmeasured', why: `the baseline for ${pkgName} has no "rules" section` };
+  // No verdict across two designs (#535): the baseline's keys, and the id the package was armed
+  // under, must both belong to the design in force. A baseline naming no design, on a package
+  // armed before designs were identified, is judged as given — it cannot be shown to disagree.
+  const frame = R.designCheck(design, baseline, owner.entry.designId);
+  if (frame.mismatch) return { decision: 'unmeasured', why: `${pkgName}: ${frame.mismatch}. Re-baselining under the design in force ` +
+    `is the user's decision — ask them. This does it${owner.entry.designId ? ', then re-arm with --arm' : ''}: ${baselineCommand(owner.dir, owner.entry, false)}` };
 
   if (!S.inCorpus(owner.rel, design)) return { decision: 'allow', why: 'outside the package corpus' };
   if (!S.compiles(owner.rel)) return { decision: 'allow', why: 'a file that compiles to nothing carries no imports' };

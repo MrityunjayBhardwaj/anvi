@@ -47,7 +47,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
+const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, designCheck } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -127,6 +127,8 @@ function main(argv) {
 
   if (!Array.isArray(design.layers) || design.layers.length === 0) return stop('the design declares no layers');
   if (baseline && !baseline.rules) return stop(`the baseline ${args.baseline} has no "rules" section — refusing to treat it as empty`);
+  // Which design the baseline was measured under, against the one in force (#535).
+  const frame = designCheck(design, baseline, null);
 
   let built = null;
   if (args.package) {
@@ -139,6 +141,18 @@ function main(argv) {
     built = { pkgDir, graph: got.graph, extractor: got.stats.extractor };
   }
   const analyser = cruise ? loadGraph(cruise, design) : null;
+
+  // The command that writes the baseline in force, from the graph this run used.
+  function regenerate(allowGrowth) {
+    return baselineCommand({
+      script: shellWord(path.resolve(__filename)),
+      source: built ? ['--package', built.pkgDir] : ['--graph', path.resolve(args.graph)],
+      design: path.resolve(args.design),
+      extractor: args.extractor && path.resolve(args.extractor),
+      baseline: path.resolve(args.baseline),
+      allowGrowth,
+    });
+  }
 
   // ── agreement: both graphs given ─────────────────────────────────────────────────────
   if (analyser && built) {
@@ -164,12 +178,19 @@ function main(argv) {
     print('\n  AGREE — the package graph is the analyser graph.');
     if (args.arm) {
       if (!baseline) return stop('--arm needs --baseline: the hook refuses only what the baseline does not already hold');
+      // Armed only on a baseline that names the design in force — the registry then records that
+      // id, so a design swapped on disk after arming is caught even if the baseline is swapped too.
+      if (frame.mismatch || frame.unstamped)
+        return stop(`--arm needs a baseline measured under the design in force: ${frame.mismatch ||
+          'the baseline names no design (written before designs were identified)'} — regenerate it:\n    ` +
+          regenerate(false));
       let file;
       try {
         file = arm({ dir: built.pkgDir, design: path.resolve(args.design), baseline: path.resolve(args.baseline),
+                     designId: frame.id,
                      ...(args.extractor ? { extractor: path.resolve(args.extractor) } : {}) });
       } catch (e) { return stop(e.message); }
-      print(`  armed: ${built.pkgDir} → ${file}`);
+      print(`  armed: ${built.pkgDir} → ${file} (design ${frame.id})`);
     }
     return 0;
   }
@@ -179,14 +200,27 @@ function main(argv) {
   const why = notMeasured(graph);
   if (why) return stop(why);
 
+  // A baseline measured under another design is not judged: its keys belong to another frame,
+  // and a layering change that legalises an edge would otherwise read as a clean sprint. The
+  // write is the remedy, so it proceeds (and says the design changed); a verdict does not.
+  if (frame.mismatch && !args['write-baseline']) {
+    print(`structure-guard: NOT MEASURED — ${frame.mismatch}. No verdict is given across two designs.`);
+    print('  Re-baselining under the design in force is a person\'s decision — the baseline is a reviewed file. ' +
+          'Growth under the new design is listed and refused unless --allow-growth is added:');
+    print('    ' + regenerate(false));
+    return 2;
+  }
+
   const results = judge(graph, design);
   const ledger = ratchet(results, baseline);
 
-  print(`structure-guard: examined ${graph.modules.size} modules · ${graph.edges.length} edges · ` +
+  print(`structure-guard: examined ${graph.modules.size} modules · ${graph.edges.length} edges · design ${frame.id} · ` +
         `${results.layer.unmapped.length} modules outside every layer · ` +
         `${graph.unresolved} of ${graph.relative} relative imports unresolved` +
         (built ? ` · graph built by ${built.extractor}` : ''));
   if (!baseline) print('  no baseline given — every violation counts as new');
+  else if (frame.unstamped) print('  the baseline names no design (written before designs were identified) — ' +
+    'it is judged as given; regenerating it stamps the design in force');
   for (const rule of RULES) {
     const r = ledger[rule];
     print(`  ${rule.padEnd(8)}: ${r.total} of ${results[rule].examined} examined — ` +
@@ -212,13 +246,7 @@ function main(argv) {
     print('  One that comes back is grandfathered again, in silence. Regenerating the baseline locks the repair in — ' +
           'a person\'s decision, since the baseline is a reviewed file' +
           (fresh.length ? '; the write is refused while the NEW violations above stand, so resolve those first' : '') + ':');
-    print('    ' + baselineCommand({
-      script: shellWord(path.resolve(__filename)),
-      source: built ? ['--package', built.pkgDir] : ['--graph', path.resolve(args.graph)],
-      design: path.resolve(args.design),
-      extractor: args.extractor && path.resolve(args.extractor),
-      baseline: path.resolve(args.baseline),
-    }));
+    print('    ' + regenerate(false));
   }
 
   if (args['write-baseline']) {
@@ -236,9 +264,12 @@ function main(argv) {
             ' (pass --allow-growth to accept these as grandfathered)');
       return 1;
     }
+    if (previous && typeof previous.designId === 'string' && previous.designId !== frame.id)
+      print(`\n  design changed since the previous baseline: ${previous.designId} → ${frame.id}`);
+    plan.baseline = { designId: frame.id, ...plan.baseline };
     plan.baseline.measured = { modules: graph.modules.size, edges: graph.edges.length, written: new Date().toISOString() };
     fs.writeFileSync(args['write-baseline'], JSON.stringify(plan.baseline, null, 1) + '\n');
-    print(`\n  baseline written: ${RULES.map(r => `${plan.baseline.rules[r].length} ${r}`).join(', ')}`);
+    print(`\n  baseline written: ${RULES.map(r => `${plan.baseline.rules[r].length} ${r}`).join(', ')} · design ${frame.id}`);
     return 0;
   }
 

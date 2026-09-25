@@ -1364,6 +1364,19 @@ loosened until it stops firing guards nothing.
   fixed violation for one new one is still growth. Growth is judged against the
   `--baseline` in force, not only against whatever sits at the output path — a write to a
   new path is still refused.
+- **A baseline names the design it was measured under, and a mismatched pair is not
+  judged (#535).** Keys mean nothing without the design that produced them: after a layer
+  moves, growth compared by key answers two questions as one, and a layering change that
+  legalises an edge reads as a clean sprint. `--write-baseline` stamps a `designId` — a hash
+  of the design's MEANING only (`root`, excludes as a set, each layer's number, dirs and
+  files as sets, plus its name, which per-layer evidence is reported under; every `_` key, a
+  layer's `why` and the `measured` block dropped), so a
+  comment edit or reformat never moves it and a moved file always does. A baseline whose id
+  differs from the design in force is NOT MEASURED (exit 2) with the re-baseline command;
+  the write itself proceeds and says the design changed. Withheld only on a POSITIVE
+  mismatch: a baseline with no id is judged and says it names no design. `--arm` requires a
+  stamped, matching baseline and records the id in the registry entry, so a design and
+  baseline swapped together after arming are caught too.
 - **An implied edge's witness may not pass back through its own source.** Inside a
   cycle `a <-> b`, the looser test calls `a -> c` implied by `a -> b -> a -> c`, a path
   that exists only because of the edge being judged. Every refusal prints its path.
@@ -1383,7 +1396,7 @@ loosened until it stops firing guards nothing.
   built; arming is how every other package earns that trust instead of inheriting it.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —
-  `{ "packages": [ { "dir", "design", "baseline", "cache"?, "extractor"? } ] }` — and with no
+  `{ "packages": [ { "dir", "design", "baseline", "designId"?, "cache"?, "extractor"? } ] }` — and with no
   registry it exits before loading anything. It rebuilds the edited file as the edit
   proposes it, builds the graph around it (`hooks/structure-graph.js`, the project's own
   TypeScript 5, a per-file cache) and judges it with the same rules as the report
