@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// structure-guard-hook.js — PreToolUse:Write|Edit. Refuse an edit that adds an import eroding
+// structure-guard-hook.js — PreToolUse:Write|Edit (MultiEdit registered, not judged). Refuse an edit that adds an import eroding
 // a registered package's declared structure, BEFORE the write lands (issue #443).
 //
 // ENFORCING: it may refuse a tool call. Everything below is shaped by what that costs.
@@ -23,14 +23,17 @@
 // by session, not a flag in memory: a hook is a new process per call, so in-process state would
 // repeat the notice on every edit.
 //
-// WHAT IT CANNOT SEE. Only Write and Edit tool calls reach it. A file changed through Bash (a
+// WHAT IT CANNOT SEE. Only Write and Edit tool calls are judged (MultiEdit is said, not judged). A file changed through Bash (a
 // heredoc, `sed -i`, `cp`, `git checkout`), by another program or by hand is never judged here;
 // the report over the package catches those after they land. A stated blind spot, not a bypass:
 // the refusal tells the agent a deliberate edge is the user's decision.
 //
 // PAYLOAD, OBSERVED (Claude Code 2.1.270): Edit `tool_input` is `file_path`, `old_string`,
 // `new_string`, `replace_all` (a boolean, present even when unset); Write is `file_path`,
-// `content`. MultiEdit was not an offered tool on that version.
+// `content`. MultiEdit was not an offered tool on that version, nor on 2.1.282 (init record of
+// a clean session, 2026-09-25) — so its shape has never been seen, and it is NOT judged (#533).
+// It stays in the matcher because that matcher is shared with the injector (see the registrar);
+// a MultiEdit in a registered package is reported NOT MEASURED, never passed as "not an edit".
 //
 // Registry: { "packages": [ { "dir": "<abs package dir>", "design": "<abs design.json>",
 //                             "baseline": "<abs baseline.json>", "cache"?: "<abs path>",
@@ -135,18 +138,29 @@ function fixedText(pkgName, fixed, pkgDir, entry) {
     `  ${baselineCommand(pkgDir, entry, false)}`;
 }
 
+// Every tool in the registered matcher is in exactly one of these; a test derives the matcher
+// from the registrar and asserts it, so the two lists cannot drift apart in silence (#533).
+const JUDGED_TOOLS = ['Write', 'Edit'];
+const UNJUDGED_TOOLS = {
+  MultiEdit: 'MultiEdit is not judged — its edit shape has never been observed (the tool was not offered on Claude Code 2.1.270 or 2.1.282)',
+};
+
 // The whole decision, with every effect injected: { decision: 'allow'|'deny'|'unmeasured', ... }
 function evaluate(payload, deps) {
   const { registry, readFile, rules: R, graph: S, stateDir } = deps;
   const tool = payload && payload.tool_name;
   const input = (payload && payload.tool_input) || {};
-  if (tool !== 'Write' && tool !== 'Edit') return { decision: 'allow', why: 'not an edit' };
+  const unjudged = Object.prototype.hasOwnProperty.call(UNJUDGED_TOOLS, tool) ? UNJUDGED_TOOLS[tool] : null;
+  if (!JUDGED_TOOLS.includes(tool) && !unjudged) return { decision: 'allow', why: 'not an edit' };
   if (typeof input.file_path !== 'string') return { decision: 'allow', why: 'no file path' };
   const abs = path.isAbsolute(input.file_path) ? input.file_path : path.resolve(payload.cwd || process.cwd(), input.file_path);
 
   const owner = packageFor(abs, registry);
   if (!owner) return { decision: 'allow', why: 'not in a registered package' };
   const pkgName = path.basename(owner.dir);
+  // Said, not guessed: a guessed shape could refuse wrongly, and silence would read as approval.
+  // Its own notice kind, so being told this never uses up a real NOT MEASURED for the package.
+  if (unjudged) return { decision: 'unmeasured', why: `${pkgName}: ${unjudged}`, noticeKind: `tool-${tool}` };
 
   let design, baseline;
   try { design = JSON.parse(readFile(owner.entry.design)); baseline = JSON.parse(readFile(owner.entry.baseline)); }
@@ -243,7 +257,7 @@ function noticeOnce(sessionId, text, stateDir, kind) {
   return true;
 }
 
-module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, noticeOnce, pruneNotices, recordFailure,
+module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, pruneNotices, recordFailure,
   REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {
@@ -274,7 +288,9 @@ if (require.main === module) {
         process.exit(2);
       }
       if (result.decision === 'unmeasured')
-        noticeOnce(payload.session_id, `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`, STATE_DIR);
+        noticeOnce(payload.session_id, result.noticeKind
+          ? `structure guard: NOT MEASURED — ${result.why}. Edits made with it are not being checked; Write and Edit still are.`
+          : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`, STATE_DIR, result.noticeKind);
       if (result.decision === 'allow' && result.notice)
         noticeOnce(payload.session_id, result.notice, STATE_DIR, 'fixed');
       process.exit(0);

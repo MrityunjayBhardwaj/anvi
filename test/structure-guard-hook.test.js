@@ -213,6 +213,39 @@ console.log('\nALLOWED — each release paired with what was examined:');
   ok(garbled.exit === 0 && garbled.stdout === '', 'malformed stdin exits 0 in silence — unreadable input is not the guard failing');
 }
 
+console.log('\nTHE REGISTERED MATCHER — every tool it names is judged, or declared unjudged and said (#533):');
+{
+  // Derived from the registration, not restated: widening the matcher without deciding what the
+  // hook does with the new tool reddens here, instead of reaching the hook as "not an edit".
+  const REG = require(path.join(__dirname, '..', 'scripts', 'register-hooks.cjs'));
+  const rows = REG.REGISTRATIONS.filter(r => r[2] === 'structure-guard-hook.js');
+  ok(rows.length === 1, `the guard is registered once (${rows.length})`);
+  const tokens = [...REG.matcherTools(rows[0][1])].sort();
+  const handled = [...H.JUDGED_TOOLS, ...Object.keys(H.UNJUDGED_TOOLS)].sort();
+  ok(tokens.join('|') === handled.join('|'), `the matcher's tools (${tokens.join('|')}) are exactly the judged plus the declared-unjudged (${handled.join('|')})`);
+  ok(!H.JUDGED_TOOLS.some(t => t in H.UNJUDGED_TOOLS), 'and no tool is both');
+
+  // MultiEdit is registered but not offered by Claude Code 2.1.270 or 2.1.282, so its edit shape
+  // has never been observed. Silence would read as approval; guessing the shape could refuse wrongly.
+  const multi = (session, file = path.join(PKG, 'src/low/a.ts')) => ({ session_id: session, cwd: PKG, tool_name: 'MultiEdit',
+    tool_input: { file_path: file, edits: [{ old_string: "export const a = 1;\n", new_string: "import { up } from '../top/t';\nexport const a = up;\n" }] } });
+  const d = decide(multi('sess-me'), registryNow());
+  ok(d.decision === 'unmeasured' && /MultiEdit/.test(d.why) && /not judged/.test(d.why),
+     `a MultiEdit in a registered package is NOT MEASURED, and says which tool (${d.decision}: ${d.why})`);
+  const first = hook(multi('sess-me'));
+  ok(first.exit === 0 && !first.denied && /NOT MEASURED/.test(first.context) && /MultiEdit/.test(first.context),
+     'the spawned hook allows it and tells the session so');
+  ok(hook(multi('sess-me')).stdout === '', 'once per session');
+  // Its own notice kind: being told about MultiEdit must not use up the package's real NOT MEASURED.
+  register({ broken: 'unmeasured' });
+  const real = hook(edit('src/low/a.ts', "export const a = 1;\n", "import { up } from '../top/t';\nexport const a = up;\n", 'sess-me'));
+  register();
+  ok(/NOT MEASURED/.test(real.context) && !/MultiEdit/.test(real.context),
+     'a real NOT MEASURED later in the same session is still said');
+  const outsideMulti = hook(multi('sess-me2', path.join(DIR, 'elsewhere.ts')));
+  ok(outsideMulti.exit === 0 && outsideMulti.stdout === '', 'a MultiEdit outside every registered package stays silent');
+}
+
 console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed edit; never refused, never rewritten (#451):');
 {
   const OLD_SRC = "import { up } from '../top/t';\nexport const old = up;\n";

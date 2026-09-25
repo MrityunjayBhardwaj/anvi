@@ -43,8 +43,10 @@ const REGISTRATIONS = [
   // ~300-module package measured ~0.8s, a warm call ~0.2s including Node startup.
   ['PreToolUse',       'Write|Edit|MultiEdit', 'structure-guard-hook.js', 10],
   // ⚠ THIS MATCHER IS SHARED WITH THE GUARD ABOVE AND THE TWO MUST STAY EQUAL.
-  // The guard has to cover MultiEdit — a multi-edit mutates the tree exactly as a
-  // Write does — and running the two off different matchers would put them in
+  // The guard is registered for MultiEdit — a multi-edit mutates the tree exactly as a
+  // Write does (it reports one NOT MEASURED rather than judging it: the tool is not
+  // offered on current versions, so its shape is unobserved, #533) — and running the
+  // two off different matchers would put them in
   // different settings.json groups, where relative order is undefined and the
   // refusal could arrive after the annotation. Widening the injector to match is
   // the smaller change and it closes a real gap: the injector never fired on a

@@ -134,7 +134,7 @@ User message
 | Hook | Trigger | File |
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
-| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (an edit that adds a NEW layer, implied or cycle violation starting in the edited file, judged against the package's baseline). Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
+| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW layer, implied or cycle violation starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
