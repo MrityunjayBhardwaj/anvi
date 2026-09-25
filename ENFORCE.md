@@ -134,7 +134,7 @@ User message
 | Hook | Trigger | File |
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
-| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW layer, implied or cycle violation starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
+| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW layer or cycle violation starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -1341,10 +1341,9 @@ nominal.
 ## Structure Guard — the edge that erodes a design, refused only when it is new
 
 An agent editing a codebase can erode its structure one import at a time, and the
-tools that already exist catch only part of it. Cycles and layer order are well
-served; nothing surveyed refuses an edge that another path already provides, and
-nothing lets a real codebase adopt a guard without first repairing every violation
-it carries. A guard that fires on hundreds of old edges is switched off; one that is
+tools that already exist catch only part of it. Two rules refuse — layer order and
+cycles — under a ratchet, so a real codebase can adopt the guard without first
+repairing every violation it carries. A guard that fires on hundreds of old edges is switched off; one that is
 loosened until it stops firing guards nothing.
 
 - **Report:** `node ~/.claude/anvi/scripts/structure-guard.js --design <design.json>
@@ -1377,13 +1376,17 @@ loosened until it stops firing guards nothing.
   mismatch: a baseline with no id is judged and says it names no design. `--arm` requires a
   stamped, matching baseline and records the id in the registry entry, so a design and
   baseline swapped together after arming are caught too.
-- **An implied edge's witness may not pass back through its own source.** Inside a
-  cycle `a <-> b`, the looser test calls `a -> c` implied by `a -> b -> a -> c`, a path
-  that exists only because of the edge being judged. Every refusal prints its path.
-- **A re-export is not judged as implied.** An index file re-exporting two modules, one
-  of which imports the other, is declaring its surface, not adding a use; on the corpus
-  this was built against, 109 of the first 262 implied edges were exactly that. Re-exports
-  are set aside and COUNTED, still count as paths, and still face layer and cycle rules.
+- **There is no "implied" rule — it was removed (#542).** It refused a direct `a -> c`
+  when `a` already reached `c` through another module. But reaching a module through `b`
+  does not give `a` its exports, so the only way to obey was to make `b` re-export `c` —
+  more coupling, not less. And since the graph holds only imports in real use (unused
+  ones are elided in compilation), it could not tell a redundant import from a needed
+  one: replaying stave's real sessions, 3 of its 3 refusals were legitimate direct use,
+  and at the 13 Sep baseline it counted 27% of the package's imports. A baseline still
+  carrying an `implied` section is judged on the rules that remain, and the report names
+  the section as ignored; regenerating the baseline drops it and says so.
+- **A re-export still faces the layer and cycle rules**, and is still told apart from a
+  use — the graph agreement check below compares re-exports edge for edge.
 - **Only imports that survive compilation are judged.** Without `tsPreCompilationDeps`,
   dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
 - **Two sources for the graph, and a check that they agree.** `--package <dir>` judges the

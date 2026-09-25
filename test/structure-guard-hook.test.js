@@ -64,7 +64,7 @@ const DESIGN = path.join(DIR, 'design.json');
 fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'], layers: [
   { n: 0, name: 'low', dirs: ['low'] }, { n: 1, name: 'mid', dirs: ['mid'] }, { n: 2, name: 'top', dirs: ['top'] }] }));
 const BASELINE = path.join(DIR, 'baseline.json');
-fs.writeFileSync(BASELINE, JSON.stringify({ rules: { layer: ['src/mid/old.ts -> src/top/t.ts'], implied: [], cycle: [] } }));
+fs.writeFileSync(BASELINE, JSON.stringify({ rules: { layer: ['src/mid/old.ts -> src/top/t.ts'], cycle: [] } }));
 
 const REGISTRY = path.join(HOME, '.claude', 'structure-guard.json');
 const register = extra => fs.writeFileSync(REGISTRY, JSON.stringify({ packages: [{
@@ -162,10 +162,14 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
      'the command quotes a path with a space and an apostrophe as one shell word');
   ok(!/--extractor/.test(odd), 'and names --extractor only when the package registers one');
 
-  const implied = edit('src/mid/m.ts', "import { b } from '../low/b';\n", "import { b } from '../low/b';\nimport { a } from '../low/a';\n");
-  const i = hook(implied);
-  ok(i.exit === 2 && /implied: src\/mid\/m\.ts -> src\/low\/a\.ts/.test(i.reason) && /already reached via/.test(i.reason),
-     'an import another path already provides is REFUSED, with the path that provides it');
+  // What the removed implied rule refused (#542): m reaches a through b, and imports a directly
+  // because it USES a. Real use, so it passes — and the refusal text no longer offers that remedy.
+  const direct = edit('src/mid/m.ts', "import { b } from '../low/b';\n", "import { b } from '../low/b';\nimport { a } from '../low/a';\n");
+  const di = hook(direct);
+  const dd = decide(direct, registryNow());
+  ok(di.exit === 0 && !di.denied && dd.decision === 'allow' && /nothing new/.test(dd.why),
+     `a direct import of something also reachable through another module is ALLOWED (${dd.decision}: ${dd.why})`);
+  ok(!/implied/.test(r.reason), 'and no refusal names an implied rule or its remedy');
 
   const w = hook(write('src/low/fresh.ts', "import { up } from '../top/t';\nexport const f = up;\n"));
   ok(w.exit === 2 && /src\/low\/fresh\.ts -> src\/top\/t\.ts/.test(w.reason), 'a Write creating a new file with an upward import is REFUSED');
@@ -185,17 +189,12 @@ console.log('\nALLOWED — each release paired with what was examined:');
   ok(g.exit === 0 && gd.decision === 'allow' && gd.examined.edges >= 1,
      `editing a file whose violation is in the baseline passes — the ratchet, not a missed edge (${gd.examined.edges} edges examined)`);
 
-  // b -> a exists and m -> b exists; adding the edge a -> ... is not what this is. Instead make a
-  // DISTANT edge redundant: n imports a, and a new n -> b edge makes nothing implied in n's own
-  // edges while the existing m -> b stays direct. The case that matters: an edit to b that makes
-  // m's existing edge implied is someone else's edge.
-  put('src/mid/m.ts', "import { b } from '../low/b';\nimport { a } from '../low/a';\nexport const m = a + b;\n");
-  const mEdits = edit('src/low/b.ts', "import { a } from './a';\n", "import { a } from './a';\n");
-  const baseImplied = decide(mEdits, registryNow());
-  ok(baseImplied.decision === 'allow' && baseImplied.elsewhere >= 1,
-     `a violation that starts in ANOTHER file is counted, not refused (${baseImplied.elsewhere} elsewhere)`);
-  ok(hook(mEdits).exit === 0, 'and the spawned hook allows that edit');
-  put('src/mid/m.ts', "import { b } from '../low/b';\nexport const m = b;\n");
+  // Closing a cycle puts TWO edges on it: the one this edit adds (refused — it starts here) and
+  // b's existing import of a, which starts in ANOTHER file: counted, never refused on b's behalf.
+  const closes = edit('src/low/a.ts', "export const a = 1;\n", "import { b } from './b';\nexport const a = 1;\n");
+  const cd = decide(closes, registryNow());
+  ok(cd.decision === 'deny' && cd.fresh.map(f => f.key).join() === 'src/low/a.ts -> src/low/b.ts' && cd.elsewhere === 1,
+     `a cycle closed by this edit refuses only the edge that starts here, and counts the other file's (${cd.decision}, ${cd.elsewhere} elsewhere)`);
 
   const outside = hook(edit('src/low/a.test.ts', "export const t = 1;\n", "import { up } from '../top/t';\nexport const t = up;\n"));
   const od = decide(edit('src/low/a.test.ts', "export const t = 1;\n", "import { up } from '../top/t';\n"), registryNow());

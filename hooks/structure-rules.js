@@ -10,29 +10,39 @@
 // THE FAILURE CLASS. An agent can erode structure one import at a time — a shortcut edge
 // here, an upward reach there — and nothing notices until the module graph has knotted.
 // Cycle detection and layer rules are well served already (dependency-cruiser, ArchUnit,
-// Bazel visibility). What a survey of that prior art did not find, and what is added here:
+// Bazel visibility). Two rules refuse here — layer order and cycles — under a RATCHET:
+// existing violations are recorded in a baseline and allowed to stand; only NEW ones are
+// refused.
 //
-//   1. A TRANSITIVELY IMPLIED EDGE, REFUSED. If `a` already reaches `c` through `b`, a
-//      direct `a -> c` adds coupling without adding capability. Transitive reduction is
-//      textbook, but it appears only as simplification or visualisation, never as a refusal.
-//   2. A RATCHET. Existing violations are recorded in a baseline and allowed to stand; only
-//      NEW ones are refused. Measured on the corpus this was built against: 153 of the 565
-//      production imports the implied rule judges were already implied before any edit.
+// REMOVED: THE "IMPLIED" RULE (#542). It refused a direct `a -> c` when `a` already reached `c`
+// through another module, on the theory that the direct import added coupling without
+// capability. Reaching a module through `b` does not give `a` its exports — `b` uses `c` for
+// its own purposes — so a file that needs `c` must import it, and the rule's remedy could only
+// be met by making `b` re-export `c`, which adds coupling. And because the graph is compiled
+// output (unused imports are elided), every edge it judged was an import in real use: it could
+// not tell a redundant import from a necessary one. Replaying stave's real sessions, 3 of its 3
+// refusals were legitimate direct use; at the 13 Sep baseline it counted 27% of the package's
+// imports. Do not reintroduce reachability as a refusal without a predicate that can see use.
 //
 // WHY THE BASELINE IS A STORED FILE AND NOT A DIFF AGAINST THE LAST GRAPH. A diff
 // grandfathers whatever landed without passing through the guard — a pull, a hand edit, a
 // branch switch — so the ratchet would loosen every time the guard was bypassed, silently.
-//
-// WHY "IMPLIED" FORBIDS REVISITING THE SOURCE. Inside a cycle `a <-> b`, the looser test
-// ("does any other successor of `a` reach `c`?") answers yes for `a -> c` via `b -> a -> c`
-// — a path that only exists BECAUSE of the edge being judged. On the corpus that looser
-// test counts 157; the strict one counts 153, and the four in between all sit on the one
-// two-file cycle.
 
 'use strict';
 
-// The rules that REFUSE, and so are ratcheted. The new-module check is not among them.
-const RULES = ['layer', 'implied', 'cycle'];
+// The rules that REFUSE, and so are ratcheted. The new-module check was never among them (#509).
+// A removed rule that baselines carried a section for is listed in RETIRED, so a baseline still
+// holding one is named, not misread.
+const RULES = ['layer', 'cycle'];
+const RETIRED = { implied: 'the implied rule was removed (#542): it refused imports a file genuinely uses' };
+
+// A baseline section for a rule that no longer exists: ignored when judging, and dropped when
+// the baseline is regenerated — both said, so a reviewed file never changes shape in silence.
+function retiredSections(baseline) {
+  const rules = (baseline && baseline.rules) || {};
+  return Object.keys(rules).filter(k => !RULES.includes(k))
+    .map(rule => ({ rule, keys: Array.isArray(rules[rule]) ? rules[rule].length : 0, why: RETIRED[rule] || 'not a rule of this guard' }));
+}
 
 const edgeKey = (a, b) => `${a} -> ${b}`;
 
@@ -201,51 +211,6 @@ function layerViolations(graph, design) {
   return { found, examined, unmapped };
 }
 
-// ── rule: transitively implied edge ──────────────────────────────────────────────────
-
-// A path a -> b -> ... -> c of two or more steps that neither uses the edge a -> c nor
-// passes back through a. Returned as the list of modules, or null.
-function witness(adj, a, c) {
-  // The source starts visited: a path back through it would need the edge being judged.
-  const seen = new Set([a]);
-  const prev = new Map();
-  const queue = [];
-  for (const b of adj.get(a) || []) if (b !== c) { seen.add(b); prev.set(b, a); queue.push(b); }
-  for (let i = 0; i < queue.length; i++) {
-    const u = queue[i];
-    for (const v of adj.get(u) || []) {
-      if (seen.has(v)) continue;
-      seen.add(v);
-      prev.set(v, u);
-      if (v === c) {
-        const path = [c];
-        for (let x = u; ; x = prev.get(x)) { path.unshift(x); if (x === a) break; }
-        return path;
-      }
-      queue.push(v);
-    }
-  }
-  return null;
-}
-
-// A RE-EXPORT IS NOT JUDGED. An index file that re-exports two modules, one of which imports
-// the other, is declaring its public surface, not adding a use — refusing its second line
-// would mean dropping a public export to satisfy a rule about coupling. Measured on the
-// corpus: 109 of the first count of 262 were exactly this, every one from an index file.
-// Re-exports still count as PATHS (importing an index does reach what it re-exports), and
-// they still face the layer and cycle rules.
-function impliedEdges(graph) {
-  const found = [];
-  let examined = 0;
-  for (const [a, c] of graph.edges) {
-    if (graph.reexports.has(edgeKey(a, c))) continue;
-    examined++;
-    const path = witness(graph.adj, a, c);
-    if (path) found.push({ key: edgeKey(a, c), detail: `already reached via ${path.join(' -> ')}` });
-  }
-  return { found, examined, reexports: graph.edges.length - examined };
-}
-
 // ── rule: cycle ──────────────────────────────────────────────────────────────────────
 
 function cycleEdges(graph) {
@@ -258,7 +223,7 @@ function cycleEdges(graph) {
 // ── the ratchet ──────────────────────────────────────────────────────────────────────
 
 function judge(graph, design) {
-  return { layer: layerViolations(graph, design), implied: impliedEdges(graph), cycle: cycleEdges(graph) };
+  return { layer: layerViolations(graph, design), cycle: cycleEdges(graph) };
 }
 
 function ratchet(results, baseline) {
@@ -296,6 +261,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 }
 
 module.exports = {
-  RULES, edgeKey, shellWord, baselineCommand, designId, designCheck, loadGraph, notMeasured, onCycle, layerOf, layerViolations, witness,
-  impliedEdges, cycleEdges, judge, ratchet, planBaseline,
+  RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, designId, designCheck, loadGraph, notMeasured, onCycle,
+  layerOf, layerViolations, cycleEdges, judge, ratchet, planBaseline,
 };
