@@ -1413,6 +1413,17 @@ loosened until it stops firing guards nothing.
   replayed copy when the edit applies to it cleanly, and otherwise the edit is DIVERGED and not
   judged. It prints every would-be refusal for a person to rule right or wrong, what landed on
   the branch in the window, and how many Bash calls changed the corpus — which the hook never sees.
+- **While armed: count what it said (`scripts/structure-refusals.js`, #547).** The hook logs
+  only its own crashes, so a refusal the agent routes around never reaches the user, and "no
+  wrong refusal" could not be told from "no refusal noticed". The report reads every session's
+  transcript (all of `~/.claude/projects` by default — the hook runs in every session on the
+  machine) and lists each refusal in the package since a time, OF the Write/Edit calls made
+  there, with every notice counted by kind (on disk · fixed · not measured · failed). It reads
+  the shapes observed on Claude Code 2.1.282: a refusal is the call's `is_error` result whose
+  text begins `PreToolUse:<Tool> hook error: BLOCKED: this edit to` (`toolDenialKind` alone
+  also marks ordinary permission rules); a notice is a `hook_success` attachment whose stdout
+  carries `structure guard:` context. A window with no edit in the package is NOT MEASURED
+  (exit 2), never a clean zero; a refusal exits 1 and needs a ruling, right or wrong.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
