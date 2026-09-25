@@ -51,6 +51,49 @@ function baselineCommand({ script, source, design, extractor, baseline, allowGro
     (allowGrowth ? ' --allow-growth' : '');
 }
 
+// ── the design id (#535) ─────────────────────────────────────────────────────────────
+// A baseline's keys mean nothing without the design that produced them: after a layer moves,
+// growth compared by key is two questions answered as one. So the design is identified, and a
+// baseline or a registry entry that names a different one is not judged against it.
+//
+// THE MEANING, NOT THE BYTES. A design carries commentary beside substance (`_`, `_layers`, a
+// layer's `why`, a `measured` block). Hashing the file would move the id on a comment edit and
+// invalidate every baseline for nothing — and a guard that fires on prose gets switched off.
+// So only what changes a verdict is kept, normalised the way the rules read it: the root and
+// dirs without trailing slashes (as `loadGraph` and `layerOf` strip them), excludes as a set
+// (they are tested with `some`), each layer's number, name, dirs and files as sets, and the
+// layers in number order (the array's order decides nothing; `n` does).
+const crypto = require('crypto');
+const stripSlash = s => String(s).replace(/\/+$/, '');
+const sortedSet = xs => [...new Set((Array.isArray(xs) ? xs : []).map(String))].sort();
+function designId(design) {
+  const d = design || {};
+  const layers = (Array.isArray(d.layers) ? d.layers : []).map(l => ({
+    n: l && l.n !== undefined ? l.n : null,
+    name: l && l.name !== undefined ? String(l.name) : null,
+    dirs: sortedSet((l && l.dirs || []).map(stripSlash)),
+    files: sortedSet(l && l.files),
+  }));
+  const text = l => JSON.stringify(l);
+  layers.sort((a, b) => (typeof a.n === 'number' && typeof b.n === 'number' && a.n !== b.n) ? a.n - b.n
+    : text(a) < text(b) ? -1 : text(a) > text(b) ? 1 : 0);
+  const canonical = { root: stripSlash(d.root || ''), excludes: sortedSet(d.excludes), layers };
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
+}
+
+// Withheld only on a POSITIVE mismatch. A baseline with no id (written before designs were
+// identified) cannot be shown to disagree, so it is judged and marked `unstamped` for the
+// caller to say — except once a package is armed under an id, when the baseline must carry it.
+function designCheck(design, baseline, armedId) {
+  const id = designId(design);
+  const measuredUnder = baseline && typeof baseline.designId === 'string' ? baseline.designId : null;
+  let mismatch = null;
+  if (armedId && armedId !== id) mismatch = `the design has changed since the package was armed (armed under design ${armedId}, the design in force is ${id})`;
+  else if (armedId && !measuredUnder) mismatch = `the baseline names no design, but the package was armed under design ${armedId}`;
+  else if (measuredUnder && measuredUnder !== id) mismatch = `the baseline was measured under design ${measuredUnder}, the design in force is ${id}`;
+  return { id, measuredUnder, mismatch, unstamped: !mismatch && !measuredUnder };
+}
+
 // ── the graph ────────────────────────────────────────────────────────────────────────
 
 function loadGraph(cruise, design) {
@@ -251,6 +294,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 }
 
 module.exports = {
-  RULES, edgeKey, shellWord, baselineCommand, loadGraph, notMeasured, onCycle, layerOf, layerViolations, witness,
+  RULES, edgeKey, shellWord, baselineCommand, designId, designCheck, loadGraph, notMeasured, onCycle, layerOf, layerViolations, witness,
   impliedEdges, cycleEdges, judge, ratchet, planBaseline,
 };
