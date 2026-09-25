@@ -568,7 +568,7 @@ console.log('structure-guard-hook (PreToolUse — refuses an eroding import)');
   const designFile = path.join(tmp, 'structure-design.json');
   const baselineFile = path.join(tmp, 'structure-baseline.json');
   fs.writeFileSync(designFile, JSON.stringify({ root: 'src', layers: [{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['high'] }] }));
-  fs.writeFileSync(baselineFile, JSON.stringify({ rules: { layer: [], implied: [], cycle: [] } }));
+  fs.writeFileSync(baselineFile, JSON.stringify({ rules: { layer: [], cycle: [] } }));
 
   const sg = (payload, home) => {
     const r = spawnSync('node', [path.join(HOOKS, 'structure-guard-hook.js')], {

@@ -3,8 +3,8 @@
 //
 // The rules live in `hooks/structure-rules.js`, shared with the edit-time hook, so the
 // report that writes a baseline and the hook that refuses an edit judge one graph one way.
-// Why each rule exists — implied edges, re-exports, the stored-file ratchet, the strict
-// witness path — is recorded there, beside the code it explains.
+// Why each rule exists — and why the implied rule was removed (#542) — is recorded there,
+// beside the code it explains.
 //
 // TWO SOURCES FOR THE GRAPH. `--graph` reads `depcruise --output-type json`. `--package`
 // builds the graph the edit-time hook builds (`hooks/structure-graph.js` — the project's own
@@ -47,7 +47,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand } = R;
+const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, retiredSections } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -190,9 +190,10 @@ function main(argv) {
   for (const rule of RULES) {
     const r = ledger[rule];
     print(`  ${rule.padEnd(8)}: ${r.total} of ${results[rule].examined} examined — ` +
-          `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline` +
-          (rule === 'implied' && results.implied.reexports ? ` (${results.implied.reexports} re-exports not judged)` : ''));
+          `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`);
   }
+  for (const r of retiredSections(baseline))
+    print(`  the baseline's "${r.rule}" section (${r.keys} keys) is ignored — ${r.why}; regenerating the baseline drops it`);
 
   const fresh = RULES.flatMap(rule => ledger[rule].fresh.map(f => ({ rule, ...f })));
   if (fresh.length) {
@@ -229,6 +230,8 @@ function main(argv) {
       try { previous = readJson(args['write-baseline'], 'previous baseline'); } catch (e) { return stop(e.message); }
     }
     if (!previous) print('\n  first baseline — nothing to compare against');
+    for (const r of retiredSections(previous))
+      print(`\n  dropped the previous baseline's "${r.rule}" section (${r.keys} keys) — ${r.why}`);
     const plan = planBaseline(results, previous, { allowGrowth: args.allowGrowth });
     if (plan.refused) {
       print(`\n  baseline NOT written — it would grow: ` +

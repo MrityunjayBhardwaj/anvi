@@ -115,7 +115,6 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry) {
     `(judged against its baseline over ${examined.modules} modules and ${examined.edges} edges)\n` +
     'Remedies:\n' +
     '  · layer — move the code to a layer allowed to depend on the target, or depend on something lower\n' +
-    '  · implied — use the path that already provides it; the direct import adds coupling, not capability\n' +
     '  · cycle — break the loop; one of the two modules is doing the other\'s job\n' +
     'If the edge is deliberate, that is the user\'s decision — ask them. A baseline records only what is already ' +
     'on disk, so regenerating it before the edge lands records nothing. Once the user has landed it, this records ' +

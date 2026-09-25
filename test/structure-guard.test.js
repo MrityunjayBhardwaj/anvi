@@ -4,7 +4,7 @@
 //
 // WHAT IS BEING PINNED. `scripts/structure-guard.js` reads dependency-cruiser's JSON and an
 // authored design, and answers three questions per edge — does it point up a layer, is it
-// already implied by another path, is it on a cycle — then subtracts a stored baseline so
+// on a cycle (the implied rule was removed, #542) — then subtracts a stored baseline so
 // only new violations are refused.
 //
 // WHY THE GRAPHS ARE BUILT HERE AND NOT CRUISED. anvi ships no dependencies, and the rules
@@ -125,47 +125,20 @@ console.log('\nLAYER — a module imports only its own layer or a lower one:');
      'a module outside every layer is COUNTED as unmapped, and its edges are not examined');
 }
 
-console.log('\nIMPLIED — an edge another path already provides:');
+console.log('\nNO IMPLIED RULE — a direct import of something also reachable another way is not refused (#542):');
 {
+  // The diamond the removed rule refused: a uses c directly, and also reaches it through b. b does
+  // not hand c's exports to a, so a's import is real use — and must pass.
   const d = design([{ n: 0, dirs: ['x'] }]);
-  const g = G.loadGraph(cruise({
-    'src/x/a.ts': ['src/x/b.ts', 'src/x/c.ts'], 'src/x/b.ts': ['src/x/c.ts'], 'src/x/c.ts': [],   // diamond
-    'src/x/d.ts': ['src/x/e.ts', 'src/x/g.ts'], 'src/x/e.ts': ['src/x/f.ts'],
-    'src/x/f.ts': ['src/x/g.ts'], 'src/x/g.ts': [],                                            // three steps
-    'src/x/p.ts': ['src/x/q.ts', 'src/x/r.ts'], 'src/x/q.ts': ['src/x/p.ts'], 'src/x/r.ts': [], // cycle artefact
-  }), d);
-  const r = G.impliedEdges(g);
-  const k = keys(r);
-  const diamond = r.found.find(f => f.key === 'src/x/a.ts -> src/x/c.ts');
-  ok(!!diamond, 'a -> c is implied when a -> b -> c exists');
-  ok(!!diamond && /via src\/x\/a\.ts -> src\/x\/b\.ts -> src\/x\/c\.ts/.test(diamond.detail),
-     'and the refusal names the path that already provides it');
-  ok(k.includes('src/x/d.ts -> src/x/g.ts'), 'an edge implied by a path three steps long is found, not only two');
-  ok(r.examined === 10 && !k.includes('src/x/a.ts -> src/x/b.ts') && !k.includes('src/x/b.ts -> src/x/c.ts'),
-     `the edges that make up the path are not themselves implied (of ${r.examined} examined)`);
-  ok(r.examined === 10 && !k.includes('src/x/p.ts -> src/x/r.ts'),
-     `a path that returns through the edge's own source does not imply it — p -> q -> p -> r needs p -> r (of ${r.examined} examined)`);
-  ok(k.length === 2, `exactly the two implied edges are found (got ${k.length})`);
-}
-
-console.log('\nRE-EXPORTS — an index declaring its surface is not an implied use:');
-{
-  const d = design([{ n: 0, dirs: ['x'] }, { n: 1, dirs: ['y'] }]);
-  // p imports q, and the index names both. Written as re-exports this is a public surface;
-  // written as imports it is a redundant use. Same files, same names, one field different.
-  const spec = { 'src/x/index.ts': ['src/x/p.ts', 'src/x/q.ts'], 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': [] };
-  const REEXPORTS = ['src/x/index.ts -> src/x/p.ts', 'src/x/index.ts -> src/x/q.ts'];
-  const barrel = G.impliedEdges(G.loadGraph(cruise(spec, { exports: REEXPORTS }), d));
-  ok(barrel.examined === 1 && barrel.reexports === 2 && !keys(barrel).includes('src/x/index.ts -> src/x/q.ts'),
-     `a re-export is not judged as implied — set aside, and counted (${barrel.examined} judged, ${barrel.reexports} set aside)`);
-  const uses = G.impliedEdges(G.loadGraph(cruise(spec), d));
-  ok(keys(uses).includes('src/x/index.ts -> src/x/q.ts'),
-     'the same edge written as an import IS implied — the exclusion is about re-exporting, not about files named index');
-  // a imports the index and q directly; the index re-exports q. The re-export is the path.
-  const via = G.impliedEdges(G.loadGraph(cruise({ 'src/x/a.ts': ['src/x/index.ts', 'src/x/q.ts'], 'src/x/index.ts': ['src/x/q.ts'], 'src/x/q.ts': [] },
-                                                { exports: ['src/x/index.ts -> src/x/q.ts'] }), d));
-  ok(keys(via).includes('src/x/a.ts -> src/x/q.ts'), 'a re-export still counts as a path: importing an index reaches what it re-exports');
-  const up = G.layerViolations(G.loadGraph(cruise({ 'src/x/index.ts': ['src/y/z.ts'], 'src/y/z.ts': [] }, { exports: ['src/x/index.ts -> src/y/z.ts'] }), d), d);
+  const g = G.loadGraph(cruise({ 'src/x/a.ts': ['src/x/b.ts', 'src/x/c.ts'], 'src/x/b.ts': ['src/x/c.ts'], 'src/x/c.ts': [] }), d);
+  const j = G.judge(g, d);
+  ok(Object.keys(j).join() === 'layer,cycle' && G.RULES.join() === 'layer,cycle', `the rules are layer and cycle only (${Object.keys(j).join()})`);
+  ok(j.layer.examined === 3 && j.layer.found.length === 0 && j.cycle.found.length === 0,
+     `the diamond is examined and nothing is found (${j.layer.examined} edges examined)`);
+  ok(G.impliedEdges === undefined && G.witness === undefined, 'and the rule\'s functions are gone, not merely unused');
+  // A re-export still faces layer order — re-export detection stays for the graph agreement check.
+  const d2 = design([{ n: 0, dirs: ['x'] }, { n: 1, dirs: ['y'] }]);
+  const up = G.layerViolations(G.loadGraph(cruise({ 'src/x/index.ts': ['src/y/z.ts'], 'src/y/z.ts': [] }, { exports: ['src/x/index.ts -> src/y/z.ts'] }), d2), d2);
   ok(keys(up).includes('src/x/index.ts -> src/y/z.ts'), 'a re-export still faces layer order — a barrel re-exporting upward is an upward edge');
 }
 
@@ -197,7 +170,7 @@ console.log('\nTHE RATCHET — only what the baseline does not already hold is r
   const d = design([{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['mid'] }]);
   const OLD = 'src/low/a.ts -> src/mid/m.ts', NEW = 'src/low/b.ts -> src/mid/m.ts', GONE = 'src/low/c.ts -> src/mid/m.ts';
   const g = G.loadGraph(cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/low/b.ts': ['src/mid/m.ts'], 'src/low/c.ts': [], 'src/mid/m.ts': [] }), d);
-  const results = { layer: G.layerViolations(g, d), implied: G.impliedEdges(g), cycle: G.cycleEdges(g) };
+  const results = { layer: G.layerViolations(g, d), cycle: G.cycleEdges(g) };
   const led = G.ratchet(results, { rules: { layer: [OLD, GONE] } });
   ok(keys(results.layer).includes(OLD) && led.layer.grandfathered === 1 && !led.layer.fresh.some(f => f.key === OLD),
      'a violation the baseline holds is grandfathered — and it IS a violation, so the silence is the ratchet\'s');
@@ -266,6 +239,19 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   const f1 = run('--design', d, '--graph', dirty, '--write-baseline', first);
   ok(f1.status === 0 && fs.existsSync(first) && /first baseline — nothing to compare against/.test(f1.stdout),
      `a genuinely first baseline is written, and says so in words (got ${f1.status})`);
+
+  // Every baseline written before #542 carries an "implied" section. Named, never misread.
+  const old = write('pre-542.json', { rules: { layer: [OLD], implied: ['src/low/a.ts -> src/low/z.ts', 'src/q.ts -> src/r.ts'], cycle: [] } });
+  const o1 = run('--design', d, '--graph', clean, '--baseline', old);
+  ok(o1.status === 0 && /"implied" section \(2 keys\) is ignored — the implied rule was removed \(#542\)/.test(o1.stdout),
+     `a baseline still carrying an implied section is judged on the rules that remain, and the section is named as ignored (got ${o1.status})`);
+  ok(!/implied\s+:/.test(o1.stdout), 'and no implied line is printed among the rules');
+  const rw = path.join(DIR, 'pre-542-rewritten.json');
+  fs.copyFileSync(old, rw);
+  const o2 = run('--design', d, '--graph', clean, '--baseline', rw, '--write-baseline', rw);
+  const after = JSON.parse(fs.readFileSync(rw, 'utf8'));
+  ok(o2.status === 0 && !('implied' in after.rules) && after.rules.layer.join() === OLD && /dropped the previous baseline's "implied" section \(2 keys\)/.test(o2.stdout),
+     `regenerating drops the section and says so — a reviewed file never changes shape in silence (got ${o2.status})`);
 }
 
 console.log('\nFIXED SINCE THE BASELINE — said loudly, with the command; the baseline is never rewritten by the check (#451):');
@@ -350,7 +336,7 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   const write = (name, obj) => { const f = path.join(DIR, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
   const d = write('pkg-design.json', design([{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['mid'] }]));
   const EDGE = 'src/low/a.ts -> src/mid/m.ts';
-  const base = write('pkg-base.json', { rules: { layer: [EDGE], implied: [], cycle: [] } });
+  const base = write('pkg-base.json', { rules: { layer: [EDGE], cycle: [] } });
   const same = write('pkg-dc.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }));
   const extra = write('pkg-dc-extra.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': ['src/low/a.ts'] }));
   const REG = path.join(HOME, '.claude', 'structure-guard.json');
@@ -361,7 +347,7 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   ok(/graph built by lines@1/.test(judged.stdout), 'and says which extractor built it');
   ok(run(['--design', d, '--package', PK, '--extractor', EX, '--baseline', base]).status === 0,
      'against a baseline holding that edge, the package graph has nothing new');
-  const stale = write('pkg-base-stale.json', { rules: { layer: [EDGE, 'src/low/gone.ts -> src/mid/m.ts'], implied: [], cycle: [] } });
+  const stale = write('pkg-base-stale.json', { rules: { layer: [EDGE, 'src/low/gone.ts -> src/mid/m.ts'], cycle: [] } });
   const pf = run(['--design', d, '--package', PK, '--extractor', EX, '--baseline', stale]);
   ok(pf.status === 0 && pf.stdout.includes(`--package '${fs.realpathSync(PK)}' --design '${d}' --extractor '${EX}' --baseline '${stale}'`),
      `in package mode, a repair's regenerate command names the package and its extractor, not a graph (got ${pf.status})`);
