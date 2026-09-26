@@ -487,6 +487,70 @@ console.log('\nLANDED OUTSIDE THE HOOK — refuse only what the edit adds, say w
   fs.unlinkSync(path.join(PKG, 'src/top/u.ts'));
 }
 
+console.log('\nA GIT WORKTREE of the registered repository is the same package (#546):');
+{
+  // A real repository and a real `git worktree add`, so the `.git` file and `commondir` are git's
+  // own, not a model of them. The package sits below the root, as stave's does.
+  const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' });
+  const REPO = path.join(DIR, 'grepo'), WT = path.join(DIR, 'gwt'), OTHER = path.join(DIR, 'gother');
+  for (const root of [REPO, OTHER]) {
+    fs.cpSync(PKG, path.join(root, 'packages', 'app'), { recursive: true });
+    git(root, 'init', '-q'); git(root, 'add', '-A'); git(root, 'commit', '-qm', 'init');
+  }
+  const added = git(REPO, 'worktree', 'add', '-q', WT);
+  ok(added.status === 0 && fs.statSync(path.join(WT, '.git')).isFile(), `a real linked worktree exists, its .git a file (${(added.stderr || '').trim() || 'ok'})`);
+  const GPKG = path.join(REPO, 'packages', 'app');
+  const REPO_CACHE = path.join(DIR, 'grepo-cache.json');
+  const reg = { packages: [{ dir: GPKG, design: DESIGN, baseline: BASELINE, extractor: EXTRACTOR, cache: REPO_CACHE }] };
+  fs.writeFileSync(REGISTRY, JSON.stringify(reg));
+
+  const inWt = H.packageFor(path.join(WT, 'packages/app/src/low/a.ts'), reg);
+  ok(inWt && inWt.checkout === 'worktree' && inWt.dir === path.join(WT, 'packages', 'app') && inWt.rel === 'src/low/a.ts',
+     `a file in the worktree belongs to the package, in the worktree's own copy of it (${inWt && inWt.checkout} ${inWt && inWt.rel})`);
+  ok((H.packageFor(path.join(GPKG, 'src/low/a.ts'), reg) || {}).checkout === 'registered', 'the registered checkout is still itself');
+  ok(H.packageFor(path.join(OTHER, 'packages/app/src/low/a.ts'), reg) === null,
+     'the same path in an UNRELATED repository is not the package');
+  ok(H.packageFor(path.join(WT, 'packages/elsewhere/x.ts'), reg) === null, 'a file of the worktree outside the package is not the package');
+  // A submodule's .git file names .git/modules/<sub>, which has no commondir: its own repository.
+  const SUB = path.join(DIR, 'gsub');
+  fs.cpSync(PKG, path.join(SUB, 'packages', 'app'), { recursive: true });
+  fs.mkdirSync(path.join(REPO, '.git', 'modules', 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(SUB, '.git'), `gitdir: ${path.join(REPO, '.git', 'modules', 'sub')}\n`);
+  ok(H.packageFor(path.join(SUB, 'packages/app/src/low/a.ts'), reg) === null, 'a submodule-shaped checkout is not a worktree of the repository');
+  // A package that IS its repository's root has no path below the root to look for, so the
+  // checkout holding the file is found by walking up to its `.git` instead.
+  const WT_ROOT = path.join(DIR, 'gwt-root');
+  ok(git(OTHER, 'worktree', 'add', '-q', WT_ROOT).status === 0, 'a worktree of a repository registered at its root');
+  const atRoot = { packages: [{ dir: OTHER }] };
+  const rootHit = H.packageFor(path.join(WT_ROOT, 'packages/app/src/brand-new/x.ts'), atRoot);
+  ok(rootHit && rootHit.checkout === 'worktree' && rootHit.dir === WT_ROOT && rootHit.rel === 'packages/app/src/brand-new/x.ts',
+     `a package at its repository's root maps into the worktree too, even for a file not yet on disk (${rootHit && rootHit.rel})`);
+  ok(H.packageFor(path.join(WT, 'packages/app/src/low/a.ts'), atRoot) === null, 'but not into a worktree of a different repository');
+  ok(H.packageFor(path.join(DIR, 'vanished', 'packages/app/src/low/a.ts'), reg) === null,
+     'a checkout that does not exist is not guessed into the package by the hook');
+  ok(H.checkoutMatch(path.join(DIR, 'vanished', 'packages/app/src/low/a.ts'), GPKG, { gone: true }).checkout === 'gone',
+     'but a reader of old transcripts may ask for it, and it is marked gone, not confirmed');
+
+  const wtEdit = (rel, from, to, session) => ({ session_id: session, cwd: WT, tool_name: 'Edit',
+    tool_input: { file_path: path.join(WT, 'packages', 'app', rel), old_string: from, new_string: to, replace_all: false } });
+  const up = hook(wtEdit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-wt'));
+  ok(up.exit === 2 && up.denied && /BLOCKED: this edit to src\/low\/a\.ts adds \d+ imports?/.test(up.reason) && /layer: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(up.reason),
+     `an upward import added in the worktree is REFUSED, named package-relative (exit ${up.exit})`);
+  const quiet = hook(wtEdit('src/low/a.ts', "export const a = 1;\n", "// a comment\nexport const a = 1;\n", 'sess-wt'));
+  ok(quiet.exit === 0 && !quiet.denied && quiet.stdout === '', 'a comment in the worktree passes in silence');
+  const other = hook({ ...wtEdit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-wt'),
+    tool_input: { file_path: path.join(OTHER, 'packages/app/src/low/a.ts'), old_string: "export const a = 1;\n",
+      new_string: "import { m } from '../mid/m';\nexport const a = m;\n", replace_all: false } });
+  ok(other.exit === 0 && other.stdout === '', 'the same upward import in the unrelated repository is not judged');
+
+  // Its own cache: the registry's `cache` belongs to the registered checkout.
+  const d = decide(wtEdit('src/low/a.ts', "export const a = 1;\n", "// c\nexport const a = 1;\n", 'sess-wt2'), reg);
+  const own = path.join(STATE, require('crypto').createHash('sha1').update(path.join(WT, 'packages', 'app')).digest('hex').slice(0, 16) + '.json');
+  ok(d.decision === 'allow' && d.examined && d.examined.modules > 0 && !fs.existsSync(REPO_CACHE) && fs.existsSync(own),
+     `the worktree was judged over ${d.examined && d.examined.modules} modules with a cache of its own, not the registered checkout's`);
+  register();
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);

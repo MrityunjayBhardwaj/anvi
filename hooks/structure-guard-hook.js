@@ -7,6 +7,8 @@
 // INERT UNLESS ASKED. Hooks on this machine are global — they run in every session, in every
 // project. This one does nothing unless `~/.claude/structure-guard.json` names the package the
 // edited file belongs to, and with no registry at all it exits before loading anything else.
+// "Belongs to" includes the same package in any git worktree of the registered repository (#546):
+// judged against the same design and baseline, with a graph cache of its own.
 //
 // WHAT IT REFUSES. The edited file's content is rebuilt as the edit proposes it — a Write's
 // `content`, or an Edit's `old_string` → `new_string` applied to the file on disk — and the
@@ -68,7 +70,69 @@ function realNear(p) {
   return path.join(head, ...tail);
 }
 
-// Which registered package owns this file? The deepest registered directory containing it.
+// The git checkout whose root is exactly `root`, and the common git directory every worktree of
+// its repository shares — or null when `root` is not a checkout's root. Read from the `.git`
+// entry the way git's own setup does (a directory in the main checkout; in a linked worktree a
+// file naming its private git dir, whose `commondir` leads back to the shared one), because this
+// runs on edits in every project on the machine and a subprocess per edit is not free. A
+// submodule's `.git` file names `.git/modules/<sub>`, which has no `commondir`, so it is its own
+// repository and never mistaken for its superproject's worktree.
+function checkoutAt(root) {
+  const dotgit = path.join(root, '.git');
+  let st;
+  try { st = fs.statSync(dotgit); } catch { return null; }
+  let common = dotgit;
+  if (!st.isDirectory()) {
+    let m;
+    try { m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotgit, 'utf8')); } catch { return null; }
+    if (!m) return null;
+    common = path.resolve(root, m[1]);
+    try { common = path.resolve(common, fs.readFileSync(path.join(common, 'commondir'), 'utf8').trim()); } catch { /* no commondir: its own */ }
+  }
+  try { common = fs.realpathSync(common); } catch { /* a gone git dir still has a name */ }
+  return { root, common };
+}
+
+// The checkout containing `dir`: the nearest ancestor with a `.git`.
+function checkoutOf(dir) {
+  for (let d = dir; ; d = path.dirname(d)) {
+    const c = checkoutAt(d);
+    if (c) return c;
+    if (path.dirname(d) === d) return null;
+  }
+}
+
+// Where a registered package's directory would sit in ANOTHER checkout of its repository (#546):
+// the same path below the checkout's root. A git worktree is a different path on disk, so without
+// this an armed package is guarded only in the one checkout it was registered from — and stave's
+// work moved into a worktree the day it was armed. `gone: true` also accepts a checkout that no
+// longer exists (a removed worktree, read from an old transcript), marked so, because the
+// repository it belonged to can no longer be confirmed.
+function checkoutMatch(target, dir, opts = {}) {
+  if (target === dir || target.startsWith(dir + path.sep))
+    return { dir, rel: path.relative(dir, target).split(path.sep).join('/'), checkout: 'registered' };
+  const home = checkoutOf(dir);
+  if (!home) return null;
+  const inRepo = path.relative(home.root, dir);
+  const tail = inRepo ? path.sep + inRepo + path.sep : null;
+  // Each place the package's own path occurs in the target could be a checkout's root before it;
+  // only the one that IS a checkout of the same repository counts.
+  const roots = [];
+  if (tail) for (let at = target.indexOf(tail); at > 0; at = target.indexOf(tail, at + 1)) roots.push(target.slice(0, at));
+  else { const c = checkoutOf(path.dirname(target)); if (c) roots.push(c.root); }
+  for (const root of roots) {
+    if (root === home.root) continue;
+    const there = inRepo ? path.join(root, inRepo) : root;
+    const rel = path.relative(there, target).split(path.sep).join('/');
+    const c = checkoutAt(root);
+    if (c) { if (c.common === home.common) return { dir: there, rel, checkout: 'worktree' }; continue; }
+    if (opts.gone && !fs.existsSync(root)) return { dir: there, rel, checkout: 'gone' };
+  }
+  return null;
+}
+
+// Which registered package owns this file? The deepest registered directory containing it — in
+// the checkout it was registered from, or in another worktree of the same repository.
 function packageFor(filePath, registry) {
   const target = realNear(filePath);
   let best = null;
@@ -76,9 +140,9 @@ function packageFor(filePath, registry) {
     if (!entry || typeof entry.dir !== 'string') continue;
     let dir;
     try { dir = fs.realpathSync(entry.dir); } catch { continue; }
-    if (target !== dir && !target.startsWith(dir + path.sep)) continue;
-    if (!best || dir.length > best.dir.length)
-      best = { entry, dir, rel: path.relative(dir, target).split(path.sep).join('/') };
+    const hit = checkoutMatch(target, dir);
+    if (!hit) continue;
+    if (!best || hit.dir.length > best.dir.length) best = { entry, ...hit };
   }
   return best;
 }
@@ -183,7 +247,9 @@ function evaluate(payload, deps) {
   if (content === null) return { decision: 'allow', why: 'edit shape not judged' };
 
   const extractor = S.loadExtractor(owner.entry, owner.dir);
-  const cachePath = owner.entry.cache ||
+  // A cache is one checkout's: a worktree's tree differs, and sharing the registered checkout's
+  // file would make each rebuild the other's (#546). So a registry's `cache` names only its own.
+  const cachePath = (owner.checkout === 'registered' && owner.entry.cache) ||
     path.join(stateDir, crypto.createHash('sha1').update(owner.dir).digest('hex').slice(0, 16) + '.json');
   const built = S.buildGraph({ pkgDir: owner.dir, design, extractor, cachePath, proposed: { rel: owner.rel, content } });
   if (built.notMeasured) return { decision: 'unmeasured', why: `${pkgName}: ${built.notMeasured}` };
@@ -304,7 +370,7 @@ function noticesOnce(sessionId, notices, stateDir) {
   return true;
 }
 
-module.exports = { realNear, packageFor, proposedContent, refusalText, evaluate, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
+module.exports = { realNear, checkoutAt, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
   REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {

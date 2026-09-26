@@ -14,8 +14,14 @@
 //   · a NOTICE (said, not refused) is an `attachment` of type `hook_success`, hookName
 //     `PreToolUse:<Tool>`, whose `stdout` is the hook's JSON with `additionalContext`
 //     beginning `structure guard:`.
+//   · a TIMEOUT is an `attachment` of type `hook_cancelled` naming the guard's command, with
+//     `timedOut: true` (observed on 2.1.283 with a hook made to overrun): the hook was killed,
+//     the edit went through, and the model was told nothing. That edit was NEVER JUDGED, so it is
+//     counted apart from the applied ones (#550) — never folded into a clean zero.
 // Every Write/Edit/MultiEdit call whose file is under the package, in the window, is counted,
 // so a zero is printed as 0 OF N edits the guard judged or passed — never as a bare zero.
+// "Under the package" includes the same package in any git worktree of its repository, matched
+// by the hook's own rule (#546), and each edit says which checkout it was in.
 //
 // THE SHAPE HAS ALREADY CHANGED ONCE — measured over every `permission-rule` record on this
 // machine: a hook's refusal was recorded BARE (`BLOCKED: …`) on 2.1.260–2.1.277 (123 records)
@@ -45,6 +51,14 @@ const os = require('os');
 const path = require('path');
 
 const TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+// The hook's own package rule, so the report counts exactly the edits the hook judges (#546).
+function loadFromCandidates(name) {
+  const candidates = [path.join(__dirname, '..', 'hooks', name), path.join(os.homedir(), '.claude', 'hooks', name)];
+  for (const c of candidates) { try { return require(c); } catch { /* next */ } }
+  throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
+}
+const HOOK = loadFromCandidates('structure-guard-hook.js');
+const GUARD_COMMAND = /structure-guard-hook\.js/;
 // The guard's opening words, bare or in Claude Code's wrapper.
 const REFUSAL = /^(?:PreToolUse:(?:Write|Edit|MultiEdit) hook error: )?BLOCKED: this edit to /;
 // The guard's own words: they survive a change of wrapper, so finding them outside the known
@@ -84,11 +98,22 @@ function spellings(dir) {
   return [...out].map(d => d.replace(/\/+$/, '') + '/');
 }
 
+// What a transcript must contain to hold an edit of the package in some checkout: the package's
+// spellings, or its path inside its repository (every worktree shares that). A cheap pre-filter
+// only — each edit is then matched by the hook's rule.
+function needles(dir) {
+  const out = spellings(dir);
+  const home = HOOK.checkoutOf(dir);
+  const inRepo = home && path.relative(home.root, dir);
+  if (inRepo) out.push(path.sep + inRepo + path.sep);
+  return { needles: out, repo: home };
+}
+
 // One transcript: every package edit in the window, and what the guard said about each.
-function readTranscript(file, prefixes, since, until) {
+function readTranscript(file, pkgDir, filter, since, until) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return { unreadable: true, calls: [] }; }
-  if (!prefixes.some(p => raw.includes(p))) return { calls: [] };
+  if (!filter.some(p => raw.includes(p))) return { calls: [] };
   const calls = new Map();
   const results = [], attachments = [];
   let badLines = 0;
@@ -105,9 +130,9 @@ function readTranscript(file, prefixes, since, until) {
         const fp = b.input && b.input.file_path;
         const ts = r.timestamp || '';
         if (typeof fp !== 'string' || ts < since || (until && ts >= until)) continue;
-        const pre = prefixes.find(p => fp.startsWith(p));
-        if (!pre) continue;
-        calls.set(b.id, { id: b.id, tool: b.name, file: fp.slice(pre.length), at: ts, version: r.version || null,
+        const hit = HOOK.checkoutMatch(HOOK.realNear(fp), pkgDir, { gone: true });
+        if (!hit) continue;
+        calls.set(b.id, { id: b.id, tool: b.name, file: hit.rel, checkout: hit.checkout, checkoutDir: hit.dir, at: ts, version: r.version || null,
           session: r.sessionId || r.session_id || path.basename(file, '.jsonl'), transcript: file,
           outcome: 'no result', violations: [], notices: [] });
       } else if (b.type === 'tool_result') {
@@ -131,6 +156,12 @@ function readTranscript(file, prefixes, since, until) {
   }
   for (const a of attachments) {
     const c = calls.get(a.toolUseID);
+    // Killed before it answered: the edit landed unjudged (#550). A cancel of ANOTHER hook on the
+    // same edit says nothing about this one.
+    if (c && a.type === 'hook_cancelled' && GUARD_COMMAND.test(a.command || '')) {
+      if (c.outcome === 'applied') c.outcome = a.timedOut === true ? 'timed out' : 'cancelled';
+      continue;
+    }
     if (!c || a.type !== 'hook_success' || !/^PreToolUse:/.test(a.hookName || '')) continue;
     let ctx = '';
     try { ctx = ((JSON.parse(a.stdout || '{}').hookSpecificOutput) || {}).additionalContext || ''; } catch { continue; }
@@ -140,6 +171,8 @@ function readTranscript(file, prefixes, since, until) {
   }
   return { calls: [...calls.values()], badLines };
 }
+
+const count2 = (calls, where) => calls.filter(c => c.checkout === where).length;
 
 const FLAGS = new Set(['package', 'since', 'until', 'transcripts', 'json']);
 
@@ -164,8 +197,10 @@ function main(argv) {
   const dir = path.resolve(args.transcripts || path.join(os.homedir(), '.claude', 'projects'));
   const files = listTranscripts(dir);
   if (!files.length) return stop(`no transcripts under ${dir}`);
-  const prefixes = spellings(args.package);
-  const read = files.map(f => readTranscript(f, prefixes, since, until));
+  let pkgDir = path.resolve(args.package);
+  try { pkgDir = fs.realpathSync(pkgDir); } catch { /* a package that is gone is still read by name */ }
+  const { needles: filter, repo } = needles(pkgDir);
+  const read = files.map(f => readTranscript(f, pkgDir, filter, since, until));
   const calls = read.flatMap(r => r.calls).sort((a, b) => a.at.localeCompare(b.at));
   const unreadable = read.filter(r => r.unreadable).length;
   const badLines = read.reduce((n, r) => n + (r.badLines || 0), 0);
@@ -176,12 +211,28 @@ function main(argv) {
   for (const c of calls) for (const k of c.notices) notices[k] = (notices[k] || 0) + 1;
   const sessions = new Set(calls.map(c => c.session));
 
-  print(`structure-refusals: ${prefixes[0].replace(/\/$/, '')} · ${since}${until ? ` → ${until}` : ' → now'}`);
+  print(`structure-refusals: ${pkgDir} · ${since}${until ? ` → ${until}` : ' → now'}`);
   print(`  read: ${files.length} transcripts under ${dir}` + (unreadable ? ` (${unreadable} unreadable)` : '') +
         (badLines ? ` · ${badLines} unparseable lines skipped` : ''));
   print(`  edits in the package: ${calls.length} Write/Edit/MultiEdit calls in ${sessions.size} sessions — ` +
         `${count('applied')} applied · ${refused.length} REFUSED by the guard · ${count('denied otherwise')} denied by another hook or a permission rule · ` +
         `${count('errored')} errored otherwise · ${count('no result')} with no result`);
+  // Said every time, zero included: an edit the guard never judged is not an edit it passed.
+  const unjudged = count('timed out') + count('cancelled');
+  print(`  applied WITHOUT being judged: ${unjudged} — the guard timed out on ${count('timed out')}, was cancelled on ${count('cancelled')}`);
+  const where = {};
+  for (const c of calls) if (c.checkout !== 'registered') (where[c.checkout] = where[c.checkout] || new Set()).add(c.checkoutDir);
+  print(!repo ? `  checkouts: worktrees NOT looked for — ${pkgDir} is not inside a git checkout`
+    : `  checkouts: registered ${count2(calls, 'registered')} · worktrees ${count2(calls, 'worktree')}` +
+      (where.worktree ? ` (${[...where.worktree].join(', ')})` : '') +
+      ` · ${count2(calls, 'gone')} in a checkout that no longer exists, so its repository cannot be confirmed` +
+      (where.gone ? ` (${[...where.gone].join(', ')})` : ''));
+  // A silent allow leaves no record, so an edit in another checkout that no hook looked at reads
+  // exactly like one it passed. Hooks before #546 did not look there — said whenever such edits
+  // are counted, because the transcript cannot say which hook was installed at the time.
+  if (count2(calls, 'worktree') + count2(calls, 'gone'))
+    print(`  CAUTION: edits in another checkout were judged only by a hook that guards worktrees (anvi #546); ` +
+          'before it was installed they passed unseen, and a transcript cannot tell the two apart. Read a trial only from --since after it.');
   print(`  notices said (not refused): ` + NOTICE_KINDS.map(([k]) => `${k} ${notices[k] || 0}`).join(' · '));
   const unrecognised = calls.filter(c => c.outcome === 'unrecognised');
   const byVersion = {};
@@ -191,6 +242,10 @@ function main(argv) {
   if (!calls.length) {
     print('');
     return stop('no edit in the package in this window — a zero here is not evidence of anything');
+  }
+  if (unjudged === calls.length) {
+    print('');
+    return stop(`the guard judged none of the ${calls.length} edits in the package — every one landed after it timed out or was cancelled`);
   }
   // Said beside every outcome it qualifies, including a refusal: a shape that moved can hide
   // further refusals behind the ones that were recognised.
@@ -207,10 +262,11 @@ function main(argv) {
     if (unrecognised.length) print(`  UNRECOGNISED: ${unrecognisedText}`);
   } else if (unrecognised.length) {
     print(`\n  no refusal RECOGNISED — but UNRECOGNISED: ${unrecognisedText}`);
-  } else print(`\n  no refusal in ${calls.length} edits.`);
+  } else print(`\n  no refusal in ${calls.length} edits` +
+    (unjudged ? ` — but ${unjudged} of them landed WITHOUT being judged, so this zero covers only the other ${calls.length - unjudged}.` : '.'));
 
   if (args.json) {
-    fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: prefixes[0], since, until, transcripts: files.length,
+    fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: pkgDir, since, until, transcripts: files.length,
       unreadable, badLines, calls: calls.map(({ reason, ...c }) => c) }, null, 1) + '\n');
     print(`  report: ${path.resolve(args.json)}`);
   }
@@ -218,6 +274,6 @@ function main(argv) {
   return refused.length ? 1 : unrecognised.length ? 2 : 0;
 }
 
-module.exports = { readTranscript, spellings, REFUSAL, GUARD_WORDS, VIOLATION, NOTICE_KINDS };
+module.exports = { readTranscript, spellings, needles, REFUSAL, GUARD_WORDS, VIOLATION, NOTICE_KINDS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
