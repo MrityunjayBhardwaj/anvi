@@ -517,6 +517,15 @@ console.log('\nA GIT WORKTREE of the registered repository is the same package (
   fs.mkdirSync(path.join(REPO, '.git', 'modules', 'sub'), { recursive: true });
   fs.writeFileSync(path.join(SUB, '.git'), `gitdir: ${path.join(REPO, '.git', 'modules', 'sub')}\n`);
   ok(H.packageFor(path.join(SUB, 'packages/app/src/low/a.ts'), reg) === null, 'a submodule-shaped checkout is not a worktree of the repository');
+  // A package that IS its repository's root has no path below the root to look for, so the
+  // checkout holding the file is found by walking up to its `.git` instead.
+  const WT_ROOT = path.join(DIR, 'gwt-root');
+  ok(git(OTHER, 'worktree', 'add', '-q', WT_ROOT).status === 0, 'a worktree of a repository registered at its root');
+  const atRoot = { packages: [{ dir: OTHER }] };
+  const rootHit = H.packageFor(path.join(WT_ROOT, 'packages/app/src/brand-new/x.ts'), atRoot);
+  ok(rootHit && rootHit.checkout === 'worktree' && rootHit.dir === WT_ROOT && rootHit.rel === 'packages/app/src/brand-new/x.ts',
+     `a package at its repository's root maps into the worktree too, even for a file not yet on disk (${rootHit && rootHit.rel})`);
+  ok(H.packageFor(path.join(WT, 'packages/app/src/low/a.ts'), atRoot) === null, 'but not into a worktree of a different repository');
   ok(H.packageFor(path.join(DIR, 'vanished', 'packages/app/src/low/a.ts'), reg) === null,
      'a checkout that does not exist is not guessed into the package by the hook');
   ok(H.checkoutMatch(path.join(DIR, 'vanished', 'packages/app/src/low/a.ts'), GPKG, { gone: true }).checkout === 'gone',
