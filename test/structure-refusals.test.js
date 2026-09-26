@@ -137,7 +137,7 @@ console.log('\nA CHANGED DENIAL SHAPE IS SAID, never read as a clean zero (#549)
   const later = use('Edit', path.join(PKG, 'src/s1.ts'), T0, 'sess-s', '2.1.300');
   put('a.jsonl', [later.line, result(later.id, 'The file has been updated successfully.', false, T0, '2.1.300')]);
   const clean = runIn(tx, ...window);
-  ok(clean.exit === 0 && /no refusal in 1 edits/.test(clean.out) && /2\.1\.300 ×1/.test(clean.out) && /UNRECOGNISED shape: 0/.test(clean.out),
+  ok(clean.exit === 0 && /no refusal in 1 edits\./.test(clean.out) && /applied WITHOUT being judged: 0/.test(clean.out) && /2\.1\.300 ×1/.test(clean.out) && /UNRECOGNISED shape: 0/.test(clean.out),
      `edits from a version never seen before give a clean zero when nothing drifted, and name it (exit ${clean.exit})`);
 
   // The guard's reason in a changed wrapper: read as drift, not as nothing.
@@ -184,6 +184,76 @@ console.log('\nA CHANGED DENIAL SHAPE IS SAID, never read as a clean zero (#549)
   const both = runIn(tx, ...window);
   ok(both.exit === 1 && /1 REFUSED/.test(both.out) && /UNRECOGNISED: 1 of 4 edits/.test(both.out),
      `a refusal beside a drifted denial exits 1 and still says what could not be read (exit ${both.exit})`);
+}
+
+console.log('\nWORKTREES — the hook\'s own package rule, each edit saying which checkout (#546):');
+{
+  const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' });
+  const REPO = path.join(DIR, 'g', 'repo'), WT = path.join(DIR, 'g', 'wt'), OTHER = path.join(DIR, 'g', 'other');
+  for (const root of [REPO, OTHER]) {
+    fs.mkdirSync(path.join(root, 'packages', 'editor', 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'packages', 'editor', 'src', 'a.ts'), 'export const a = 1;\n');
+    git(root, 'init', '-q'); git(root, 'add', '-A'); git(root, 'commit', '-qm', 'init');
+  }
+  ok(git(REPO, 'worktree', 'add', '-q', WT).status === 0, 'a real linked worktree of the repository');
+  const GPKG = path.join(REPO, 'packages', 'editor');
+  const tx = path.join(DIR, 'wt-tx');
+  fs.mkdirSync(tx, { recursive: true });
+  const inMain = use('Edit', path.join(GPKG, 'src/a.ts'), T0, 'sess-w');
+  const inWt = use('Edit', path.join(WT, 'packages/editor/src/a.ts'), T0, 'sess-w');
+  const inOther = use('Edit', path.join(OTHER, 'packages/editor/src/a.ts'), T0, 'sess-w');
+  const inGone = use('Edit', path.join(DIR, 'g', 'removed-wt', 'packages/editor/src/a.ts'), T0, 'sess-w');
+  const refusedWt = use('Edit', path.join(WT, 'packages/editor/src/b.ts'), T0, 'sess-w');
+  fs.writeFileSync(path.join(tx, 'w.jsonl'), [
+    inMain.line, result(inMain.id, 'The file has been updated successfully.', false),
+    inWt.line, result(inWt.id, 'The file has been updated successfully.', false),
+    inOther.line, result(inOther.id, 'The file has been updated successfully.', false),
+    inGone.line, result(inGone.id, 'The file has been updated successfully.', false),
+    refusedWt.line, result(refusedWt.id, "PreToolUse:Edit hook error: BLOCKED: this edit to src/b.ts adds 1 import that erode editor's declared structure:\n  · layer: src/b.ts -> src/z.ts\n", true),
+  ].join('\n') + '\n');
+  const r = runIn(tx, '--package', GPKG, '--since', '2026-09-25T00:00:00Z');
+  ok(/4 Write\/Edit\/MultiEdit calls/.test(r.out), `the registered checkout, the worktree and the removed checkout count; the unrelated repository does not (${(r.out.match(/(\d+) Write\/Edit/) || [])[1]})`);
+  ok(new RegExp(`checkouts: registered 1 · worktrees 2 \\(${WT.replace(/[/.]/g, '\\$&')}/packages/editor\\) · 1 in a checkout that no longer exists`).test(r.out),
+     'each edit says which checkout it was in, the worktree named');
+  ok(r.exit === 1 && /Edit src\/b\.ts/.test(r.out) && /layer\s+src\/b\.ts -> src\/z\.ts/.test(r.out),
+     `a refusal in the worktree is listed package-relative, like any other (exit ${r.exit})`);
+  ok(/CAUTION: edits in another checkout were judged only by a hook that guards worktrees/.test(r.out),
+     'edits in another checkout carry the caution that an older hook never looked there');
+  const plain = run('--package', PKG, '--since', '2026-09-25T00:00:00Z');
+  ok(!/CAUTION: edits in another checkout/.test(plain.out), 'edits only in the registered checkout carry no such caution');
+  ok(/worktrees NOT looked for/.test(plain.out), 'a package outside any git checkout says worktrees were not looked for');
+}
+
+console.log('\nTIMEOUTS — an edit the guard never judged is not one it passed (#550):');
+{
+  const tx = path.join(DIR, 'timeouts');
+  fs.mkdirSync(tx, { recursive: true });
+  const window = ['--package', PKG, '--since', '2026-09-25T00:00:00Z'];
+  // The attachment exactly as observed on 2.1.283 when a PreToolUse hook overran its timeout.
+  const cancelled = (id, tool, command, timedOut = true) => JSON.stringify({ type: 'attachment', timestamp: T0, attachment: {
+    type: 'hook_cancelled', hookName: `PreToolUse:${tool}`, toolUseID: id, hookEvent: 'PreToolUse', command,
+    durationMs: 10041, timedOut, timeoutMs: 10000 } });
+  const GUARD = 'node "/Users/someone/.claude/hooks/structure-guard-hook.js"';
+  const judged = use('Edit', path.join(PKG, 'src/t1.ts'), T0, 'sess-t');
+  const late = use('Edit', path.join(PKG, 'src/t2.ts'), T0, 'sess-t');
+  const otherHook = use('Write', path.join(PKG, 'src/t3.ts'), T0, 'sess-t');
+  fs.writeFileSync(path.join(tx, 't.jsonl'), [
+    judged.line, result(judged.id, 'The file has been updated successfully.', false),
+    late.line, cancelled(late.id, 'Edit', GUARD), result(late.id, 'The file has been updated successfully.', false),
+    // Another hook killed on the same kind of edit says nothing about this guard.
+    otherHook.line, cancelled(otherHook.id, 'Write', 'node "/Users/someone/.claude/hooks/catalogue-context-injector.js"'),
+    result(otherHook.id, 'File created successfully', false),
+  ].join('\n') + '\n');
+  const r = runIn(tx, ...window);
+  ok(/2 applied/.test(r.out) && /applied WITHOUT being judged: 1 — the guard timed out on 1/.test(r.out),
+     `the guard's timeout is counted apart; another hook's is not (${(r.out.match(/applied WITHOUT[^\n]*/) || [''])[0]})`);
+  ok(r.exit === 0 && /no refusal in 3 edits — but 1 of them landed WITHOUT being judged, so this zero covers only the other 2\./.test(r.out),
+     `the zero is said to cover only the judged edits (exit ${r.exit})`);
+
+  fs.writeFileSync(path.join(tx, 't.jsonl'), [late.line, cancelled(late.id, 'Edit', GUARD), result(late.id, 'The file has been updated successfully.', false)].join('\n') + '\n');
+  const none = runIn(tx, ...window);
+  ok(none.exit === 2 && /NOT MEASURED — the guard judged none of the 1 edits/.test(none.out),
+     `when every edit went unjudged, it is NOT MEASURED, never a clean zero (exit ${none.exit})`);
 }
 
 console.log('\nBAD INPUT IS NOT MEASURED, never a clean zero:');

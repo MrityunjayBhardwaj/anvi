@@ -1433,6 +1433,26 @@ loosened until it stops firing guards nothing.
   first drifted refusal and never on a version that did not drift, so no per-version capture is
   kept. A denial without the guard's words (another hook's, or a settings permission rule — the
   record cannot tell them apart) is counted where it can be seen, not called drift.
+- **A git worktree of the registered repository is the same package (#546).** Registration is
+  by real path, so an edit in a worktree was not judged and nothing said so — and on the day
+  stave was armed, 24 of its 24 edits were made in a worktree. The hook now maps a file to the
+  package in any checkout whose `.git` leads to the same common git directory (read from the
+  `.git` file and its `commondir`, the way git's own setup does — no subprocess on every edit
+  in every project), at the same path below that checkout's root. The design and baseline are
+  shared; the graph cache is the worktree's own (a registry `cache` names only the registered
+  checkout's). A submodule's `.git` names `.git/modules/<sub>`, which has no `commondir`, so it
+  is never mistaken for a worktree. The report counts edits by the same rule and says which
+  checkout each was in; one in a checkout that no longer exists is counted and marked, because
+  its repository can no longer be confirmed. A silent allow leaves no record, so an edit in a
+  worktree before this hook was installed reads exactly like one it passed; whenever such edits
+  are counted, the report says so, and a trial is read only from a `--since` after it.
+- **A timeout is an edit NOT judged, never one passed (#550).** Observed on Claude Code
+  2.1.283: when a PreToolUse hook overruns its timeout it is killed, the edit goes through, the
+  model is told nothing, and the transcript records a `hook_cancelled` attachment with
+  `timedOut: true`. The report counts those (matched to the guard's own command) apart from
+  applied edits, says the count every time, and prints NOT MEASURED (exit 2) when no edit in the
+  window was judged. A cold graph build measured 3.2–5.5s at load ~40 against the hook's 10s
+  budget, and every change to the file list forces one.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
