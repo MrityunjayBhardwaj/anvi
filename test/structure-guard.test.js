@@ -262,7 +262,9 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   // from the command's own FLAGS set, so a flag added later without a case here is caught.
   const FLAGS = [...fs.readFileSync(GUARD, 'utf8').match(/const FLAGS = new Set\(\[([^\]]*)\]\)/)[1].matchAll(/'([^']+)'/g)].map(m => m[1]);
   const known = run('--design', d, '--graph', clean, '--baseline', base, '--write-baseline', path.join(DIR, 'known.json'), '--allow-growth');
-  ok(FLAGS.length === 8 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
+  // --ref is the ninth: it needs a git checkout, so its parsing is witnessed in "A BASELINE IS
+  // WRITTEN FROM THE DEFAULT BRANCH" below, where it measures a ref the working tree is not on.
+  ok(FLAGS.length === 9 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
      `the ${FLAGS.length} known flags all still parse — the check refuses the unknown, not everything (got ${known.status})`);
 
   const out = path.join(DIR, 'written.json');
@@ -564,6 +566,73 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   const noTs = run(['--design', d, '--package', PK]);
   ok(noTs.status === 2 && /NOT MEASURED/.test(noTs.stdout) && /TypeScript/.test(noTs.stdout),
      `with no extractor named and no TypeScript beside the package, --package is not measured (got ${noTs.status})`);
+}
+
+console.log('\nA BASELINE IS WRITTEN FROM THE DEFAULT BRANCH, NEVER THE WORKING TREE (#562):');
+{
+  // A real repository whose checkout is on a feature branch carrying a committed violation and
+  // an uncommitted one. origin/* refs are written directly: they are what `git fetch` leaves.
+  const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' });
+  const REPO = path.join(DIR, 'refrepo'), PK = path.join(REPO, 'packages', 'app');
+  fs.mkdirSync(path.join(PK, 'src', 'low'), { recursive: true });
+  fs.mkdirSync(path.join(PK, 'src', 'mid'), { recursive: true });
+  fs.writeFileSync(path.join(PK, 'src', 'low', 'a.ts'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(PK, 'src', 'mid', 'm.ts'), "import { a } from '../low/a';\nexport const m = a;\n");
+  git(REPO, 'init', '-q', '-b', 'main'); git(REPO, 'add', '-A'); git(REPO, 'commit', '-qm', 'main');
+  git(REPO, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  git(REPO, 'checkout', '-qb', 'feat');
+  fs.writeFileSync(path.join(PK, 'src', 'low', 'a.ts'), "import { m } from '../mid/m';\nexport const a = m;\n");
+  git(REPO, 'commit', '-qam', 'feat: an upward import');
+  fs.writeFileSync(path.join(PK, 'src', 'low', 'scratch.ts'), "import { m } from '../mid/m';\nexport const s = m;\n");
+  const EX = path.join(DIR, 'line-extractor.js');
+  const d = path.join(DIR, 'pkg-design.json');
+  const run = (...a) => spawnSync(process.execPath, [GUARD, '--design', d, '--package', PK, '--extractor', EX, ...a], { encoding: 'utf8' });
+  const out = name => path.join(DIR, name);
+  const read = f => JSON.parse(fs.readFileSync(f, 'utf8'));
+  const leftovers = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('structure-guard-ref-')).length;
+  const before = leftovers();
+
+  // The case that goes red without the fix: on disk there are two upward imports.
+  const disk = spawnSync(process.execPath, [GUARD, '--design', d, '--package', PK, '--extractor', EX], { encoding: 'utf8' });
+  ok(/2 of \d+ examined/.test(disk.stdout) && /as it is on disk/.test(disk.stdout),
+     `judged without writing, the working tree is what it is — 2 upward imports on disk (${(disk.stdout.match(/divergence: .*/) || [''])[0]})`);
+  const w = run('--write-baseline', out('ref-base.json'));
+  ok(w.status === 0 && /measured origin\/main at [0-9a-f]{8} .* through git archive — not the working tree/.test(w.stdout) &&
+     /origin\/HEAD is not set, and origin\/main is the only one/.test(w.stdout),
+     `writing measures origin/main, and says which ref and why (exit ${w.status})`);
+  ok(fs.existsSync(out('ref-base.json')) && read(out('ref-base.json')).rules.divergence.length === 0,
+     'so neither the feature branch\'s committed import nor the uncommitted file is recorded');
+  const f = run('--write-baseline', out('ref-feat.json'), '--ref', 'feat', '--allow-growth');
+  ok(f.status === 0 && /measured feat at/.test(f.stdout) && read(out('ref-feat.json')).rules.divergence.length === 1,
+     `--ref names another commit, and only its committed import is recorded, not the uncommitted one (exit ${f.status})`);
+
+  git(REPO, 'update-ref', 'refs/remotes/origin/master', 'refs/remotes/origin/main');
+  const both = run('--write-baseline', out('ref-both.json'));
+  ok(both.status === 2 && /cannot tell the default branch/.test(both.stdout) && /both origin\/main and origin\/master exist/.test(both.stdout) &&
+     /pass --ref/.test(both.stdout) && !fs.existsSync(out('ref-both.json')),
+     `with both origin/main and origin/master and no origin/HEAD, it refuses to guess and writes nothing (exit ${both.status})`);
+  git(REPO, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/master');
+  const head = run('--write-baseline', out('ref-head.json'));
+  ok(head.status === 0 && /measured origin\/master at .*ref chosen by origin\/HEAD\)/.test(head.stdout),
+     `origin/HEAD, when set, decides (exit ${head.status})`);
+  git(REPO, 'symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+  git(REPO, 'update-ref', '-d', 'refs/remotes/origin/master'); git(REPO, 'update-ref', '-d', 'refs/remotes/origin/main');
+  const none = run('--write-baseline', out('ref-none.json'));
+  ok(none.status === 2 && /neither origin\/main nor origin\/master exists/.test(none.stdout) && !fs.existsSync(out('ref-none.json')),
+     `with no remote branch it is NOT MEASURED — never the working tree instead (exit ${none.status})`);
+  const bad = run('--write-baseline', out('ref-bad.json'), '--ref', 'no-such-branch');
+  ok(bad.status === 2 && /no-such-branch is not a commit/.test(bad.stdout), `a --ref that is not a commit is NOT MEASURED (exit ${bad.status})`);
+  git(REPO, 'checkout', '-q', '--orphan', 'empty'); git(REPO, 'rm', '-rqf', '--cached', '.');
+  fs.writeFileSync(path.join(REPO, 'x'), 'x'); git(REPO, 'add', 'x'); git(REPO, 'commit', '-qm', 'no package here');
+  const gone = run('--write-baseline', out('ref-gone.json'), '--ref', 'empty');
+  ok(gone.status === 2 && /packages\/app does not exist at empty/.test(gone.stdout), `a package absent at the ref is NOT MEASURED (exit ${gone.status})`);
+  const noPkg = spawnSync(process.execPath, [GUARD, '--design', d, '--graph', path.join(DIR, 'pkg-dc.json'), '--ref', 'main'], { encoding: 'utf8' });
+  ok(noPkg.status === 2 && /--ref .* needs --package/.test(noPkg.stdout), `--ref without --package does nothing, so it is NOT MEASURED (exit ${noPkg.status})`);
+  const plain = spawnSync(process.execPath, [GUARD, '--design', d, '--package', path.join(DIR, 'pkg'), '--extractor', EX,
+    '--write-baseline', out('plain.json'), '--allow-growth'], { encoding: 'utf8' });
+  ok(plain.status === 0 && /as it is on disk — it is not inside a git checkout/.test(plain.stdout),
+     `a package outside any git checkout is written from disk, and says why (exit ${plain.status})`);
+  ok(leftovers() === before, `no temporary copy is left behind (${leftovers() - before} extra)`);
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

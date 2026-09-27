@@ -169,30 +169,28 @@ function proposedContent(toolName, input, readFile) {
 // Built beside the rules, shared with the report; required only on the paths that print it, so
 // the no-registry fast path still loads nothing.
 //
-// ALWAYS THE REGISTERED CHECKOUT (#560). A baseline is written from the graph on disk at
-// `--package`, so naming a worktree's copy would record that branch — and anything else it
-// carries — as the stored baseline. The registered checkout is where the change is recorded once
-// it has landed; an edit made in a worktree is told to wait for the merge, not to record the branch.
+// ALWAYS THE REGISTERED CHECKOUT (#560), MEASURED AT THE DEFAULT BRANCH (#562). The command
+// names the registered package, and the script measures that repository's default branch through
+// `git archive` — never a working tree, whose branch and uncommitted files would otherwise be
+// stored as the baseline. So every remedy that prints it says to run it after the merge.
 function baselineCommand(pkgDir, entry, allowGrowth, worktree) {
   const cmd = require('./structure-rules.js').baselineCommand({
     script: '~/.claude/anvi/scripts/structure-guard.js', source: ['--package', pkgDir],
     design: entry.design, extractor: entry.extractor, baseline: entry.baseline, allowGrowth });
-  return worktreeNote(worktree, pkgDir) + `  ${cmd}`;
+  return worktreeNote(worktree) + `  ${cmd}`;
 }
 
-// The registered checkout is not promised to be on main (stave's live one sits on feature
-// branches), so the note says what the command reads — that directory as it is on disk.
-function worktreeNote(worktree, pkgDir) {
+function worktreeNote(worktree) {
   return worktree
-    ? `  (This edit is in a worktree, ${worktree}. The command reads the registered checkout, ${pkgDir}, as it is on disk ` +
-      '— not this branch — so run it only after the change has landed there.)\n'
+    ? `  (This edit is in a worktree, ${worktree}. The command measures the repository's default branch, not this ` +
+      'branch, so run it only after the change has merged.)\n'
     : '';
 }
 
-// ORDER MATTERS in the last paragraph, observed: the baseline is written from the graph ON DISK,
-// so regenerating it while the edge is only proposed records nothing (and says "written"), and the
-// same edit is refused again. A deliberate edge has to land first — and landing it is not this
-// edit's to do, because the only way past the refusal is around the guard.
+// ORDER MATTERS in the last paragraph, observed: the baseline is written from the default branch
+// (#562), so regenerating it while the edge is only proposed records nothing (and says "written"),
+// and the same edit is refused again. A deliberate edge has to merge first — and landing it is not
+// this edit's to do, because the only way past the refusal is around the guard.
 //
 // A DIVERGENCE HAS TWO REMEDIES (#554). The design is a model, and an edge it does not declare
 // questions the model as much as the code: either the code should reach the component another
@@ -241,8 +239,9 @@ function exceptionText(divergent) {
       'arrow, and records it in the baseline as a known exception while the design still says no.'
     : 'If the cycle is deliberate, the only way to keep it is a ONE-IMPORT EXCEPTION: the design has no arrow to declare ' +
       'for a file-level cycle, so the import is recorded in the baseline as a known exception.';
-  return `${why} That is the user's decision — ask them. A baseline records only what is already on disk, so running ` +
-    'this before the edge lands records nothing. Once the user has landed it, this records it (the growth is then recorded, not silent):';
+  return `${why} That is the user's decision — ask them. A baseline is measured from the repository's default branch, ` +
+    'not the working tree, so running this before the import has merged there records nothing. Once the user has merged it, ' +
+    'this records it (the growth is then recorded, not silent):';
 }
 
 // A repair the baseline still holds (#451). Said, never acted on: the baseline is a reviewed
@@ -253,7 +252,8 @@ function fixedText(pkgName, fixed, pkgDir, entry, worktree) {
   const shown = fixed.slice(0, 3).map(f => `${f.rule}: ${f.key}`).join('; ') + (fixed.length > 3 ? ` (+${fixed.length - 3} more)` : '');
   return `structure guard: ${fixed.length} violation${one ? '' : 's'} in ${pkgName} fixed since its baseline — ${shown}. ` +
     `The baseline still holds ${one ? 'it' : 'them'}, so if one comes back it is allowed in silence. Locking the repair in ` +
-    'by regenerating the baseline is the user\'s decision — ask them. Once the repair has landed, this does it:\n' +
+    'by regenerating the baseline is the user\'s decision — ask them. Once the repair has merged into the default branch, ' +
+    'this does it:\n' +
     baselineCommand(pkgDir, entry, false, worktree);
 }
 
@@ -367,7 +367,8 @@ function landedText(pkgName, rel, onDisk, pkgDir, entry, worktree) {
   return `structure guard: ${rel} carries ${onDisk.length} violation${one ? '' : 's'} of ${pkgName}'s declared structure that ` +
     `${one ? 'is' : 'are'} already on disk but not in its baseline — ${shown}. ${one ? 'It' : 'They'} landed outside the hook ` +
     '(a Bash command, another program, or a hand edit), so this edit is not refused for it. Fixing it, or recording it as ' +
-    'grandfathered, is the user\'s decision — ask them. If it is meant, this records it:\n' +
+    'grandfathered, is the user\'s decision — ask them. If it is meant, this records it once it is on the default branch ' +
+    '(the command measures that branch, not the working tree):\n' +
     baselineCommand(pkgDir, entry, true, worktree);
 }
 

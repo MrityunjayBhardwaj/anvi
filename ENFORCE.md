@@ -1384,6 +1384,20 @@ loosened until it stops firing guards nothing.
   fixed violation for one new one is still growth. Growth is judged against the
   `--baseline` in force, not only against whatever sits at the output path — a write to a
   new path is still refused.
+- **A baseline is written from the default branch, never a working tree (#562).** A
+  package's checkout can sit on a feature branch with uncommitted files; writing from it
+  stored that branch, scratch included, as the baseline in force. So with
+  `--write-baseline` (or `--ref <commit>`) a `--package` inside a git checkout is measured
+  from a ref through a temporary `git archive` of the whole repository (a tsconfig may
+  extend one above the package), with each `node_modules` on the way down linked from
+  the checkout. The ref is `--ref` if given, else `origin/HEAD`, else the only one of
+  `origin/main` and `origin/master`; when that cannot be told (both or neither exist),
+  the ref is not a commit, or the package is absent at it, the run is NOT MEASURED and
+  never falls back to the working tree. Every run says which ref it measured, at which
+  commit, and why. A directory outside any git checkout (an archive, a scratch copy) is
+  measured as it is on disk, and the run says so. Observed on stave: `--ref d187328c`
+  reproduced the stored baseline key for key (319 modules, 794 edges, 23 divergences,
+  2 cycles) while the checkout sat on a feature branch with 110 uncommitted paths.
 - **A baseline names the design it was measured under, and a mismatched pair is not
   judged (#535).** Keys mean nothing without the design that produced them: after a
   component's mapping or its allowed edges move, growth compared by key answers two
@@ -1497,9 +1511,11 @@ loosened until it stops firing guards nothing.
   design has no arrow to declare, so there it is the only way to keep a deliberate cycle. The refusal prints the
   exact command, built from the registry entry it judged against (`--package`, `--design`,
   `--extractor` when registered, `--baseline` and `--write-baseline` on the same file,
-  `--allow-growth`). The baseline is written from the graph on disk, so running that command
-  while the edge is only proposed records nothing — observed: it reports "baseline written:
-  0 layer" (today: "0 divergence") and the same edit is refused again.
+  `--allow-growth`). `--package` names the registered checkout, never a worktree the edit
+  was made in (#560), and the baseline is measured from the default branch (#562), so running
+  that command before the import has merged records nothing — observed: it reports "baseline
+  written: 0 layer" (today: "0 divergence") and the same edit is refused again. An edit in a
+  worktree is told so on the line before the command.
 - **A repair is said loudly, and no check rewrites the baseline.** A baselined violation that
   no longer occurs is FIXED. The report lists each one and prints the exact command that
   regenerates the baseline in force — never with `--allow-growth`, and while a NEW violation

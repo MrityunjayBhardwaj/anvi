@@ -22,9 +22,18 @@
 // Usage:
 //   node scripts/structure-guard.js --design <design.json> (--graph <depcruise.json> | --package <dir>)
 //        [--extractor <module>] [--baseline <baseline.json>]
-//        [--write-baseline <out.json> [--allow-growth]]
+//        [--write-baseline <out.json> [--allow-growth]] [--ref <git ref>]
 //   node scripts/structure-guard.js --design <design.json> --graph <depcruise.json> --package <dir>
 //        [--extractor <module>] [--arm --baseline <baseline.json>]
+//
+// A BASELINE IS WRITTEN FROM THE DEFAULT BRANCH, NEVER THE WORKING TREE (#562). A package's
+// checkout can sit on a feature branch with uncommitted files, and writing from it would store
+// that branch — scratch included — as the baseline in force, and say "written". So with
+// --write-baseline (or --ref) a package inside a git checkout is measured from a ref through a
+// temporary `git archive`: --ref if given, else the remote's default branch. When the ref cannot
+// be told or read, the run is NOT MEASURED; it never falls back to the working tree. A directory
+// that is not in a git checkout (an archive, a scratch copy) has no branch to confuse and is
+// measured as it is on disk, and the run says so.
 //
 // Exit: 0 nothing new / the graphs agree (and the package is armed, with --arm) ·
 //       1 a NEW violation, a baseline write that would grow, or graphs that disagree ·
@@ -35,6 +44,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 // The shared modules are found from either install tree: the repo, where scripts/ and hooks/
 // are siblings, or the installed hooks directory.
@@ -95,8 +105,55 @@ function arm(entry) {
 // note, a CI step — runs with an argument that does nothing and still exits 0, which reads as
 // "measured, nothing new" (#511). A typo lands the same way: `--baselien b.json` would run with
 // no baseline at all and judge every grandfathered violation as new.
-const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm']);
+const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm', 'ref']);
 const REMOVED = { before: 'the new-module report was removed (#509): it flagged 85% of new files' };
+
+function git(cwd, ...a) {
+  const r = spawnSync('git', ['-C', cwd, ...a], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+// The ref a baseline is measured from: the one asked for, else the remote's default branch. The
+// default is read from origin/HEAD; a clone that never recorded it (stave's) falls back only when
+// exactly one of origin/main and origin/master exists — two, or none, is a guess, so it refuses.
+function defaultRef(root) {
+  const head = git(root, 'symbolic-ref', '-q', 'refs/remotes/origin/HEAD');
+  if (head) return { ref: head.replace(/^refs\/remotes\//, ''), why: 'origin/HEAD' };
+  const have = ['origin/main', 'origin/master'].filter(r => git(root, 'rev-parse', '--verify', '-q', `refs/remotes/${r}`));
+  if (have.length === 1) return { ref: have[0], why: `origin/HEAD is not set, and ${have[0]} is the only one of origin/main, origin/master` };
+  return { notMeasured: `cannot tell the default branch of ${root}: origin/HEAD is not set and ` +
+    (have.length ? 'both origin/main and origin/master exist' : 'neither origin/main nor origin/master exists') +
+    ' — pass --ref <branch> to name the one to measure' };
+}
+
+// A copy of the package as it is at `ref`, from `git archive` of the whole repository (a
+// package's tsconfig may extend one above it). node_modules is untracked, so it is not in any
+// ref: each one on the way down to the package is linked from the checkout, which is where
+// TypeScript and the installed packages come from — the graph keeps only in-package edges.
+function checkoutAtRef(pkgDir, asked) {
+  const root = git(pkgDir, 'rev-parse', '--show-toplevel');
+  if (!root) return null;
+  const top = fs.realpathSync(root);
+  const inRepo = path.relative(top, pkgDir);
+  const chosen = asked ? { ref: asked, why: '--ref' } : defaultRef(top);
+  if (chosen.notMeasured) return chosen;
+  const sha = git(top, 'rev-parse', '--verify', '-q', `${chosen.ref}^{commit}`);
+  if (!sha) return { notMeasured: `${chosen.ref} is not a commit in ${top}` };
+  const date = git(top, 'show', '-s', '--format=%cI', sha);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'structure-guard-ref-'));
+  const cleanup = () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best effort */ } };
+  const x = spawnSync('bash', ['-o', 'pipefail', '-c', 'git -C "$1" archive --format=tar "$2" | tar -x -C "$3"', 'x', top, sha, tmp], { encoding: 'utf8' });
+  if (x.status !== 0) { cleanup(); return { notMeasured: `git archive of ${chosen.ref} failed: ${(x.stderr || '').trim()}` }; }
+  const dir = path.join(tmp, inRepo);
+  if (!fs.existsSync(dir)) { cleanup(); return { notMeasured: `${inRepo || '.'} does not exist at ${chosen.ref} (${sha.slice(0, 8)})` }; }
+  const parts = inRepo ? inRepo.split(path.sep) : [];
+  for (let i = 0; i <= parts.length; i++) {
+    const live = path.join(top, ...parts.slice(0, i), 'node_modules');
+    const there = path.join(tmp, ...parts.slice(0, i), 'node_modules');
+    if (fs.existsSync(live) && !fs.existsSync(there)) fs.symlinkSync(live, there);
+  }
+  return { dir, ref: chosen.ref, why: chosen.why, sha, date, cleanup };
+}
 
 function main(argv) {
   const args = {};
@@ -117,6 +174,7 @@ function main(argv) {
   if (unknown.length) return stop(`unrecognised argument${unknown.length > 1 ? 's' : ''} — ${unknown.join(' · ')}`);
   if (!args.design || (!args.graph && !args.package))
     return stop('usage: --design <design.json> and --graph <depcruise.json> and/or --package <dir>');
+  if (args.ref && !args.package) return stop('--ref names the commit a package is measured at, so it needs --package');
 
   let design, cruise = null, baseline = null;
   try {
@@ -136,10 +194,20 @@ function main(argv) {
     let S, pkgDir;
     try { S = loadFromCandidates('structure-graph.js'); pkgDir = fs.realpathSync(args.package); }
     catch (e) { return stop(e.message); }
-    const extractor = S.loadExtractor(args.extractor ? { extractor: args.extractor } : {}, pkgDir);
-    const got = S.buildGraph({ pkgDir, design, extractor, cachePath: null, proposed: null });
+    let at = null;
+    if (args['write-baseline'] || args.ref) {
+      at = checkoutAtRef(pkgDir, args.ref);
+      if (at && at.notMeasured) return stop(at.notMeasured);
+      if (!at && args.ref) return stop(`--ref ${args.ref} needs a package inside a git checkout, and ${pkgDir} is not in one`);
+    }
+    let got;
+    try {
+      const dir = at ? at.dir : pkgDir;
+      const extractor = S.loadExtractor(args.extractor ? { extractor: args.extractor } : {}, dir);
+      got = S.buildGraph({ pkgDir: dir, design, extractor, cachePath: null, proposed: null });
+    } finally { if (at) at.cleanup(); }
     if (got.notMeasured) return stop(got.notMeasured);
-    built = { pkgDir, graph: got.graph, extractor: got.stats.extractor };
+    built = { pkgDir, graph: got.graph, extractor: got.stats.extractor, at };
   }
   const analyser = cruise ? loadGraph(cruise, design) : null;
 
@@ -148,6 +216,7 @@ function main(argv) {
     return baselineCommand({
       script: shellWord(path.resolve(__filename)),
       source: built ? ['--package', built.pkgDir] : ['--graph', path.resolve(args.graph)],
+      ref: args.ref,
       design: path.resolve(args.design),
       extractor: args.extractor && path.resolve(args.extractor),
       baseline: path.resolve(args.baseline),
@@ -162,6 +231,7 @@ function main(argv) {
       if (why) return stop(`${name}: ${why}`);
     }
     const { diff, agree, count } = compareGraphs(analyser, built.graph);
+    if (built.at) print(`structure-guard: the package graph is ${built.at.ref} at ${built.at.sha.slice(0, 8)}, through git archive`);
     print(`structure-guard: agreement — analyser ${analyser.modules.size} modules · ${analyser.edges.length} edges · ` +
           `${analyser.reexports.size} re-exports · ${analyser.circular.size} on a cycle; ` +
           `package (${built.extractor}) ${built.graph.modules.size} · ${built.graph.edges.length} · ` +
@@ -214,6 +284,12 @@ function main(argv) {
 
   const results = judge(graph, design);
   const ledger = ratchet(results, baseline);
+
+  if (built) print(built.at
+    ? `structure-guard: measured ${built.at.ref} at ${built.at.sha.slice(0, 8)} (${built.at.date}) through git archive — ` +
+      `not the working tree (ref chosen by ${built.at.why})`
+    : `structure-guard: measured ${built.pkgDir} as it is on disk` +
+      (args['write-baseline'] ? ' — it is not inside a git checkout, so there is no branch to measure instead' : ''));
 
   print(`structure-guard: examined ${graph.modules.size} modules · ${graph.edges.length} edges · design ${frame.id} · ` +
         `${results.divergence.unmapped.length} modules outside every component · ` +
