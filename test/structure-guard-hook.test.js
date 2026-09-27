@@ -149,6 +149,7 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   ok(/Remedies:/.test(r.reason), 'and carries the remedy');
   // The whole command, flag by flag, from the registry entry — so a remedy that names the script
   // but not the files it needs, or names the wrong one, reddens here.
+  ok(!/in a worktree/.test(r.reason), 'a refusal in the registered checkout says nothing about worktrees');
   ok(r.reason.includes(`structure-guard.js --package '${PKG}' --design '${DESIGN}' --extractor '${EXTRACTOR}' ` +
                        `--baseline '${BASELINE}' --write-baseline '${BASELINE}' --allow-growth`),
      'including the exact command that grandfathers a deliberate edge, built from the registry entry');
@@ -609,6 +610,18 @@ console.log('\nA GIT WORKTREE of the registered repository is the same package (
   const up = hook(wtEdit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-wt'));
   ok(up.exit === 2 && up.denied && /BLOCKED: this edit to src\/low\/a\.ts adds \d+ imports?/.test(up.reason) && /divergence: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(up.reason),
      `an upward import added in the worktree is REFUSED, named package-relative (exit ${up.exit})`);
+  // THE PRINTED COMMAND RECORDS THE REGISTERED CHECKOUT, NEVER THE BRANCH (#560): a baseline is
+  // written from the graph on disk at --package, so the worktree's path would record its branch.
+  const WPKG = path.join(WT, 'packages', 'app');
+  ok(up.reason.includes(`--package '${GPKG}' `) && !up.reason.includes(`--package '${WPKG}'`),
+     'the refusal\'s command names the registered checkout, not the worktree the edit was in');
+  ok(up.reason.includes(`This edit is in a worktree, ${WPKG}.`) && up.reason.includes(`reads the registered checkout, ${GPKG}, as it is on disk — not this branch — so run it only after the change has landed there`),
+     'and says the edit was in a worktree, so the command is for after the merge');
+  const wrongId = { packages: [{ ...reg.packages[0], designId: '000000000000' }] };
+  const mis = decide(wtEdit('src/low/a.ts', "export const a = 1;\n", "// m\nexport const a = 1;\n", 'sess-wt3'), wrongId);
+  ok(mis.decision === 'unmeasured' && mis.why.includes(`--package '${GPKG}' `) && !mis.why.includes(`'${WPKG}'`) &&
+     /\n  \(This edit is in a worktree/.test(mis.why) && /\n  node \S+structure-guard\.js --package/.test(mis.why),
+     'the design-mismatch notice in a worktree names the registered checkout too, its command on a line of its own');
   const quiet = hook(wtEdit('src/low/a.ts', "export const a = 1;\n", "// a comment\nexport const a = 1;\n", 'sess-wt'));
   ok(quiet.exit === 0 && !quiet.denied && quiet.stdout === '', 'a comment in the worktree passes in silence');
   const other = hook({ ...wtEdit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-wt'),

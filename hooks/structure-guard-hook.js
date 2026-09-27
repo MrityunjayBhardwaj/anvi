@@ -168,10 +168,25 @@ function proposedContent(toolName, input, readFile) {
 // registry entry the hook judged against — so the remedy names the files that were actually used.
 // Built beside the rules, shared with the report; required only on the paths that print it, so
 // the no-registry fast path still loads nothing.
-function baselineCommand(pkgDir, entry, allowGrowth) {
-  return require('./structure-rules.js').baselineCommand({
+//
+// ALWAYS THE REGISTERED CHECKOUT (#560). A baseline is written from the graph on disk at
+// `--package`, so naming a worktree's copy would record that branch — and anything else it
+// carries — as the stored baseline. The registered checkout is where the change is recorded once
+// it has landed; an edit made in a worktree is told to wait for the merge, not to record the branch.
+function baselineCommand(pkgDir, entry, allowGrowth, worktree) {
+  const cmd = require('./structure-rules.js').baselineCommand({
     script: '~/.claude/anvi/scripts/structure-guard.js', source: ['--package', pkgDir],
     design: entry.design, extractor: entry.extractor, baseline: entry.baseline, allowGrowth });
+  return worktreeNote(worktree, pkgDir) + `  ${cmd}`;
+}
+
+// The registered checkout is not promised to be on main (stave's live one sits on feature
+// branches), so the note says what the command reads — that directory as it is on disk.
+function worktreeNote(worktree, pkgDir) {
+  return worktree
+    ? `  (This edit is in a worktree, ${worktree}. The command reads the registered checkout, ${pkgDir}, as it is on disk ` +
+      '— not this branch — so run it only after the change has landed there.)\n'
+    : '';
 }
 
 // ORDER MATTERS in the last paragraph, observed: the baseline is written from the graph ON DISK,
@@ -183,7 +198,7 @@ function baselineCommand(pkgDir, entry, allowGrowth) {
 // questions the model as much as the code: either the code should reach the component another
 // way, or the design is missing an edge it should have. Offering only the first makes every
 // refusal a request to work around the design, and a design nobody revises goes stale.
-function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design) {
+function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design, worktree) {
   const lines = fresh.map(f => `  · ${f.rule}: ${f.key}\n      ${f.detail}`);
   const pairs = [...new Set(fresh.filter(f => f.rule === 'divergence').map(f => f.pair))];
   const R = require('./structure-rules.js');
@@ -210,7 +225,7 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design) {
     lines.join('\n') + '\n' +
     `(judged against its baseline over ${examined.modules} modules and ${examined.edges} edges)\n` +
     'Remedies:\n' + remedies.join('\n') + '\n' + exceptionText(pairs.length > 0) + '\n' +
-    `  ${baselineCommand(pkgDir, entry, true)}`;
+    baselineCommand(pkgDir, entry, true, worktree);
 }
 
 // THE ONE-IMPORT EXCEPTION, LAST (#558). Recording an import in the baseline keeps it while the
@@ -233,13 +248,13 @@ function exceptionText(divergent) {
 // A repair the baseline still holds (#451). Said, never acted on: the baseline is a reviewed
 // file, so the hook neither rewrites it nor refuses anything on its account. Without the
 // notice, the violation coming back is grandfathered again and nobody is told.
-function fixedText(pkgName, fixed, pkgDir, entry) {
+function fixedText(pkgName, fixed, pkgDir, entry, worktree) {
   const one = fixed.length === 1;
   const shown = fixed.slice(0, 3).map(f => `${f.rule}: ${f.key}`).join('; ') + (fixed.length > 3 ? ` (+${fixed.length - 3} more)` : '');
   return `structure guard: ${fixed.length} violation${one ? '' : 's'} in ${pkgName} fixed since its baseline — ${shown}. ` +
     `The baseline still holds ${one ? 'it' : 'them'}, so if one comes back it is allowed in silence. Locking the repair in ` +
     'by regenerating the baseline is the user\'s decision — ask them. Once the repair has landed, this does it:\n' +
-    `  ${baselineCommand(pkgDir, entry, false)}`;
+    baselineCommand(pkgDir, entry, false, worktree);
 }
 
 // Every tool in the registered matcher is in exactly one of these; a test derives the matcher
@@ -262,6 +277,9 @@ function evaluate(payload, deps) {
   const owner = packageFor(abs, registry);
   if (!owner) return { decision: 'allow', why: 'not in a registered package' };
   const pkgName = path.basename(owner.dir);
+  // Every printed command records the registered checkout, never a worktree's branch (#560).
+  const home = owner.entry.dir;
+  const worktree = owner.checkout === 'registered' ? null : owner.dir;
   // Said, not guessed: a guessed shape could refuse wrongly, and silence would read as approval.
   // Its own notice kind, so being told this never uses up a real NOT MEASURED for the package.
   if (unjudged) return { decision: 'unmeasured', why: `${pkgName}: ${unjudged}`, noticeKind: `tool-${tool}` };
@@ -277,7 +295,7 @@ function evaluate(payload, deps) {
   // armed before designs were identified, is judged as given — it cannot be shown to disagree.
   const frame = R.designCheck(design, baseline, owner.entry.designId);
   if (frame.mismatch) return { decision: 'unmeasured', why: `${pkgName}: ${frame.mismatch}. Re-baselining under the design in force ` +
-    `is the user's decision — ask them. This does it${owner.entry.designId ? ', then re-arm with --arm' : ''}: ${baselineCommand(owner.dir, owner.entry, false)}` };
+    `is the user's decision — ask them. This does it${owner.entry.designId ? ', then re-arm with --arm' : ''}:\n${baselineCommand(home, owner.entry, false, worktree)}` };
 
   if (!S.inCorpus(owner.rel, design)) return { decision: 'allow', why: 'outside the package corpus' };
   if (!S.compiles(owner.rel)) return { decision: 'allow', why: 'a file that compiles to nothing carries no imports' };
@@ -328,10 +346,10 @@ function evaluate(payload, deps) {
   // Only an ALLOWED edit reports repairs: a refused one never lands, so its graph is not the disk's.
   const fixed = R.RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key })));
   if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk,
-    notice: fixed.length ? fixedText(pkgName, fixed, owner.dir, owner.entry) : null,
-    landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, owner.dir, owner.entry) : null,
+    notice: fixed.length ? fixedText(pkgName, fixed, home, owner.entry, worktree) : null,
+    landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, home, owner.entry, worktree) : null,
     unmappedNotice: unmapped, unmappedKind: unmapped ? unmappedKind(owner.rel) : null };
-  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry, design) };
+  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) };
 }
 
 // Each unmapped file is told once per session under its own marker, so being told about one
@@ -343,14 +361,14 @@ function unmappedKind(rel) {
 // A violation on disk that the baseline does not hold, in the file being edited (#544). The edit
 // did not add it, so it is not refused; but allowing it in silence would grandfather it by
 // neglect, so it is said — once per session — with the command that records it if it is meant.
-function landedText(pkgName, rel, onDisk, pkgDir, entry) {
+function landedText(pkgName, rel, onDisk, pkgDir, entry, worktree) {
   const one = onDisk.length === 1;
   const shown = onDisk.map(f => `${f.rule}: ${f.key} (${f.detail})`).join('; ');
   return `structure guard: ${rel} carries ${onDisk.length} violation${one ? '' : 's'} of ${pkgName}'s declared structure that ` +
     `${one ? 'is' : 'are'} already on disk but not in its baseline — ${shown}. ${one ? 'It' : 'They'} landed outside the hook ` +
     '(a Bash command, another program, or a hand edit), so this edit is not refused for it. Fixing it, or recording it as ' +
     'grandfathered, is the user\'s decision — ask them. If it is meant, this records it:\n' +
-    `  ${baselineCommand(pkgDir, entry, true)}`;
+    baselineCommand(pkgDir, entry, true, worktree);
 }
 
 // State below grows only on the rare paths — a new notice, a crash — so it is trimmed there and
