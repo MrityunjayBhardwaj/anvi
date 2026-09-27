@@ -1349,7 +1349,10 @@ loosened until it stops firing guards nothing.
 - **Report:** `node ~/.claude/anvi/scripts/structure-guard.js --design <design.json>
   --graph <depcruise.json> [--baseline <b.json>]
   [--write-baseline <out.json> [--allow-growth]]`. Exit **0** nothing new, **1** a
-  new violation or a baseline write that would grow, **2** NOT MEASURED. It parses no
+  new violation or a baseline write that would grow, **2** NOT MEASURED. An argument it
+  would otherwise ignore is NOT MEASURED too, and named: an unknown flag (#511), a flag with
+  no value, or a plain word. A command copied together with the sentence after it used to
+  write `baseline.json.` and say "written" (#556). It parses no
   source: the graph is `depcruise --output-type json`, and the design is a component
   graph under a `root` (below).
 - **The design is a component graph, checked as a reflexion model (#554).** It names

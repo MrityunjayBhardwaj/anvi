@@ -158,17 +158,28 @@ function checkoutAtRef(pkgDir, asked) {
 function main(argv) {
   const args = {};
   const unknown = [];
+  const stray = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--allow-growth') args.allowGrowth = true;
     else if (a === '--arm') args.arm = true;
     else if (a.startsWith('--')) {
       const name = a.slice(2);
-      const value = argv[++i];
-      if (FLAGS.has(name)) args[name] = value;
-      else unknown.push(name in REMOVED ? `--${name}: ${REMOVED[name]}` : `--${name}: not a flag of this command`);
+      if (!FLAGS.has(name)) { unknown.push(name in REMOVED ? `--${name}: ${REMOVED[name]}` : `--${name}: not a flag of this command`);
+        if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) i++;   // its value, not a stray word
+        continue; }
+      // A value that is missing, or is the next flag, would leave this flag doing nothing — or
+      // swallow the next one — and the run would still look measured.
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('--')) unknown.push(`--${name}: has no value`);
+      else { args[name] = value; i++; }
     }
+    // A word that is not a flag is not ignored (#556): a command copied to the end of a line
+    // brings the sentence after it along, and zsh glues the full stop to a quoted path — the
+    // baseline then lands at `baseline.json.` while this run says "written".
+    else stray.push(JSON.stringify(a));
   }
+  if (stray.length) unknown.push(`${stray.join(' ')}: not flags — this command takes no plain arguments`);
   const print = s => console.log(s);
   const stop = why => { print(`structure-guard: NOT MEASURED — ${why}`); return 2; };
   if (unknown.length) return stop(`unrecognised argument${unknown.length > 1 ? 's' : ''} — ${unknown.join(' · ')}`);

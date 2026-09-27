@@ -255,6 +255,23 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   const typo = run('--design', d, '--graph', clean, '--baselien', base);
   ok(typo.status === 2 && /--baselien/.test(typo.stdout),
      `a misspelled flag is NOT MEASURED and is named, never run with the flag dropped (got ${typo.status})`);
+  // A PLAIN WORD IS NOT IGNORED (#556). This is the notice's command copied to the end of its
+  // line, split the way zsh splits it: the full stop glued to the quoted path, then the prose.
+  const glued = path.join(DIR, 'glued.json');
+  const copied = run('--design', d, '--graph', clean, '--baseline', base, '--write-baseline', glued + '.', 'Edits', 'there', 'are', 'not');
+  ok(copied.status === 2 && /"Edits" "there" "are" "not": not flags/.test(copied.stdout) &&
+     !fs.existsSync(glued + '.') && !/baseline written/.test(copied.stdout),
+     `a command copied with the sentence after it is NOT MEASURED, names the stray words, and writes nothing (got ${copied.status})`);
+  const lone = run('--design', d, '--graph', clean, 'stray');
+  ok(lone.status === 2 && /"stray": not flags/.test(lone.stdout), `one stray word after the flags is NOT MEASURED too (got ${lone.status})`);
+  const empty = run('--design', d, '--graph', clean, '--baseline');
+  ok(empty.status === 2 && /--baseline: has no value/.test(empty.stdout), `a flag left with no value is NOT MEASURED, not run without it (got ${empty.status})`);
+  const swallow = run('--design', d, '--baseline', '--graph', clean);
+  ok(swallow.status === 2 && /--baseline: has no value/.test(swallow.stdout),
+     `a flag whose value is the next flag does not swallow it (got ${swallow.status})`);
+  const typoLast = run('--design', d, '--graph', clean, '--baselien', base, 'x');
+  ok(typoLast.status === 2 && /--baselien/.test(typoLast.stdout) && /"x": not flags/.test(typoLast.stdout) && !/"\/.*base/.test(typoLast.stdout),
+     'an unknown flag\'s value is not also reported as a stray word, but a word after it is');
   const removed = run('--design', d, '--graph', clean, '--before', clean);
   ok(removed.status === 2 && /--before/.test(removed.stdout) && /#509/.test(removed.stdout),
      `a flag this command USED to have says the report was removed, not that it was misspelled (got ${removed.status})`);
