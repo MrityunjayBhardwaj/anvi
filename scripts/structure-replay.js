@@ -366,6 +366,10 @@ function main(argv) {
   const designPath = path.resolve(args.design);
   let design;
   try { design = JSON.parse(fs.readFileSync(designPath, 'utf8')); } catch (e) { return stop(`cannot read the design: ${e.message}`); }
+  // The landed view judges the design directly, not through the hook, so it checks it here: a design
+  // it cannot judge against (a retired layer design maps nothing) would otherwise read as 0 divergences.
+  const problem = R.designProblem(design);
+  if (problem) return stop(`the design ${designPath}: ${problem}`);
   let since, sinceIso, until;
   try {
     since = git(repo, ['rev-parse', '--verify', args.since + '^{commit}']).trim();

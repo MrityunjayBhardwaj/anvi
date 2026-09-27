@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const GH = require(path.join(__dirname, '..', 'hooks', 'structure-guard-hook.js'));
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
@@ -92,6 +93,7 @@ console.log('\nNOTICES — said, not refused, each counted by kind:');
   const landed = use('Edit', path.join(PKG, 'src/d.ts'), T0, 'sess-n');
   const measured = use('Write', path.join(PKG, 'src/e.ts'), T0, 'sess-n');
   const foreign = use('Edit', path.join(PKG, 'src/f.ts'), T0, 'sess-n');
+  const unmapped = use('Edit', path.join(PKG, 'src/keys/k.ts'), T0, 'sess-n');
   const lines = [
     landed.line,
     // One hook output joining two notices (#544): both kinds are counted.
@@ -104,12 +106,14 @@ console.log('\nNOTICES — said, not refused, each counted by kind:');
     // with the same text is not read as the guard having said it.
     notice(foreign.id, 'Edit', 'structure guard: NOT MEASURED — from an attachment type never observed').replace('"hook_success"', '"hook_non_blocking_error"'),
     result(foreign.id, 'The file has been updated successfully.', false),
+    unmapped.line, notice(unmapped.id, 'Edit', "structure guard: src/keys/k.ts belongs to no component of editor's design, so its imports to and from other components are not being judged (cycles still are)."),
+    result(unmapped.id, 'The file has been updated successfully.', false),
   ];
   fs.writeFileSync(path.join(TX, 'project-a', 'notices.jsonl'), lines.join('\n') + '\n');
   const r = run('--package', PKG, '--since', '2026-09-25T00:00:00Z');
-  ok(/on disk 1 · fixed 1 · not measured 1 · failed 0/.test(r.out),
+  ok(/on disk 1 · fixed 1 · not measured 1 · failed 0 · unmapped 1/.test(r.out),
      `a joined output counts both its kinds, and another hook's context counts as none (${(r.out.match(/notices said[^\n]*/) || [''])[0]})`);
-  ok(/4 applied · 1 REFUSED/.test(r.out), 'an edit with a notice is still an applied edit');
+  ok(/5 applied · 1 REFUSED/.test(r.out), 'an edit with a notice is still an applied edit');
 }
 
 console.log('\nTHE PACKAGE AS THE TRANSCRIPTS SPELL IT:');
@@ -209,13 +213,17 @@ console.log('\nWORKTREES — the hook\'s own package rule, each edit saying whic
     inWt.line, result(inWt.id, 'The file has been updated successfully.', false),
     inOther.line, result(inOther.id, 'The file has been updated successfully.', false),
     inGone.line, result(inGone.id, 'The file has been updated successfully.', false),
-    refusedWt.line, result(refusedWt.id, "PreToolUse:Edit hook error: BLOCKED: this edit to src/b.ts adds 1 import that erode editor's declared structure:\n  · layer: src/b.ts -> src/z.ts\n", true),
+    // The hook's OWN words for a divergence (#554), built by the hook's function rather than typed
+    // here, so a change to the refusal's shape reddens this reader rather than slipping past it.
+    refusedWt.line, result(refusedWt.id, 'PreToolUse:Edit hook error: ' + GH.refusalText('editor', 'src/b.ts',
+      [{ rule: 'divergence', key: 'src/b.ts -> src/z.ts', pair: 'a -> z', detail: 'a imports z, which the design does not declare' }],
+      { modules: 2, edges: 1 }, '/pkg', { design: '/d.json', baseline: '/b.json' }, { components: { a: {}, z: {} }, allowed: [] }), true),
   ].join('\n') + '\n');
   const r = runIn(tx, '--package', GPKG, '--since', '2026-09-25T00:00:00Z');
   ok(/4 Write\/Edit\/MultiEdit calls/.test(r.out), `the registered checkout, the worktree and the removed checkout count; the unrelated repository does not (${(r.out.match(/(\d+) Write\/Edit/) || [])[1]})`);
   ok(new RegExp(`checkouts: registered 1 · worktrees 2 \\(${WT.replace(/[/.]/g, '\\$&')}/packages/editor\\) · 1 in a checkout that no longer exists`).test(r.out),
      'each edit says which checkout it was in, the worktree named');
-  ok(r.exit === 1 && /Edit src\/b\.ts/.test(r.out) && /layer\s+src\/b\.ts -> src\/z\.ts/.test(r.out),
+  ok(r.exit === 1 && /Edit src\/b\.ts/.test(r.out) && /divergence\s+src\/b\.ts -> src\/z\.ts/.test(r.out),
      `a refusal in the worktree is listed package-relative, like any other (exit ${r.exit})`);
   ok(/CAUTION: edits in another checkout were judged only by a hook that guards worktrees/.test(r.out),
      'edits in another checkout carry the caution that an older hook never looked there');

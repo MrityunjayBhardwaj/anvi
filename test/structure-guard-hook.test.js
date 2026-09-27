@@ -61,10 +61,12 @@ module.exports = { create: (pkgDir, entry) => entry.broken === 'unmeasured' ? { 
 }) };
 `);
 const DESIGN = path.join(DIR, 'design.json');
-fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'], layers: [
-  { n: 0, name: 'low', dirs: ['low'] }, { n: 1, name: 'mid', dirs: ['mid'] }, { n: 2, name: 'top', dirs: ['top'] }] }));
+// A component graph (#554): top may import mid and low, mid may import low, low imports nothing.
+fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'],
+  components: { low: { dirs: ['low'] }, mid: { dirs: ['mid'] }, top: { dirs: ['top'] } },
+  allowed: [['mid', 'low'], ['top', 'mid'], ['top', 'low']] }));
 const BASELINE = path.join(DIR, 'baseline.json');
-fs.writeFileSync(BASELINE, JSON.stringify({ rules: { layer: ['src/mid/old.ts -> src/top/t.ts'], cycle: [] } }));
+fs.writeFileSync(BASELINE, JSON.stringify({ rules: { divergence: ['src/mid/old.ts -> src/top/t.ts'], cycle: [] } }));
 
 const REGISTRY = path.join(HOME, '.claude', 'structure-guard.json');
 const register = extra => fs.writeFileSync(REGISTRY, JSON.stringify({ packages: [{
@@ -143,7 +145,7 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   const up = edit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n");
   const r = hook(up);
   ok(r.exit === 2 && r.denied, `an upward import is REFUSED — exit 2 and a deny payload (got exit ${r.exit})`);
-  ok(/layer: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(r.reason), 'the refusal names the edge and the rule');
+  ok(/divergence: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(r.reason), 'the refusal names the edge and the rule');
   ok(/Remedies:/.test(r.reason), 'and carries the remedy');
   // The whole command, flag by flag, from the registry entry — so a remedy that names the script
   // but not the files it needs, or names the wrong one, reddens here.
@@ -152,11 +154,20 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
      'including the exact command that grandfathers a deliberate edge, built from the registry entry');
   ok(/before the edge lands records nothing/.test(r.reason) && /user's decision/.test(r.reason),
      'and says the edge must land first, by the user\'s decision — regenerating before it lands records nothing');
+  // Both remedies for a divergence (#554): the code's, naming where low may reach, and the design's.
+  ok(/either change the code: low may import no other component, so move the code into a component that may depend on mid;/.test(r.reason),
+     'the code remedy names what the source component may import (here, nothing)');
+  // mid → low is declared, so declaring low → mid would close a cycle: the design remedy must not
+  // offer a design the guard would then refuse whole (found by following it literally).
+  ok(/declaring low -> mid would close a cycle with the edges already declared \(low -> mid, mid -> low\)/.test(r.reason) &&
+     /invert one direction through a port or registry/.test(r.reason) && !r.reason.includes('add ["low", "mid"]'),
+     'where declaring the edge would close a cycle, the design remedy says so and offers the cycle\'s three answers instead');
 
   // A path with a space and an apostrophe must still be ONE shell word, and a package with no
   // registered extractor must not print an empty --extractor.
-  const odd = H.refusalText('p', 'src/x.ts', [{ rule: 'layer', key: 'k', detail: 'd' }], { modules: 1, edges: 1 },
-    "/tmp/it's a pkg", { design: '/d.json', baseline: '/b.json' });
+  const odd = H.refusalText('p', 'src/x.ts', [{ rule: 'divergence', key: 'k', pair: 'a -> b', detail: 'd' }], { modules: 1, edges: 1 },
+    "/tmp/it's a pkg", { design: '/d.json', baseline: '/b.json' }, { components: { a: {}, b: {}, c: {} }, allowed: [['a', 'c']] });
+  ok(/a may import c, so reach b/.test(odd), 'the code remedy lists the components the source may import');
   // The --package word alone: the extractor case below owns what sits between the other flags.
   ok(odd.includes("--package '/tmp/it'\\''s a pkg' "),
      'the command quotes a path with a space and an apostrophe as one shell word');
@@ -180,7 +191,7 @@ console.log('\nALLOWED — each release paired with what was examined:');
   const down = edit('src/mid/n.ts', "export const n = 1;\n", "import { a } from '../low/a';\nexport const n = a;\n");
   const r = hook(down);
   const d = decide(down, registryNow());
-  ok(r.exit === 0 && r.stdout === '', 'an import down a layer passes in silence');
+  ok(r.exit === 0 && r.stdout === '', 'an import along a declared edge passes in silence' + (r.stdout ? ' GOT ' + r.stdout : ''));
   ok(d.decision === 'allow' && d.examined.modules === 6, `and the silence is a judgement over the package (${d.examined && d.examined.modules} modules examined)`);
 
   const note = edit('src/mid/old.ts', "export const old = up;\n", "// still grandfathered\nexport const old = up;\n");
@@ -300,13 +311,62 @@ console.log('\nFIXED SINCE THE BASELINE — said once per session on an allowed 
   put('src/mid/old.ts', OLD_SRC);
 }
 
+console.log('\nTHE COMPONENT GRAPH — unmapped files are said, a design remedy works as printed, a layer design is refused (#554):');
+{
+  // A file no component claims: allowed (its cross-component edges are judged by nothing), and SAID,
+  // once per session per file. Its twin is every mapped-file allow above, which prints nothing.
+  put('src/other/u.ts', 'export const u = 1;\n');
+  put('src/other/v.ts', 'export const v = 1;\n');
+  const un = e => edit(e, 'export const', "import { m } from '../mid/m';\nexport const", 'sess-unmapped');
+  const u1 = hook(un('src/other/u.ts'));
+  ok(u1.exit === 0 && !u1.denied && /src\/other\/u\.ts belongs to no component of pkg's design/.test(u1.context) && /cycles still are/.test(u1.context),
+     `an edit to a file in no component is allowed and SAID — its imports are not being judged (exit ${u1.exit})`);
+  ok(u1.context.includes(DESIGN), 'naming the design file the mapping would go in');
+  const u2 = hook(un('src/other/u.ts'));
+  ok(u2.exit === 0 && u2.stdout === '', 'the same file again in the same session is quiet');
+  const v1 = hook(un('src/other/v.ts'));
+  ok(v1.exit === 0 && /src\/other\/v\.ts belongs to no component/.test(v1.context), 'a DIFFERENT unmapped file in that session is still told');
+  const mapped = hook(edit('src/mid/n.ts', "export const n = 1;\n", "export const n = 2;\n", 'sess-unmapped'));
+  ok(mapped.exit === 0 && mapped.stdout === '', 'and a mapped file in that session is not — the notice keys on the mapping, not on the session');
+  fs.rmSync(path.join(PKG, 'src/other'), { recursive: true, force: true });
+
+  // The design remedy, followed literally: parse the pair the refusal names, declare it, and the
+  // same edit passes. A copy of the design with a component nothing leads back from, so declaring
+  // an edge into it closes no cycle.
+  put('src/side/s.ts', 'export const s = 1;\n');
+  const D3 = path.join(DIR, 'design-revise.json');
+  const base3 = JSON.parse(fs.readFileSync(DESIGN, 'utf8'));
+  fs.writeFileSync(D3, JSON.stringify({ ...base3, components: { ...base3.components, side: { dirs: ['side'] } } }));
+  const reg3 = { packages: [{ ...registryNow().packages[0], design: D3 }] };
+  const upEdit = edit('src/low/a.ts', "export const a = 1;\n", "import { s } from '../side/s';\nexport const a = s;\n", 'sess-revise');
+  const before = decide(upEdit, reg3);
+  const m = /add (\["[^"]+", "[^"]+"\]) to "allowed" in (\S+)\./.exec(before.reason || '');
+  ok(before.decision === 'deny' && m && m[2] === D3, `refused, with a design remedy naming this design (${before.decision})`);
+  const dd = JSON.parse(fs.readFileSync(D3, 'utf8'));
+  dd.allowed.push(JSON.parse(m[1]));
+  fs.writeFileSync(D3, JSON.stringify(dd));
+  const after = decide(upEdit, reg3);
+  ok(after.decision === 'allow', `with the named edge declared, the same edit is allowed (${after.decision}: ${after.why})`);
+  // Declaring the reverse too would make a cycle between components: that design is refused whole.
+  dd.allowed.push(['side', 'low']);
+  fs.writeFileSync(D3, JSON.stringify(dd));
+  const cyc = decide(upEdit, reg3);
+  ok(cyc.decision === 'unmeasured' && /form a cycle/.test(cyc.why), `a design whose declared edges form a cycle is NOT MEASURED, not judged (${cyc.why})`);
+
+  const DL = path.join(DIR, 'design-layers.json');
+  fs.writeFileSync(DL, JSON.stringify({ root: 'src', layers: [{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['mid'] }] }));
+  const lay = decide(upEdit, { packages: [{ ...registryNow().packages[0], design: DL }] });
+  ok(lay.decision === 'unmeasured' && /retired layer format \(#554\)/.test(lay.why), `a design in the retired layer format is NOT MEASURED and named (${lay.decision})`);
+  fs.rmSync(path.join(PKG, 'src/side'), { recursive: true, force: true });
+}
+
 console.log('\nTHE DESIGN ID — no verdict across two designs (#535):');
 {
   const designObj = JSON.parse(fs.readFileSync(DESIGN, 'utf8'));
   const ID = R.designId(designObj);
   const rules = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).rules;
-  const D2 = path.join(DIR, 'design-id-2.json');       // src/low/a.ts moved to the top layer
-  const d2 = { ...designObj, layers: designObj.layers.map(l => l.n === 2 ? { ...l, files: ['low/a.ts'] } : l) };
+  const D2 = path.join(DIR, 'design-id-2.json');       // src/low/a.ts moved to the top component
+  const d2 = { ...designObj, components: { ...designObj.components, top: { ...designObj.components.top, files: ['low/a.ts'] } } };
   fs.writeFileSync(D2, JSON.stringify(d2));
   const ID2 = R.designId(d2);
   const SB = path.join(DIR, 'baseline-stamped.json');
@@ -534,7 +594,7 @@ console.log('\nA GIT WORKTREE of the registered repository is the same package (
   const wtEdit = (rel, from, to, session) => ({ session_id: session, cwd: WT, tool_name: 'Edit',
     tool_input: { file_path: path.join(WT, 'packages', 'app', rel), old_string: from, new_string: to, replace_all: false } });
   const up = hook(wtEdit('src/low/a.ts', "export const a = 1;\n", "import { m } from '../mid/m';\nexport const a = m;\n", 'sess-wt'));
-  ok(up.exit === 2 && up.denied && /BLOCKED: this edit to src\/low\/a\.ts adds \d+ imports?/.test(up.reason) && /layer: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(up.reason),
+  ok(up.exit === 2 && up.denied && /BLOCKED: this edit to src\/low\/a\.ts adds \d+ imports?/.test(up.reason) && /divergence: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(up.reason),
      `an upward import added in the worktree is REFUSED, named package-relative (exit ${up.exit})`);
   const quiet = hook(wtEdit('src/low/a.ts', "export const a = 1;\n", "// a comment\nexport const a = 1;\n", 'sess-wt'));
   ok(quiet.exit === 0 && !quiet.denied && quiet.stdout === '', 'a comment in the worktree passes in silence');

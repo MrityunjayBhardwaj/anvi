@@ -178,14 +178,38 @@ function baselineCommand(pkgDir, entry, allowGrowth) {
 // so regenerating it while the edge is only proposed records nothing (and says "written"), and the
 // same edit is refused again. A deliberate edge has to land first — and landing it is not this
 // edit's to do, because the only way past the refusal is around the guard.
-function refusalText(pkgName, rel, fresh, examined, pkgDir, entry) {
+//
+// A DIVERGENCE HAS TWO REMEDIES (#554). The design is a model, and an edge it does not declare
+// questions the model as much as the code: either the code should reach the component another
+// way, or the design is missing an edge it should have. Offering only the first makes every
+// refusal a request to work around the design, and a design nobody revises goes stale.
+function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design) {
   const lines = fresh.map(f => `  · ${f.rule}: ${f.key}\n      ${f.detail}`);
+  const pairs = [...new Set(fresh.filter(f => f.rule === 'divergence').map(f => f.pair))];
+  const R = require('./structure-rules.js');
+  const remedies = [];
+  for (const pair of pairs) {
+    const [from, to] = pair.split(' -> ');
+    const may = R.allowedFrom(design, from);
+    // Declaring the edge must itself be a design the guard accepts. When the design already leads
+    // back from `to` to `from`, the new edge would close a cycle between components, and a design
+    // with one is refused whole — so that remedy, followed literally, would stop all judging.
+    const closes = R.designProblem({ ...design, allowed: [...(design.allowed || []), [from, to]] });
+    const code = `  · divergence ${pair} — either change the code: ` + (may.length
+      ? `${from} may import ${may.join(', ')}, so reach ${to} through one of those or move the code into a component that may depend on it;\n`
+      : `${from} may import no other component, so move the code into a component that may depend on ${to};\n`);
+    remedies.push(code + (closes
+      ? `      or revise the design — but declaring ${pair} would close a cycle with the edges already declared (${closes.replace(/^.*form a cycle \(([^)]*)\).*$/, '$1')}). ` +
+        'A cycle between components is a design question with three answers: invert one direction through a port or registry, ' +
+        'extract what both need into a component of its own, or merge the two. That is the user\'s decision — ask them.'
+      : `      or revise the design: if ${from} SHOULD depend on ${to}, add ["${from}", "${to}"] to "allowed" in ${entry.design}. ` +
+        'That is the user\'s decision — ask them. It changes the design id, so the baseline is re-measured under it and the package re-armed.'));
+  }
+  if (fresh.some(f => f.rule === 'cycle')) remedies.push('  · cycle — break the loop; one of the two modules is doing the other\'s job');
   return `BLOCKED: this edit to ${rel} adds ${fresh.length} import${fresh.length === 1 ? '' : 's'} that erode ${pkgName}'s declared structure:\n` +
     lines.join('\n') + '\n' +
     `(judged against its baseline over ${examined.modules} modules and ${examined.edges} edges)\n` +
-    'Remedies:\n' +
-    '  · layer — move the code to a layer allowed to depend on the target, or depend on something lower\n' +
-    '  · cycle — break the loop; one of the two modules is doing the other\'s job\n' +
+    'Remedies:\n' + remedies.join('\n') + '\n' +
     'If the edge is deliberate, that is the user\'s decision — ask them. A baseline records only what is already ' +
     'on disk, so regenerating it before the edge lands records nothing. Once the user has landed it, this records ' +
     'it as grandfathered (the growth is then recorded, not silent):\n' +
@@ -231,7 +255,8 @@ function evaluate(payload, deps) {
   let design, baseline;
   try { design = JSON.parse(readFile(owner.entry.design)); baseline = JSON.parse(readFile(owner.entry.baseline)); }
   catch (e) { return { decision: 'unmeasured', why: `cannot read the design or baseline for ${pkgName}: ${e.message}` }; }
-  if (!Array.isArray(design.layers) || !design.layers.length) return { decision: 'unmeasured', why: `the design for ${pkgName} declares no layers` };
+  const problem = R.designProblem(design);
+  if (problem) return { decision: 'unmeasured', why: `the design for ${pkgName} cannot be judged against: ${problem}` };
   if (!baseline.rules) return { decision: 'unmeasured', why: `the baseline for ${pkgName} has no "rules" section` };
   // No verdict across two designs (#535): the baseline's keys, and the id the package was armed
   // under, must both belong to the design in force. A baseline naming no design, on a package
@@ -245,6 +270,15 @@ function evaluate(payload, deps) {
 
   const content = proposedContent(tool, { ...input, file_path: abs }, readFile);
   if (content === null) return { decision: 'allow', why: 'edit shape not judged' };
+  // A file no component claims: its edges to other components are never examined, so saying
+  // nothing would read as "judged and allowed" (#554). Cycles are still judged — they are a
+  // fact about the code, not the design. Said once per session per file.
+  // Package-relative, like every graph key: the design's `root` is stripped as loadGraph strips it.
+  const unmapped = R.componentOf(design, design.root ? String(design.root).replace(/\/+$/, '') + '/' : '')(owner.rel) === undefined
+    ? `structure guard: ${owner.rel} belongs to no component of ${pkgName}'s design, so its imports to and from other ` +
+      `components are not being judged (cycles still are). Mapping it is a design change — the user's decision; ` +
+      `add it to a component's "dirs" or "files" in ${owner.entry.design}.`
+    : null;
 
   const extractor = S.loadExtractor(owner.entry, owner.dir);
   // A cache is one checkout's: a worktree's tree differs, and sharing the registered checkout's
@@ -281,8 +315,15 @@ function evaluate(payload, deps) {
   const fixed = R.RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key })));
   if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk,
     notice: fixed.length ? fixedText(pkgName, fixed, owner.dir, owner.entry) : null,
-    landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, owner.dir, owner.entry) : null };
-  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry) };
+    landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, owner.dir, owner.entry) : null,
+    unmappedNotice: unmapped, unmappedKind: unmapped ? unmappedKind(owner.rel) : null };
+  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, owner.dir, owner.entry, design) };
+}
+
+// Each unmapped file is told once per session under its own marker, so being told about one
+// never uses up being told about another.
+function unmappedKind(rel) {
+  return 'unmapped-' + crypto.createHash('sha1').update(rel).digest('hex').slice(0, 12);
 }
 
 // A violation on disk that the baseline does not hold, in the file being edited (#544). The edit
@@ -370,7 +411,7 @@ function noticesOnce(sessionId, notices, stateDir) {
   return true;
 }
 
-module.exports = { realNear, checkoutAt, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
+module.exports = { realNear, checkoutAt, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
   REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {
@@ -405,7 +446,8 @@ if (require.main === module) {
           ? `structure guard: NOT MEASURED — ${result.why}. Edits made with it are not being checked; Write and Edit still are.`
           : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`, STATE_DIR, result.noticeKind);
       if (result.decision === 'allow')
-        noticesOnce(payload.session_id, [['fixed', result.notice], ['landed', result.landedNotice]].filter(([, t]) => t), STATE_DIR);
+        noticesOnce(payload.session_id, [['fixed', result.notice], ['landed', result.landedNotice],
+          [result.unmappedKind, result.unmappedNotice]].filter(([, t]) => t), STATE_DIR);
       process.exit(0);
     } catch (e) {
       // Fail open on its own bugs — and record it, because a crash and "nothing to refuse"

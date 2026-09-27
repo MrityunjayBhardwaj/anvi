@@ -47,7 +47,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, designCheck, retiredSections } = R;
+const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, designCheck, designProblem, retiredSections, byPair } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -125,7 +125,8 @@ function main(argv) {
     if (args.baseline) baseline = readJson(args.baseline, 'baseline');
   } catch (e) { return stop(e.message); }
 
-  if (!Array.isArray(design.layers) || design.layers.length === 0) return stop('the design declares no layers');
+  const problem = designProblem(design);
+  if (problem) return stop(problem);
   if (baseline && !baseline.rules) return stop(`the baseline ${args.baseline} has no "rules" section — refusing to treat it as empty`);
   // Which design the baseline was measured under, against the one in force (#535).
   const frame = designCheck(design, baseline, null);
@@ -201,7 +202,7 @@ function main(argv) {
   if (why) return stop(why);
 
   // A baseline measured under another design is not judged: its keys belong to another frame,
-  // and a layering change that legalises an edge would otherwise read as a clean sprint. The
+  // and a design change that legalises an edge would otherwise read as a clean sprint. The
   // write is the remedy, so it proceeds (and says the design changed); a verdict does not.
   if (frame.mismatch && !args['write-baseline']) {
     print(`structure-guard: NOT MEASURED — ${frame.mismatch}. No verdict is given across two designs.`);
@@ -215,7 +216,7 @@ function main(argv) {
   const ledger = ratchet(results, baseline);
 
   print(`structure-guard: examined ${graph.modules.size} modules · ${graph.edges.length} edges · design ${frame.id} · ` +
-        `${results.layer.unmapped.length} modules outside every layer · ` +
+        `${results.divergence.unmapped.length} modules outside every component · ` +
         `${graph.unresolved} of ${graph.relative} relative imports unresolved` +
         (built ? ` · graph built by ${built.extractor}` : ''));
   if (!baseline) print('  no baseline given — every violation counts as new');
@@ -223,16 +224,41 @@ function main(argv) {
     'it is judged as given; regenerating it stamps the design in force');
   for (const rule of RULES) {
     const r = ledger[rule];
-    print(`  ${rule.padEnd(8)}: ${r.total} of ${results[rule].examined} examined — ` +
+    print(`  ${rule.padEnd(10)}: ${r.total} of ${results[rule].examined} examined — ` +
           `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`);
   }
   for (const r of retiredSections(baseline))
     print(`  the baseline's "${r.rule}" section (${r.keys} keys) is ignored — ${r.why}; regenerating the baseline drops it`);
 
+  // THE MODEL'S SIDE OF THE REFLEXION (#554). Unmapped modules are listed, because their edges
+  // are examined by no rule but the cycle one; divergences are grouped by component pair, because
+  // several at one pair are evidence against the design; and declared edges nothing uses are
+  // listed, because a model that allows what nobody needs is looser than it reads.
+  const { unmapped, absences } = results.divergence;
+  if (unmapped.length) {
+    print(`\n  OUTSIDE EVERY COMPONENT — ${unmapped.length} module${unmapped.length === 1 ? '' : 's'}, whose edges only the cycle rule examines:`);
+    for (const m of unmapped.slice(0, 20)) print(`    ${m}`);
+    if (unmapped.length > 20) print(`    … and ${unmapped.length - 20} more`);
+  }
+  const pairs = byPair(results.divergence.found);
+  if (pairs.length) {
+    const fresh = new Set(ledger.divergence.fresh.map(f => f.key));
+    print('\n  DIVERGENCES BY COMPONENT PAIR — edges the design does not declare (all, grandfathered or not):');
+    for (const { pair, count } of pairs) {
+      const n = results.divergence.found.filter(f => f.pair === pair && fresh.has(f.key)).length;
+      print(`    ${String(count).padStart(4)}  ${pair}` + (n ? `   (${n} NEW)` : '') +
+            (count >= 3 ? '   ← 3 or more at one pair: evidence the design may be wrong here, not only the code' : ''));
+    }
+  }
+  if (absences.length) {
+    print(`\n  ABSENCES — ${absences.length} declared edge${absences.length === 1 ? '' : 's'} no import uses (reported, never refused):`);
+    for (const a of absences) print(`    ${a}`);
+  }
+
   const fresh = RULES.flatMap(rule => ledger[rule].fresh.map(f => ({ rule, ...f })));
   if (fresh.length) {
     print('\n  NEW — refused:');
-    for (const f of fresh) print(`    ${f.rule.padEnd(8)} ${f.key}   (${f.detail})`);
+    for (const f of fresh) print(`    ${f.rule.padEnd(10)} ${f.key}   (${f.detail})`);
   }
 
   // A repair the baseline still holds is grandfathered again if it comes back — in silence. The
@@ -243,7 +269,7 @@ function main(argv) {
     const one = fixed.length === 1;
     print(`\n  FIXED since the baseline — ${fixed.length} violation${one ? '' : 's'} no longer occur${one ? 's' : ''}, ` +
           `but the baseline still holds ${one ? 'it' : 'them'}:`);
-    for (const f of fixed) print(`    ${f.rule.padEnd(8)} ${f.key}`);
+    for (const f of fixed) print(`    ${f.rule.padEnd(10)} ${f.key}`);
     print('  One that comes back is grandfathered again, in silence. Regenerating the baseline locks the repair in — ' +
           'a person\'s decision, since the baseline is a reviewed file' +
           (fresh.length ? '; the write is refused while the NEW violations above stand, so resolve those first' : '') + ':');

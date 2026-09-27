@@ -55,7 +55,7 @@ module.exports = { create: pkgDir => ({ id: 'lines@1', configFiles: [], edges(re
 } }) };
 `);
 const DESIGN = path.join(DIR, 'design.json');
-fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'], layers: [{ n: 0, name: 'low', dirs: ['low'] }, { n: 1, name: 'top', dirs: ['top'] }] }));
+fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'], components: { low: { dirs: ['low'] }, top: { dirs: ['top'] } }, allowed: [['top', 'low']] }));
 
 // ── transcripts ──────────────────────────────────────────────────────────────────────────
 const TX = path.join(DIR, 'transcripts');
@@ -144,7 +144,7 @@ const rep = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { gr
 const rows = s => (rep.groups.find(g => g.session === s) || { edits: [] }).edits;
 ok(r.status === 1, `a would-be refusal exits 1 (got ${r.status}${r.status > 1 ? ': ' + r.stdout.slice(-300) : ''})`);
 const refusals = rep.groups.flatMap(g => g.refusals);
-ok(refusals.length === 1 && refusals[0].fresh.map(f => f.key).join() === 'src/low/a.ts -> src/top/t.ts' && refusals[0].fresh[0].rule === 'layer',
+ok(refusals.length === 1 && refusals[0].fresh.map(f => f.key).join() === 'src/low/a.ts -> src/top/t.ts' && refusals[0].fresh[0].rule === 'divergence',
    `the upward import is refused, by rule and edge (${refusals.length} refusal(s))`);
 ok(rows('s1')[1] && rows('s1')[1].decision === 'allow', 'an edit that keeps the already-refused edge is not refused again — counted once');
 ok(rows('s1')[2] && rows('s1')[2].counterfactual === true && rows('s1')[1].counterfactual === true && rows('s1')[0].counterfactual === false,
@@ -164,7 +164,7 @@ ok(rows('s3')[0] && rows('s3')[0].decision === 'allow' && /nothing new/.test(row
 ok(/would-be REFUSED/.test(r.stdout) && /WOULD-BE REFUSALS — each needs a ruling/.test(r.stdout) && /src\/low\/a\.ts -> src\/top\/t\.ts/.test(r.stdout),
    'the printed report lists each would-be refusal for a person to rule on');
 ok(/divergence: 1 of /.test(r.stdout), 'and states the divergence count with its denominator');
-ok(rep.landed && rep.landed.layer && rep.landed.layer.new.length === 1 && rep.landed.layer.new[0].key === 'src/low/b.ts -> src/top/t.ts',
+ok(rep.landed && rep.landed.divergence && rep.landed.divergence.new.length === 1 && rep.landed.divergence.new[0].key === 'src/low/b.ts -> src/top/t.ts',
    'the landed view names the violation that reached the branch in the window');
 
 const s4 = rep.groups.find(g => g.session === 's4') || { trees: [], edits: [] };
@@ -189,6 +189,15 @@ const e = run([...base, '--transcripts', EMPTY]);
 ok(e.status === 2 && /NOT MEASURED/.test(e.stdout), `a replay that judged no edit exits 2, NOT MEASURED (got ${e.status})`);
 const typo = run([...base, '--transcripts', TX, '--sinse', C0]);
 ok(typo.status === 2 && /--sinse/.test(typo.stdout), 'an unrecognised flag is NOT MEASURED and named');
+// A design the rules cannot judge against: judged directly, a layer design maps no module and the
+// landed view would print 0 divergences over nothing (#554).
+const LAYERS = path.join(DIR, 'layers-design.json');
+fs.writeFileSync(LAYERS, JSON.stringify({ root: 'src', layers: [{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['top'] }] }));
+const lay = run([...base.map(x => x === DESIGN ? LAYERS : x), '--transcripts', TX]);
+// The per-edit path refuses such a design too, so its words alone cannot tell the two apart: without
+// the up-front check the replay runs every group and prints a LANDED line reading "divergence 0→0".
+ok(lay.status === 2 && /^structure-replay: NOT MEASURED — the design .*retired layer format/.test(lay.stdout) && !/LANDED|groups:/.test(lay.stdout),
+   `a design in the retired layer format is NOT MEASURED before anything is replayed — no LANDED line (got ${lay.status})`);
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 console.log(`\n${pass} passed, ${fail} failed`);

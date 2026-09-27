@@ -134,7 +134,7 @@ User message
 | Hook | Trigger | File |
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
-| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW layer or cycle violation starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
+| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -1341,8 +1341,8 @@ nominal.
 ## Structure Guard — the edge that erodes a design, refused only when it is new
 
 An agent editing a codebase can erode its structure one import at a time, and the
-tools that already exist catch only part of it. Two rules refuse — layer order and
-cycles — under a ratchet, so a real codebase can adopt the guard without first
+tools that already exist catch only part of it. Two rules refuse — divergence from
+the design's component graph, and cycles — under a ratchet, so a real codebase can adopt the guard without first
 repairing every violation it carries. A guard that fires on hundreds of old edges is switched off; one that is
 loosened until it stops firing guards nothing.
 
@@ -1350,8 +1350,29 @@ loosened until it stops firing guards nothing.
   --graph <depcruise.json> [--baseline <b.json>]
   [--write-baseline <out.json> [--allow-growth]]`. Exit **0** nothing new, **1** a
   new violation or a baseline write that would grow, **2** NOT MEASURED. It parses no
-  source: the graph is `depcruise --output-type json`, and the design names layers by
-  directory and file under a `root`.
+  source: the graph is `depcruise --output-type json`, and the design is a component
+  graph under a `root` (below).
+- **The design is a component graph, checked as a reflexion model (#554).** It names
+  `components` (each a set of `dirs` and `files`; a file entry beats a directory, the
+  longest directory wins) and the `allowed` edges between them as `[from, to]` pairs.
+  An import between two components is a **convergence** when its pair is declared and a
+  **divergence** when not; only a NEW divergence is refused. A declared pair nothing
+  uses is an **absence**, reported by the CLI and never refused. The report groups
+  divergences by component pair and flags any pair with 3 or more, because a cluster
+  under one design is evidence against the design as much as the code. A module in no
+  component is listed by the report, and the hook says so once per session per file;
+  its edges are judged only by the cycle rule. **A refusal offers two remedies:** change
+  the code (naming what the component may import), or revise the design by declaring the
+  pair, which is the user's decision. When declaring the pair would close a cycle between
+  components, the refusal says so and offers the three answers to a cycle instead.
+  **The declared graph must be acyclic.** A design whose edges form a cycle, that
+  names a missing component, maps one path to two components, or has no `allowed` list
+  is NOT MEASURED. So is a design in the **retired layer format**. That format gave each
+  folder one number and allowed every downward edge: a total order forced onto a graph,
+  too strict for components that really depend on each other (it had to cut stave's
+  cluster cycles by hand) and too loose for siblings (on stave, 43 of the 75 pairs it
+  allowed were used by nothing). A baseline's old `layer` section is named as ignored,
+  like the `implied` one.
 - **Pin `typescript@5` for the analyser.** Under TypeScript 7, dependency-cruiser
   parses no `.ts` file and prints its green tick over zero modules. That is why an
   empty graph, a graph with no edges, or one whose relative imports mostly failed to
@@ -1364,12 +1385,13 @@ loosened until it stops firing guards nothing.
   `--baseline` in force, not only against whatever sits at the output path — a write to a
   new path is still refused.
 - **A baseline names the design it was measured under, and a mismatched pair is not
-  judged (#535).** Keys mean nothing without the design that produced them: after a layer
-  moves, growth compared by key answers two questions as one, and a layering change that
-  legalises an edge reads as a clean sprint. `--write-baseline` stamps a `designId` — a hash
-  of the design's MEANING only (`root`, excludes as a set, each layer's number, dirs and
-  files as sets, plus its name, which per-layer evidence is reported under; every `_` key, a
-  layer's `why` and the `measured` block dropped), so a
+  judged (#535).** Keys mean nothing without the design that produced them: after a
+  component's mapping or its allowed edges move, growth compared by key answers two
+  questions as one, and a design change that legalises an edge reads as a clean sprint.
+  `--write-baseline` stamps a `designId` — a hash of the design's MEANING only (`root`,
+  excludes as a set, each component's dirs and files as sets under its name, which the
+  per-pair evidence is reported under, and the allowed edges as a set; every `_` key, a
+  component's `why` and the `measured` block dropped), so a
   comment edit or reformat never moves it and a moved file always does. A baseline whose id
   differs from the design in force is NOT MEASURED (exit 2) with the re-baseline command;
   the write itself proceeds and says the design changed. Withheld only on a POSITIVE
@@ -1385,7 +1407,7 @@ loosened until it stops firing guards nothing.
   and at the 13 Sep baseline it counted 27% of the package's imports. A baseline still
   carrying an `implied` section is judged on the rules that remain, and the report names
   the section as ignored; regenerating the baseline drops it and says so.
-- **A re-export still faces the layer and cycle rules**, and is still told apart from a
+- **A re-export still faces the divergence and cycle rules**, and is still told apart from a
   use — the graph agreement check below compares re-exports edge for edge.
 - **Only imports that survive compilation are judged.** Without `tsPreCompilationDeps`,
   dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
@@ -1471,7 +1493,7 @@ loosened until it stops firing guards nothing.
   `--extractor` when registered, `--baseline` and `--write-baseline` on the same file,
   `--allow-growth`). The baseline is written from the graph on disk, so running that command
   while the edge is only proposed records nothing — observed: it reports "baseline written:
-  0 layer" and the same edit is refused again.
+  0 layer" (today: "0 divergence") and the same edit is refused again.
 - **A repair is said loudly, and no check rewrites the baseline.** A baselined violation that
   no longer occurs is FIXED. The report lists each one and prints the exact command that
   regenerates the baseline in force — never with `--allow-growth`, and while a NEW violation
