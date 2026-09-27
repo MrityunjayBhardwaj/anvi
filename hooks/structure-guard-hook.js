@@ -209,11 +209,25 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design) {
   return `BLOCKED: this edit to ${rel} adds ${fresh.length} import${fresh.length === 1 ? '' : 's'} that erode ${pkgName}'s declared structure:\n` +
     lines.join('\n') + '\n' +
     `(judged against its baseline over ${examined.modules} modules and ${examined.edges} edges)\n` +
-    'Remedies:\n' + remedies.join('\n') + '\n' +
-    'If the edge is deliberate, that is the user\'s decision — ask them. A baseline records only what is already ' +
-    'on disk, so regenerating it before the edge lands records nothing. Once the user has landed it, this records ' +
-    'it as grandfathered (the growth is then recorded, not silent):\n' +
+    'Remedies:\n' + remedies.join('\n') + '\n' + exceptionText(pairs.length > 0) + '\n' +
     `  ${baselineCommand(pkgDir, entry, true)}`;
+}
+
+// THE ONE-IMPORT EXCEPTION, LAST (#558). Recording an import in the baseline keeps it while the
+// design still says no, so it is not a third way of resolving the disagreement: it is a recorded
+// exception to the design. It is listed after the two remedies that resolve it, and worded as what
+// it is: narrower than declaring the arrow (one file-to-file import, not every file of one
+// component reaching the other), which makes it the right tool for a deliberate, temporary
+// exception such as a refactor in progress. For a file-level cycle the design has no arrow to
+// declare, so there it is the only way to keep a deliberate one.
+function exceptionText(divergent) {
+  const why = divergent
+    ? 'Last, and narrower than revising the design: a ONE-IMPORT EXCEPTION. It keeps exactly this import, not the whole ' +
+      'arrow, and records it in the baseline as a known exception while the design still says no.'
+    : 'If the cycle is deliberate, the only way to keep it is a ONE-IMPORT EXCEPTION: the design has no arrow to declare ' +
+      'for a file-level cycle, so the import is recorded in the baseline as a known exception.';
+  return `${why} That is the user's decision — ask them. A baseline records only what is already on disk, so running ` +
+    'this before the edge lands records nothing. Once the user has landed it, this records it (the growth is then recorded, not silent):';
 }
 
 // A repair the baseline still holds (#451). Said, never acted on: the baseline is a reviewed

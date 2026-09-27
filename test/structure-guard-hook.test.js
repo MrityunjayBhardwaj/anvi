@@ -168,6 +168,19 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   const odd = H.refusalText('p', 'src/x.ts', [{ rule: 'divergence', key: 'k', pair: 'a -> b', detail: 'd' }], { modules: 1, edges: 1 },
     "/tmp/it's a pkg", { design: '/d.json', baseline: '/b.json' }, { components: { a: {}, b: {}, c: {} }, allowed: [['a', 'c']] });
   ok(/a may import c, so reach b/.test(odd), 'the code remedy lists the components the source may import');
+  // THE ONE-IMPORT EXCEPTION IS LAST, AND SAYS WHAT IT IS (#558).
+  const at = (text, re) => text.search(re);
+  ok(at(r.reason, /either change the code/) < at(r.reason, /or revise the design/) &&
+     at(r.reason, /or revise the design/) < at(r.reason, /ONE-IMPORT EXCEPTION/) &&
+     at(r.reason, /ONE-IMPORT EXCEPTION/) < at(r.reason, /--allow-growth/),
+     'a divergence refusal lists change the code, then revise the design, then the one-import exception and its command');
+  ok(/narrower than revising the design/.test(r.reason) && /keeps exactly this import, not the whole arrow/.test(r.reason),
+     'and words the exception as narrower than declaring the arrow');
+  ok(!/If the edge is deliberate/.test(r.reason), 'the old catch-all "if the edge is deliberate" wording is gone');
+  const cyc = H.refusalText('p', 'src/x.ts', [{ rule: 'cycle', key: 'src/x.ts -> src/y.ts', detail: 'part of a cycle' }], { modules: 2, edges: 2 },
+    '/pkg', { design: '/d.json', baseline: '/b.json' }, { components: { a: {} }, allowed: [] });
+  ok(/If the cycle is deliberate, the only way to keep it is a ONE-IMPORT EXCEPTION/.test(cyc) && !/narrower than revising/.test(cyc) &&
+     /--allow-growth/.test(cyc), 'a cycle-only refusal offers the exception as the only way to keep a deliberate cycle');
   // The --package word alone: the extractor case below owns what sits between the other flags.
   ok(odd.includes("--package '/tmp/it'\\''s a pkg' "),
      'the command quotes a path with a space and an apostrophe as one shell word');
