@@ -1488,7 +1488,13 @@ loosened until it stops firing guards nothing.
   (from the cache); what is already there is allowed and said once per session, with the
   `--allow-growth` command that records it if it is meant. An edit that adds a violation beside
   a landed one is still refused, naming only what it adds.
-- **A deliberate edge is grandfathered AFTER it lands, never before.** The refusal prints the
+- **A one-import exception comes last, and is recorded AFTER the import lands, never before (#558).**
+  Recording an import in the baseline keeps it while the design still says no, so the refusal
+  lists it after the two remedies that resolve the disagreement (change the code, revise the
+  design) and words it as what it is: narrower than declaring the arrow, since it covers one
+  file-to-file import rather than every file of one component. That makes it the tool for a
+  deliberate, temporary exception such as a refactor in progress. For a file-level cycle the
+  design has no arrow to declare, so there it is the only way to keep a deliberate cycle. The refusal prints the
   exact command, built from the registry entry it judged against (`--package`, `--design`,
   `--extractor` when registered, `--baseline` and `--write-baseline` on the same file,
   `--allow-growth`). The baseline is written from the graph on disk, so running that command
