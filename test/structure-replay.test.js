@@ -55,7 +55,7 @@ module.exports = { create: pkgDir => ({ id: 'lines@1', configFiles: [], edges(re
 } }) };
 `);
 const DESIGN = path.join(DIR, 'design.json');
-fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'], layers: [{ n: 0, name: 'low', dirs: ['low'] }, { n: 1, name: 'top', dirs: ['top'] }] }));
+fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'], components: { low: { dirs: ['low'] }, top: { dirs: ['top'] } }, allowed: [['top', 'low']] }));
 
 // ── transcripts ──────────────────────────────────────────────────────────────────────────
 const TX = path.join(DIR, 'transcripts');
@@ -144,7 +144,7 @@ const rep = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : { gr
 const rows = s => (rep.groups.find(g => g.session === s) || { edits: [] }).edits;
 ok(r.status === 1, `a would-be refusal exits 1 (got ${r.status}${r.status > 1 ? ': ' + r.stdout.slice(-300) : ''})`);
 const refusals = rep.groups.flatMap(g => g.refusals);
-ok(refusals.length === 1 && refusals[0].fresh.map(f => f.key).join() === 'src/low/a.ts -> src/top/t.ts' && refusals[0].fresh[0].rule === 'layer',
+ok(refusals.length === 1 && refusals[0].fresh.map(f => f.key).join() === 'src/low/a.ts -> src/top/t.ts' && refusals[0].fresh[0].rule === 'divergence',
    `the upward import is refused, by rule and edge (${refusals.length} refusal(s))`);
 ok(rows('s1')[1] && rows('s1')[1].decision === 'allow', 'an edit that keeps the already-refused edge is not refused again — counted once');
 ok(rows('s1')[2] && rows('s1')[2].counterfactual === true && rows('s1')[1].counterfactual === true && rows('s1')[0].counterfactual === false,
@@ -164,7 +164,7 @@ ok(rows('s3')[0] && rows('s3')[0].decision === 'allow' && /nothing new/.test(row
 ok(/would-be REFUSED/.test(r.stdout) && /WOULD-BE REFUSALS — each needs a ruling/.test(r.stdout) && /src\/low\/a\.ts -> src\/top\/t\.ts/.test(r.stdout),
    'the printed report lists each would-be refusal for a person to rule on');
 ok(/divergence: 1 of /.test(r.stdout), 'and states the divergence count with its denominator');
-ok(rep.landed && rep.landed.layer && rep.landed.layer.new.length === 1 && rep.landed.layer.new[0].key === 'src/low/b.ts -> src/top/t.ts',
+ok(rep.landed && rep.landed.divergence && rep.landed.divergence.new.length === 1 && rep.landed.divergence.new[0].key === 'src/low/b.ts -> src/top/t.ts',
    'the landed view names the violation that reached the branch in the window');
 
 const s4 = rep.groups.find(g => g.session === 's4') || { trees: [], edits: [] };

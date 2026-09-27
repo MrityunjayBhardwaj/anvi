@@ -64,13 +64,15 @@ const REFUSAL = /^(?:PreToolUse:(?:Write|Edit|MultiEdit) hook error: )?BLOCKED: 
 // The guard's own words: they survive a change of wrapper, so finding them outside the known
 // shape means the shape moved, not that the guard went quiet.
 const GUARD_WORDS = /BLOCKED: this edit to .* adds \d+ import/;
-const VIOLATION = /^\s*·\s*(layer|cycle):\s*(\S+ -> \S+)\s*$/gm;
+// `layer` stays readable: transcripts written before the component graph (#554) carry it.
+const VIOLATION = /^\s*·\s*(divergence|layer|cycle):\s*(\S+ -> \S+)\s*$/gm;
 // What each notice says, by its own opening words (hooks/structure-guard-hook.js).
 const NOTICE_KINDS = [
   ['on disk', /already on disk but not in its baseline/],
   ['fixed', /fixed since its baseline/],
   ['not measured', /NOT MEASURED/],
   ['failed', /FAILED and allowed the edit/],
+  ['unmapped', /belongs to no component of/],
 ];
 
 function listTranscripts(dir) {
