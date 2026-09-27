@@ -189,6 +189,15 @@ const e = run([...base, '--transcripts', EMPTY]);
 ok(e.status === 2 && /NOT MEASURED/.test(e.stdout), `a replay that judged no edit exits 2, NOT MEASURED (got ${e.status})`);
 const typo = run([...base, '--transcripts', TX, '--sinse', C0]);
 ok(typo.status === 2 && /--sinse/.test(typo.stdout), 'an unrecognised flag is NOT MEASURED and named');
+// A design the rules cannot judge against: judged directly, a layer design maps no module and the
+// landed view would print 0 divergences over nothing (#554).
+const LAYERS = path.join(DIR, 'layers-design.json');
+fs.writeFileSync(LAYERS, JSON.stringify({ root: 'src', layers: [{ n: 0, dirs: ['low'] }, { n: 1, dirs: ['top'] }] }));
+const lay = run([...base.map(x => x === DESIGN ? LAYERS : x), '--transcripts', TX]);
+// The per-edit path refuses such a design too, so its words alone cannot tell the two apart: without
+// the up-front check the replay runs every group and prints a LANDED line reading "divergence 0→0".
+ok(lay.status === 2 && /^structure-replay: NOT MEASURED — the design .*retired layer format/.test(lay.stdout) && !/LANDED|groups:/.test(lay.stdout),
+   `a design in the retired layer format is NOT MEASURED before anything is replayed — no LANDED line (got ${lay.status})`);
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 console.log(`\n${pass} passed, ${fail} failed`);
