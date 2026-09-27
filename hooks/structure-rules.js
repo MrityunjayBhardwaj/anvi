@@ -71,9 +71,9 @@ const shellWord = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // to lock in) and by the hook (a refusal to grandfather, or a repair to lock in), and built here
 // once so the two remedies cannot drift apart. `script` is inserted as given — the hook names
 // the installed copy through `~`, which must stay unquoted for the shell to expand it.
-function baselineCommand({ script, source, design, extractor, baseline, allowGrowth = false }) {
+function baselineCommand({ script, source, design, extractor, baseline, allowGrowth = false, ref }) {
   return `node ${script} ${source[0]} ${shellWord(source[1])} --design ${shellWord(design)}` +
-    (extractor ? ` --extractor ${shellWord(extractor)}` : '') +
+    (extractor ? ` --extractor ${shellWord(extractor)}` : '') + (ref ? ` --ref ${shellWord(ref)}` : '') +
     ` --baseline ${shellWord(baseline)} --write-baseline ${shellWord(baseline)}` +
     (allowGrowth ? ' --allow-growth' : '');
 }

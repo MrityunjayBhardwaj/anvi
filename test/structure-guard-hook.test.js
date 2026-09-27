@@ -153,8 +153,9 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   ok(r.reason.includes(`structure-guard.js --package '${PKG}' --design '${DESIGN}' --extractor '${EXTRACTOR}' ` +
                        `--baseline '${BASELINE}' --write-baseline '${BASELINE}' --allow-growth`),
      'including the exact command that grandfathers a deliberate edge, built from the registry entry');
-  ok(/before the edge lands records nothing/.test(r.reason) && /user's decision/.test(r.reason),
-     'and says the edge must land first, by the user\'s decision — regenerating before it lands records nothing');
+  ok(/measured from the repository's default branch, not the working tree, so running this before the import has merged there records nothing/.test(r.reason) &&
+     /user's decision/.test(r.reason),
+     'and says the import must merge first, by the user\'s decision — the baseline is measured from the default branch (#562)');
   // Both remedies for a divergence (#554): the code's, naming where low may reach, and the design's.
   ok(/either change the code: low may import no other component, so move the code into a component that may depend on mid;/.test(r.reason),
      'the code remedy names what the source component may import (here, nothing)');
@@ -615,7 +616,7 @@ console.log('\nA GIT WORKTREE of the registered repository is the same package (
   const WPKG = path.join(WT, 'packages', 'app');
   ok(up.reason.includes(`--package '${GPKG}' `) && !up.reason.includes(`--package '${WPKG}'`),
      'the refusal\'s command names the registered checkout, not the worktree the edit was in');
-  ok(up.reason.includes(`This edit is in a worktree, ${WPKG}.`) && up.reason.includes(`reads the registered checkout, ${GPKG}, as it is on disk — not this branch — so run it only after the change has landed there`),
+  ok(up.reason.includes(`This edit is in a worktree, ${WPKG}.`) && up.reason.includes("measures the repository's default branch, not this branch, so run it only after the change has merged"),
      'and says the edit was in a worktree, so the command is for after the merge');
   const wrongId = { packages: [{ ...reg.packages[0], designId: '000000000000' }] };
   const mis = decide(wtEdit('src/low/a.ts', "export const a = 1;\n", "// m\nexport const a = 1;\n", 'sess-wt3'), wrongId);
