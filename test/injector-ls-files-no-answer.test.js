@@ -11,10 +11,14 @@
 // "no currency anchor", asked for a stamp, and that verdict is cached until HEAD moves.
 //
 // So the hook is spawned the way the harness spawns it, with a `git` on PATH whose
-// `ls-files` dies by a signal. A signal, not a sleep: a sleep is killed by the hook's own
-// 3 s timeout, which leaves too little of the deadline to grade anything, so the defect
-// hides behind timing. A signal is an instant no-answer with the whole deadline left. The
-// control is the same hook with ls-files answering, which grades H1 and caches it.
+// `ls-files` overflows the output buffer, so node kills it: ENOBUFS, no exit status.
+// Not a sleep: a sleep is killed by the hook's own 3 s timeout, which leaves too little of
+// the deadline to grade anything, so the defect hides behind timing. Not a self-signal
+// either: where /bin/sh is dash (Ubuntu CI), `sh -c` does not exec the command, so a
+// signal-killed git comes back as exit 143 — a status, which reads as an answer (observed:
+// this test passed on macOS and failed on Ubuntu that way). The overflow is killed by node
+// itself, on its direct child, in ~50 ms on both. The control is the same hook with
+// ls-files answering, which grades H1 and caches it.
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -63,8 +67,8 @@ git('add -A', P);
 git('-c commit.gpgsign=false commit -qm catalogues', P);
 const HEAD = git('rev-parse HEAD', P).trim();
 
-// Every git call goes to the real git except ls-files, which in `die` mode kills itself —
-// the no-status, no-answer shape (observed: status null, signal SIGTERM). Each forced call
+// Every git call goes to the real git except ls-files, which in `die` mode writes past the
+// 64 MB buffer — the no-status, no-answer shape (observed: status null, code ENOBUFS). Each forced call
 // is counted, so a run where the trigger never fired cannot pass for a clean one.
 const SHIM = path.join(tmp, 'shim');
 const FORCED = path.join(tmp, 'forced.log');
@@ -73,7 +77,7 @@ fs.writeFileSync(path.join(SHIM, 'git'), [
   '#!/bin/sh',
   'case "$*" in',
   '  ls-files*)',
-  `    if [ "$SHIM_MODE" = die ]; then echo ls-files >> ${JSON.stringify(FORCED)}; kill -TERM $$; fi ;;`,
+  `    if [ "$SHIM_MODE" = die ]; then echo ls-files >> ${JSON.stringify(FORCED)}; head -c 70000000 /dev/zero; exit 0; fi ;;`,
   'esac',
   `exec ${JSON.stringify(REAL_GIT)} "$@"`,
   '',
@@ -96,7 +100,7 @@ function inject(mode) {
   return { exit: r.status, ctx };
 }
 
-console.log('ls-files died without answering: nothing graded on a guessed set, nothing cached');
+console.log('ls-files never answered: nothing graded on a guessed set, nothing cached');
 for (const run of [1, 2]) {
   const before = forced();
   const r = inject('die');
