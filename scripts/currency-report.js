@@ -131,7 +131,12 @@ const refHistory = (!storeGit || !kindRead.ref.dir) ? null : ({ area, path: rel,
   try {
     const out = storeGit(`log --since=${JSON.stringify(since)} --format=%h -- ${JSON.stringify(storeRel)}`).trim();
     return out ? out.split('\n').filter(Boolean).length : 0;
-  } catch { return null; }
+  } catch (e) {
+    // Git said no → null. Git never answered → rethrow, so the verdict says it could not
+    // look rather than treating the document as undated (#571). Same rule as the injector's.
+    if (typeof (e && e.status) !== 'number') throw e;
+    return null;
+  }
 };
 
 // --- propose mode -----------------------------------------------------------

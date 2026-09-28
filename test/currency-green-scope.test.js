@@ -26,7 +26,9 @@ function makeGit(logMap) {
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
     if (m) {
       const key = `${m[1]}:${m[2]}`;
-      if (!(key in logMap)) throw new Error('unknown sha');
+      // Git SAYS no with exit 128 on an unknown sha (observed); a status-less error would
+      // mean git never answered, which is a different verdict (#571).
+      if (!(key in logMap)) throw Object.assign(new Error('unknown sha'), { status: 128 });
       return logMap[key];
     }
     return '';

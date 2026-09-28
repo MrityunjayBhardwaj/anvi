@@ -227,6 +227,10 @@ console.log('\nGROUP 6 — the bound is shared, and the callers actually pass it
     ok(/area !== 'ref'/.test(src),
       `${rel}'s reader refuses to answer for anything but the store document area`);
     ok(/refHistory,/.test(src), `${rel} passes it in`);
+    // And it does not answer for git when git never answered: a killed read rethrows, so
+    // the verdict records it could not look (#571). Both copies, for the same reason as above.
+    ok(/const refHistory =[\s\S]{0,900}?if \(typeof \(e && e\.status\) !== 'number'\) throw e;/.test(src),
+      `${rel}'s reader rethrows when git gave no answer`);
   }
 }
 

@@ -310,14 +310,18 @@ eq(entryKind('dharana.md', dhs[0]), 'focus', 'dharana ## primary → focus');
 
 // --- the anchor ladder ------------------------------------------------------
 // git mock with sha reachability + a store history for the time rung.
+// Git SAYS no with a numeric exit status (cat-file -e / log on a missing object exit 128,
+// observed); an error without one means git never answered, which is graded differently
+// (#571). So the mock says no the way git does.
+const gitSaysNo = (msg) => Object.assign(new Error(msg), { status: 128 });
 function ladderGit({ live = [], logMap = {}, revList = null } = {}) {
   return (args) => {
     const ce = args.match(/^cat-file -e ([0-9a-f]+)\^\{commit\}$/);
-    if (ce) { if (!live.includes(ce[1])) throw new Error('bad object'); return ''; }
+    if (ce) { if (!live.includes(ce[1])) throw gitSaysNo('bad object'); return ''; }
     const rl = args.match(/^rev-list -1 --before=/);
-    if (rl) { if (!revList) throw new Error('no rev'); return revList + '\n'; }
+    if (rl) { if (!revList) throw gitSaysNo('no rev'); return revList + '\n'; }
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
-    if (m) { const k = `${m[1]}:${m[2]}`; if (!(k in logMap)) throw new Error('unknown sha'); return logMap[k]; }
+    if (m) { const k = `${m[1]}:${m[2]}`; if (!(k in logMap)) throw gitSaysNo('unknown sha'); return logMap[k]; }
     const pr = args.match(/--grep="\(#(\d+)\)"/);
     if (pr) return pr[1] === '40' ? 'squash40\n' : '';
     return '';
