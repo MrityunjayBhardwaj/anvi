@@ -592,6 +592,35 @@ console.log('\nA GIT WORKTREE of the registered repository is the same package (
   fs.mkdirSync(path.join(REPO, '.git', 'modules', 'sub'), { recursive: true });
   fs.writeFileSync(path.join(SUB, '.git'), `gitdir: ${path.join(REPO, '.git', 'modules', 'sub')}\n`);
   ok(H.packageFor(path.join(SUB, 'packages/app/src/low/a.ts'), reg) === null, 'a submodule-shaped checkout is not a worktree of the repository');
+  // ONE IDENTITY RULE, THE SHARED ONE (#555). A `.git` file anyone can write; git records a
+  // worktree from the repository's side too, and the shared resolver checks that back-pointer.
+  // The guard's own former copy did not, and treated both of these as the armed package.
+  const FORGED = path.join(DIR, 'gforged');
+  fs.cpSync(PKG, path.join(FORGED, 'packages', 'app'), { recursive: true });
+  const wtRecord = fs.readFileSync(path.join(WT, '.git'), 'utf8').match(/^gitdir:\s*(.+?)\s*$/m)[1];
+  fs.writeFileSync(path.join(FORGED, '.git'), `gitdir: ${wtRecord}\n`);
+  ok(H.packageFor(path.join(FORGED, 'packages/app/src/low/a.ts'), reg) === null,
+     'a .git file borrowing a real worktree\'s record is not that worktree, so not the package');
+  ok(H.packageFor(path.join(WT, 'packages/app/src/low/a.ts'), reg) !== null, 'while the worktree that record belongs to still is');
+  const WT_B = path.join(DIR, 'gwt-b');
+  ok(git(REPO, 'worktree', 'add', '-q', WT_B).status === 0, 'a second real worktree');
+  const recordB = path.resolve(WT_B, fs.readFileSync(path.join(WT_B, '.git'), 'utf8').match(/^gitdir:\s*(.+?)\s*$/m)[1]);
+  const backB = fs.readFileSync(path.join(recordB, 'gitdir'), 'utf8');
+  fs.writeFileSync(path.join(recordB, 'gitdir'), path.join(DIR, 'elsewhere', '.git') + '\n');
+  ok(H.packageFor(path.join(WT_B, 'packages/app/src/low/a.ts'), reg) === null,
+     'a worktree whose record in the repository names another checkout is not the package');
+  fs.writeFileSync(path.join(recordB, 'gitdir'), backB);
+  ok(H.packageFor(path.join(WT_B, 'packages/app/src/low/a.ts'), reg) !== null, 'and is again once the record points back at it');
+  // The shared resolver costs about as much as the hook, so an edit in an unrelated project,
+  // armed or not, must not load it.
+  const loaded = spawnSync(process.execPath, ['-e', `
+    const H = require(${JSON.stringify(path.join(__dirname, '..', 'hooks', 'structure-guard-hook.js'))});
+    const key = require.resolve(${JSON.stringify(path.join(__dirname, '..', 'hooks', 'anvi-paths.js'))});
+    H.packageFor(${JSON.stringify(path.join(OTHER, 'README.md'))}, ${JSON.stringify(reg)});
+    const unrelated = !!require.cache[key];
+    H.packageFor(${JSON.stringify(path.join(WT, 'packages/app/src/low/a.ts'))}, ${JSON.stringify(reg)});
+    console.log(unrelated + ' ' + !!require.cache[key]);`], { encoding: 'utf8' });
+  ok(loaded.stdout.trim() === 'false true', `the shared resolver is loaded for a worktree of the package, never for an unrelated edit (${loaded.stdout.trim() || loaded.stderr.trim()})`);
   // A package that IS its repository's root has no path below the root to look for, so the
   // checkout holding the file is found by walking up to its `.git` instead.
   const WT_ROOT = path.join(DIR, 'gwt-root');

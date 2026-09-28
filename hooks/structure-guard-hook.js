@@ -70,36 +70,40 @@ function realNear(p) {
   return path.join(head, ...tail);
 }
 
-// The git checkout whose root is exactly `root`, and the common git directory every worktree of
-// its repository shares — or null when `root` is not a checkout's root. Read from the `.git`
-// entry the way git's own setup does (a directory in the main checkout; in a linked worktree a
-// file naming its private git dir, whose `commondir` leads back to the shared one), because this
-// runs on edits in every project on the machine and a subprocess per edit is not free. A
-// submodule's `.git` file names `.git/modules/<sub>`, which has no `commondir`, so it is its own
-// repository and never mistaken for its superproject's worktree.
-function checkoutAt(root) {
-  const dotgit = path.join(root, '.git');
-  let st;
-  try { st = fs.statSync(dotgit); } catch { return null; }
-  let common = dotgit;
-  if (!st.isDirectory()) {
-    let m;
-    try { m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotgit, 'utf8')); } catch { return null; }
-    if (!m) return null;
-    common = path.resolve(root, m[1]);
-    try { common = path.resolve(common, fs.readFileSync(path.join(common, 'commondir'), 'utf8').trim()); } catch { /* no commondir: its own */ }
+// WHICH REPOSITORY A CHECKOUT BELONGS TO is the shared resolver's question (#555), not this
+// hook's: `anvi-paths.js` `repositoryOf` reads `.git` the way git's own setup does and also
+// checks git's back-pointer, so a `.git` file that claims a worktree record git never made for
+// that directory names no repository. This hook once had its own copy without that check, and
+// it would have guarded — and could have refused edits in — a checkout git does not recognise.
+// Loaded only when a path could be another checkout of an armed package: it costs about as much
+// as this whole hook, and edits in unrelated projects never need it.
+// Like every hook that loads the shared module, it adopts the session when it does, so anything
+// the module says once is said once per session rather than once per edit.
+let sharedPaths = null;
+let sessionId = null;
+function adoptSessionOf(payload) { sessionId = payload && payload.session_id; }
+function repositoryOf(root) {
+  if (!sharedPaths) {
+    sharedPaths = require('./anvi-paths.js');
+    sharedPaths.adoptSession(sessionId);
   }
-  try { common = fs.realpathSync(common); } catch { /* a gone git dir still has a name */ }
-  return { root, common };
+  return sharedPaths.repositoryOf(root);
 }
 
-// The checkout containing `dir`: the nearest ancestor with a `.git`.
-function checkoutOf(dir) {
+// The nearest ancestor of `dir` holding a `.git` — found without reading it. As in git, the
+// nearest one decides: one that names no repository is not walked past to an outer one.
+function gitRootOf(dir) {
   for (let d = dir; ; d = path.dirname(d)) {
-    const c = checkoutAt(d);
-    if (c) return c;
+    if (fs.existsSync(path.join(d, '.git'))) return d;
     if (path.dirname(d) === d) return null;
   }
+}
+
+// The checkout containing `dir` and its repository (git's common directory), or null.
+function checkoutOf(dir) {
+  const root = gitRootOf(dir);
+  const common = root && repositoryOf(root);
+  return common ? { root, common } : null;
 }
 
 // Where a registered package's directory would sit in ANOTHER checkout of its repository (#546):
@@ -111,21 +115,26 @@ function checkoutOf(dir) {
 function checkoutMatch(target, dir, opts = {}) {
   if (target === dir || target.startsWith(dir + path.sep))
     return { dir, rel: path.relative(dir, target).split(path.sep).join('/'), checkout: 'registered' };
-  const home = checkoutOf(dir);
-  if (!home) return null;
-  const inRepo = path.relative(home.root, dir);
+  const homeRoot = gitRootOf(dir);
+  if (!homeRoot) return null;
+  const inRepo = path.relative(homeRoot, dir);
   const tail = inRepo ? path.sep + inRepo + path.sep : null;
   // Each place the package's own path occurs in the target could be a checkout's root before it;
   // only the one that IS a checkout of the same repository counts.
   const roots = [];
   if (tail) for (let at = target.indexOf(tail); at > 0; at = target.indexOf(tail, at + 1)) roots.push(target.slice(0, at));
-  else { const c = checkoutOf(path.dirname(target)); if (c) roots.push(c.root); }
+  else { const r = gitRootOf(path.dirname(target)); if (r) roots.push(r); }
+  let home;
   for (const root of roots) {
-    if (root === home.root) continue;
+    if (root === homeRoot) continue;
     const there = inRepo ? path.join(root, inRepo) : root;
     const rel = path.relative(there, target).split(path.sep).join('/');
-    const c = checkoutAt(root);
-    if (c) { if (c.common === home.common) return { dir: there, rel, checkout: 'worktree' }; continue; }
+    if (fs.existsSync(path.join(root, '.git'))) {
+      if (home === undefined) home = repositoryOf(homeRoot);
+      const repo = home && repositoryOf(root);
+      if (repo && repo === home) return { dir: there, rel, checkout: 'worktree' };
+      continue;
+    }
     if (opts.gone && !fs.existsSync(root)) return { dir: there, rel, checkout: 'gone' };
   }
   return null;
@@ -444,7 +453,7 @@ function noticesOnce(sessionId, notices, stateDir) {
   return true;
 }
 
-module.exports = { realNear, checkoutAt, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
+module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
   REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {
@@ -457,6 +466,7 @@ if (require.main === module) {
     // Unreadable input is not an edit, and not the guard failing: silent, like every hook.
     let payload;
     try { payload = JSON.parse(raw || '{}'); } catch { process.exit(0); }
+    adoptSessionOf(payload);
     try {
       // The fast path: no registry, nothing to guard, nothing else loaded.
       if (!fs.existsSync(REGISTRY)) process.exit(0);
