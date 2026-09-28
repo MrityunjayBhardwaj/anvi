@@ -38,6 +38,15 @@ const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, ext
 //      verdict is a function of — and a wall-clock budget bounds the cold path.
 const CURRENCY_BUDGET_MS = 1500;
 const GIT_TIMEOUT_MS = 3000;
+// The whole hook's deadline, measured from PROCESS start (performance.now()), under the
+// 5 s the harness is registered to wait (scripts/register-hooks.cjs). Past that the
+// harness kills the process and the edit goes ahead with no context and no word of it,
+// ~15% of calls before #551. A killed hook cannot say it was cut off; one that stops
+// itself first can. Every git call below gets only the time that is left, and an entry
+// with no time left is named as not checked instead of silently dropped (#568).
+const HOOK_DEADLINE_MS = 3500;
+const MIN_ENTRY_MS = 250; // don't start an entry that cannot finish its first git call
+const timeLeft = () => HOOK_DEADLINE_MS - performance.now();
 
 function cacheFile(projectRoot, head) {
   const slug = path.basename(projectRoot).replace(/[^\w.-]/g, '_');
@@ -48,12 +57,19 @@ function cacheFile(projectRoot, head) {
 // "did THIS project's code move under THIS project's entry", so every git question
 // and every REF-file check below has to be asked of that repo. Ask the wrong repo
 // and it answers confidently about files it has never contained.
+// Returns { nudges, skipped }: skipped are the wanted entries with no verdict because
+// time ran out, which the caller must name — silence would read as "fresh".
 function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
-  if (!wanted.length) return [];
+  if (!wanted.length) return { nudges: [], skipped: [] };
+  const allIds = () => wanted.map((w) => w.id);
+  if (timeLeft() < MIN_ENTRY_MS) return { nudges: [], skipped: allIds() };
   // Same bound as the CLI's helpers, from the same constant. This one runs on every
-  // edit, so an unbounded read here fails quietly at the worst moment (#409).
+  // edit, so an unbounded read here fails quietly at the worst moment (#409). The
+  // timeout is the time LEFT, capped at GIT_TIMEOUT_MS: a git killed by it is read as
+  // "could not look" (#567), never as an answer.
   const run = (dir) => (a) => execSync(`git ${a}`, {
-    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GIT_TIMEOUT_MS,
+    cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: Math.max(1, Math.min(GIT_TIMEOUT_MS, Math.floor(timeLeft()))),
     maxBuffer: GIT_MAX_BUFFER,
   });
   const git = run(projectRoot);
@@ -83,8 +99,11 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
   const fileExt = extensionsFrom(git, refResolver ? refResolver.files : []);
 
   let head;
-  try { head = git('rev-parse HEAD').trim(); } catch { return []; } // not a repo → no drift to compute
-  if (!head) return [];
+  try { head = git('rev-parse HEAD').trim(); } catch (e) {
+    // Not a repo (git ran and said so) → no drift to compute. Killed for time → say so.
+    return { nudges: [], skipped: typeof (e && e.status) === 'number' ? [] : allIds() };
+  }
+  if (!head) return { nudges: [], skipped: [] };
 
   const cachePath = cacheFile(projectRoot, head);
   let cache = {};
@@ -118,6 +137,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
 
   const started = Date.now();
   const out = [];
+  const skipped = [];
   const byCat = {};
   for (const w of wanted) (byCat[w.catalogue] = byCat[w.catalogue] || []).push(w.id);
 
@@ -139,9 +159,11 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
       // this gate depends on. The catalogue's mtime closes that.
       const key = `${cat}:${e.id}:${mtime}`;
       if (key in cache) { if (cache[key]) out.push(cache[key]); continue; }
-      // Budget guard: an uncached entry past the budget is skipped, not half-computed.
-      // Silence beats a slow hook — the report covers what the hook skips.
-      if (Date.now() - started > CURRENCY_BUDGET_MS) break;
+      // Budget guard: an uncached entry past the budget, or with too little of the hook's
+      // deadline left, is skipped, not half-computed — and NAMED, so a skipped entry never
+      // reads as a fresh one. It continues rather than breaks, so every skipped entry is
+      // collected and the cached ones behind it are still served.
+      if (Date.now() - started > CURRENCY_BUDGET_MS || timeLeft() < MIN_ENTRY_MS) { skipped.push(e.id); continue; }
       let nudge = null, couldNotLook = false;
       try {
         const verdict = computeCurrency(e, {
@@ -173,7 +195,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
     }
   } catch { /* cache is an optimization; failing to persist it costs speed, not correctness */ }
 
-  return out;
+  return { nudges: out, skipped };
 }
 
 // --- KINDS: — selecting an entry by what a file IS, not where it sits ---------
@@ -848,11 +870,24 @@ process.stdin.on('end', () => {
       // ask when a record lists more than one.
       const subject = subjectRepoFor(filePath, data.cwd || process.cwd());
       if (subject.repo) {
-        const nudges = currencyNudges(subject.repo, anviDir, wanted, refDir, invDir);
-        // Capped first, then the ungraded notice is appended — it is a statement
-        // about what the gate could not reach, not another verdict competing for
-        // the cap, and dropping it is the silence this whole block exists to end.
+        const { nudges, skipped } = currencyNudges(subject.repo, anviDir, wanted, refDir, invDir);
+        // Capped first, then the out-of-time and ungraded notices are appended — they
+        // are statements about what the gate could not reach, not verdicts competing
+        // for the cap, and dropping them is the silence this whole block exists to end.
         const lines = capNudges(nudges);
+        if (skipped.length) {
+          const ids = [...new Set(skipped)];
+          const one = ids.length === 1;
+          // A cold cache on a large catalogue skips dozens (84 on one real project). The
+          // count is always whole; the list is bounded and says how much it held back.
+          const SHOWN = 12;
+          const named = ids.length > SHOWN
+            ? `${ids.slice(0, SHOWN).join(', ')}, and ${ids.length - SHOWN} more`
+            : ids.join(', ');
+          lines.push(`⏱ freshness NOT checked for ${ids.length} ${one ? 'entry' : 'entries'} — out of time (${named}). `
+            + `Nothing here says ${one ? 'it is' : 'they are'} current; a later edit fills the cache, `
+            + 'or run `node scripts/currency-report.js <project-dir>`.');
+        }
         if (ungraded.length) {
           lines.push(`⚪ ${ungraded.join('; ')} — NOT graded: this boundary has no id, so no `
             + 'freshness verdict can be keyed to it. Nothing here says it is current. '
