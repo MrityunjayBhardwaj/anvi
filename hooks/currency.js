@@ -1537,16 +1537,22 @@ function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level, occurrence
   const { lineStart, lineEnd } = self;
   if (!lineStart || !lineEnd) return null;
 
+  // The same two outcomes as the catalogue read above, told apart the same way: git ran and
+  // said no (a numeric exit status) is an absence; no status means git never answered. On a
+  // 3 MB catalogue this line-range log takes 2-3 s and the helper kills it at 3 s, so the
+  // second case is routine, and answering it with null graded real history as "no store
+  // history" — a verdict the injector then cached (#567).
+  const noAnswer = (e) => typeof (e && e.status) !== 'number';
   let ts;
   try {
     const out = storeGit(`log -1 --format=%cI -L ${lineStart},${lineEnd}:${JSON.stringify(cataloguePath)}`);
     ts = (out.split('\n')[0] || '').trim();
-  } catch { return null; }
+  } catch (e) { return noAnswer(e) ? { sha: null, unreadable: true } : null; }
   if (!/^\d{4}-\d{2}-\d{2}T/.test(ts)) return null;
   try {
     const sha = git(`rev-list -1 --before=${JSON.stringify(ts)} HEAD`).trim();
     if (sha) return { sha, source: 'TIME', provisional: true, ts: ts.slice(0, 10) };
-  } catch { /* fall through to GRAY */ }
+  } catch (e) { if (noAnswer(e)) return { sha: null, unreadable: true }; }
   return null;
 }
 
@@ -1713,6 +1719,11 @@ function nudgeFor(verdict, { catalogue, id } = {}) {
     return `${tag}🔵 grounded in ${where} (vendored/reference source) — drift isn't a question this repo's git can answer; re-check only if the upstream version was refreshed.`;
   }
   if (verdict.status === 'GRAY') {
+    // Could not look is not "unanchored": a stamp asserts the entry was re-confirmed, and
+    // asking for one here asks for it at the one moment nothing was checked (#567).
+    if (verdict.anchor && verdict.anchor.storeUnreadable) {
+      return `${tag}⚪ freshness NOT checked (${verdict.reason}). Nothing here says this entry is current or stale; the next edit tries again, or run \`node scripts/currency-report.js <project-dir>\`.${vendorTail}`;
+    }
     return `${tag}⚪ no currency anchor (${verdict.reason}) — freshness unknown. Stamp \`VALIDATED: <sha> <date>\` when you next confirm this entry.${vendorTail}`;
   }
   // YELLOW
@@ -2199,7 +2210,7 @@ function computeCurrency(entry, opts) {
     return withVendor({
       status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })),
       reason: anchor.storeUnreadable
-        ? 'no anchor: the store catalogue could not be READ, so the time rung never ran — this is not a claim that store history is absent'
+        ? 'no anchor: the store could not be READ (git gave no answer: the catalogue read or its line history failed or timed out), so the time rung never finished — this is not a claim that store history is absent'
         : 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)',
     });
   }

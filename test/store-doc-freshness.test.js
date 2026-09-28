@@ -154,6 +154,39 @@ console.log('\nGROUP 5 — "we could not look" is not "there is nothing to look 
     'and does NOT assert an absence it never observed — the whole of this defect');
 }
 
+console.log('\nGROUP 5b — the line-history read that follows is held to the same rule (#567)');
+{
+  // The catalogue read succeeds; the entry is in it; what fails is dating its lines.
+  const cataloguePath = 'projects/p/.anvi/hetvabhasa.md';
+  const entry = { id: 'D7', refField: 'src/App.ts' };
+  const committed = '# H\n## D7: an undated entry\n**REF:** src/App.ts\n';
+  const store = (onHistory) => (a) => {
+    if (a.startsWith('show HEAD:')) return committed;
+    if (a.startsWith('log -1 --format=%cI -L')) return onHistory();
+    return '';
+  };
+  const killed = () => { const e = new Error('spawnSync /bin/sh ETIMEDOUT'); e.code = 'ETIMEDOUT'; e.status = null; e.signal = 'SIGTERM'; throw e; };
+  const saidNo = () => { const e = new Error('fatal: no such path'); e.status = 128; throw e; };
+  const { nudgeFor } = require(path.join(ROOT, 'hooks', 'currency.js'));
+
+  const timedOut = computeCurrency(entry, { ...base(), storeGit: store(killed), cataloguePath });
+  eq(timedOut.status, 'GRAY', 'a line history git was killed on → no anchor');
+  ok(/could not be READ/.test(timedOut.reason) && !/no store history/.test(timedOut.reason),
+    'and says the store could not be read, not that it has no history');
+  const n = nudgeFor(timedOut, { catalogue: 'hetvabhasa.md', id: 'D7' });
+  ok(/NOT checked/.test(n) && !/Stamp/.test(n), 'the nudge says NOT checked and asks for no stamp');
+
+  const absent = computeCurrency(entry, { ...base(), storeGit: store(saidNo), cataloguePath });
+  ok(/no store history/.test(absent.reason), 'git that ran and said no is still an absence');
+  ok(/Stamp/.test(nudgeFor(absent, { catalogue: 'hetvabhasa.md', id: 'D7' })), 'and still asks for a stamp');
+
+  // The history answered; the project git then timed out turning its date into a sha.
+  const dated = store(() => '2026-08-09T00:44:10+05:30\n');
+  const projKilled = (a) => { if (a.startsWith('rev-list')) killed(); return mkGit()(a); };
+  const noSha = computeCurrency(entry, { ...base(), git: projKilled, storeGit: dated, cataloguePath });
+  ok(/could not be READ/.test(noSha.reason), 'a killed rev-list after a dated history is "could not look" too');
+}
+
 console.log('\nGROUP 6 — the bound is shared, and the callers actually pass it');
 {
   // A constant nobody passes is the failure a shared constant introduces, so this reads

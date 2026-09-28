@@ -142,7 +142,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
       // Budget guard: an uncached entry past the budget is skipped, not half-computed.
       // Silence beats a slow hook — the report covers what the hook skips.
       if (Date.now() - started > CURRENCY_BUDGET_MS) break;
-      let nudge = null;
+      let nudge = null, couldNotLook = false;
       try {
         const verdict = computeCurrency(e, {
           git,
@@ -151,7 +151,12 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
           cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
         });
         nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
+        couldNotLook = !!(verdict && verdict.anchor && verdict.anchor.storeUnreadable);
       } catch { nudge = null; }
+      // Said, never cached: "git gave no answer" is a fact about this call (a slow machine,
+      // a killed git), not about the entry. Cached, it stood in for the answer until HEAD
+      // moved, and every edit in between repeated it (#567).
+      if (couldNotLook) { if (nudge) out.push(nudge); continue; }
       cache[key] = nudge; // cache GREEN's null too — a fresh entry shouldn't be recomputed
       if (nudge) out.push(nudge);
     }
