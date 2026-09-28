@@ -132,7 +132,12 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
     try {
       const out = storeGit(`log --since=${JSON.stringify(since)} --format=%h -- ${JSON.stringify(storeRel)}`).trim();
       return out ? out.split('\n').filter(Boolean).length : 0;
-    } catch { return null; }
+    } catch (e) {
+      // Git said no → null, "no history to count". Git never answered → rethrow, so the
+      // verdict records that it could not look instead of treating the doc as undated (#571).
+      if (typeof (e && e.status) !== 'number') throw e;
+      return null;
+    }
   };
 
   const started = Date.now();
@@ -173,7 +178,7 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
           cataloguePath: storeRoot ? path.join(cataloguePrefix, cat) : null,
         });
         nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
-        couldNotLook = !!(verdict && verdict.anchor && verdict.anchor.storeUnreadable);
+        couldNotLook = !!(verdict && (verdict.couldNotLook || (verdict.anchor && verdict.anchor.storeUnreadable)));
       } catch { nudge = null; }
       // Said, never cached: "git gave no answer" is a fact about this call (a slow machine,
       // a killed git), not about the entry. Cached, it stood in for the answer until HEAD

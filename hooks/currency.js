@@ -1542,7 +1542,6 @@ function resolveTimeAnchor({ git, storeGit, cataloguePath, id, level, occurrence
   // 3 MB catalogue this line-range log takes 2-3 s and the helper kills it at 3 s, so the
   // second case is routine, and answering it with null graded real history as "no store
   // history" — a verdict the injector then cached (#567).
-  const noAnswer = (e) => typeof (e && e.status) !== 'number';
   let ts;
   try {
     const out = storeGit(`log -1 --format=%cI -L ${lineStart},${lineEnd}:${JSON.stringify(cataloguePath)}`);
@@ -1721,7 +1720,7 @@ function nudgeFor(verdict, { catalogue, id } = {}) {
   if (verdict.status === 'GRAY') {
     // Could not look is not "unanchored": a stamp asserts the entry was re-confirmed, and
     // asking for one here asks for it at the one moment nothing was checked (#567).
-    if (verdict.anchor && verdict.anchor.storeUnreadable) {
+    if (verdict.couldNotLook || (verdict.anchor && verdict.anchor.storeUnreadable)) {
       return `${tag}⚪ freshness NOT checked (${verdict.reason}). Nothing here says this entry is current or stale; the next edit tries again, or run \`node scripts/currency-report.js <project-dir>\`.${vendorTail}`;
     }
     return `${tag}⚪ no currency anchor (${verdict.reason}) — freshness unknown. Stamp \`VALIDATED: <sha> <date>\` when you next confirm this entry.${vendorTail}`;
@@ -2066,7 +2065,66 @@ function greenScopeText(scope) {
 //     cataloguePath              it (+ the entry's line range) enables ladder
 //                                rung 4, the time-based fallback.
 // Returns { status, anchor, files:[{file,exists,changedCommits}], reason }.
+// --- a git that never answered is not an answer (#567, #571) -------------------
+// Every git read below has a fallback for "git said no": unreachable, not in history,
+// never tracked, no document history. Each fallback is right when git RAN and said so
+// (a numeric exit status). Each is wrong when git never answered — killed by a
+// timeout, ENOBUFS, spawn failure — and they are wrong in BOTH directions: a VALIDATED
+// sha read as unreachable falls to an older anchor (false drift), a file whose history
+// was never read is called external (silence), an uncounted file drops out of the
+// drift sum (false GREEN). Six sites, so the rule is not repeated six times: git is
+// wrapped once, every read that got no answer is recorded, and a verdict built on any
+// such read is replaced by "NOT checked" (see computeCurrency). The fallbacks keep
+// running unchanged; only their result stops being believed.
+//
+// Wrappers are STABLE per function: committedEntries caches by storeGit identity, and a
+// fresh wrapper per entry would re-read a 3 MB catalogue for every entry.
+const noAnswer = (e) => typeof (e && e.status) !== 'number';
+let unansweredSink = null; // set for the duration of one computeCurrency call (synchronous)
+const watchedFns = new WeakMap();
+function watched(fn, label) {
+  if (typeof fn !== 'function') return fn;
+  let byLabel = watchedFns.get(fn);
+  if (!byLabel) { byLabel = new Map(); watchedFns.set(fn, byLabel); }
+  if (byLabel.has(label)) return byLabel.get(label);
+  const w = (...args) => {
+    try { return fn(...args); } catch (e) {
+      if (unansweredSink && noAnswer(e)) {
+        const what = typeof args[0] === 'string' ? `${label} ${args[0].split(' ')[0]}` : label;
+        unansweredSink.push(what);
+      }
+      throw e;
+    }
+  };
+  byLabel.set(label, w);
+  return w;
+}
+
 function computeCurrency(entry, opts) {
+  const unanswered = [];
+  const outer = unansweredSink;
+  unansweredSink = unanswered;
+  let verdict;
+  try {
+    verdict = gradeEntry(entry, {
+      ...opts,
+      git: watched(opts.git, 'git'),
+      storeGit: watched(opts.storeGit, 'store git'),
+      refHistory: watched(opts.refHistory, 'document history'),
+    });
+  } finally { unansweredSink = outer; }
+  if (!unanswered.length) return verdict;
+  const what = [...new Set(unanswered)].join(', ');
+  return {
+    ...verdict,
+    status: 'GRAY',
+    couldNotLook: true,
+    anchor: { ...(verdict.anchor || { sha: null, source: 'none' }), couldNotLook: true },
+    reason: `no answer from git (${what}): the store or repository could not be READ, so this is not a claim about the entry's freshness either way`,
+  };
+}
+
+function gradeEntry(entry, opts) {
   const { git, fileExists, storeGit, cataloguePath, refResolver, readVendor, refHistory } = opts;
 
   // The UNION of what the entry maps and what grounds it. A boundary genuinely
