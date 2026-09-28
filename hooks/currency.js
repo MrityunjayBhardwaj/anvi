@@ -1155,10 +1155,16 @@ function newestValidated(body) {
 function parseEntries(md) {
   const entries = [];
   const re = new RegExp(ENTRY_RE.source, 'gm'); // fresh lastIndex per call
-  let m;
+  // Line numbers are counted forward from the previous heading, never from the top.
+  // Re-splitting the whole prefix per heading made this quadratic in catalogue size:
+  // 1.1 s for one 3 MB catalogue, parsed several times per hook call, which is where the
+  // context injector's timeouts came from (#551).
+  let m, pos = 0, line = 1;
   while ((m = re.exec(md)) !== null) {
     const body = m[2];
-    const lineStart = md.slice(0, m.index).split('\n').length;
+    for (let i = md.indexOf('\n', pos); i !== -1 && i < m.index; i = md.indexOf('\n', i + 1)) line++;
+    pos = m.index;
+    const lineStart = line;
     // One record per id named in the heading — normally one, and two for the
     // slash-joined form. Every field is shared, deliberately: the ids share a heading
     // because the statement is about all of them, so its REF, its stamps and its span
