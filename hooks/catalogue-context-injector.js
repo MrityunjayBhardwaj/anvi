@@ -96,7 +96,10 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
   // Recognise a REF as a file from what the project tracks PLUS the store's reference
   // files — else a vendored language the project doesn't use (a JS app citing Ruby) is
   // dropped before it can be classified. Derived once, shared across every entry.
-  const fileExt = extensionsFrom(git, refResolver ? refResolver.files : []);
+  // extensionsFrom rethrows only when git never answered (#574): the store's extensions
+  // alone would drop the project's own, so grading nothing beats grading every entry wrong.
+  let fileExt;
+  try { fileExt = extensionsFrom(git, refResolver ? refResolver.files : []); } catch { return { nudges: [], skipped: allIds() }; }
 
   let head;
   try { head = git('rev-parse HEAD').trim(); } catch (e) {

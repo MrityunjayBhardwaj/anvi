@@ -73,6 +73,24 @@ pair('the anchor date for a Ground Truth doc, killed',
   { validatedField: `${SHA} 2026-09-01`, refField: 'ref/GROUND_TRUTH_X.md' }, /^log -1 --format=%cI /,
   { refResolver, refHistory: () => 0 });
 
+// With no fileExt passed, grading asks `ls-files` which extensions are files. A killed
+// ls-files now throws (#574) rather than falling back to a guessed set — and a throw that
+// follows an unanswered read must still come back as NOT checked, not escape to a caller
+// whose catch-all would cache it as fresh.
+pair('the ls-files that decides which REF tokens are files, killed',
+  { validatedField: `${SHA} 2026-09-01`, refField: 'a.js' }, /^ls-files/, { fileExt: undefined },
+  (t) => ok(t.status === 'GREEN', `twin: not a repo → default extensions, a.js still graded (got ${t.status})`));
+
+console.log('a throw with nothing unanswered is a real error, and stays one');
+{
+  let threw = null;
+  try {
+    computeCurrency({ validatedField: `${SHA} 2026-09-01`, refField: 'a.js' },
+      { git: gitWith(), fileExt, fileExists: () => { throw new Error('boom'); } });
+  } catch (e) { threw = e; }
+  ok(threw && threw.message === 'boom', 'not dressed up as NOT checked');
+}
+
 console.log('the Ground Truth doc history reader, killed');
 {
   const base = { git: gitWith(), fileExists, fileExt, refResolver };

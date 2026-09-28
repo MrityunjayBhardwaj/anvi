@@ -83,7 +83,12 @@ function extensionsFrom(git, extraFiles = []) {
   const add = (name) => { const m = String(name).match(/\.([A-Za-z0-9]{1,8})$/); if (m) exts.add(m[1].toLowerCase()); };
   try {
     for (const f of git('ls-files').split('\n')) add(f);
-  } catch { /* not a repo — extraFiles may still carry a set */ }
+  } catch (e) {
+    // Git answered "not a repo" (exit 128) → extraFiles may still carry a set. Git never
+    // answered (killed by a timeout or a signal) → rethrow: the store's extensions alone
+    // drop the project's own (.js on anvi), and every verdict graded on them is wrong (#574).
+    if (noAnswer(e)) throw e;
+  }
   for (const f of extraFiles) add(f);
   if (!exts.size) return FILE_EXT;
   return new RegExp(`\\.(${[...exts].map(e => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`, 'i');
@@ -2112,6 +2117,12 @@ function computeCurrency(entry, opts) {
       storeGit: watched(opts.storeGit, 'store git'),
       refHistory: watched(opts.refHistory, 'document history'),
     });
+  } catch (e) {
+    // A read that never answered may have nothing to fall back to and rethrow (ls-files,
+    // #574). That is still "could not look": say it, rather than let a caller's catch-all
+    // turn it into a cached "fresh". Any other throw is a real error and stays one.
+    if (!unanswered.length) throw e;
+    verdict = { files: [], anchor: null }; // the shape every consumer reads (nudgeFor: .files)
   } finally { unansweredSink = outer; }
   if (!unanswered.length) return verdict;
   const what = [...new Set(unanswered)].join(', ');
