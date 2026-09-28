@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawnSync } = require('child_process');
 
 // The identity module, located across both install trees — a hook loads it
 // from its own directory, the CLI from ~/.claude/hooks. Loaded DEFENSIVELY on
@@ -642,6 +643,67 @@ function mainCheckoutOf(root) {
   return path.dirname(repo);
 }
 
+// WHAT A LINKED WORKTREE IS MISSING (#553). A worktree gets its project's Anvi knowledge only
+// through explicit links — `.anvi` and `ref` pointing where the main checkout's resolve. That is
+// the design, and it stays: this never resolves a worktree to its main checkout. What it removes
+// is the silence: skipped links left every hook that resolves the project with nothing to say,
+// which read exactly like a project without catalogues (516 of 583 worktree file operations
+// measured on this machine got none).
+//
+// Returns null unless `dir` is inside a LINKED worktree whose main checkout resolves a kind this
+// worktree does not — `missing` resolves nothing here, `differs` resolves another directory. A
+// kind the main checkout lacks is not the worktree's to link. `existingDirs`, not the gated
+// readers: this asks what each checkout WOULD resolve, and speaks only about links.
+const WORKTREE_LINKED_KINDS = ['.anvi', 'ref'];
+function worktreeLinkGap(dir) {
+  if (!dir) return null;
+  let d = realSafe(path.resolve(dir)) || path.resolve(dir);
+  for (;;) {
+    if (exists(path.join(d, '.git'))) break;
+    if (path.dirname(d) === d) return null;
+    d = path.dirname(d);
+  }
+  const main = mainCheckoutOf(d);
+  if (!main || (realSafe(main) || main) === d) return null;
+  const missing = [], differs = [];
+  for (const kind of WORKTREE_LINKED_KINDS) {
+    const theirs = existingDirs(main, kind)[0];
+    if (!theirs) continue;
+    const target = realSafe(theirs) || theirs;
+    const ours = existingDirs(d, kind)[0];
+    if (!ours) missing.push({ kind, target });
+    else if ((realSafe(ours) || ours) !== target) differs.push({ kind, have: ours, target });
+  }
+  if (!missing.length && !differs.length) return null;
+  return { worktree: d, main, repo: repositoryOf(d), missing, differs };
+}
+
+// The notice for that gap, once per session per worktree, or null. Every command is on a line of
+// its own so it can be copied whole, and the ignore rule is offered only for a link git would
+// otherwise show as untracked — in the repository's shared `info/exclude`, by ABSOLUTE path: from
+// inside a worktree a relative `--git-common-dir` answer names the worktree's `.git` FILE.
+const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+function worktreeLinkNotice(dir) {
+  const gap = worktreeLinkGap(dir);
+  if (!gap || !firstTime('worktree-links\0' + gap.worktree)) return null;
+  const what = (k) => (k === '.anvi' ? 'catalogues (.anvi)' : 'Ground Truth docs (ref)');
+  const lines = [];
+  if (gap.missing.length) {
+    lines.push(`ANVI: ${gap.worktree} is a git worktree of ${gap.main}, but it does not link that checkout's ` +
+      `${gap.missing.map(m => what(m.kind)).join(' or ')}, so they are NOT delivered here — not "this project has none". ` +
+      'A worktree gets them only through explicit links; linking them is the user\'s call. These add them:');
+    for (const m of gap.missing) lines.push(`  ln -s ${shq(m.target)} ${shq(path.join(gap.worktree, m.kind))}`);
+    for (const m of gap.missing) {
+      const r = spawnSync('git', ['-C', gap.worktree, 'check-ignore', '-q', m.kind], { encoding: 'utf8' });
+      if (r.status !== 0 && gap.repo) lines.push(`  printf '%s\\n' ${shq('/' + m.kind)} >> ${shq(path.join(gap.repo, 'info', 'exclude'))}`);
+    }
+  }
+  for (const m of gap.differs)
+    lines.push(`ANVI: ${m.kind} in the worktree ${gap.worktree} resolves ${m.have}, not ${m.target} as its main checkout ` +
+      `${gap.main} does — this worktree is being served another directory's ${what(m.kind)}. Changing that is the user's call.`);
+  return lines.join('\n');
+}
+
 // resolveDir for the project that owns `filePath`, rather than for the session cwd.
 // Consumers that act ON A FILE must resolve through this, not resolveDir(cwd) — one
 // answer to "whose knowledge governs this file", so the injector and the currency
@@ -748,6 +810,8 @@ module.exports = {
   // "Which repository is this root a checkout of" — so a worktree and its main
   // checkout can be recognised as one project without each consumer parsing `.git`.
   repositoryOf, mainCheckoutOf,
+  // "What is this linked worktree missing" — said, never resolved around (#553).
+  worktreeLinkGap, worktreeLinkNotice,
   resolveDirForFile,
   subjectRepoFor,
   // "Which checkouts does this store project's record bind to it" — the one reader

@@ -112,6 +112,23 @@ The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.c
 
 **For contributors:** use `--dev` — the repo _is_ the live installation. After pulling a change that adds a hook, skill or agent, run `--sync` to link it. Run the installer from the clone the install is linked to: from any other tree (a worktree, a second clone) it refuses rather than write through the links.
 
+### Working in a git worktree
+
+A worktree gets your project's Anvi knowledge **only through links you add**. It has its own
+root, so nothing resolves back to the main checkout on its own. Link the catalogues and the
+Ground Truth docs to where the main checkout's resolve, and keep both out of `git status`:
+
+```bash
+ln -s ~/.anvideck/projects/<project>/.anvi <worktree>/.anvi
+ln -s ~/.anvideck/projects/<project>/ref   <worktree>/ref
+printf '%s\n' /.anvi /ref >> "$(git -C <worktree> rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+```
+
+Use `--path-format=absolute`: from inside a worktree, a relative `--git-common-dir` names
+the worktree's `.git` file, not the shared directory. If you skip the links, the session
+start and the catalogue injector say which ones are missing, once per session, with these
+commands filled in.
+
 ### Versions
 
 Releases are numbered **`YYYY.0M.PATCH`** — `2026.08.0`, then `2026.08.1` for a fix in
