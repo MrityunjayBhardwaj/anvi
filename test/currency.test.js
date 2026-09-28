@@ -1015,8 +1015,21 @@ ok(ext.test('lib/core.rb'), 'a repo tracking .rb makes .rb a file extension (the
 ok(ext.test('q.sql'), 'and .sql');
 ok(!ext.test('use_bpm 0.5'), 'a decimal is still not a file');
 ok(!ext.test('scheduler.tick'), 'a method call is still not a file — prose stays out');
-ext = extensionsFrom(() => { throw new Error('not a repo'); });
-eq(ext.source, FILE_EXT.source, 'git unavailable → falls back to the compiled default');
+// Real git outside a repository exits 128 ("fatal: not a git repository") — observed.
+const notARepo = () => { const e = new Error('not a repo'); e.status = 128; throw e; };
+ext = extensionsFrom(notARepo);
+eq(ext.source, FILE_EXT.source, 'not a repo (git answered 128) → falls back to the compiled default');
+ext = extensionsFrom(notARepo, ['vendor/x.rb']);
+ok(ext.test('lib/core.rb') && !ext.test('a.ts'), 'not a repo + store files → the store files\' extensions');
+// A git killed by a timeout or a signal has no exit status (status null) — observed. That is
+// not "not a repo": falling back would grade every entry on the store's extensions alone,
+// which on anvi drops .js and changes 306 of 426 verdicts (#574). It must say it could not look.
+for (const [how, err] of [['killed by its timeout', { code: 'ETIMEDOUT', signal: 'SIGTERM', status: null }],
+                          ['killed by a signal', { signal: 'SIGTERM', status: null }]]) {
+  let threw = null;
+  try { extensionsFrom(() => { throw Object.assign(new Error(how), err); }, ['vendor/x.rb']); } catch (e) { threw = e; }
+  ok(threw && threw.message === how, `ls-files ${how} → rethrown, not read as "not a repo"`);
+}
 ext = extensionsFrom(lsGitExt([]));
 eq(ext.source, FILE_EXT.source, 'empty repo → compiled default, never an empty matcher');
 
