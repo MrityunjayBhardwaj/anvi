@@ -12,7 +12,10 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
+const { resolveDirForRead, adoptSession, worktreeLinkNotice } = require('./anvi-paths.js');
+// A linked worktree that skipped its links resolves nothing, which must not read as a project
+// without knowledge (#553). Guarded like adoptSession: an older resolver lacks it.
+const linkNotice = (dir) => (typeof worktreeLinkNotice === 'function' ? worktreeLinkNotice(dir) : null);
 // The one catalogue reader. Required here for the same reason the injector requires
 // it: the grammar of an entry and of its fields is one rule, and a second reader of
 // either judges a different corpus while printing the same finding name.
@@ -260,6 +263,9 @@ process.stdin.on('end', () => {
       if (anvi.refused) {
         const news = [failing, health].filter(Boolean).map(t => ` | ${t}`).join('');
         emit(`ANVI: catalogues are NOT being served here — ${anvi.notice}${news}`);
+      } else {
+        const links = linkNotice(cwd);
+        if (links) emit([links, failing, health].filter(Boolean).join('\n'));
       }
       process.exit(0);
     }
@@ -385,7 +391,10 @@ process.stdin.on('end', () => {
       // reader around the guard.
       message += ` | Ground Truth docs NOT SERVED — ${ref.notice}`;
     } else {
-      message += ' | NO Ground Truth docs — consider /anvi:ground';
+      // In a worktree that did not link its main checkout's `ref`, /anvi:ground would create a
+      // reference area under a store project named after the WORKTREE — the link is the remedy.
+      const links = linkNotice(cwd);
+      message += links ? ` | ${links}` : ' | NO Ground Truth docs — consider /anvi:ground';
     }
 
     if (gaps.length > 0) {

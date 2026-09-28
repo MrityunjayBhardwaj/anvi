@@ -704,6 +704,22 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
      there, so a resolved root that is not itself a checkout is discarded.
      Residual limit: a project whose path traverses a symlink, driven from a linked
      worktree, still declines to mirror — unchanged from before, never worse.
+   - **The catalogues are NOT resolved from the main worktree, and that difference is
+     deliberate (#553).** Memory is a backup, written on the project's behalf, so it follows
+     the project. Catalogues and Ground Truth docs are served to whoever asks, so a worktree
+     gets them only through explicit links: `.anvi` and `ref` pointing where the main
+     checkout's resolve. What changed is the silence. Unlinked, every hook that resolves the
+     project said nothing, which read as a project without knowledge; measured on this
+     machine, 516 of 583 worktree file operations got no catalogues. Now
+     `worktreeLinkNotice` in `anvi-paths.js` says it once per session per worktree. The
+     session-start hook says it for its working directory, and the catalogue injector says it
+     for a file that resolves nothing. The notice gives one `ln -s` line per missing link and
+     an `info/exclude` line for any link git would show as untracked, by absolute path. With
+     `.anvi` linked but not `ref`, session start offers the link instead of `/anvi:ground`,
+     which would have created a reference area under a store project named after the
+     worktree. A worktree served a different directory's copy (a store project sharing its
+     folder name) is named as such. A worktree of a project with no Anvi knowledge stays
+     silent.
 
 ### Currency — is a catalogue entry STILL real?
 

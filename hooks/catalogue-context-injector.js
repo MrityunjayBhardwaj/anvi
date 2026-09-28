@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession } = require('./anvi-paths.js');
+const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession, worktreeLinkNotice } = require('./anvi-paths.js');
 const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
@@ -374,7 +374,14 @@ process.stdin.on('end', () => {
     try { realFile = fs.realpathSync(realFile); } catch { /* new/unsaved file — keep the literal path */ }
 
     const anviDir = resolveDirForFile(filePath, '.anvi');
-    if (!anviDir) process.exit(0);
+    if (!anviDir) {
+      // Nothing resolved can still be a fact worth saying: a linked worktree of a project that
+      // HAS catalogues, whose links were skipped, is not a project without them (#553). Once
+      // per session per worktree, shared with the session-start hook's notice.
+      const links = typeof worktreeLinkNotice === 'function' ? worktreeLinkNotice(projectRoot) : null;
+      if (links) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: links } }));
+      process.exit(0);
+    }
 
     // Read dharana if exists
     const dharanaPath = path.join(anviDir, 'dharana.md');
