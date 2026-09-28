@@ -135,8 +135,11 @@ For each downloaded system, launch an agent to generate the Ground Truth doc.
 
 For each generated doc, verify:
 ```bash
-# Count code citations (should be 50+)
-grep -cE '[a-z_]+\.(js|rb|ts|py):[0-9]+' ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md
+# Every section cites file:line or declares **UNCITABLE:** <reason> — exit 0, else it names
+# each section that does neither (exit 2 = no doc found: NOT MEASURED, not clean). anvi #414:
+# the bar is per-section coverage; a citation TOTAL (the old "50+") rewards padding, and the old
+# grep here only knew .js|.rb|.ts|.py, so it read docs about C or Go source as uncited.
+node ~/.claude/anvi/scripts/gt-citation-check.js ~/.anvideck/projects/[project]/ref
 
 # Count stages (should be 3+)
 grep -c '^## STAGE' ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md

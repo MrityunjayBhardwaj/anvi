@@ -29,7 +29,7 @@ Ground Truth documents trace a system's pipeline end-to-end with `file:line` cit
 4. **Include the full meta-prompt content** in the agent's prompt — don't just reference it by path
 5. Include all source file paths + what to trace (input → output pipeline)
 6. Output: `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_[SYSTEM_NAME].md`
-7. Verify: 50+ code citations, 3+ stages, init sequence traced, opaque regions listed
+7. Verify: `node ~/.claude/anvi/scripts/gt-citation-check.js ~/.anvideck/projects/[project]/ref` exits 0 — every section cites `file:line` or declares `**UNCITABLE:** <reason>` (anvi #414; the bar is coverage per section, not a citation total), plus 3+ stages, init sequence traced, opaque regions listed
 
 **Automated:** `/anvi:ground` runs this entire flow (audit → download → generate → wire REFs).
 

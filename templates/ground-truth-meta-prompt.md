@@ -279,6 +279,10 @@ GATE 1: COMPLETENESS
   [ ] Every boundary crossing is documented in both directions
   [ ] Init sequence is traced from first call to "ready"
   [ ] No stage has zero code citations
+  [ ] Any other section with none says why, on its own line:
+      **UNCITABLE:** <reason>   (framing, OPAQUE, method, re-validation log,
+      or an OBSERVED claim about a system whose source cannot be read)
+      Checked by: node scripts/gt-citation-check.js <ref-dir>
 
 GATE 2: GROUNDEDNESS  
   [ ] Every behavioral claim cites file:line
