@@ -174,6 +174,10 @@ const payloadFor = (hook, dir) => {
       ].join('\n') + '\n');
       return { hook_event_name: 'UserPromptSubmit', prompt: 'carry on', transcript_path: t };
     }
+    case 'structure-guard-hook.js':
+      // It loads the shared module only to tell whether a checkout is a worktree of an armed
+      // package's repository, and it reads no store knowledge; with no registry it is silent.
+      return { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: file, old_string: 'a', new_string: 'b' } };
     case 'provenance-guard.js':
       return { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: path.join(sp, '.anvi', 'hetvabhasa.md') } };
     default:
