@@ -98,6 +98,21 @@ Rules:
   the store has no remote, the entries you just harvested exist on this machine
   only — state that plainly.
 
+CHECK THE DRIFT CEILING before you commit — a batch it asks for is more catalogue
+writes, so it belongs under this lease and in this commit, not after it (#530):
+
+    node ~/.claude/anvi/scripts/drift-gate.js [project-dir]    # default: cwd
+
+`0` within the ceiling · `1` over it: one batch is owed · `2` NOT MEASURED, with the
+reason. It reads the currency report, so on a large catalogue it takes minutes;
+re-acquire the lease afterwards if the harvest is running long. On `1`, the output
+ranks the files the drifted entries cite. Pick ONE, list its entries with the
+`--batch` command it prints, and re-validate that batch with `/anvi:currency`'s scope and
+re-validate steps (`~/.claude/anvi/workflows/currency.md`) — the listed entries only,
+never a sweep. Being over asks for one batch per wrap, not for the whole backlog: the
+ceiling sets a direction. Say which batch you took and how many entries it re-stamped.
+On `2`, quote the reason and say drift was not measured — never report it as within.
+
 COMMIT AS SOON AS THE WRITES ARE DONE — here, not in step 3. The commit used to
 sit two steps away, with the whole memory update in between, and that gap is the
 window the checkpoint hook wins: in the store's history the median gap between a
