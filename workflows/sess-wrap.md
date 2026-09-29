@@ -107,10 +107,11 @@ writes, so it belongs under this lease and in this commit, not after it (#530):
 reason. It reads the currency report, so on a large catalogue it takes minutes;
 re-acquire the lease afterwards if the harvest is running long. On `1`, the output
 ranks the files the drifted entries cite. Pick ONE, list its entries with the
-`--batch` command it prints, and re-validate that batch with `/anvi:currency`'s scope and
-re-validate steps (`~/.claude/anvi/workflows/currency.md`) — the listed entries only,
-never a sweep. Being over asks for one batch per wrap, not for the whole backlog: the
-ceiling sets a direction. Say which batch you took and how many entries it re-stamped.
+`--batch` command it prints, and re-validate that batch with steps `4_reconfirm`,
+`5_stamp` and `6_verify` of `~/.claude/anvi/workflows/currency.md` — the listed
+entries only, never a sweep. Skip its `7_persist`: this step's commit below carries
+the new stamps. Being over asks for one batch per wrap, not for the whole backlog:
+the ceiling sets a direction. Say which batch you took and how many entries it re-stamped.
 On `2`, quote the reason and say drift was not measured — never report it as within.
 
 COMMIT AS SOON AS THE WRITES ARE DONE — here, not in step 3. The commit used to
