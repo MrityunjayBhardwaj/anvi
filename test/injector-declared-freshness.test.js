@@ -102,7 +102,8 @@ console.log('the cap names what it holds back');
 console.log('control: a delivered trap whose code did not move is graded GREEN, silently');
 {
   const m = inject('src/calm.js');
-  ok(/Traps whose own REF names this file:[^\n]*H8:/.test(m), 'H8 is delivered');
+  // Stamped and unmoved, so it is verified and delivered with its ✓ (#529 step 3).
+  ok(/Traps whose own REF names this file:[^\n]*H8 ✓:/.test(m), 'H8 is delivered, marked verified');
   ok(!/H8: [🟡🔴⚪]/.test(currencyBlock(m)), 'and gets no warning line');
   const c = cache();
   const k = cachedFor(c, 'H8');

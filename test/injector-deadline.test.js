@@ -102,6 +102,10 @@ console.log('git that never answers: the hook finishes under the harness timeout
   ok(/H1:[^\n]*NOT checked/.test(r.ctx), 'the entry whose git was killed says NOT checked');
   ok(/freshness NOT checked for 2 entries — out of time \(H2, H3\)/.test(r.timeLine),
     `the entries it had no time for are counted and named: ${r.timeLine.trim().slice(0, 90)}`);
+  // The freshness line keeps the two apart: a killed git is no answer, the rest ran out of time.
+  const fl = (r.ctx.split('\n').find((l) => /^Freshness of the/.test(l)) || '');
+  ok(/not checked this edit \d+ \(out of time: H2, H3; no answer: [^)]*\bH1\b/.test(fl),
+    `the freshness line names both reasons apart (${fl.slice(fl.indexOf('not checked')).slice(0, 90)})`);
 }
 
 console.log('git that is slow but answers: the budget stops it, and what the budget skipped is named');
