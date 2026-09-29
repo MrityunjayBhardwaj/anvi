@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans, GIT_MAX_BUFFER } = loadFromCandidates('currency.js');
+const { computeCurrency, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, evidenceKind, EVIDENCE_KINDS, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans, GIT_MAX_BUFFER } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -573,6 +573,9 @@ let partialCount = 0;
 const states = Object.fromEntries(FRESHNESS_STATES.map(k => [k, 0]));
 const notChecked = Object.fromEntries(NOT_CHECKED_REASONS.map(k => [k, 0]));
 let primaries = 0, stampedPrimaries = 0, continuations = 0;
+// What licensed each primary's claim (#529 step 2), counted from the EVIDENCE field alone.
+const EVIDENCE_ALL = [...EVIDENCE_KINDS, 'not recorded', 'unreadable'];
+const evidence = Object.fromEntries(EVIDENCE_ALL.map(k => [k, 0]));
 
 say(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
 // Say it before the verdicts, not after: every unknown below is read in the light
@@ -623,11 +626,13 @@ for (const cat of CATALOGUES) {
     const state = freshnessState(graded);
     const reason = freshnessReason(graded);
     const stamped = Boolean(e.validatedField);
+    const ev = evidenceKind(e.evidenceField);
     if (e.occurrence === 1) {
       primaries++;
       states[state]++;
       if (reason) notChecked[reason]++;
       if (stamped) stampedPrimaries++;
+      evidence[ev]++;
     } else continuations++;
     // The same verdict the row below prints, kept as data for `--json`. Recorded
     // HERE rather than rebuilt afterwards so the two can never diverge: a summary
@@ -647,6 +652,7 @@ for (const cat of CATALOGUES) {
       occurrence: e.occurrence,
       state,
       ...(reason ? { not_checked: reason } : {}),
+      evidence: ev,
     });
     // --stale is the deliberate "what should I re-verify?" worklist. It normally
     // hides GREEN (nothing to do) and REFERENCE (settled — drifts only on an upstream
@@ -737,6 +743,12 @@ say(`── freshness of ${primaries} primary ${primaries === 1 ? 'entry' : 'ent
 say('   verified = fresh since a VALIDATED stamp or the FIX commit it was written against; a time anchor');
 say('   (when the text last changed), or no anchor over cited files, is never confirmed. not checked = no');
 say('   freshness verdict: git never answered, the pointer was withheld, or nothing it cites is diffable here.');
+// Same rule as the freshness line: every kind printed, zeros included, and "not recorded"
+// kept apart from "unreadable" — the first asks for a field, the second for a fix to one.
+const recorded = EVIDENCE_KINDS.reduce((n, k) => n + evidence[k], 0);
+say(`── evidence recorded on ${recorded} of ${primaries} primary ${primaries === 1 ? 'entry' : 'entries'}: ` +
+  EVIDENCE_KINDS.map(k => `${k} ${evidence[k]}`).join(' · ') +
+  ` (not recorded ${evidence['not recorded']} · unreadable ${evidence.unreadable})`);
 if (counts.GREEN) {
   say(`   ${SYMBOL.GREEN} fresh = no cited file changed since that entry's anchor. That is a claim about`);
   say('     commits, not about whether the citation still lands on anything: a reference that');
@@ -755,6 +767,7 @@ if (jsonOnly) {
     counts,
     partial: partialCount,
     states: { primaries, ...states, not_checked: notChecked, stamped: stampedPrimaries, continuations },
+    evidence: { primaries, ...evidence },
     withheld_kinds: withheldKinds,
     entries: rows,
   }) + '\n');

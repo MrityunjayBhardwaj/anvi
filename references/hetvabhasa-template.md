@@ -75,8 +75,17 @@ _(Compact when the catalogue passes ~200 KB — see the Compaction Log below.)_
 **Detection signal:** [How you notice it]
 **The trap:** [The wrong fix that's tempting]. Root fix: [the actual fix]
 **REF:** [Ground Truth doc]#[section] — `[source_file:line]` [what the code shows]
+**EVIDENCE:** observed | source | inferred — [pointer: the run and its output, the code read, or the reasoning]
 **FIX:** [commit sha / PR #N / issue #N in the project's repo that resolved it]
 ```
+
+The `**EVIDENCE:**` field records what licensed the claim, as one of three kinds:
+- `observed` — you ran something and read its output (a test run, a hook fired, a count)
+- `source` — you read the code that decides it (cite the file and symbol)
+- `inferred` — reasoned from reading, not run and not traced to the deciding code
+Follow the kind with a pointer to the run, the code or the reasoning. Write the kind you
+actually have, not the one you wish you had: `currency-report.js` counts each kind, and an
+entry without the field is counted as "not recorded" — never guessed from its prose.
 
 The `**REF:**` field is MANDATORY for all project-specific entries. It creates the provenance chain:
 

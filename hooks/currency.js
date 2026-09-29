@@ -1196,6 +1196,8 @@ function parseEntries(md) {
         // Newest, not first — stamps are a history. See newestValidated().
         validatedField: newestValidated(body),
         filesField: field(body, 'FILES'),
+        // What licensed the claim (#529 step 2). Read raw; evidenceKind() grades it.
+        evidenceField: field(body, 'EVIDENCE'),
         lineStart,
         lineEnd: lineStart + m[0].replace(/\n$/, '').split('\n').length - 1,
       });
@@ -2102,6 +2104,20 @@ function freshnessReason(verdict) {
   return 'nothing diffable';
 }
 
+// What licensed an entry's claim: `**EVIDENCE:** observed | source | inferred — <pointer>`.
+// Only the leading word decides, and only when it IS one of the three: an absent field
+// is "not recorded" and anything else is "unreadable", each counted apart. Never guessed
+// from prose (Confirmed by, the body) — a guess in a report is believed as much as a
+// recorded kind, and "I looked at it" does not say whether looking was a run or a read.
+const EVIDENCE_KINDS = ['observed', 'source', 'inferred'];
+function evidenceKind(value) {
+  if (!value) return 'not recorded';
+  // The kind word, then the end, whitespace or punctuation — but not a hyphen or more
+  // letters: "observed-ish" and "observedly" are not "observed".
+  const m = String(value).trim().toLowerCase().match(/^([a-z]+)(?![a-z0-9-])/);
+  return m && EVIDENCE_KINDS.includes(m[1]) ? m[1] : 'unreadable';
+}
+
 // Compute a currency verdict for one entry.
 //   entry: { validatedField?, fixField?, refField?, id?, lineStart?, lineEnd? }
 //   opts:  { git, fileExists, storeGit?, cataloguePath? }
@@ -2412,7 +2428,7 @@ function gradeEntry(entry, opts) {
 }
 
 module.exports = {
-  computeCurrency, verdictScope, greenScopeText, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable,
+  computeCurrency, verdictScope, greenScopeText, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, evidenceKind, EVIDENCE_KINDS, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable,
   GIT_MAX_BUFFER,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom, matchedTracked,
