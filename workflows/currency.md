@@ -79,6 +79,21 @@ State the verdicts honestly. Drift is NOT wrongness:
 - ⚪ GRAY       no computable anchor (cross-ref / section / procedural pattern with
                no source file). Cannot receive a file-drift verdict — leave it;
                it is a grounding-completeness note, not a staleness one.
+
+The colour says whether a cited file moved; it does not say whether anyone ever
+checked the entry. The `── freshness of N primary entries` line answers that, over
+primaries only (continuations share their primary's verdict), always with all four:
+- **verified**        green since a VALIDATED stamp or the FIX commit it was written against
+- **drifted**         a cited file changed since that stamp or fix
+- **never confirmed** graded, but from the time anchor (when the text last changed) or
+                      no anchor at all — a green on the time anchor lands here, not in
+                      verified. Stamping it is what would grade it.
+- **not checked**     no freshness verdict, with its reason in brackets: *no answer*
+                      (git never answered — retry), *withheld* (the area was refused),
+                      *nothing diffable* (no REF this repo can diff — give it one)
+`--json` carries the same per row (`anchor`, `stamped`, `occurrence`, `state`, and
+`not_checked` with the reason) and in `states`; quote those rather than recounting
+from the colours.
 </step>
 
 <step name="3_scope">
