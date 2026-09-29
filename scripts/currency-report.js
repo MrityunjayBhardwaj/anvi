@@ -576,6 +576,10 @@ let primaries = 0, stampedPrimaries = 0, continuations = 0;
 // What licensed each primary's claim (#529 step 2), counted from the EVIDENCE field alone.
 const EVIDENCE_ALL = [...EVIDENCE_KINDS, 'not recorded', 'unreadable'];
 const evidence = Object.fromEntries(EVIDENCE_ALL.map(k => [k, 0]));
+// Only the catalogues whose templates ask for the field are counted: a lifecycle or a
+// boundary map was never asked, and counting it "not recorded" would inflate the gap.
+const ASKS_EVIDENCE = new Set(['hetvabhasa.md', 'vyapti.md']);
+let evidenceAsked = 0;
 
 say(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
 // Say it before the verdicts, not after: every unknown below is read in the light
@@ -632,7 +636,7 @@ for (const cat of CATALOGUES) {
       states[state]++;
       if (reason) notChecked[reason]++;
       if (stamped) stampedPrimaries++;
-      evidence[ev]++;
+      if (ASKS_EVIDENCE.has(cat)) { evidenceAsked++; evidence[ev]++; }
     } else continuations++;
     // The same verdict the row below prints, kept as data for `--json`. Recorded
     // HERE rather than rebuilt afterwards so the two can never diverge: a summary
@@ -746,7 +750,7 @@ say('   freshness verdict: git never answered, the pointer was withheld, or noth
 // Same rule as the freshness line: every kind printed, zeros included, and "not recorded"
 // kept apart from "unreadable" — the first asks for a field, the second for a fix to one.
 const recorded = EVIDENCE_KINDS.reduce((n, k) => n + evidence[k], 0);
-say(`── evidence recorded on ${recorded} of ${primaries} primary ${primaries === 1 ? 'entry' : 'entries'}: ` +
+say(`── evidence recorded on ${recorded} of ${evidenceAsked} primary error patterns and invariants: ` +
   EVIDENCE_KINDS.map(k => `${k} ${evidence[k]}`).join(' · ') +
   ` (not recorded ${evidence['not recorded']} · unreadable ${evidence.unreadable})`);
 if (counts.GREEN) {
@@ -767,7 +771,7 @@ if (jsonOnly) {
     counts,
     partial: partialCount,
     states: { primaries, ...states, not_checked: notChecked, stamped: stampedPrimaries, continuations },
-    evidence: { primaries, ...evidence },
+    evidence: { asked: evidenceAsked, ...evidence },
     withheld_kinds: withheldKinds,
     entries: rows,
   }) + '\n');

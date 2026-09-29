@@ -84,6 +84,12 @@ fs.writeFileSync(path.join(CAT, 'hetvabhasa.md'), `# H
 **REF:** \`src/a.js\`
 **EVIDENCE:** I looked at it
 `);
+// A lifecycle entry is never asked for the field, so it must not join the denominator.
+fs.writeFileSync(path.join(CAT, 'krama.md'), `# K
+
+## K1: a lifecycle
+**REF:** \`src/a.js\`
+`);
 const run = (args) => spawnSync('node', [REPORT, ...args, PROJ],
   { cwd: PROJ, encoding: 'utf8', env: { ...process.env, ANVI_CATALOGUE_DIR: CAT } });
 let data = null;
@@ -98,17 +104,17 @@ if (data) {
   eq(row('H3').evidence, 'not recorded', 'H3 row: not recorded');
   eq(row('H4').evidence, 'unreadable', 'H4 row: unreadable');
   const ev = data.evidence || {};
-  eq(ev.primaries, 4, 'counted over the 4 primaries');
+  eq(ev.asked, 4, 'counted over the 4 primary error patterns — the lifecycle entry is not asked');
   eq(ev.observed, 1, 'observed 1');
   eq(ev.source, 1, 'source 1');
   eq(ev.inferred, 0, 'inferred 0 — the continuation is not counted');
   eq(ev['not recorded'], 1, 'not recorded 1');
   eq(ev.unreadable, 1, 'unreadable 1');
-  eq(ev.observed + ev.source + ev.inferred + ev['not recorded'] + ev.unreadable, ev.primaries, 'the parts sum to the primaries');
+  eq(ev.observed + ev.source + ev.inferred + ev['not recorded'] + ev.unreadable, ev.asked, 'the parts sum to the entries asked');
 }
 const t = run([]);
 const line = (t.stdout || '').split('\n').find(l => /evidence recorded/.test(l)) || '';
-ok(/evidence recorded on 2 of 4 primary entries: observed 1 · source 1 · inferred 0 \(not recorded 1 · unreadable 1\)/.test(line),
+ok(/evidence recorded on 2 of 4 primary error patterns and invariants: observed 1 · source 1 · inferred 0 \(not recorded 1 · unreadable 1\)/.test(line),
   `the text report prints each kind with zeros (got ${JSON.stringify(line)})`);
 
 fs.rmSync(tmp, { recursive: true, force: true });

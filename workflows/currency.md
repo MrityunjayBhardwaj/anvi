@@ -95,7 +95,8 @@ primaries only (continuations share their primary's verdict), always with all fo
 `not_checked` with the reason) and in `states`; quote those rather than recounting
 from the colours.
 
-The `── evidence recorded on N of M` line counts what licensed each primary's claim, from
+The `── evidence recorded on N of M` line counts what licensed each primary error pattern's
+and invariant's claim (the catalogues whose templates ask for it), from
 its `**EVIDENCE:**` field alone (observed · source · inferred). An entry without the
 field is "not recorded" and one whose value names no kind is "unreadable" — both are
 counted, never guessed from the entry's prose. Only entries written since the field
