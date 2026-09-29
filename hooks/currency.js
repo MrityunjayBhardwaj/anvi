@@ -1767,7 +1767,13 @@ function capNudges(nudges, cap = NUDGE_CAP) {
   if (nudges.length <= cap) return [...nudges].sort((a, b) => rankNudge(a) - rankNudge(b));
   const sorted = [...nudges].sort((a, b) => rankNudge(a) - rankNudge(b));
   const kept = sorted.slice(0, cap);
-  kept.push(`…and ${nudges.length - cap} more drifted/unanchored entries at this boundary — \`node scripts/currency-report.js --stale\` for the full picture.`);
+  // Name what is held back — a bound must say what it held back, as the declared-trap cap does: a count
+  // alone cannot tell the reader WHICH delivered entry the remainder covers (#577). Ids are
+  // cheap; the prose is what the cap exists to drop. Bounded like the other remainders.
+  const held = [...new Set(sorted.slice(cap).map((n) => (String(n).match(/^([A-Z]{1,3}\d+):/) || [])[1]).filter(Boolean))];
+  const SHOWN = 12;
+  const named = held.length > SHOWN ? `${held.slice(0, SHOWN).join(', ')}, and ${held.length - SHOWN} more` : held.join(', ');
+  kept.push(`…and ${nudges.length - cap} more drifted/unanchored entries${named ? ` (${named})` : ''} — \`node scripts/currency-report.js --stale\` for the full picture.`);
   return kept;
 }
 

@@ -538,6 +538,13 @@ eq(capped[0], N.red, 'cap keeps the most urgent, not the first-arrived');
 ok(!capped.slice(0, 3).includes(N.gray), 'cap drops the least urgent first');
 ok(/and 4 more/.test(capped[3]), 'tail counts exactly what was dropped');
 ok(/currency-report/.test(capped[3]), 'tail points at the exhaustive surface — silence about the remainder would read as "that was all"');
+// A count alone cannot say WHICH delivered entry the remainder covers (#577): the tail names
+// every held-back id, once, and none of the ones already shown.
+ok(/\(H2, H1, K4\)/.test(capped[3]), `tail names the held-back ids, each once, in rank order (got: ${capped[3].slice(0, 70)})`);
+ok(!/V9|B1/.test(capped[3]), 'and does not repeat the ids already shown above it');
+const lots = Array.from({ length: 20 }, (_, i) => `H${100 + i}: 🟡 REF drifted since its anchor (a.js +1).`);
+const tail20 = capNudges(lots, 5)[5];
+ok(/H105, H106[^)]*, and 3 more\)/.test(tail20), `a long remainder names 12 ids and counts the rest (got: ${tail20.slice(0, 90)})`);
 
 // --- FILES: — the code a boundary MAPS ---------------------------------------
 // Every fixture below is a REAL line lifted from the live fleet catalogues, not an
