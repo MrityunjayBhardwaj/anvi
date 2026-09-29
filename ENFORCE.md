@@ -21,7 +21,10 @@ User message
    the ids were written by hand, for the work about to start. Measured: briefs name
    a median of 8 entries and only 61.7% of them ever reached context, because prose
    asking for a read is obeyed about six times in ten. Silent on a prompt naming
-   none. Caps the payload and NAMES what it dropped.
+   none. Caps the payload and NAMES what it dropped. States the freshness of what it
+   delivered in one line, from the text alone: which entries carry a re-validation
+   stamp (newest date) and which never have — none is graded here, since this path
+   runs no git, and the line says so.
 
 ④ UserPromptSubmit — absent-warrant-check.js
    Reads the PREVIOUS assistant turn out of the transcript and asks, of each claim

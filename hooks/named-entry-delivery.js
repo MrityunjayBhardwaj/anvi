@@ -27,6 +27,14 @@ const { resolveDirForRead, adoptSession } = require('./anvi-paths.js');
 
 const CATALOGUES = ['hetvabhasa.md', 'vyapti.md', 'krama.md', 'dharana.md'];
 
+// The stamp is read by the SAME function the injector and the report use — newest
+// VALIDATED by date, since stamps are appended — so "stamped" means one thing across
+// every surface. Loaded defensively: on a skewed install where the module or the
+// export is missing, the line says stamps were NOT READ. It must never fall through
+// to "never stamped", which would turn "could not look" into "nothing there".
+let STAMP_OF = null;
+try { STAMP_OF = require('./currency.js').newestValidated || null; } catch (_) { STAMP_OF = null; }
+
 // The prompt must be TALKING about catalogues, not merely contain something
 // id-shaped. Without this, a bare version string reaches the lookup.
 const CATALOGUE_WORD = /\.anvi\b|hetvabhasa|vyapti|krama|dharana|catalogue/i;
@@ -96,7 +104,36 @@ function loadEntries(anviDir) {
   return { entries, prefixes };
 }
 
-function build(prompt, anviDir) {
+/**
+ * One line stating what can be known about the delivered entries WITHOUT git: which
+ * carry a re-validation stamp (with its date) and which never have. None is graded
+ * here — a stamp says someone once checked; whether the cited code moved since is the
+ * injector's and the report's question — so every entry is "not checked", and the
+ * line says so rather than implying a verdict. Zeros are printed on purpose.
+ */
+function freshnessLine(delivered, entries, stampOf) {
+  const n = delivered.length;
+  const head = `Freshness of the ${n} ${n === 1 ? 'entry' : 'entries'} delivered below: not checked — `
+    + 'delivery by name reads the text only and runs no git, so none is graded';
+  if (typeof stampOf !== 'function') {
+    return `${head}; stamps not read (the stamp reader did not load), so nothing here says whether any was ever re-validated.`;
+  }
+  const byId = (a, b) => a.localeCompare(b, 'en', { numeric: true });
+  const stamped = [];
+  const never = [];
+  for (const id of delivered) {
+    const v = stampOf(entries.get(id).text);
+    if (v) stamped.push(`${id} ${(String(v).match(/\b\d{4}-\d{2}-\d{2}\b/) || ['undated'])[0]}`);
+    else never.push(id);
+  }
+  stamped.sort(byId);
+  never.sort(byId);
+  const part = (label, list) => (list.length ? `${label} ${list.length} (${list.join(', ')})` : `${label} 0`);
+  return `${head}. ${part('stamped', stamped)} · ${part('never stamped', never)}. `
+    + 'A stamp is when it was last re-validated, not a sign it still holds — `/anvi:currency` grades them.';
+}
+
+function build(prompt, anviDir, stampOf = STAMP_OF) {
   if (!prompt || !CATALOGUE_WORD.test(prompt)) return null;
   const tokens = [...new Set(prompt.match(ID_TOKEN) || [])];
   if (!tokens.length) return null;
@@ -141,10 +178,11 @@ function build(prompt, anviDir) {
     head += `\n⚠ NAMED BUT NOT FOUND in this project's catalogues: ${missing.join(', ')}. `
       + 'The id may be wrong, or may belong to another project. Nothing was delivered for it.';
   }
+  if (delivered.length) head += `\n${freshnessLine(delivered, entries, stampOf)}`;
   return parts.length ? `${head}\n\n${parts.join('\n\n')}` : head;
 }
 
-module.exports = { build, loadEntries, idInHeading, PER_ENTRY_CHARS, TOTAL_CHARS };
+module.exports = { build, loadEntries, idInHeading, freshnessLine, PER_ENTRY_CHARS, TOTAL_CHARS };
 
 if (require.main !== module) return;
 
