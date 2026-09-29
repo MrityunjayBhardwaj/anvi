@@ -857,6 +857,12 @@ process.stdin.on('end', () => {
         for (const pid of new Set(ids)) wanted.push({ catalogue: 'hetvabhasa.md', id: pid });
       }
       for (const vid of new Set(vyaptiIds)) wanted.push({ catalogue: 'vyapti.md', id: vid });
+      // The error patterns chosen because their own REF names the edited file (#282) are
+      // delivered too, and this block predates them: without this line they reached the
+      // session with no verdict and no mention, which reads as fresh (#577). Duplicates of
+      // boundary-mentioned ids are harmless — the grading loop walks each catalogue's entries
+      // once and only asks whether an id is wanted.
+      for (const pid of new Set(declaredErrorIds)) wanted.push({ catalogue: 'hetvabhasa.md', id: pid });
 
       // Store reference areas resolved via the SAME shared resolver as .anvi, anchored
       // to the file's owning project — so a REF into vendored source / GT docs /
