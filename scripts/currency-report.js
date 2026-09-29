@@ -23,7 +23,7 @@ function loadFromCandidates(name) {
   for (const c of candidates) { try { return require(c); } catch { /* next */ } }
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
-const { computeCurrency, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans, GIT_MAX_BUFFER } = loadFromCandidates('currency.js');
+const { computeCurrency, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, parseEntries, entryKind, lintEntry, extensionsFrom, makeRefResolver, classifySpec, globWidthGap, matchedTracked, citedNameIsTrackedPath, symbolInText, splitBoundaries, boundaryLabel, boundaryDeclares, sensitivityFor, guessMatchesFile, fallbackSpans, GIT_MAX_BUFFER } = loadFromCandidates('currency.js');
 const anviPaths = loadFromCandidates('anvi-paths.js');
 const { resolveDir } = anviPaths;
 
@@ -567,6 +567,12 @@ const counts = { GREEN: 0, YELLOW: 0, RED: 0, GRAY: 0, REFERENCE: 0, WITHHELD: 0
 const rows = [];  // one per entry, for --json
 let shown = 0;
 let partialCount = 0;
+// Four freshness states over PRIMARY entries (#529). Counted here, beside the colour
+// tally, from the same verdict — never re-derived by a probe. A continuation shares its
+// primary's verdict (#185), so counting it would count one claim twice.
+const states = Object.fromEntries(FRESHNESS_STATES.map(k => [k, 0]));
+const notChecked = Object.fromEntries(NOT_CHECKED_REASONS.map(k => [k, 0]));
+let primaries = 0, stampedPrimaries = 0, continuations = 0;
 
 say(`Currency report — ${path.basename(cwd)}  (catalogues: ${anviDir})\n`);
 // Say it before the verdicts, not after: every unknown below is read in the light
@@ -611,6 +617,18 @@ for (const cat of CATALOGUES) {
     const partial = Boolean(heldArea) && !withheld;
     if (withheld) counts.WITHHELD++; else counts[v.status]++;
     if (partial) partialCount++;
+    // WITHHELD is decided here, not in the verdict, so the state is asked of the status
+    // this row reports: a pointer nobody followed is "not checked", never "never confirmed".
+    const graded = withheld ? { ...v, status: 'WITHHELD' } : v;
+    const state = freshnessState(graded);
+    const reason = freshnessReason(graded);
+    const stamped = Boolean(e.validatedField);
+    if (e.occurrence === 1) {
+      primaries++;
+      states[state]++;
+      if (reason) notChecked[reason]++;
+      if (stamped) stampedPrimaries++;
+    } else continuations++;
     // The same verdict the row below prints, kept as data for `--json`. Recorded
     // HERE rather than rebuilt afterwards so the two can never diverge: a summary
     // derived a second time is a second instrument.
@@ -621,6 +639,14 @@ for (const cat of CATALOGUES) {
       partial,
       gone: gone || null,
       drifted: v.files.filter(f => f.changedCommits > 0).map(f => f.file),
+      // What the verdict was measured FROM, whether a VALIDATED stamp is present (it may
+      // exist and not be the anchor, when its sha is unreachable), and which occurrence
+      // of the id this row is — 1 is the primary.
+      anchor: (v.anchor && v.anchor.source) || 'none',
+      stamped,
+      occurrence: e.occurrence,
+      state,
+      ...(reason ? { not_checked: reason } : {}),
     });
     // --stale is the deliberate "what should I re-verify?" worklist. It normally
     // hides GREEN (nothing to do) and REFERENCE (settled — drifts only on an upstream
@@ -701,6 +727,16 @@ say(`── ${total} entries: ${SYMBOL.GREEN} ${counts.GREEN} fresh  ${SYMBOL.YE
 // reference had when the stamp was written; if it was wrong then, or was never checked at
 // that depth, nothing here revisits it. Saying so does not close the gap — it makes it
 // visible, which is the whole of what this line is for.
+// Printed every time, zeros included: a state left off the line when it is empty reads
+// as "not measured" to someone looking for it. Not affected by --stale, which filters
+// rows, not the population this line is about.
+say(`── freshness of ${primaries} primary ${primaries === 1 ? 'entry' : 'entries'}: ` +
+  FRESHNESS_STATES.map(k => `${k} ${states[k]}`).join(' · ') +
+  ` (${NOT_CHECKED_REASONS.map(k => `${k} ${notChecked[k]}`).join(' · ')})` +
+  `  (stamped ${stampedPrimaries}; ${continuations} ${continuations === 1 ? 'continuation shares its' : 'continuations share their'} primary's verdict, not counted)`);
+say('   verified = fresh since a VALIDATED stamp or the FIX commit it was written against; a time anchor');
+say('   (when the text last changed), or no anchor over cited files, is never confirmed. not checked = no');
+say('   freshness verdict: git never answered, the pointer was withheld, or nothing it cites is diffable here.');
 if (counts.GREEN) {
   say(`   ${SYMBOL.GREEN} fresh = no cited file changed since that entry's anchor. That is a claim about`);
   say('     commits, not about whether the citation still lands on anything: a reference that');
@@ -718,6 +754,7 @@ if (jsonOnly) {
     examined: rows.length,
     counts,
     partial: partialCount,
+    states: { primaries, ...states, not_checked: notChecked, stamped: stampedPrimaries, continuations },
     withheld_kinds: withheldKinds,
     entries: rows,
   }) + '\n');

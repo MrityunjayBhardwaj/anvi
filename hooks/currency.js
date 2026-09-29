@@ -2061,6 +2061,41 @@ function greenScopeText(scope) {
   return s;
 }
 
+// Has anyone checked this entry against the code it cites — the question the colour
+// alone cannot answer, because a colour mixes what moved with what it was measured FROM.
+// A VALIDATED stamp is a moment someone re-checked the claim; a FIX anchor is the commit
+// the entry was written against (measured: every FIX-anchored entry on anvi entered the
+// store within -3..+1 days of its fix, #529 decision A). The time rung is only when the
+// entry's TEXT last changed, so green over it is "never confirmed", not verified.
+//
+// Only a GREEN/YELLOW/RED verdict is a freshness claim. Anything else is "not checked",
+// and freshnessReason says which of three different things happened, because each asks
+// for a different action: git never answered (retry), the pointer was withheld (grant
+// the area), or nothing the entry cites can be diffed here (give it a pointer that can).
+// The one GRAY that stays "never confirmed" is the no-anchor terminal over files the
+// entry does cite: stamping it is exactly what would grade it. Pure over the verdict;
+// the report counts with it now, and the injector's freshness line will ask the same.
+const FRESHNESS_STATES = ['verified', 'drifted', 'never confirmed', 'not checked'];
+const NOT_CHECKED_REASONS = ['no answer', 'withheld', 'nothing diffable'];
+const CHECKED_ANCHOR = (source) => source === 'VALIDATED' || source.startsWith('FIX-');
+function freshnessState(verdict) {
+  if (freshnessReason(verdict)) return 'not checked';
+  const anchor = verdict.anchor || {};
+  if (verdict.status === 'GRAY') return 'never confirmed'; // no anchor, files cited
+  if (!CHECKED_ANCHOR(anchor.source || 'none')) return 'never confirmed';
+  return verdict.status === 'GREEN' ? 'verified' : 'drifted';
+}
+// Why a verdict is "not checked", or null when it is a state about the entry.
+function freshnessReason(verdict) {
+  if (!verdict || verdict.couldNotLook) return 'no answer';
+  const anchor = verdict.anchor || {};
+  if (anchor.storeUnreadable) return 'no answer';
+  if (verdict.status === 'WITHHELD') return 'withheld';
+  if (['GREEN', 'YELLOW', 'RED'].includes(verdict.status)) return null;
+  if (verdict.status === 'GRAY' && !anchor.sha && ((verdict.files || []).length > 0)) return null;
+  return 'nothing diffable';
+}
+
 // Compute a currency verdict for one entry.
 //   entry: { validatedField?, fixField?, refField?, id?, lineStart?, lineEnd? }
 //   opts:  { git, fileExists, storeGit?, cataloguePath? }
@@ -2371,7 +2406,7 @@ function gradeEntry(entry, opts) {
 }
 
 module.exports = {
-  computeCurrency, verdictScope, greenScopeText, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable,
+  computeCurrency, verdictScope, greenScopeText, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable,
   GIT_MAX_BUFFER,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom, matchedTracked,
