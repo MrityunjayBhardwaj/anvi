@@ -1,0 +1,4 @@
+{
+  "about": "The drift ceiling (#530, ruled 2026-09-29): past this share of a project's primary catalogue entries drifted (yellow or red in the currency report), a session re-validates one batch before it wraps. It sets a direction, it does not block work: being over asks for one batch per wrap, not for the whole backlog. Read by scripts/drift-gate.js; change it only by a ruling on #530 or its successor.",
+  "ceiling_percent": 25
+}
