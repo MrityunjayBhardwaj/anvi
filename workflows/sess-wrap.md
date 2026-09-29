@@ -81,6 +81,10 @@ Rules:
 - Update an existing entry rather than duplicating it. Check first.
 - IDs are never renumbered or reused (V3); the archive is git history (V2).
 - Every new entry carries a REF (UNGROUNDED if no source is grounded yet).
+- Every new error pattern or invariant carries `**EVIDENCE:** observed | source |
+  inferred` — the kind that actually licensed it (see the catalogue templates),
+  with its pointer (in vyapti the pointer stays in `Confirmed by`). Do not add it
+  to older entries from memory: an entry without it is counted "not recorded".
 - Outward-facing content never carries catalogue IDs (V6) — but the catalogue
   files themselves do.
 - If nothing durable was learned, say so and write nothing. Do NOT manufacture

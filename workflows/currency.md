@@ -94,6 +94,13 @@ primaries only (continuations share their primary's verdict), always with all fo
 `--json` carries the same per row (`anchor`, `stamped`, `occurrence`, `state`, and
 `not_checked` with the reason) and in `states`; quote those rather than recounting
 from the colours.
+
+The `── evidence recorded on N of M` line counts what licensed each primary error pattern's
+and invariant's claim (the catalogues whose templates ask for it), from
+its `**EVIDENCE:**` field alone (observed · source · inferred). An entry without the
+field is "not recorded" and one whose value names no kind is "unreadable" — both are
+counted, never guessed from the entry's prose. Only entries written since the field
+existed carry it, so "not recorded" is expected to dominate for a long time.
 </step>
 
 <step name="3_scope">

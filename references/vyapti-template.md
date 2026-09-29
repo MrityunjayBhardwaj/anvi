@@ -48,6 +48,7 @@
 **Scope:** Where this holds.
 **Breaks when:** Where this doesn't hold (scope conditions).
 **Confirmed by:** [Direct observation that validated this — date]
+**EVIDENCE:** observed | source | inferred
 **Implication:** [What this means for design/debugging decisions]
 ```
 
@@ -109,10 +110,19 @@ _(Each entry must include a `**REF:**` field pointing to a Ground Truth doc.)_
 **Scope:** [Where this holds]
 **Breaks when:** [Where this doesn't hold]
 **Confirmed by:** [Direct observation — date]
+**EVIDENCE:** observed | source | inferred
 **Implication:** [What this means for design/debugging]
 **Status:** IMPLEMENTED / NOT YET IMPLEMENTED / ALIGNED / MISALIGNED
 **REF:** [Ground Truth doc]#[section] — `[source_file:line]` [what the code shows]
 ```
+
+The `**EVIDENCE:**` field records what licensed the claim, as one of three kinds:
+- `observed` — you ran something and read its output (a test run, a hook fired, a count)
+- `source` — you read the code that decides it (cite the file and symbol)
+- `inferred` — reasoned from reading, not run and not traced to the deciding code
+In vyapti the pointer stays in `Confirmed by`; `EVIDENCE` carries the kind alone. Write the kind you
+actually have, not the one you wish you had: `currency-report.js` counts each kind, and an
+entry without the field is counted as "not recorded" — never guessed from its prose.
 
 The `**REF:**` field creates the three-layer provenance chain:
 ```
