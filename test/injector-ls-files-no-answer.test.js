@@ -108,6 +108,10 @@ for (const run of [1, 2]) {
   ok(r.exit === 0 && /DHYANA/.test(r.ctx), `run ${run}: hook exits 0 and the checks inject`);
   ok(!/H1: ⚪ no currency anchor/.test(r.ctx), `run ${run}: H1 is not graded "no currency anchor"`);
   ok(/freshness NOT checked[^\n]*\bH1\b/.test(r.ctx), `run ${run}: H1 is named as NOT checked`);
+  // The reason is named as what happened — git gave no answer — not as a timeout (#529 step 3).
+  ok(/freshness NOT checked[^\n]*— git gave no answer/.test(r.ctx), `run ${run}: the ⏱ line says git gave no answer, not out of time`);
+  ok(/Freshness of the 2 entries delivered above: verified 0 · drifted 0 · never confirmed 0 · not checked this edit 2 \(no answer: B1, H1\)/.test(r.ctx),
+    `run ${run}: the freshness line counts both delivered entries as not checked — no answer`);
   ok(cachedH1() === null, `run ${run}: no verdict for H1 was written to the cache`);
 }
 

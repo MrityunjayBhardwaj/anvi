@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession, worktreeLinkNotice } = require('./anvi-paths.js');
-const { computeCurrency, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
+const { computeCurrency, freshnessState, freshnessReason, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -57,12 +57,15 @@ function cacheFile(projectRoot, head) {
 // "did THIS project's code move under THIS project's entry", so every git question
 // and every REF-file check below has to be asked of that repo. Ask the wrong repo
 // and it answers confidently about files it has never contained.
-// Returns { nudges, skipped }: skipped are the wanted entries with no verdict because
-// time ran out, which the caller must name — silence would read as "fresh".
+// Returns { nudges, skipped, states, why }: skipped are the wanted entries with no verdict
+// because time ran out, which the caller must name — silence would read as "fresh".
+// states maps `catalogue:id` to { state, reason } for every entry graded (#529 step 3);
+// why, on an early return, says why NONE were graded, so the caller can name the reason.
 function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
-  if (!wanted.length) return { nudges: [], skipped: [] };
+  const states = new Map();
+  if (!wanted.length) return { nudges: [], skipped: [], states };
   const allIds = () => wanted.map((w) => w.id);
-  if (timeLeft() < MIN_ENTRY_MS) return { nudges: [], skipped: allIds() };
+  if (timeLeft() < MIN_ENTRY_MS) return { nudges: [], skipped: allIds(), states, why: 'out of time' };
   // Same bound as the CLI's helpers, from the same constant. This one runs on every
   // edit, so an unbounded read here fails quietly at the worst moment (#409). The
   // timeout is the time LEFT, capped at GIT_TIMEOUT_MS: a git killed by it is read as
@@ -99,14 +102,16 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
   // extensionsFrom rethrows only when git never answered (#574): the store's extensions
   // alone would drop the project's own, so grading nothing beats grading every entry wrong.
   let fileExt;
-  try { fileExt = extensionsFrom(git, refResolver ? refResolver.files : []); } catch { return { nudges: [], skipped: allIds() }; }
+  try { fileExt = extensionsFrom(git, refResolver ? refResolver.files : []); } catch { return { nudges: [], skipped: allIds(), states, why: 'no answer' }; }
 
   let head;
   try { head = git('rev-parse HEAD').trim(); } catch (e) {
     // Not a repo (git ran and said so) → no drift to compute. Killed for time → say so.
-    return { nudges: [], skipped: typeof (e && e.status) === 'number' ? [] : allIds() };
+    return typeof (e && e.status) === 'number'
+      ? { nudges: [], skipped: [], states, why: 'nothing diffable' }
+      : { nudges: [], skipped: allIds(), states, why: 'no answer' };
   }
-  if (!head) return { nudges: [], skipped: [] };
+  if (!head) return { nudges: [], skipped: [], states, why: 'nothing diffable' };
 
   const cachePath = cacheFile(projectRoot, head);
   let cache = {};
@@ -166,13 +171,24 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
       // like a no-op, and teach that stamping is pointless — killing the update loop
       // this gate depends on. The catalogue's mtime closes that.
       const key = `${cat}:${e.id}:${mtime}`;
-      if (key in cache) { if (cache[key]) out.push(cache[key]); continue; }
+      // The state rides beside the nudge under its own key, so a cache written before it
+      // existed reads as a miss and is regraded once, rather than serving a nudge with no state.
+      const skey = `state:${key}`;
+      if (key in cache && cache[skey]) {
+        if (cache[key]) out.push(cache[key]);
+        states.set(`${cat}:${e.id}`, cache[skey]);
+        continue;
+      }
       // Budget guard: an uncached entry past the budget, or with too little of the hook's
       // deadline left, is skipped, not half-computed — and NAMED, so a skipped entry never
       // reads as a fresh one. It continues rather than breaks, so every skipped entry is
       // collected and the cached ones behind it are still served.
-      if (Date.now() - started > CURRENCY_BUDGET_MS || timeLeft() < MIN_ENTRY_MS) { skipped.push(e.id); continue; }
-      let nudge = null, couldNotLook = false;
+      if (Date.now() - started > CURRENCY_BUDGET_MS || timeLeft() < MIN_ENTRY_MS) {
+        skipped.push(e.id);
+        states.set(`${cat}:${e.id}`, { state: 'not checked', reason: 'out of time' });
+        continue;
+      }
+      let nudge = null, couldNotLook = false, graded = { state: 'not checked', reason: 'no answer' };
       try {
         const verdict = computeCurrency(e, {
           git,
@@ -182,12 +198,15 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
         });
         nudge = nudgeFor(verdict, { catalogue: cat, id: e.id });
         couldNotLook = !!(verdict && (verdict.couldNotLook || (verdict.anchor && verdict.anchor.storeUnreadable)));
+        graded = { state: freshnessState(verdict), reason: freshnessReason(verdict) };
       } catch { nudge = null; }
+      states.set(`${cat}:${e.id}`, graded);
       // Said, never cached: "git gave no answer" is a fact about this call (a slow machine,
       // a killed git), not about the entry. Cached, it stood in for the answer until HEAD
       // moved, and every edit in between repeated it (#567).
       if (couldNotLook) { if (nudge) out.push(nudge); continue; }
       cache[key] = nudge; // cache GREEN's null too — a fresh entry shouldn't be recomputed
+      cache[skey] = graded;
       if (nudge) out.push(nudge);
     }
   }
@@ -203,7 +222,41 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
     }
   } catch { /* cache is an optimization; failing to persist it costs speed, not correctness */ }
 
-  return { nudges: out, skipped };
+  return { nudges: out, skipped, states };
+}
+
+// --- One freshness line for everything delivered (#529 step 3) ----------------
+// Silence spoke for verified and never-checked entries alike. One line states all of
+// them, zeros included; ✓ marks only the verified, since a mark on the ~95% case marks
+// nothing. Printed on a file's first delivery in a session and again when its line
+// changes: a hook is a process per event, so "already said" lives in a file keyed by
+// the session. No session id → always printed, never silently withheld.
+const LINE_IDS = 6;
+const NOT_CHECKED_ORDER = ['out of time', 'no answer', 'nothing diffable', 'no id'];
+function freshnessLine(delivered) {
+  const by = { verified: [], drifted: [], 'never confirmed': [], 'not checked': [] };
+  for (const d of delivered) by[d.state].push(d);
+  const ids = (list) => {
+    const names = list.map((d) => d.name).sort((x, y) => x.localeCompare(y, 'en', { numeric: true }));
+    return names.length > LINE_IDS ? `${names.slice(0, LINE_IDS).join(', ')}, +${names.length - LINE_IDS} more` : names.join(', ');
+  };
+  const part = (label, list) => (list.length ? `${label} ${list.length} (${ids(list)})` : `${label} 0`);
+  const nc = by['not checked'];
+  const why = NOT_CHECKED_ORDER.map((r) => [r, nc.filter((d) => d.reason === r)]).filter(([, l]) => l.length)
+    .map(([r, l]) => `${r}: ${ids(l)}`).join('; ');
+  return `Freshness of the ${delivered.length} ${delivered.length === 1 ? 'entry' : 'entries'} delivered above: `
+    + [part('verified', by.verified), part('drifted', by.drifted), part('never confirmed', by['never confirmed'])].join(' · ')
+    + ` · not checked this edit ${nc.length}${nc.length ? ` (${why})` : ''}`;
+}
+function saidBefore(sessionId, file, line) {
+  if (!sessionId) return false;
+  const f = path.join(os.tmpdir(), `anvi-freshness-${String(sessionId).replace(/[^\w.-]/g, '_')}.json`);
+  let said = {};
+  try { said = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { said = {}; }
+  if (said[file] === line) return true;
+  said[file] = line;
+  try { fs.writeFileSync(f, JSON.stringify(said)); } catch { /* unrecorded → printed again next time, never withheld */ }
+  return false;
 }
 
 // --- KINDS: — selecting an entry by what a file IS, not where it sits ---------
@@ -884,7 +937,32 @@ process.stdin.on('end', () => {
       // ask when a record lists more than one.
       const subject = subjectRepoFor(filePath, data.cwd || process.cwd());
       if (subject.repo) {
-        const { nudges, skipped } = currencyNudges(subject.repo, anviDir, wanted, refDir, invDir);
+        const { nudges, skipped, states, why } = currencyNudges(subject.repo, anviDir, wanted, refDir, invDir);
+        // Every entry the message above delivers, once each, with its state. A boundary-
+        // mentioned error id that is no entry was never delivered (it has no summary), so it
+        // is left out; an unnumbered boundary is delivered and cannot be graded.
+        const hetIds = new Set(hetEntries.map((e) => e.id));
+        const delivered = [];
+        const seen = new Set();
+        for (const w of wanted) {
+          const k = `${w.catalogue}:${w.id}`;
+          if (seen.has(k) || (w.catalogue === 'hetvabhasa.md' && !hetIds.has(w.id))) continue;
+          seen.add(k);
+          const st = states.get(k)
+            || { state: 'not checked', reason: why || (skipped.includes(w.id) ? 'out of time' : 'no answer') };
+          delivered.push({ name: w.id, ...st });
+        }
+        for (const label of ungraded) delivered.push({ name: label, state: 'not checked', reason: 'no id' });
+        // ✓ where a verified entry is delivered as `ID: …` — the mark is only worth reading
+        // because it is rare.
+        for (const d of delivered) {
+          if (d.state !== 'verified' || !/^[A-Z]{1,3}\d+$/.test(d.name)) continue;
+          message = message.replace(new RegExp(`(^|[\\s;(])${d.name}: `, 'g'), `$1${d.name} ✓: `);
+        }
+        if (delivered.length) {
+          const line = freshnessLine(delivered);
+          if (!saidBefore(data.session_id, filePath, line)) message += `\n${line}`;
+        }
         // Capped first, then the out-of-time and ungraded notices are appended — they
         // are statements about what the gate could not reach, not verdicts competing
         // for the cap, and dropping them is the silence this whole block exists to end.
@@ -898,7 +976,7 @@ process.stdin.on('end', () => {
           const named = ids.length > SHOWN
             ? `${ids.slice(0, SHOWN).join(', ')}, and ${ids.length - SHOWN} more`
             : ids.join(', ');
-          lines.push(`⏱ freshness NOT checked for ${ids.length} ${one ? 'entry' : 'entries'} — out of time (${named}). `
+          lines.push(`⏱ freshness NOT checked for ${ids.length} ${one ? 'entry' : 'entries'} — ${why === 'no answer' ? 'git gave no answer' : 'out of time'} (${named}). `
             + `Nothing here says ${one ? 'it is' : 'they are'} current; a later edit fills the cache, `
             + 'or run `node scripts/currency-report.js <project-dir>`.');
         }
