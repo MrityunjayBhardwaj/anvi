@@ -171,6 +171,10 @@ function syncMemory(cwd) {
 // Consume stdin per hook protocol; the Stop payload carries `cwd`, used for the
 // memory copy-sync. Act on end (or on timeout with no cwd — preserves prior behavior).
 let input = '';
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('anvideck-checkpoint.js', 'Stop'); } catch (_) { meter = null; }
 const stdinTimeout = setTimeout(() => run(''), 5000);
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => { input += chunk; });
@@ -181,7 +185,11 @@ function run(rawInput) {
   if (ran) return; ran = true;
   try {
     let cwd = '';
-    try { cwd = (JSON.parse(rawInput || '{}').cwd) || ''; } catch { /* no/!JSON payload */ }
+    try {
+      const payload = JSON.parse(rawInput || '{}');
+      cwd = payload.cwd || '';
+      if (meter) meter.session(payload.session_id);
+    } catch { /* no/!JSON payload */ }
     if (!fs.existsSync(path.join(DIR, '.git'))) process.exit(0);
     syncMemory(cwd); // mirror live memory into the store BEFORE the dirty check
     // Don't interfere with an in-progress git operation

@@ -226,6 +226,10 @@ function checkpointFailureText() {
          ` — the durability backstop is not committing${f.detail ? `: ${f.detail}` : ''}`;
 }
 
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('ground-truth-session-start.js', 'SessionStart'); } catch (_) { meter = null; }
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -241,6 +245,7 @@ process.stdin.on('end', () => {
     // per-process, not die silently inside a hook — the catch below exits 0
     // either way, which would read as a hook with nothing to say.
     if (adoptSession) adoptSession(data.session_id);
+    if (meter) meter.session(data.session_id);
     const cwd = data.cwd || process.cwd();
     // Before any exit below — see checkpointFailureText. The health series is
     // machine-wide for the same reason, so it is read here too (anvi #516, #522).

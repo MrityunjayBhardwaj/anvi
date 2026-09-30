@@ -457,6 +457,10 @@ module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedCont
   REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
 
 if (require.main === module) {
+  // What this run costs, one row per run (#527). Guarded like any shared module: a
+  // missing meter on a skewed install must cost the measurement, never the hook.
+  let meter = null;
+  try { meter = require('./hook-meter.js'); meter.start('structure-guard-hook.js', 'PreToolUse'); } catch (_) { meter = null; }
   const stdinTimeout = setTimeout(() => process.exit(0), 9000);
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -467,6 +471,7 @@ if (require.main === module) {
     let payload;
     try { payload = JSON.parse(raw || '{}'); } catch { process.exit(0); }
     adoptSessionOf(payload);
+    if (meter) meter.session(payload.session_id);
     try {
       // The fast path: no registry, nothing to guard, nothing else loaded.
       if (!fs.existsSync(REGISTRY)) process.exit(0);

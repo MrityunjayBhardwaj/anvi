@@ -54,6 +54,7 @@ console.log('\nthe whole directory');
   ok(/2026-09-28T10:00:00Z → 2026-09-30T09:02:00Z/.test(out), 'the window, first to last row');
   ok(out.includes(DIR), 'the directory it read');
   ok(/killed from outside/.test(out), 'says what the rows cannot contain');
+  ok(/stdout; a refusal's copy of its reason on stderr is not counted/.test(out), 'and what bytes do not include');
   ok(/2 unreadable rows/.test(out) && /sA\.jsonl ×1/.test(out) && /sB\.jsonl ×1/.test(out),
     'a broken line and an unknown outcome are each counted, with their file named');
   const inj = out.split('\n').find(l => l.startsWith('inj.js')) || '';

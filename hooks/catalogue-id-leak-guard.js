@@ -89,6 +89,10 @@ try { ({ parseEntries } = require('./currency.js')); } catch { parseEntries = nu
 // command untouched, which degrades toward FIRING: the safe direction here.
 try { ({ blankQuotedHeredocs } = require('./shell-spans.js')); } catch { blankQuotedHeredocs = null; }
 
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('catalogue-id-leak-guard.js', 'PreToolUse'); } catch (_) { meter = null; }
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 // The real catalogue IDs for the project at `cwd` — the set a bare token must match to
@@ -188,6 +192,7 @@ process.stdin.on('end', () => {
     // session. Guarded: this module is loaded defensively above, and an install
     // predating the export must degrade to per-process, not throw inside a hook.
     if (adoptSession) adoptSession(data.session_id);
+    if (meter) meter.session(data.session_id);
     const cwd = data.cwd || process.cwd();
     const command = (data.tool_input && data.tool_input.command) || '';
     if (!command) process.exit(0);

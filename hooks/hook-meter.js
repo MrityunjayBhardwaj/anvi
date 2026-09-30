@@ -6,18 +6,26 @@
 // nothing still costs its latency every time.
 //
 // Shared module, not a hook: it reads no stdin and emits no envelope. A hook calls
-// start() at the top, session() once it has parsed its payload, and emitted() at each
-// site that writes to stdout. The row is written from the process's exit handler, so
-// every early `process.exit(0)` is metered without being touched. A run killed from
-// outside (the harness timeout) writes nothing; no row is not a zero.
+// start() once it knows it is running as a process (never at require time — suites
+// require hooks as modules), and session() once it has parsed its payload. start()
+// wraps process.stdout.write, so every byte the hook writes is counted wherever it is
+// written: a write site added later is metered without anyone remembering to. The row
+// is written from the process's exit handler, so every early `process.exit(0)` is
+// metered too. A run killed from outside (the harness timeout) writes nothing; no row
+// is not a zero.
 //
 // Row: { ts, sid, hook, event, bytes, ms, outcome }
-//   bytes    Buffer.byteLength of exactly what was written to stdout; 0 when silent
+//   bytes    Buffer.byteLength of exactly what was written to stdout; 0 when silent.
+//            A refusal's copy of its reason on stderr is not counted: stdout is the
+//            channel with effect, and what the harness does with stderr on exit 2 is
+//            not grounded in anything this repo has read.
 //   ms       performance.now() at exit — time since the process started, which is what
 //            the session waited for (module loading included). Node's launch before
 //            that clock starts is not: observed 2026-09-30, wall − ms = 14–16 ms over
 //            6 runs of three hooks on this repo.
-//   outcome  silent | informed | refused
+//   outcome  silent (nothing written) | refused (the output is a PreToolUse deny, or a
+//            top-level block decision) | informed (anything else written). Read from the
+//            output's own structure, never from its wording.
 //
 // Where: machine-local, never the store — a session's measurements are not knowledge,
 // and a hook may be running in a directory whose store project the caller does not own.
@@ -46,11 +54,24 @@ const fileFor = (sid) => (typeof sid === 'string' && /^[A-Za-z0-9._-]{1,128}$/.t
   ? `${sid}.jsonl` : 'no-session.jsonl');
 
 let row = null;
+let written = '';
+
+// What the hook said, judged by the shape the harness reads.
+function outcomeOf(text, bytes) {
+  if (!bytes) return 'silent';
+  try {
+    const o = JSON.parse(text);
+    const h = o && o.hookSpecificOutput;
+    if ((h && h.permissionDecision === 'deny') || (o && o.decision === 'block')) return 'refused';
+  } catch (_) { /* not JSON: still output */ }
+  return 'informed';
+}
 
 function write() {
   if (!row) return;
   try {
     row.ms = Math.round(performance.now() * 10) / 10;
+    row.outcome = outcomeOf(written, row.bytes);
     const dir = meterDir();
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, fileFor(row.sid)), JSON.stringify(row) + '\n');
@@ -60,6 +81,16 @@ function write() {
 function start(hook, event) {
   if (row) return; // once per process: a second exit handler would write a second row
   row = { ts: new Date().toISOString(), sid: null, hook, event, bytes: 0, ms: 0, outcome: 'silent' };
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = function meteredWrite(chunk, ...rest) {
+    try {
+      if (chunk != null && typeof chunk !== 'function') {
+        row.bytes += Buffer.byteLength(chunk);
+        written += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      }
+    } catch (_) { /* counting must never stop the write */ }
+    return original(chunk, ...rest);
+  };
   process.on('exit', write);
 }
 
@@ -67,12 +98,4 @@ function session(sid) {
   if (row && sid) row.sid = String(sid);
 }
 
-// Call with the exact string handed to stdout. Several emits in one run add up, and the
-// strongest outcome wins (refused over informed).
-function emitted(text, outcome = 'informed') {
-  if (!row) return;
-  row.bytes += Buffer.byteLength(String(text == null ? '' : text));
-  if (OUTCOMES.indexOf(outcome) > OUTCOMES.indexOf(row.outcome)) row.outcome = outcome;
-}
-
-module.exports = { start, session, emitted, meterDir, fileFor, OUTCOMES };
+module.exports = { start, session, outcomeOf, meterDir, fileFor, OUTCOMES };

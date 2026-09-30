@@ -475,7 +475,6 @@ process.stdin.on('end', () => {
       const links = typeof worktreeLinkNotice === 'function' ? worktreeLinkNotice(projectRoot) : null;
       if (links) {
         const out = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: links } });
-        if (meter) meter.emitted(out);
         process.stdout.write(out);
       }
       process.exit(0);
@@ -1023,7 +1022,6 @@ process.stdin.on('end', () => {
     };
 
     const out = JSON.stringify(output);
-    if (meter) meter.emitted(out);
     process.stdout.write(out);
 
     // --- AnviDeck logging (fire-and-forget) ---

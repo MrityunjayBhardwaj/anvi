@@ -79,6 +79,10 @@ function projectNameOf(root) {
 }
 
 // Timeout guard: exit if stdin doesn't close in 5s
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('provenance-guard.js', 'PostToolUse'); } catch (_) { meter = null; }
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -639,6 +643,7 @@ function run(data) {
   // session. Guarded: the module above is loaded defensively, so an install
   // predating the export must degrade to per-process rather than throw here.
   if (adoptSession) adoptSession(data.session_id);
+  if (meter) meter.session(data.session_id);
   const cwd = data.cwd || process.cwd();
   const toolName = data.tool_name || '';
   const toolInput = data.tool_input || {};

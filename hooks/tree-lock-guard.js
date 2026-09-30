@@ -234,6 +234,10 @@ module.exports = { MUTATORS, redirectsIntoTree, isInside, repoFor, gateRunning, 
 
 // ── Runtime ──────────────────────────────────────────────────────────────────
 if (require.main === module) {
+  // What this run costs, one row per run (#527). Guarded like any shared module: a
+  // missing meter on a skewed install must cost the measurement, never the hook.
+  let meter = null;
+  try { meter = require('./hook-meter.js'); meter.start('tree-lock-guard.js', 'PreToolUse'); } catch (_) { meter = null; }
   const stdinTimeout = setTimeout(() => process.exit(0), 4000);
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -242,6 +246,7 @@ if (require.main === module) {
     clearTimeout(stdinTimeout);
     try {
       const input = JSON.parse(raw || '{}');
+      if (meter) meter.session(input.session_id);
       const tool = input.tool_name || '';
       const ti = input.tool_input || {};
       const cwd = input.cwd || process.cwd();
