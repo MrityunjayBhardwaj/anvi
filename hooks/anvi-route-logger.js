@@ -12,8 +12,8 @@
 // unused commands over a 60-day window, so they go beside the meter's rows (durable,
 // machine-local), not to /tmp, which the OS clears.
 //
-// Fires on every Read tool call. Exits immediately if the file isn't a
-// known spec file. Lightweight: parse stdin, string match, exit.
+// Fires on every Read tool call. Exits immediately if the file is neither a
+// known spec file nor an installed workflow. Lightweight: parse stdin, string match, exit.
 
 const fs = require('fs');
 const path = require('path');
