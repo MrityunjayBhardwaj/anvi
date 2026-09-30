@@ -28,10 +28,20 @@ function loadFromCandidates(name) {
 }
 
 const args = process.argv.slice(2);
-const take = (flag) => { const i = args.indexOf(flag); return i === -1 ? undefined : args[i + 1]; };
+// A flag given without a value, or a --since that is not a date, would silently widen or
+// garble the filter while the header still claims it was applied. Refused instead.
+const refuse = (msg) => { console.error(`meter-report: ${msg}`); process.exit(2); };
+const take = (flag) => {
+  const i = args.indexOf(flag);
+  if (i === -1) return undefined;
+  const v = args[i + 1];
+  if (v === undefined || v.startsWith('--')) refuse(`${flag} needs a value`);
+  return v;
+};
 const jsonOnly = args.includes('--json');
 const session = take('--session');
 const since = take('--since');
+if (since !== undefined && !/^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(since)) refuse(`--since must be an ISO date (2026-09-29 or 2026-09-29T10:00:00Z), got "${since}"`);
 // The directory rule is the meter's own, so the report reads where the hooks write.
 const meter = loadFromCandidates('hook-meter.js');
 const OUTCOMES = meter.OUTCOMES;

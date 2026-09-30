@@ -84,6 +84,15 @@ console.log('\nfilters');
   ok(h && h.runs === 5 && h.bytes === 6000 && h.p95_ms === 400 && h.silent === 2, '--json carries the per-hook figures');
 }
 
+console.log('\narguments that would filter wrongly are refused');
+{
+  const bad = run('--since', 'yesterday');
+  eq(bad.status, 2, '--since that is not an ISO date is exit 2, not a text comparison');
+  ok(/--since/.test(bad.stdout + bad.stderr), 'and says which argument');
+  const bare = run('--session');
+  eq(bare.status, 2, '--session with no value is exit 2, not "all sessions"');
+}
+
 console.log('\nnothing to report is not zero');
 {
   const empty = path.join(tmp, 'empty');
