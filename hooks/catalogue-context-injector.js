@@ -370,6 +370,11 @@ function extractChecks(content) {
 }
 
 // Timeout guard: exit if stdin doesn't close in 5s
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('catalogue-context-injector.js', 'PreToolUse'); } catch (_) { meter = null; }
+
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -385,6 +390,7 @@ process.stdin.on('end', () => {
     // per-process, not die silently inside a hook — the catch below exits 0
     // either way, which would read as a hook with nothing to say.
     if (adoptSession) adoptSession(data.session_id);
+    if (meter) meter.session(data.session_id);
     const toolInput = data.tool_input || {};
     const filePath = toolInput.file_path || '';
 
@@ -414,7 +420,11 @@ process.stdin.on('end', () => {
       // HAS catalogues, whose links were skipped, is not a project without them (#553). Once
       // per session per worktree, shared with the session-start hook's notice.
       const links = typeof worktreeLinkNotice === 'function' ? worktreeLinkNotice(projectRoot) : null;
-      if (links) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: links } }));
+      if (links) {
+        const out = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: links } });
+        if (meter) meter.emitted(out);
+        process.stdout.write(out);
+      }
       process.exit(0);
     }
 
@@ -934,7 +944,9 @@ process.stdin.on('end', () => {
       }
     };
 
-    process.stdout.write(JSON.stringify(output));
+    const out = JSON.stringify(output);
+    if (meter) meter.emitted(out);
+    process.stdout.write(out);
 
     // --- AnviDeck logging (fire-and-forget) ---
     // Append structured log for real-time dashboard observation.

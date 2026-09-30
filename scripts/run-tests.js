@@ -31,6 +31,13 @@ const { spawnSync, execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const TEST_DIR = path.join(ROOT, 'test');
 
+// Suites spawn metered hooks with invented session ids. Pointed at the real meter
+// directory, every suite run would add rows indistinguishable from real sessions and
+// inflate the very counts the meter exists to report (#527). Children inherit this.
+if (!process.env.ANVI_METER_DIR) {
+  process.env.ANVI_METER_DIR = require('fs').mkdtempSync(path.join(require('os').tmpdir(), 'anvi-suite-meter-'));
+}
+
 // The per-file cap, named rather than inlined so the report can PRINT it. In the run
 // that produced #316 the cap was 300s and the five files ran ~901s — the timeout was
 // detected but did not stop anything near the cap, and why is still open (the obvious

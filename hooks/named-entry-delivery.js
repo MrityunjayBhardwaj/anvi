@@ -148,6 +148,11 @@ module.exports = { build, loadEntries, idInHeading, PER_ENTRY_CHARS, TOTAL_CHARS
 
 if (require.main !== module) return;
 
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('named-entry-delivery.js', 'UserPromptSubmit'); } catch (_) { meter = null; }
+
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -157,6 +162,7 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(input);
     if (adoptSession) adoptSession(data.session_id);
+    if (meter) meter.session(data.session_id);
     const prompt = data.prompt || data.user_message || data.message || '';
     const anvi = resolveDirForRead(data.cwd || process.cwd(), '.anvi');
     let message;
@@ -175,9 +181,11 @@ process.stdin.on('end', () => {
       message = build(prompt, anvi.dir);
     }
     if (!message) { process.exit(0); }
-    process.stdout.write(JSON.stringify({
+    const out = JSON.stringify({
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: message },
-    }));
+    });
+    if (meter) meter.emitted(out);
+    process.stdout.write(out);
   } catch (_) {
     process.exit(0);
   }
