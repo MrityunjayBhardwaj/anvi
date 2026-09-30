@@ -113,6 +113,18 @@ console.log('a cache written before states existed is regraded, not served witho
     `the same line from a cache with no states (got ${JSON.stringify(line)})`);
 }
 
+console.log('a green over part of what it cites is not verified, and the line says why (#583)');
+{
+  // H4 is stamped and its one resolvable file is unmoved, but it also cites a file that
+  // cannot be found here. Its reason must be PRINTED: a hand-written reason list here
+  // once dropped any reason it did not name, and the line's ids stopped summing.
+  fs.writeFileSync(path.join(P, '.anvi', 'hetvabhasa.md'), HET() + ['', '## H4: PARTLY-FOUR — one file here, one not',
+    '**REF:** `src/calm.js`; `src/gone.js`', `**VALIDATED:** ${A} 2026-01-01`, ''].join('\n'));
+  line = lineOf(inject('src/calm.js', sid('partly')));
+  ok(/verified 2 \(H1, V1\)/.test(line) && /\(partly compared: H4[;)]/.test(line),
+    `H4 is not verified, and is listed under partly compared (got ${JSON.stringify(line)})`);
+}
+
 console.log('control: a file nothing delivers prints no line');
 ok(lineOf(inject('src/alone.js', sid('c'))) === '', 'no entries → no freshness line');
 

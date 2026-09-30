@@ -2083,8 +2083,20 @@ function greenScopeText(scope) {
 // The one GRAY that stays "never confirmed" is the no-anchor terminal over files the
 // entry does cite: stamping it is exactly what would grade it. Pure over the verdict;
 // the report counts with it now, and the injector's freshness line will ask the same.
+//
+// Verified also needs every cited file COMPARED (#583, #590). A green is computed over
+// the files that could be compared; one that could not be found, or whose history lacks
+// the anchor, is set aside. That green is honest about what it saw, but it does not
+// vouch for the entry, and counted as verified it read exactly like a green over every
+// file. Observed 2026-09-30: in a worktree without its `ref` link, two entries read
+// verified off one code file each, their Ground Truth docs unresolved; linked, one of
+// them is drifted by that doc. So such a green is "not checked", `partly compared`
+// (restore the link, or re-point the citation) — or `withheld` when the report set part
+// of it aside as a withheld area (`partial`), since the action there is to grant it.
+// Store reference files are not counted against it: their freshness is a version
+// question, not drift. Drift over part of the files is still drift, so only GREEN narrows.
 const FRESHNESS_STATES = ['verified', 'drifted', 'never confirmed', 'not checked'];
-const NOT_CHECKED_REASONS = ['no answer', 'withheld', 'nothing diffable'];
+const NOT_CHECKED_REASONS = ['no answer', 'withheld', 'partly compared', 'nothing diffable'];
 const CHECKED_ANCHOR = (source) => source === 'VALIDATED' || source.startsWith('FIX-');
 function freshnessState(verdict) {
   if (freshnessReason(verdict)) return 'not checked';
@@ -2099,6 +2111,11 @@ function freshnessReason(verdict) {
   const anchor = verdict.anchor || {};
   if (anchor.storeUnreadable) return 'no answer';
   if (verdict.status === 'WITHHELD') return 'withheld';
+  if (verdict.status === 'GREEN' && CHECKED_ANCHOR(anchor.source || 'none')) {
+    if (verdict.partial) return 'withheld';
+    const uncompared = (verdict.files || []).filter(f => f.exists === false ? !f.reference : f.changedCommits === null);
+    if (uncompared.length) return 'partly compared';
+  }
   if (['GREEN', 'YELLOW', 'RED'].includes(verdict.status)) return null;
   if (verdict.status === 'GRAY' && !anchor.sha && ((verdict.files || []).length > 0)) return null;
   return 'nothing diffable';

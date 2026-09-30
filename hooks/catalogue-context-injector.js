@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession, worktreeLinkNotice } = require('./anvi-paths.js');
-const { computeCurrency, freshnessState, freshnessReason, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
+const { computeCurrency, freshnessState, freshnessReason, NOT_CHECKED_REASONS, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -232,7 +232,9 @@ function currencyNudges(projectRoot, anviDir, wanted, refDir, invDir) {
 // changes: a hook is a process per event, so "already said" lives in a file keyed by
 // the session. No session id → always printed, never silently withheld.
 const LINE_IDS = 6;
-const NOT_CHECKED_ORDER = ['out of time', 'no answer', 'nothing diffable', 'no id'];
+// The shared reasons come from currency.js, so a reason added there is printed here too:
+// a hand-written copy dropped any it did not list, and the line's ids no longer summed.
+const NOT_CHECKED_ORDER = ['out of time', ...NOT_CHECKED_REASONS, 'no id'];
 function freshnessLine(delivered) {
   const by = { verified: [], drifted: [], 'never confirmed': [], 'not checked': [] };
   for (const d of delivered) by[d.state].push(d);
