@@ -14,10 +14,20 @@ Collect from current session:
 </step>
 
 <step name="estimate_usage">
-Rough estimation of session resource usage:
-- Approximate tool calls
-- Approximate context used
-- Duration
+What this session's hooks cost, from the meter's own rows (#527) — measured, not estimated:
+
+```bash
+SID="${CLAUDE_CODE_SESSION_ID:-}"   # the harness's id for this session — the meter's file name
+if [ -z "$SID" ]; then
+  echo "hook cost: NOT MEASURED — this shell has no session id (CLAUDE_CODE_SESSION_ID unset)"
+else
+  node "$HOME/.claude/anvi/scripts/meter-report.js" --session "$SID" --summary
+fi
+```
+
+Quote the line as printed. `NOT MEASURED` (exit 2, or no session id) goes in the report as
+not measured — never as zero. It covers hooks only: what the model itself read and wrote
+is not in it, and nothing here estimates that.
 </step>
 
 <step name="cognitive_metrics">
@@ -66,6 +76,9 @@ Write `$PM/reports/SESSION_REPORT_{timestamp}.md`:
 - Lifecycles: {N} total ({+M} this session)
 - Debug sessions resolved: {N}
 - Recovery triggers: {N}
+
+## Hook cost
+{The line from estimate_usage, verbatim}
 
 ## Outcomes
 {What was delivered, what's pending}
