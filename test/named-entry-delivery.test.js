@@ -52,7 +52,11 @@ fs.mkdirSync(anvi, { recursive: true });
 fs.writeFileSync(path.join(anvi, 'hetvabhasa.md'), [
   '# Hetvabhasa', '',
   '## H1: the first pattern', 'BODY-H1 distinctive line', '',
-  '## H2 — an em-dash heading', 'BODY-H2 distinctive line', '',
+  '## H2 — an em-dash heading', 'BODY-H2 distinctive line',
+  // Three stamps out of date order, so first (08-15), last (08-01) and NEWEST (09-01)
+  // are three different answers — only the newest counts.
+  '**VALIDATED:** 5eed123 2026-08-15 — a look', '**VALIDATED:** abc1234 2026-09-01 — re-read at trunk',
+  '**VALIDATED:** 0ff1ce0 2026-08-01 — appended late', '',
   '### [H3] a bracketed id', 'BODY-H3 distinctive line', '',
   '## H4: a very long one', 'x'.repeat(20000), '',
 ].join('\n'));
@@ -201,6 +205,42 @@ console.log('\nGROUP 7 — driven through stdin exactly as the harness drives it
 
   const nowhere = run({ hook_event_name: 'UserPromptSubmit', cwd: '/nonexistent-xyz', prompt: '.anvi H1' });
   eq(nowhere.status, 0, 'an unresolvable project never blocks the turn');
+}
+
+// ── GROUP 9 — every delivered entry states its freshness, from the text alone ──
+console.log('\nGROUP 9 — a named entry arrives with its stamp stated, and nothing claims it was checked');
+{
+  const line = (out) => (out.match(/^Freshness of the .*$/m) || [])[0] || '';
+  const plain = H.build('read .anvi entries H1, V2 and B1 before starting', anvi);
+  const l = line(plain);
+  ok(l, 'a delivery carries ONE freshness line');
+  eq((plain.match(/^Freshness of the /gm) || []).length, 1, 'exactly one, not one per entry');
+  ok(/Freshness of the 3 entries delivered below/.test(l), 'it counts the entries actually delivered');
+  ok(/never stamped 3 \(B1, H1, V2\)/.test(l), 'unstamped entries are counted AND named');
+  ok(/stamped 0\b/.test(l.replace(/never stamped/g, '')), 'a zero is printed, so silence cannot read as safety');
+  ok(/not checked/.test(l) && /no git/.test(l), 'it says none was graded here, and why');
+  ok(!/verified|✓/.test(plain), 'nothing on this path claims an entry is verified');
+  ok(plain.indexOf(l) < plain.indexOf('--- '), 'the line sits above the entries it describes');
+
+  const stamped = line(H.build('read .anvi H2 and H1', anvi));
+  ok(/ stamped 1 \(H2 2026-09-01\)/.test(stamped), 'a stamped entry is named with its NEWEST stamp date, not its first');
+  ok(/never stamped 1 \(H1\)/.test(stamped), 'and the unstamped one beside it');
+
+  // Budget-dropped entries are not delivered, so they are not counted as delivered.
+  const many = path.join(TMP, 'many');
+  const ids = Array.from({ length: 40 }, (_, i) => `H${i + 1}`).join(' ');
+  const capped = H.build(`.anvi ${ids}`, many);
+  const n = (capped.match(/^--- \S+ \(/gm) || []).length;
+  ok(new RegExp(`Freshness of the ${n} entries delivered below`).test(capped), 'a capped delivery counts only what arrived');
+
+  const onlyMissing = H.build('read .anvi H9999', anvi);
+  ok(!/^Freshness of/m.test(onlyMissing), 'nothing delivered, no freshness line');
+
+  // COULD NOT LOOK must never print as NOTHING FOUND: a missing stamp reader is not
+  // "never stamped".
+  const blind = line(H.build('read .anvi H2', anvi, null));
+  ok(/not read/.test(blind), 'without the stamp reader the line says stamps were not read');
+  ok(!/never stamped/.test(blind), 'and does not call the entry unstamped');
 }
 
 // ── GROUP 8 — the source stays greppable ───────────────────────────────────
