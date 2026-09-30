@@ -10,7 +10,13 @@
 // before its exit handler, so it leaves no row. Every figure here is "of the runs that
 // finished", and the report says so each time rather than only when it seems to matter.
 //
-// Usage: node scripts/meter-report.js [--session <id>] [--since <ISO date>] [--dir <meter dir>] [--json]
+// With --workflows it reports workflow reads instead (#527 step 6): per workflow, reads,
+// sessions and the last read, beside when recording began. That is a PROXY for command
+// use — a skill reads its workflow to run it, but a read is not a completed run — and
+// the report says so every time. A command unused for a window is only evidence once
+// recording began before the window did.
+//
+// Usage: node scripts/meter-report.js [--workflows] [--session <id>] [--since <ISO date>] [--dir <meter dir>] [--json]
 // Exit:  0 rows reported · 2 NO ROWS — nothing was metered in this scope. Never a table of
 //        zeros: "the meter wrote nothing" and "the hooks cost nothing" ask different things.
 'use strict';
@@ -53,6 +59,70 @@ const noRows = (why) => {
   else console.log(msg);
   process.exit(2);
 };
+
+if (args.includes('--workflows')) workflowReport();
+
+function workflowReport() {
+  const wdir = meter.workflowReadsDir({ ANVI_METER_DIR: dir });
+  const none = (why) => {
+    const msg = `no workflow-read rows ${why} (${wdir}). Nothing was recorded in this scope — that is not evidence a command went unused.`;
+    if (jsonOnly) process.stdout.write(JSON.stringify({ dir: wdir, reads: 0, proxy: true, reason: msg }) + '\n');
+    else console.log(msg);
+    process.exit(2);
+  };
+  let wfiles = [];
+  try { wfiles = fs.readdirSync(wdir).filter(f => f.endsWith('.jsonl')).sort(); } catch { none('— the directory cannot be read'); }
+  const all = [];
+  const bad = {};
+  for (const f of wfiles) {
+    let text = '';
+    try { text = fs.readFileSync(path.join(wdir, f), 'utf8'); } catch { bad[f] = (bad[f] || 0) + 1; continue; }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let r;
+      try { r = JSON.parse(line); } catch { bad[f] = (bad[f] || 0) + 1; continue; }
+      if (!r || typeof r.workflow !== 'string' || typeof r.ts !== 'string') { bad[f] = (bad[f] || 0) + 1; continue; }
+      all.push(r);
+    }
+  }
+  const badTotal = Object.values(bad).reduce((a, b) => a + b, 0);
+  if (!all.length) none('in the directory');
+  // When recording began is never filtered: it is what any "unused for N days" is measured against.
+  const began = all.map(r => r.ts).sort()[0];
+  const kept = all.filter(r => (!session || r.sid === session) && (!since || r.ts >= since));
+  if (!kept.length) none('match the filter');
+  const per = {};
+  for (const r of kept) {
+    const w = per[r.workflow] || (per[r.workflow] = { reads: 0, sids: new Set(), last: r.ts });
+    w.reads++; w.sids.add(r.sid);
+    if (r.ts > w.last) w.last = r.ts;
+  }
+  const workflows = {};
+  for (const [n, w] of Object.entries(per)) workflows[n] = { reads: w.reads, sessions: w.sids.size, last: w.last };
+  const sessions = new Set(kept.map(r => r.sid)).size;
+  const days = Math.floor((Date.now() - Date.parse(began)) / 86400000);
+  if (jsonOnly) {
+    process.stdout.write(JSON.stringify({ dir: wdir, proxy: true, session: session || null, since: since || null,
+      reads: kept.length, sessions, recording_began: began, unreadable: badTotal, workflows }, null, 2) + '\n');
+    process.exit(0);
+  }
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const scope = [session && `session ${session}`, since && `since ${since}`].filter(Boolean).join(', ');
+  console.log(`workflow reads — ${plural(kept.length, 'read')} of ${plural(Object.keys(workflows).length, 'workflow')} in ${plural(sessions, 'session')}${scope ? ` (${scope})` : ''}`);
+  console.log(`  read from ${wdir}`);
+  console.log('  A PROXY for command use: a Read of ~/.claude/anvi/workflows/<name>.md. A read is not a completed run, and');
+  console.log('  a long workflow read in parts is several reads — sessions is the closer figure.');
+  console.log(`  recording began ${began} (${plural(days, 'day')} ago); no command can be called unused for longer than that.`);
+  if (badTotal) console.log(`  ⚠ ${plural(badTotal, 'unreadable row')}, not counted: ${Object.entries(bad).map(([f, n]) => `${f} ×${n}`).join(', ')}`);
+  console.log('');
+  const names = Object.keys(workflows).sort((a, b) => workflows[b].sessions - workflows[a].sessions || workflows[b].reads - workflows[a].reads || a.localeCompare(b));
+  const width = Math.max(...names.map(n => n.length));
+  for (const n of names) {
+    const w = workflows[n];
+    console.log(`${n.padEnd(width)}  ${plural(w.reads, 'read').padStart(9)}  ${plural(w.sessions, 'session').padStart(11)}  last ${w.last}`);
+  }
+  process.exit(0);
+}
 
 let files = [];
 try { files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).sort(); } catch { noRows('— the directory cannot be read'); }

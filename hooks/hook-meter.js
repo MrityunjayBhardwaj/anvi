@@ -53,6 +53,11 @@ function meterDir(env = process.env) {
 const fileFor = (sid) => (typeof sid === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(sid) && !/^\.+$/.test(sid)
   ? `${sid}.jsonl` : 'no-session.jsonl');
 
+// Workflow reads (#527 step 6) live in a directory of their own beside the cost rows,
+// so neither report can mistake one kind of row for the other.
+const WORKFLOW_READS = 'workflow-reads';
+const workflowReadsDir = (env = process.env) => path.join(meterDir(env), WORKFLOW_READS);
+
 let row = null;
 let written = '';
 
@@ -98,4 +103,4 @@ function session(sid) {
   if (row && sid) row.sid = String(sid);
 }
 
-module.exports = { start, session, outcomeOf, meterDir, fileFor, OUTCOMES };
+module.exports = { start, session, outcomeOf, meterDir, fileFor, workflowReadsDir, OUTCOMES };
