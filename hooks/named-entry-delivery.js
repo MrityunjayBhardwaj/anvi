@@ -44,6 +44,34 @@ const ID_TOKEN = /\b[A-Z]{1,2}[0-9]{1,4}\b/g;
 // use resets it first.
 const hasId = (t) => { ID_TOKEN.lastIndex = 0; return ID_TOKEN.test(t); };
 
+// A RANGE names every id inside it. Read one token at a time, `Q300–Q302` is its two
+// ends and the middle is neither delivered nor reported. Measured on 783 distinct
+// catalogue-talking prompts on this machine: 91 ranges carried the prefix on both
+// ends (widest 22 apart) and 5 dropped it on the end (`Q570–572`). The dropped form
+// is taken only with nothing around the dash — every spaced one seen was prose
+// (`Q410 — 18 lines`). A range wider than the cap, or reversed, is looked up by its
+// ends and SAID to be unexpanded, never guessed at and never silently narrowed.
+const MAX_RANGE_SPAN = 30;
+const ID_OR_RANGE = /\b([A-Z]{1,2})([0-9]{1,4})\b(?:\s?[–—-]\s?\1([0-9]{1,4})\b|[–—-]([0-9]{1,4})\b)?/g;
+
+/** The ids a prompt names, in order, ranges expanded; plus the ranges left unexpanded. */
+function namedIds(prompt) {
+  const ids = [];
+  const unexpanded = [];
+  for (const [, prefix, a, b1, b2] of prompt.matchAll(ID_OR_RANGE)) {
+    const b = b1 !== undefined ? b1 : b2;
+    if (b === undefined) { ids.push(prefix + a); continue; }
+    const lo = Number(a), hi = Number(b);
+    if (hi >= lo && hi - lo <= MAX_RANGE_SPAN) {
+      for (let n = lo; n <= hi; n++) ids.push(prefix + n);
+    } else {
+      ids.push(prefix + a, prefix + b);
+      unexpanded.push({ prefix, text: `${prefix}${a}–${prefix}${b}` });
+    }
+  }
+  return { ids: [...new Set(ids)], unexpanded };
+}
+
 // Measured against all 4,394 entries in the fleet: median 2,719 chars, p75 3,638,
 // p95 6,378, max 58,060; briefs name a median of 8 ids and a p90 of 15. So the
 // median delivery is ~21 KB and the tail reaches ~93 KB. These caps leave the
@@ -135,7 +163,7 @@ function freshnessLine(delivered, entries, stampOf) {
 
 function build(prompt, anviDir, stampOf = STAMP_OF) {
   if (!prompt || !CATALOGUE_WORD.test(prompt)) return null;
-  const tokens = [...new Set(prompt.match(ID_TOKEN) || [])];
+  const { ids: tokens, unexpanded } = namedIds(prompt);
   if (!tokens.length) return null;
 
   const { entries, prefixes } = loadEntries(anviDir);
@@ -178,11 +206,17 @@ function build(prompt, anviDir, stampOf = STAMP_OF) {
     head += `\n⚠ NAMED BUT NOT FOUND in this project's catalogues: ${missing.join(', ')}. `
       + 'The id may be wrong, or may belong to another project. Nothing was delivered for it.';
   }
+  // Only a range in this catalogue's own vocabulary; a planning-label range stays silent.
+  const ranges = unexpanded.filter((r) => prefixes.has(r.prefix)).map((r) => r.text);
+  if (ranges.length) {
+    head += `\n⚠ RANGE NOT EXPANDED: ${ranges.join(', ')} — reversed, or wider than ${MAX_RANGE_SPAN + 1} ids. `
+      + 'Only its two ends were looked up; name the ids between if you need them.';
+  }
   if (delivered.length) head += `\n${freshnessLine(delivered, entries, stampOf)}`;
   return parts.length ? `${head}\n\n${parts.join('\n\n')}` : head;
 }
 
-module.exports = { build, loadEntries, idInHeading, freshnessLine, PER_ENTRY_CHARS, TOTAL_CHARS };
+module.exports = { build, loadEntries, idInHeading, freshnessLine, namedIds, MAX_RANGE_SPAN, PER_ENTRY_CHARS, TOTAL_CHARS };
 
 if (require.main !== module) return;
 

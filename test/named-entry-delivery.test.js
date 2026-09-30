@@ -243,6 +243,55 @@ console.log('\nGROUP 9 — a named entry arrives with its stamp stated, and noth
   ok(!/never stamped/.test(blind), 'and does not call the entry unstamped');
 }
 
+// ── GROUP 10 — a range names every id inside it ─────────────────────────────
+// Real briefs write ranges: of 783 distinct catalogue-talking prompts on this
+// machine, 91 ranges carried the prefix on both ends (spans up to 22) and 5 dropped
+// it on the end (`H570–572`). Read one token at a time, a range is its two ends and
+// the middle is neither delivered nor reported — the silent drop GROUP 3 forbids.
+console.log('\nGROUP 10 — a range delivers its middle, and one it will not expand says so');
+{
+  const ids = (out) => (out.match(/^--- (\S+) \(/gm) || []).map((s) => s.slice(4, -2)).join(',');
+  eq(ids(H.build('read .anvi H1–H3 first', anvi)), 'H1,H2,H3', 'an en-dash range delivers its MIDDLE entry');
+  eq(ids(H.build('read .anvi H1—H3 first', anvi)), 'H1,H2,H3', 'an em-dash range too');
+  eq(ids(H.build('read .anvi H1-H3 first', anvi)), 'H1,H2,H3', 'a hyphen range too');
+  eq(ids(H.build('read .anvi H1 – H3 first', anvi)), 'H1,H2,H3', 'spaces around the dash, prefix on both ends');
+  eq(ids(H.build('read .anvi H1–3 first', anvi)), 'H1,H2,H3', 'the end may drop its prefix when nothing separates it');
+  eq(ids(H.build('read .anvi V1 then H1–H3 then K1', anvi)), 'V1,H1,H2,H3,K1', 'expanded ids keep the prompt\'s order');
+
+  const past = H.build('read .anvi H3–H5', anvi);
+  eq(ids(past), 'H3,H4', 'a range running past the catalogue delivers what exists');
+  ok(/NAMED BUT NOT FOUND[^\n]*H5/.test(past), 'and reports the id that does not exist');
+  ok(/names 3 catalogue entries/.test(past), 'the count in the header includes every id the range names');
+
+  // Controls: things that look like ranges and are not, or are too wide to trust.
+  eq(ids(H.build('read .anvi H1–V2', anvi)), 'H1,V2', 'different prefixes are two ids, not a range');
+  eq(ids(H.build('read .anvi H1 — 3 lines above', anvi)), 'H1', 'a spaced dash before a bare number is prose, not a range');
+  eq(H.build('read .anvi phases S1–S4', anvi), null, 'a planning-label range stays silent');
+
+  const many = path.join(TMP, 'many');
+  const wide = H.build('read .anvi H1–H40', many);
+  eq(ids(wide), 'H1,H40', 'a range wider than the cap is looked up by its ends only');
+  ok(/RANGE NOT EXPANDED[^\n]*H1–H40/.test(wide), 'and SAYS its middle was not looked up');
+  const back = H.build('read .anvi H3–H1', anvi);
+  ok(/RANGE NOT EXPANDED[^\n]*H3–H1/.test(back), 'a reversed range is not guessed at, and says so');
+  // The cap's edge, from both sides, so an off-by-one in either direction goes red.
+  const edge = H.MAX_RANGE_SPAN;
+  // Counted from the header, which covers delivered AND budget-dropped: 31 of these
+  // 4,000-char entries overrun the budget, and the drops are named, not lost.
+  const atCap = H.build(`read .anvi H1–H${1 + edge}`, many);
+  ok(new RegExp(`names ${edge + 1} catalogue entries`).test(atCap) && !/RANGE NOT EXPANDED/.test(atCap),
+    'a range exactly at the cap is expanded in full');
+  ok(/RANGE NOT EXPANDED/.test(H.build(`read .anvi H1–H${2 + edge}`, many)), 'one id past the cap is not');
+  ok(!/RANGE NOT EXPANDED/.test(H.build('read .anvi H2–H2', anvi)), 'a one-id range is not called reversed');
+  eq(H.build('read .anvi phases S1–S99', anvi), null, 'a WIDE planning-label range stays silent too');
+  // Alone, that prompt leaves before the notice is built; beside a real id it does not.
+  const mixed = H.build('read .anvi H1 for phases S1–S99', anvi);
+  ok(/BODY-H1/.test(mixed) && !/RANGE NOT EXPANDED/.test(mixed),
+    'beside a real id, a wide planning-label range still raises no notice');
+  const fine = H.build('read .anvi H1–H3', anvi);
+  ok(!/RANGE NOT EXPANDED/.test(fine), 'an expanded range carries no such notice');
+}
+
 // ── GROUP 8 — the source stays greppable ───────────────────────────────────
 console.log('\nGROUP 8 — no NUL byte in the shipped source');
 {
