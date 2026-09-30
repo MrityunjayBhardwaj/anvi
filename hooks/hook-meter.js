@@ -14,7 +14,9 @@
 // Row: { ts, sid, hook, event, bytes, ms, outcome }
 //   bytes    Buffer.byteLength of exactly what was written to stdout; 0 when silent
 //   ms       performance.now() at exit — time since the process started, which is what
-//            the session waited for (module loading included)
+//            the session waited for (module loading included). Node's launch before
+//            that clock starts is not: observed 2026-09-30, wall − ms = 14–16 ms over
+//            6 runs of three hooks on this repo.
 //   outcome  silent | informed | refused
 //
 // Where: machine-local, never the store — a session's measurements are not knowledge,
@@ -24,7 +26,9 @@
 // test runs never land among real sessions.
 //
 // A meter that breaks a hook is worse than no meter: every failure here is swallowed,
-// and the only file operation is one append at exit.
+// and the only file operation is one append at exit. Its own cost, measured 2026-09-30
+// on a silent run of the delivery hook: median 49.1 ms without it, 51.0 and 51.1 ms with
+// it (two rounds of 15, load average 26–69) — about 2 ms a run.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
