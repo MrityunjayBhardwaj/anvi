@@ -4,8 +4,16 @@
 // Detects when Claude reads Anvi cognitive OS spec files (context routing).
 // Logs to /tmp/anvi-route-{session_id}.log for AnviDeck real-time dashboard.
 //
-// Fires on every Read tool call. Exits immediately if the file isn't a
-// known spec file. Lightweight: parse stdin, string match, exit.
+// Also records which commands are used (#527 step 6). A skill reaches its workflow by
+// reading ~/.claude/anvi/workflows/<name>.md, so each such Read is one row naming the
+// workflow. It is a PROXY: a read is not a completed run, and a long workflow read in
+// parts is several reads. The same file read through a checkout or worktree is
+// development, not a command, and is not recorded. These rows feed the removal of
+// unused commands over a 60-day window, so they go beside the meter's rows (durable,
+// machine-local), not to /tmp, which the OS clears.
+//
+// Fires on every Read tool call. Exits immediately if the file is neither a
+// known spec file nor an installed workflow. Lightweight: parse stdin, string match, exit.
 
 const fs = require('fs');
 const path = require('path');
@@ -43,6 +51,13 @@ function isAnviSpecFile(filePath) {
   return null;
 }
 
+// Only a top-level markdown file directly under the installed workflows directory.
+const WORKFLOW_READ = /\/\.claude\/anvi\/workflows\/([a-z0-9][a-z0-9-]*)\.md$/;
+function workflowOf(filePath) {
+  const m = WORKFLOW_READ.exec(filePath || '');
+  return m ? m[1] : null;
+}
+
 // What this run costs, one row per run (#527). Guarded like any shared module: a
 // missing meter on a skewed install must cost the measurement, never the hook.
 let meter = null;
@@ -60,19 +75,29 @@ process.stdin.on('end', () => {
     const filePath = (data.tool_input && data.tool_input.file_path) || '';
     const sessionId = data.session_id || 'unknown';
 
-    const match = isAnviSpecFile(filePath);
-    if (!match) process.exit(0);
+    const workflow = workflowOf(filePath);
+    const match = workflow ? null : isAnviSpecFile(filePath);
+    if (!match && !workflow) process.exit(0);
 
-    const logEntry = JSON.stringify({
-      ts: new Date().toISOString(),
-      sid: sessionId,
-      file: match.file,
-      category: match.category,
-      tier: match.tier
-    });
+    const ts = new Date().toISOString();
+    // The id becomes a filename; an unusable one must not steer the write out of /tmp (#591).
+    // One rule for both logs — the meter's. Without the meter (a skewed install) every id
+    // is treated as unusable rather than trusted.
+    const name = meter ? meter.fileFor(sessionId).replace(/\.jsonl$/, '') : 'no-session';
+    const logEntry = JSON.stringify(workflow
+      ? { ts, sid: sessionId, file: `${workflow}.md`, category: 'workflow', workflow }
+      : { ts, sid: sessionId, file: match.file, category: match.category, tier: match.tier });
+
+    if (workflow && meter) {
+      try {
+        const dir = meter.workflowReadsDir();
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(path.join(dir, meter.fileFor(sessionId)), JSON.stringify({ ts, sid: sessionId, workflow }) + '\n');
+      } catch (_) { /* the dashboard line below still gets written */ }
+    }
 
     fs.appendFileSync(
-      path.join('/tmp', `anvi-route-${sessionId}.log`),
+      path.join('/tmp', `anvi-route-${name}.log`),
       logEntry + '\n'
     );
   } catch (_) {
