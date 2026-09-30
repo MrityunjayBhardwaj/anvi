@@ -11,6 +11,39 @@ matched as exact strings and `2026.8.0` would not find `2026.08.0`.
 Releases before `2026.08.0` used [semantic versioning](https://semver.org/) and keep
 the numbers they were published under.
 
+## Unreleased — Armed
+
+Not yet a version: it gets a number when it is cut. The heading has no brackets on
+purpose, because the installer reads every bracketed heading as an installable
+release.
+
+### Delivered entries now state how fresh they are
+
+Every catalogue entry that reaches a session now comes with a statement of whether
+anyone has re-checked it against the code it cites. **Nothing is withheld.** An entry
+that has not been re-checked is still delivered, with its state stated plainly next to it.
+
+- **On an edit**, the entries injected for the file get one line counting them as
+  *verified* (still green since a re-validation stamp or the commit that fixed it) ·
+  *drifted* (a cited file changed since then) · *never confirmed* (no stamp and no
+  fix to measure from) · *not checked this edit* (no answer this time, with the
+  reason). Zeros are printed. Only verified entries carry a ✓. The line prints on the
+  first delivery for a file in a session, and again whenever the counts change.
+- **When a prompt names entries**, they arrive with one line saying which carry a
+  re-validation stamp (and its date) and which never have. That path runs no git,
+  so it grades nothing, and the line says so.
+- **The currency report** prints the same four counts for a project, and its
+  `--json` rows carry each entry's state, anchor and stamp.
+- **Entries can record what licensed them**: `**EVIDENCE:** observed | source |
+  inferred`, asked for by the error-pattern and invariant templates and the
+  session wrap. Existing entries are not backfilled; the report counts them as
+  *not recorded*.
+
+**No migration is required**, since nothing leaves the delivery set. Expect most
+entries to read *drifted* or *never confirmed* at first. `/anvi:update` now prints
+each project's four counts so the numbers are seen there first, and
+`/anvi:currency` re-validates entries.
+
 ## [2026.08.0] — 2026-08-01
 **MIGRATION REQUIRED** — run `/anvi:update`; until a project is bound, its catalogue reads are declined
 

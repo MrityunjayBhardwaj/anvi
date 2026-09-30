@@ -246,6 +246,22 @@ Observe that the update actually landed — do not infer from "the script exited
    not being served — report it with the remedy (`scripts/bind-store.js --apply
    <dir>` for unbound; a mismatch is a real collision and wants a human). Do not
    report the update as successful for a project that is not bound.
+5c. Per-project FRESHNESS — the injector and the delivery-by-name hook now state how
+   fresh every entry they deliver is, so the first edit after an update starts
+   printing counts nobody saw before. Show them here first, where the reader chose to
+   look, rather than letting them appear mid-work. Nothing was removed: every entry is
+   still delivered; these counts are what the new line will say about them.
+
+   ```bash
+   node "$REPO/scripts/currency-report.js" <project-dir> 2>&1 | grep -A3 -E '^── freshness|WITHHELD|no \.anvi catalogues'
+   ```
+
+   Read the `── freshness of N primary entries:` line — verified · drifted · never
+   confirmed · not checked, zeros included. If it is missing and a WITHHELD or
+   "no .anvi catalogues" line printed instead, freshness was NOT MEASURED for that
+   project: say so and quote the line. Never report a project whose line did not print
+   as zero drift. The report grades every entry with git, so it takes minutes on a
+   catalogue of several hundred entries — run it once per project, not per check.
 6. Store durability: `ensure-store-durable.sh "$STORE"` reports DURABLE (unless the
    user declined the backup repo, in which case it is correctly still NO_REPO/
    NO_REMOTE and that was their explicit choice — say so).
@@ -262,9 +278,14 @@ documents; saying where they landed is the minimum:
 
   <project>  →  <absolute store path>   binding: BOUND|UNBOUND|MISMATCH
                                         durable: DURABLE|NO_REMOTE|NO_REPO
+                                        freshness: verified N · drifted N · never confirmed N · not checked N
+                                                   (or: NOT MEASURED — <the line the report printed>)
 
-Take binding from the conformance run in step 5b and durability from
-`ensure-store-durable.sh`. Do not soften either. `NO_REMOTE` means the store is
+Take binding from the conformance run in step 5b, durability from
+`ensure-store-durable.sh`, and freshness from step 5c. Do not soften any of them. For
+freshness, add one sentence per project: drifted and never-confirmed entries are
+still delivered, each edit now says how many, and `/anvi:currency` re-validates them
+— one cited file's batch at a time while the project is over its drift ceiling. `NO_REMOTE` means the store is
 versioned on this machine and pushed NOWHERE — say that, and give the one-line
 remedy; the checkpoint hook commits the store, which is not the same as backing
 it up. If the store has no remote, offer to create the backup repo ONCE here
@@ -305,5 +326,6 @@ Point at STORAGE.md for the layout rather than explaining it again.
       the manual fix, not worked around
 - [ ] Verified: `--check` up to date, hook-liveness green, no foreign hook pruned,
       SECOND run a clean no-op, each project symlinked + granted
+- [ ] Each project's four freshness counts printed — or NOT MEASURED with the reason
 - [ ] Plain-language report of what changed
 </success_criteria>
