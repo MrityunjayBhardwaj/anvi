@@ -253,6 +253,18 @@ console.log('\ncurrency report: a pointer into a WITHHELD area is not an unresol
   const h4a = ra.out.split('\n').find(l => / H4 /.test(l)) || '';
   ok(!/PARTIAL/.test(h4a), 'the same entry is NOT marked partial when the area is merely absent');
   ok(/unresolved/.test(h4a), 'there the pointer genuinely is unresolved, and still says so');
+
+  // Freshness (#583): H4 is stamped and green, but over part of what it cites. It must
+  // not be counted verified in either shape, and the reason differs by the action it asks.
+  const h4State = (cwd) => {
+    const j = run([REPORT, '--json'], cwd);
+    try { return JSON.parse(j.out).entries.find(r => r.id === 'H4' && r.occurrence === 1) || {}; } catch { return {}; }
+  };
+  const js = h4State(split), ja = h4State(absent);
+  ok(js.state === 'not checked' && js.not_checked === 'withheld',
+    `a green over partly-withheld evidence is not verified: not checked, withheld (got ${js.state}, ${js.not_checked})`);
+  ok(ja.state === 'not checked' && ja.not_checked === 'partly compared',
+    `with the area merely absent: not checked, partly compared (got ${ja.state}, ${ja.not_checked})`);
 }
 
 // ------------------------------------------------------------------ scope ---

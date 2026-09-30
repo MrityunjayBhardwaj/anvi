@@ -626,7 +626,9 @@ for (const cat of CATALOGUES) {
     if (partial) partialCount++;
     // WITHHELD is decided here, not in the verdict, so the state is asked of the status
     // this row reports: a pointer nobody followed is "not checked", never "never confirmed".
-    const graded = withheld ? { ...v, status: 'WITHHELD' } : v;
+    // A partial verdict is passed as such, so a green over part of the evidence is never
+    // counted verified (#583) — including when the withheld pointer never registered as a file.
+    const graded = withheld ? { ...v, status: 'WITHHELD' } : partial ? { ...v, partial: true } : v;
     const state = freshnessState(graded);
     const reason = freshnessReason(graded);
     const stamped = Boolean(e.validatedField);
