@@ -115,6 +115,7 @@ const scope = [session && `session ${session}`, since && `since ${since}`].filte
 console.log(`hook meter — ${kept.length} runs in ${sessions} session${sessions === 1 ? '' : 's'}, ${window.from} → ${window.to}${scope ? ` (${scope})` : ''}`);
 console.log(`  read from ${dir}`);
 console.log('  Only runs that finished are here: a run killed from outside (a harness timeout) leaves no row.');
+console.log('  Bytes are what each hook wrote to stdout; a refusal\'s copy of its reason on stderr is not counted.');
 if (unreadableTotal) {
   console.log(`  ⚠ ${unreadableTotal} unreadable row${unreadableTotal === 1 ? '' : 's'}, not counted: ${Object.entries(unreadable).map(([f, n]) => `${f} ×${n}`).join(', ')}`);
 }

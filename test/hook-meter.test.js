@@ -114,23 +114,81 @@ console.log('\nfilenames and failure');
 console.log('\nthe module alone');
 {
   // start() twice in one process must still mean one row: a second exit handler would
-  // double every figure the report sums.
+  // double every figure the report sums. Writes go through stdout itself — a string, a
+  // Buffer, a multibyte character — and are counted in bytes, not characters.
   const r = spawnSync(process.execPath, ['-e', `
     const m = require(${JSON.stringify(HOOK('hook-meter.js'))});
     m.start('x.js', 'PreToolUse'); m.start('x.js', 'PreToolUse');
-    m.session('meter-twice'); m.emitted('abc'); m.emitted('de', 'refused'); m.emitted('f');
+    m.session('meter-twice');
+    process.stdout.write('ab'); process.stdout.write(Buffer.from('cd')); process.stdout.write('é');
   `], { encoding: 'utf8', env: { ...process.env, ANVI_METER_DIR: METER } });
   eq(r.status, 0, 'a child using the module exits 0');
+  eq(r.stdout, 'abcdé', 'and its output is passed through untouched');
   const got = rows('meter-twice');
   eq(got.length, 1, 'start() twice still writes ONE row');
-  eq((got[0] || {}).bytes, 6, 'several emits add up (3 + 2 + 1 bytes)');
-  eq((got[0] || {}).outcome, 'refused', 'and the strongest outcome wins');
+  eq((got[0] || {}).bytes, 6, 'every write adds up, in bytes (2 + 2 + 2 for é)');
+  eq((got[0] || {}).outcome, 'informed', 'output that is not a refusal is informed');
+
+  const { outcomeOf } = require(HOOK('hook-meter.js'));
+  const deny = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'x' } });
+  eq(outcomeOf(deny, 10), 'refused', 'a PreToolUse deny is refused');
+  eq(outcomeOf(JSON.stringify({ decision: 'block', reason: 'x' }), 10), 'refused', 'a top-level block is refused');
+  eq(outcomeOf(JSON.stringify({ hookSpecificOutput: { permissionDecision: 'allow' } }), 10), 'informed', 'an allow is not a refusal');
+  eq(outcomeOf('the word deny in prose', 10), 'informed', 'the WORD deny is not a refusal — structure decides');
+  eq(outcomeOf('', 0), 'silent', 'nothing written is silent');
+}
+
+console.log('\nevery registered hook is metered — the door set is derived, not listed');
+{
+  const { REGISTRATIONS } = require(path.join(ROOT, 'scripts', 'register-hooks.cjs'));
+  const byHook = new Map();
+  for (const [event, , file] of REGISTRATIONS) byHook.set(file, event);
+  ok(byHook.size >= 12, `the registrar names ${byHook.size} hooks`);
+  // A scratch HOME for every run: the Stop hook commits and pushes the store it finds
+  // under HOME, and a test must never reach the real one.
+  const home = path.join(tmp, 'home-all');
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  for (const [file, event] of byHook) {
+    const sid = `meter-door-${file.replace(/\W/g, '')}`;
+    const r = spawnSync(process.execPath, [HOOK(file)], {
+      input: JSON.stringify({ session_id: sid, cwd: path.join(tmp, 'nowhere'), hook_event_name: event,
+        tool_name: 'Read', tool_input: {}, prompt: 'go' }),
+      encoding: 'utf8', timeout: 20000,
+      env: { ...process.env, HOME: home, CLAUDE_DIR: path.join(home, '.claude'), ANVI_METER_DIR: METER },
+    });
+    const got = rows(sid);
+    ok(r.status === 0 && got.length === 1 && got[0].hook === file && got[0].event === event,
+      `${file} (${event}): one row naming it (exit ${r.status}, ${got.length} row${got.length === 1 ? '' : 's'})`);
+  }
+}
+
+console.log('\na real refusal is counted as refused');
+{
+  const home = path.join(tmp, 'home-lock');
+  const repo = path.join(tmp, 'locked-repo');
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  fs.mkdirSync(repo, { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'tree-guard.json'), JSON.stringify({
+    default: { bannedOps: [], gatePatterns: [] }, repos: { [repo]: { bannedOps: ['git stash'], gatePatterns: [] } },
+  }));
+  const r = spawnSync(process.execPath, [HOOK('tree-lock-guard.js')], {
+    input: JSON.stringify({ session_id: 'meter-refused', cwd: repo, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git stash' } }),
+    encoding: 'utf8', env: { ...process.env, HOME: home, ANVI_METER_DIR: METER },
+  });
+  eq(r.status, 2, 'the guard refuses (exit 2)');
+  const got = rows('meter-refused');
+  eq(got.length, 1, 'one row');
+  eq((got[0] || {}).outcome, 'refused', 'counted as refused');
+  eq((got[0] || {}).bytes, Buffer.byteLength(r.stdout), 'bytes = its stdout, the deny it wrote');
 }
 
 console.log('\nthe module is shared, not hook-shaped');
 {
   const src = fs.readFileSync(HOOK('hook-meter.js'), 'utf8');
-  ok(!/process\.stdin/.test(src) && !/hookSpecificOutput/.test(src), 'reads no stdin and emits no envelope');
+  // The registrar's own discriminator (test/hook-table-parity.test.js): hook-shaped means
+  // reading stdin AND naming the envelope. The meter names the envelope — it reads a
+  // refusal by its structure — so what keeps it a shared module is that it reads no stdin.
+  ok(!/process\.stdin/.test(src), 'reads no stdin, so the registrar does not take it for an unregistered hook');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

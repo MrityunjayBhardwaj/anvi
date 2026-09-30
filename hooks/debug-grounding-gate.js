@@ -195,7 +195,6 @@ process.stdin.on('end', () => {
       }
     };
     const out = JSON.stringify(output);
-    if (meter) meter.emitted(out);
     process.stdout.write(out);
   } catch (e) {
     process.exit(0);

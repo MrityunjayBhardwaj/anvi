@@ -43,6 +43,10 @@ function isAnviSpecFile(filePath) {
   return null;
 }
 
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('anvi-route-logger.js', 'PostToolUse'); } catch (_) { meter = null; }
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 
 let input = '';
@@ -52,6 +56,7 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    if (meter) meter.session(data.session_id);
     const filePath = (data.tool_input && data.tool_input.file_path) || '';
     const sessionId = data.session_id || 'unknown';
 

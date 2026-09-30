@@ -222,7 +222,6 @@ process.stdin.on('end', () => {
     const out = JSON.stringify({
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: message },
     });
-    if (meter) meter.emitted(out);
     process.stdout.write(out);
   } catch (_) {
     process.exit(0);

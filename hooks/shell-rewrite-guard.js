@@ -135,6 +135,10 @@ module.exports = { quoteStates, heredocStates, isArrayLike, bareScalarExpansions
 
 if (require.main !== module) return;
 
+// What this run costs, one row per run (#527). Guarded like any shared module: a
+// missing meter on a skewed install must cost the measurement, never the hook.
+let meter = null;
+try { meter = require('./hook-meter.js'); meter.start('shell-rewrite-guard.js', 'PreToolUse'); } catch (_) { meter = null; }
 const stdinTimeout = setTimeout(() => process.exit(0), 5000);
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -143,6 +147,7 @@ process.stdin.on('end', () => {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
+    if (meter) meter.session(data.session_id);
     const cmd = (data.tool_input && data.tool_input.command) || '';
     if (!cmd) process.exit(0);
 
