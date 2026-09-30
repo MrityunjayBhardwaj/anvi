@@ -221,6 +221,19 @@ Confirm the writes are durable (V5 — uncommitted knowledge doesn't exist).
 - Memory files are written in place (not a pushed repo) — no commit needed.
 Print a one-line summary of what was committed and pushed, naming any entries a
 sweep had already claimed.
+
+Then one line on what this session's hooks cost, from the meter's rows (#527):
+
+```bash
+SID="${CLAUDE_CODE_SESSION_ID:-}"   # the harness's id for this session — the meter's file name
+if [ -z "$SID" ]; then
+  echo "hook cost: NOT MEASURED — this shell has no session id (CLAUDE_CODE_SESSION_ID unset)"
+else
+  node "$HOME/.claude/anvi/scripts/meter-report.js" --session "$SID" --summary
+fi
+```
+
+Quote it as printed. `NOT MEASURED` is reported as not measured, never as zero.
 </step>
 
 <step name="4_next_session_prompt">

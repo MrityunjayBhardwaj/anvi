@@ -16,7 +16,10 @@
 // the report says so every time. A command unused for a window is only evidence once
 // recording began before the window did.
 //
-// Usage: node scripts/meter-report.js [--workflows] [--session <id>] [--since <ISO date>] [--dir <meter dir>] [--json]
+// With --summary it prints ONE line — runs, hooks, bytes to the context, the slowest p95
+// — for the wrap and the session report to quote (#527 step 5); no rows is one line too.
+//
+// Usage: node scripts/meter-report.js [--workflows] [--summary] [--session <id>] [--since <ISO date>] [--dir <meter dir>] [--json]
 // Exit:  0 rows reported · 2 NO ROWS — nothing was metered in this scope. Never a table of
 //        zeros: "the meter wrote nothing" and "the hooks cost nothing" ask different things.
 'use strict';
@@ -41,10 +44,13 @@ const take = (flag) => {
   const i = args.indexOf(flag);
   if (i === -1) return undefined;
   const v = args[i + 1];
-  if (v === undefined || v.startsWith('--')) refuse(`${flag} needs a value`);
+  // An empty value is refused too (#593): an unset shell variable expands to "", and ""
+  // would switch the filter off — "this session" silently becoming "every session".
+  if (v === undefined || v === '' || v.startsWith('--')) refuse(`${flag} needs a value`);
   return v;
 };
 const jsonOnly = args.includes('--json');
+const summaryOnly = args.includes('--summary');
 const session = take('--session');
 const since = take('--since');
 if (since !== undefined && !/^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(since)) refuse(`--since must be an ISO date (2026-09-29 or 2026-09-29T10:00:00Z), got "${since}"`);
@@ -54,7 +60,9 @@ const OUTCOMES = meter.OUTCOMES;
 const dir = take('--dir') || meter.meterDir();
 
 const noRows = (why) => {
-  const msg = `no meter rows ${why} (${dir}). Nothing was metered in this scope — that is not a cost of zero.`;
+  const msg = summaryOnly
+    ? `hook cost${session ? `, session ${session}` : ''}: NOT MEASURED — no meter rows ${why} (${dir}); that is not a cost of zero.`
+    : `no meter rows ${why} (${dir}). Nothing was metered in this scope — that is not a cost of zero.`;
   if (jsonOnly) process.stdout.write(JSON.stringify({ dir, runs: 0, reason: msg }) + '\n');
   else console.log(msg);
   process.exit(2);
@@ -175,6 +183,19 @@ for (const [name, h] of Object.entries(hooks)) {
 const sessions = new Set(kept.map(r => r.sid)).size;
 const stamps = kept.map(r => String(r.ts)).sort();
 const window = { from: stamps[0], to: stamps[stamps.length - 1] };
+
+if (summaryOnly) {
+  const n = Object.keys(summary).length;
+  const slow = Object.entries(summary).sort((a, b) => b[1].p95_ms - a[1].p95_ms || a[0].localeCompare(b[0]))[0];
+  const bytes = Object.values(summary).reduce((a, h) => a + h.bytes, 0);
+  const small = slow[1].runs < SMALL ? ` (n=${slow[1].runs}: the max)` : '';
+  const where = [session && `session ${session}`, since && `since ${since}`].filter(Boolean).join(', ') || `${sessions} session${sessions === 1 ? '' : 's'}`;
+  console.log(`hook cost, ${where}: ${kept.length} runs of ${n} hook${n === 1 ? '' : 's'} · ${bytes} B to the context · `
+    + `slowest p95 ${slow[0]} ${slow[1].p95_ms} ms${small}`
+    + `${unreadableTotal ? ` · ⚠ ${unreadableTotal} unreadable row${unreadableTotal === 1 ? '' : 's'} not counted` : ''}`
+    + ' · a run killed by a timeout leaves no row');
+  process.exit(0);
+}
 
 if (jsonOnly) {
   process.stdout.write(JSON.stringify({ dir, session: session || null, since: since || null, runs: kept.length, sessions, window, unreadable: unreadableTotal, hooks: summary }, null, 2) + '\n');
