@@ -113,6 +113,10 @@ console.log('\nA JSON FILE IS A MODULE ONLY WHEN IMPORTED (#599):');
   const proposed = S.buildGraph({ pkgDir: pkg, design, extractor: jsonAware, cachePath: null, proposed: { rel: 'src/ledger.json', content: '{"edited":true}\n' } });
   ok(!proposed.notMeasured && !proposed.graph.modules.has('src/ledger.json') && proposed.graph.edges.length === 1,
      'an edit proposed to an unimported JSON file builds the same graph, and does not crash');
+  const starts = S.buildGraph({ pkgDir: pkg, design, extractor: jsonAware, cachePath: null,
+    proposed: { rel: 'src/reads.ts', content: "import table from './table.json';\nimport ledger from './ledger.json';\nexport const t = [table, ledger];\n" } });
+  ok(starts.graph.modules.has('src/ledger.json') && edgeKeys(starts.graph).includes('src/reads.ts -> src/ledger.json'),
+     `an edit that STARTS importing a JSON file makes it a module in that same build (got ${edgeKeys(starts.graph).join(', ')})`);
 }
 
 console.log('\nTHE CACHE — reused per file, rebuilt when resolution could have moved:');
