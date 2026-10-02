@@ -361,6 +361,112 @@ function evaluate(payload, deps) {
   return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) };
 }
 
+// THE PROJECT'S OWN CHECK, IN SHADOW (#600). What counts as a violation belongs to the codebase,
+// as runnable code reviewed in its own history; this hook owns the moment, the record and "not
+// measured". A registry entry may name a check:
+//   "check": { "adapter": "<abs program>", "root": "<repo root, relative to the package dir>",
+//              "files": ["<repo-relative files of the check itself>"], "mode": "shadow",
+//              "node"?: <the lowest Node major the adapter runs on> }
+// The adapter is a program, run as a child of this Node: it reads { root, rel, before, after } as
+// JSON on stdin (`before` null for a new file) and prints { examined, before, after, allowed } —
+// the reaches the project's check finds in each version of the file ({ rule, reach }), and the
+// reaches its exception list allows for that file. A child because a project's check is its own
+// code, in its own module system (stave's is ES-module TypeScript), and a crash or a hang there must
+// cost one measurement, not this hook.
+//
+// SHADOW REFUSES NOTHING AND PRINTS NOTHING. It records one row per edit, so that before the check
+// may refuse anyone, every would-be refusal can be put to the owner as right or wrong (the gate
+// ruled on #600). Every way it cannot look is a row of its own — "could not look" never reads as
+// "nothing found". Only `"mode": "shadow"` exists; any other mode is recorded as not measured.
+const CHECK_TIMEOUT_MS = 3000;
+// THE SHADOW SPENDS ONLY WHAT IS LEFT (#607). It runs before the decision is printed, and a hook
+// past its registered timeout is killed and the edit goes through — so a slow check after a cold
+// graph build could lose a refusal the graph rule had already decided. It gets what remains of
+// the registered budget (HOOK_BUDGET_MS, equal to the registrar's figure — a test holds them
+// together) less EXIT_MARGIN_MS for printing and exiting; below CHECK_MIN_MS it does not start.
+const HOOK_BUDGET_MS = 10000;
+const EXIT_MARGIN_MS = 1500;
+const CHECK_MIN_MS = 500;
+
+function shadowLogPath(stateDir, entryDir) {
+  let dir = entryDir;
+  try { dir = fs.realpathSync(entryDir); } catch { /* the registered path as written */ }
+  return path.join(stateDir, 'shadow', crypto.createHash('sha1').update(dir).digest('hex').slice(0, 16) + '.jsonl');
+}
+
+// The row for one edit, or null when there is nothing to record (no registered check).
+function shadowCheck(payload, deps) {
+  const { registry } = deps;
+  const tool = payload && payload.tool_name;
+  const input = (payload && payload.tool_input) || {};
+  if (!JUDGED_TOOLS.includes(tool) && !Object.prototype.hasOwnProperty.call(UNJUDGED_TOOLS, tool)) return null;
+  if (typeof input.file_path !== 'string') return null;
+  const abs = path.isAbsolute(input.file_path) ? input.file_path : path.resolve(payload.cwd || process.cwd(), input.file_path);
+  const owner = packageFor(abs, registry);
+  if (!owner || !owner.entry.check) return null;
+  const row = { package: owner.entry.dir, session: payload.session_id || null,
+    checkout: owner.checkout === 'registered' ? 'registered' : owner.dir, tool };
+  const unmeasured = why => ({ ...row, rel: row.rel || owner.rel, outcome: 'not-measured', why });
+  // Once the package is known, a failure of its own is a row too — never a missing one.
+  try { return judgeWithCheck(owner, abs, tool, input, row, unmeasured, deps); }
+  catch (e) { return unmeasured(`the shadow check failed: ${e && e.message}`); }
+}
+
+function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, spawn, nodeMajor, budgetMs = CHECK_TIMEOUT_MS }) {
+  const check = owner.entry.check;
+
+  if (!check || typeof check.adapter !== 'string' || typeof check.root !== 'string')
+    return unmeasured('the registry entry\'s "check" needs "adapter" and "root"');
+  const root = path.resolve(owner.dir, check.root);
+  row.rel = path.relative(root, realNear(abs)).split(path.sep).join('/');
+  if (row.rel.startsWith('..')) return unmeasured(`the edited file is outside the check's root ${root}`);
+  if (check.mode !== 'shadow') return unmeasured(`check mode ${JSON.stringify(check.mode)} is not supported — only "shadow" exists`);
+  if (!JUDGED_TOOLS.includes(tool)) return unmeasured(UNJUDGED_TOOLS[tool]);
+  // An edit to the check itself is a design change: never judged by the thing it changes (#600).
+  if ((check.files || []).includes(row.rel)) return { ...row, outcome: 'check-file' };
+  // The lowest Node is the CHECK's property, not this hook's: stave's is TypeScript loaded through
+  // Node's type stripping (23+), a plain JavaScript check runs on any Node this hook runs on.
+  if (check.node !== undefined && !(nodeMajor >= check.node))
+    return unmeasured(`Node ${nodeMajor} cannot load the check — it needs Node ${check.node} or later`);
+
+  const after = proposedContent(tool, { ...input, file_path: abs }, readFile);
+  if (after === null) return { ...row, outcome: 'edit-shape' };
+  let before = null;
+  try { before = readFile(abs); } catch { /* a new file: nothing before */ }
+
+  const timeout = Math.min(CHECK_TIMEOUT_MS, Math.floor(budgetMs));
+  if (!(timeout >= CHECK_MIN_MS)) return unmeasured(`no time left in the hook's budget — ${Math.max(0, Math.floor(budgetMs))} ms remained, the check needs ${CHECK_MIN_MS}`);
+  const r = spawn(process.execPath, [check.adapter], { input: JSON.stringify({ root, rel: row.rel, before, after }),
+    encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
+  if (r.error) return unmeasured(r.error.code === 'ETIMEDOUT' ? `the check took longer than ${timeout} ms` : `the check could not run: ${r.error.message}`);
+  if (r.status !== 0) {
+    // Node ends an uncaught error with its own version line, so the last line says nothing: the
+    // line naming the error does.
+    const lines = String(r.stderr || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const said = lines.find(l => /\b\w*Error\b/.test(l)) || lines.find(l => !/^Node\.js v/.test(l)) || 'no message';
+    return unmeasured(`the check exited ${r.status}${r.signal ? ` (${r.signal})` : ''}: ${said.slice(0, 300)}`);
+  }
+  let out;
+  try { out = JSON.parse(r.stdout); } catch { return unmeasured('the check printed no JSON'); }
+  const reaches = x => Array.isArray(x) && x.every(e => e && typeof e.reach === 'string' && typeof e.rule === 'string');
+  if (!out || typeof out.examined !== 'number' || !reaches(out.before) || !reaches(out.after) || !Array.isArray(out.allowed))
+    return unmeasured('the check\'s answer has the wrong shape — its interface may have moved');
+  // Outside the check's population (a test, a file inside the area it guards): not a chance.
+  if (out.examined === 0) return { ...row, outcome: 'outside' };
+  const had = new Set(out.before.map(e => e.reach));
+  const allowed = new Set(out.allowed);
+  const added = out.after.filter(e => !had.has(e.reach)).map(e => ({ rule: e.rule, reach: e.reach, onList: allowed.has(e.reach) }));
+  // On disk already and not on the list: landed outside any edit hook. Said apart, never this edit's.
+  const landed = out.before.filter(e => !allowed.has(e.reach)).map(e => e.reach);
+  return { ...row, outcome: 'judged', added, landed };
+}
+
+function recordShadow(stateDir, entryDir, row) {
+  const f = shadowLogPath(stateDir, entryDir);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.appendFileSync(f, JSON.stringify(row) + '\n');
+}
+
 // Each unmapped file is told once per session under its own marker, so being told about one
 // never uses up being told about another.
 function unmappedKind(rel) {
@@ -454,13 +560,14 @@ function noticesOnce(sessionId, notices, stateDir) {
 }
 
 module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
-  REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES };
+  shadowCheck, shadowLogPath, recordShadow, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
 if (require.main === module) {
   // What this run costs, one row per run (#527). Guarded like any shared module: a
   // missing meter on a skewed install must cost the measurement, never the hook.
   let meter = null;
   try { meter = require('./hook-meter.js'); meter.start('structure-guard-hook.js', 'PreToolUse'); } catch (_) { meter = null; }
+  const started = Date.now();
   const stdinTimeout = setTimeout(() => process.exit(0), 9000);
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -483,6 +590,17 @@ if (require.main === module) {
         graph: require('./structure-graph.js'),
         stateDir: STATE_DIR,
       });
+      // The project's own check, in shadow (#600): after the decision, and unable to change it —
+      // its own failures are caught here and recorded as a row, never thrown into the decision.
+      try {
+        const t0 = Date.now();
+        const budgetMs = HOOK_BUDGET_MS - (t0 - started) - EXIT_MARGIN_MS;
+        const row = shadowCheck(payload, { registry, readFile: f => fs.readFileSync(f, 'utf8'), spawn: require('child_process').spawnSync,
+          nodeMajor: Number(process.versions.node.split('.')[0]), budgetMs });
+        if (row) recordShadow(STATE_DIR, row.package, { ts: new Date().toISOString(), ...row, ms: Date.now() - t0, budgetMs, graph: result.decision });
+      } catch (e) {
+        try { recordFailure(LOG, `${new Date().toISOString()}\tshadow check: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}\n`); } catch { /* nothing more to do */ }
+      }
       if (result.decision === 'deny') {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: {
           hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.reason } }));

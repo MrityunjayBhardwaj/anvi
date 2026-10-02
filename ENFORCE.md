@@ -1531,6 +1531,37 @@ loosened until it stops firing guards nothing.
   refusals, never by a window's count. Not counted as chances: a new cycle inside one component,
   and edits through Bash. Over stave's 60 days to 2026-10-02: 697 edits landed, 405 computed, 0
   chances, 12 crossings all allowed — the replay's figure, reached by another route.
+- **The project's own check, in SHADOW (`scripts/structure-shadow.js`, #600).** What counts as a
+  violation belongs to the codebase; anvi owns the moment, the record and "not measured". A
+  registry entry may name `"check": { "adapter", "root", "files", "mode": "shadow", "node"? }`: `adapter` is
+  a program kept beside the registry (stave's is in the store, `instances/stave-boundary-adapter.mjs`,
+  calling stave's own `measureBoundary`), `root` is the repository root relative to the package dir,
+  `files` are the check's own files (repo-relative). After the graph decision, the hook runs the
+  adapter as a child of its Node with `{ root, rel, before, after }` on stdin; it answers
+  `{ examined, before, after, allowed }` — the reaches the project's check finds in each version of
+  the file, and those its exception list allows for that file. A chance is a reach the edit ADDS
+  that the list does not allow; a reach already on disk and off the list is recorded as landed, not
+  charged to the edit. **Shadow refuses nothing and prints nothing**: it appends one row per edit to
+  `~/.claude/structure-guard-cache/shadow/<package id>.jsonl` and cannot change the decision. Every
+  way it cannot look is a `not-measured` row with its reason — the adapter crashing, hanging past
+  its time, printing no JSON or the wrong shape, a Node below the check's own `node` (stave's: 23, for type
+  stripping), a MultiEdit, a mode other than
+  shadow, a failure of the shadow step itself. **Its time is what is left of the hook's budget
+  (#607)**: it runs before the decision is printed, and a hook killed at its 10 s timeout lets the
+  edit through, so a slow check after a cold graph build would lose a refusal the graph rule had
+  already decided. It gets at most 3 s, never more than the registered 10 s less the time already
+  spent and a 1.5 s margin, and does not start with under 0.5 s left; each row records the budget
+  it was given. An edit to one of the check's own files is a `check-file` row:
+  a design change for the owner, never judged by the check it changes. The report lists every
+  would-be refusal for the owner to rule right or wrong, and every edit to the check. Exit 1
+  something to read · 2 not measured (no check registered, an unreadable log) · 3 UNTESTED — never
+  0. The gate (ruled on #600): 7 days or 10 judged edits, whichever is later; the check may refuse
+  only with zero wrong would-be refusals and at least one chance. Observed on stave (2026-10-02,
+  planted edits never written): an `acorn` import in `toolbar/Toolbar.tsx` → a chance not on the
+  list; a comment → judged, nothing added; a `codeView/` file and a test → outside; the exception
+  list → check-file; 0.2–0.6 s per edit. The 60-day replay planned first could not be run: the
+  area the check guards was created on 2026-10-01, and 311 of 404 past edits have no recorded
+  prior content for the check's type checker to read.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
