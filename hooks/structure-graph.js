@@ -14,7 +14,8 @@
 //     is a use. 0 classification mismatches against the analyser.
 //   · `resolveModuleName` against the project's own tsconfig. 742 of 742 edges agreed.
 // A file that compiles to nothing (a `.d.ts`, a JSON module) carries no outgoing edges;
-// `transpileModule` hard-fails on empty output, so they are never handed to it.
+// `transpileModule` hard-fails on empty output, so they are never handed to it. A JSON file
+// that nothing imports is not a module at all, which is how the analyser counts it too.
 //
 // ONLY TYPESCRIPT 5 IS ACCEPTED. It is what the agreement was measured on, and TypeScript 7
 // has no compiler API of this shape — the same version that let dependency-cruiser print a
@@ -43,6 +44,7 @@ const R = require('./structure-rules.js');
 const SCRIPT = /\.[cm]?[jt]sx?$/;
 const DECLARATION = /\.d\.[cm]?ts$/;
 const MODULE = /\.([cm]?[jt]sx?|json)$/;
+const DATA = /\.json$/;
 
 const compiles = rel => SCRIPT.test(rel) && !DECLARATION.test(rel);
 
@@ -187,7 +189,13 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
     perFile[proposed.rel] = { edges: got.edges, unresolved: got.unresolved || 0 };
   }
 
-  const cruise = { modules: Object.entries(perFile).map(([source, f]) => ({
+  // A JSON file is a module only when something imports it (#599). One that code reads with
+  // `fs` is data: the analyser never lists it, so listing it here made the two graphs disagree
+  // on modules alone — 2 of 333 on the package this was found on — and blocked arming.
+  const imported = new Set(Object.values(perFile).flatMap(f => f.edges.map(([target]) => target)));
+  const isModule = rel => !DATA.test(rel) || imported.has(rel);
+
+  const cruise = { modules: Object.entries(perFile).filter(([source]) => isModule(source)).map(([source, f]) => ({
     source,
     dependencies: [
       ...f.edges.map(([target, reexportOnly]) => ({
