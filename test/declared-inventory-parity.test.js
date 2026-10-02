@@ -31,7 +31,8 @@
 // is that these numbers be trustworthy.
 //
 // So every count below is derived from the glob the INSTALLER uses, not from whatever
-// glob reads naturally, and each derivation says which line of install.sh it mirrors.
+// glob reads naturally, and each derivation names the install.sh loop it mirrors — by its
+// section heading and glob, never a line number, so a search still finds it after it moves.
 'use strict';
 require('./meter-sandbox');
 const fs = require('fs');
@@ -48,12 +49,14 @@ const eq = (a, b, msg) => ok(a === b, `${msg} (got ${JSON.stringify(a)})`);
 const ls = d => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true });
 
 const INVENTORY = {
-  // install.sh:507,679 — `for skill_dir in "$SCRIPT_DIR/skills/"anvi*/` and a
-  // directory with no SKILL.md is skipped rather than installed.
+  // install.sh, twice: the `--dev mode` block and the `# ─── Skills ───` section, both
+  // `for skill_dir in "$SCRIPT_DIR/skills/"anvi*/`, and both skip a directory with no
+  // SKILL.md through `skill_installable` rather than install it.
   skills: ls('skills')
     .filter(e => e.isDirectory() && e.name.startsWith('anvi'))
     .filter(e => fs.existsSync(path.join(ROOT, 'skills', e.name, 'SKILL.md'))).length,
-  // install.sh:519,665 — `for agent_file in "$SCRIPT_DIR/agents/"anvi-*.md`
+  // install.sh, twice: the `--dev mode` block and the `# ─── Agents ───` section, both
+  // `for agent_file in "$SCRIPT_DIR/agents/"anvi-*.md`.
   agents: ls('agents').filter(e => e.isFile() && /^anvi-.*\.md$/.test(e.name)).length,
   // Workflows are not deployed one-by-one; the directory is the set.
   workflows: ls('workflows').filter(e => e.isFile() && e.name.endsWith('.md')).length,
