@@ -329,6 +329,11 @@ exports.create = pkgDir => ({ id: 'fixture@1', configFiles: [], edges(rel, conte
   ok(missed.exit === 1 && /MISSED CHANCES — 1/.test(missed.out) && /src\/a\/two\.ts -> src\/c\/four\.ts\s+\(a -> c\)/.test(missed.out),
      `a not-allowed import that landed is a MISSED chance, listed with its pair, exit 1 (exit ${missed.exit})`);
   ok(/1 chance to refuse — 0 refused .* 1 missed/.test(missed.out), 'and the trial reading counts it as a chance');
+  ok(/src\/a\/two\.ts · applied · the guard said: nothing/.test(missed.out), 'a missed chance says what the guard said on that edit — here nothing');
+  const said = edit('src/a/two.ts', P0, P0, "import { v } from '../c/four';\n" + P0);
+  said.splice(1, 0, notice(JSON.parse(said[0]).message.content[0].id, 'Edit', 'structure guard: NOT MEASURED — editor: the design in force is not the one armed.'));
+  const notMeasured = read([said], EMPTY);
+  ok(/· the guard said: not measured/.test(notMeasured.out), 'and a guard that said NOT MEASURED there is told apart from one that judged and allowed');
 
   const baselined = read([edit('src/a/one.ts', P0, P0, "import { v } from '../c/four';\n" + P0)]);
   ok(baselined.exit === 3 && /across, baselined 1/.test(baselined.out) && !/MISSED/.test(baselined.out),

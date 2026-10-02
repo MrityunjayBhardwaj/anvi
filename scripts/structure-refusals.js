@@ -427,7 +427,10 @@ function main(argv) {
       if (!rows.length) return;
       print(title);
       rows.forEach((c, i) => {
-        print(`    ${i + 1}. ${c.at} ${c.session.slice(0, 8)} ${c.tool} ${c.file} · ${c.outcome}` + (c.checkout !== 'registered' ? ` · in a ${c.checkout} checkout` : ''));
+        print(`    ${i + 1}. ${c.at} ${c.session.slice(0, 8)} ${c.tool} ${c.file} · ${c.outcome}` + (c.checkout !== 'registered' ? ` · in a ${c.checkout} checkout` : '') +
+              // What the guard said on that edit tells the reasons apart: "not measured" is a guard
+              // that was not judging (a design mismatch, no TypeScript), silence is a guard that judged.
+              ` · the guard said: ${c.notices.length ? c.notices.join(', ') : 'nothing'}`);
         for (const e of c.exposure.edges.filter(x => x.kind === 'NOT allowed')) print(`         ${e.key}   (${e.pair})`);
       });
     };
