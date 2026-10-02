@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // hook-meter — every run of a metered hook leaves one row saying what it cost (#527).
 //
 // What has to hold, driven through real stdin exactly as the harness drives it:

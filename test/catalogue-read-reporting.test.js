@@ -16,6 +16,7 @@
 // expectation while being identical — which is precisely how this survived.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

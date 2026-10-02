@@ -12,6 +12,7 @@
 // with the cost of 1x: linear gives ~4, the old code ~16. A ratio rather than a clock,
 // because this suite runs on loaded machines where absolute times mean little.
 'use strict';
+require('./meter-sandbox');
 const { parseEntries } = require('../hooks/currency.js');
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));

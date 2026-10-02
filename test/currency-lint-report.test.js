@@ -24,6 +24,7 @@
 // least. The finding must therefore be ABSENT there, and the report must SAY it is
 // absent rather than let a reader take silence for a clean bill.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

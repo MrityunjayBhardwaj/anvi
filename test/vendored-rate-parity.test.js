@@ -23,6 +23,7 @@
 // places they deliberately disagree.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

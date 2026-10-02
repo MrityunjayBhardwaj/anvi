@@ -27,6 +27,7 @@
 // expression is sloppy.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const { spawnSync, execFileSync } = require('child_process');

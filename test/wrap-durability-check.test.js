@@ -30,6 +30,7 @@
 // one written later is judged by the same standard instead of passing unexamined.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

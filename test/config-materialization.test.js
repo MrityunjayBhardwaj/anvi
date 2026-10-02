@@ -20,6 +20,7 @@
 // threw, and the throw looked exactly like "no file was written".
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

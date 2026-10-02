@@ -6,6 +6,7 @@
 // pruned; a foreign hook (and a live anvi hook) is NEVER touched — and the
 // conservative default (empty removed-list) is a pure no-op.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

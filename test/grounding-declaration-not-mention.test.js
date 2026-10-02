@@ -21,6 +21,7 @@
 // artifact is a hook, its output is a JSON envelope, and an in-process test of a
 // helper would not have caught the parser half of this defect at all.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

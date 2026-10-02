@@ -13,6 +13,7 @@
 // the same call exit 128 (git ran and said no), which must still read as an absence and
 // still be cached. Each mode runs twice, and the cache file is read after each.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

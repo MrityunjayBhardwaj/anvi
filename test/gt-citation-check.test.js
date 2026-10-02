@@ -9,6 +9,7 @@
 // The shipped command is run as a process, the way ground.md runs it.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

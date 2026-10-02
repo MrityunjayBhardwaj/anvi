@@ -24,6 +24,7 @@
 // the expected verdicts, instead of asserting on whatever the live corpus says
 // today.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

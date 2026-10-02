@@ -19,6 +19,7 @@
 // measuring the first run's work, not the code.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

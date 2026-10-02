@@ -22,6 +22,7 @@
 // as an invariant, and every invariant shown must carry an id or the freshness gate cannot
 // cover what the injection asks you to reason from.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // workflow-reads — which commands are used, by the closest honest proxy (#527 step 6).
 //
 // A skill reaches its workflow by reading `~/.claude/anvi/workflows/<name>.md`, so the

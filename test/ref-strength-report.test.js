@@ -18,6 +18,7 @@
 // name CONTAINS another passes for the wrong reason, and this repo has shipped that.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -23,6 +23,7 @@
 // pause-work wrote a file orient could not see — the two halves of one handoff disagreeing
 // about where the tree is. Invariant 2: the tree's location is resolved, never spelled.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

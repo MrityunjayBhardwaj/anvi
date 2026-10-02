@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // absent-warrant-check — the licence rows, the freshness branch, and the store.
 //
 // WHAT THIS SUITE HAS TO PROVE, and why each part is here.

@@ -20,6 +20,7 @@
 //     ceiling. Both must REFUSE, because a difference computed over a short read is
 //     wrong in both directions — it invents missing rows and hides real ones.
 'use strict';
+require('./meter-sandbox');
 const path = require('path');
 const { reconcile } = require(path.join(__dirname, '..', 'scripts', 'board-reconcile.js'));
 

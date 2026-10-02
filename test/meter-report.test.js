@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // meter-report — what the hooks cost, read from the meter's rows (#527 step 3).
 //
 // What has to hold:

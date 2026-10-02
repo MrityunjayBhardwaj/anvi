@@ -24,6 +24,7 @@
 //      confidently, and they answer differently. So the check here is a CROSS-CONSUMER
 //      EQUALITY, never an assertion about either one alone.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

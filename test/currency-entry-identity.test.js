@@ -18,6 +18,7 @@
 // later one a continuation — and a heading naming N ids produces N records sharing one
 // body. Both were chosen against measurements on the live corpus, not from taste.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -21,6 +21,7 @@
 // every pair of failures would be noise, and noise gets ignored, which returns the
 // reader to reading five names as five defects.
 'use strict';
+require('./meter-sandbox');
 const path = require('path');
 const {
   classify, clusters, overruns, verdictLines, lastTally,

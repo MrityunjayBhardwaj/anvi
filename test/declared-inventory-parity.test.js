@@ -33,6 +33,7 @@
 // So every count below is derived from the glob the INSTALLER uses, not from whatever
 // glob reads naturally, and each derivation says which line of install.sh it mirrors.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

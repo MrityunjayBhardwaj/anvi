@@ -19,6 +19,7 @@
 //      has an answer cannot be believed when it says it has none
 //   3. it writes NOTHING
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

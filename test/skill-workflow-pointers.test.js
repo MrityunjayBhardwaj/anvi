@@ -31,6 +31,7 @@
 //    reaches. A workflow invoked only by another workflow is wired, not orphaned, and a
 //    check that ignored that would report false orphans and get ignored in turn.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');

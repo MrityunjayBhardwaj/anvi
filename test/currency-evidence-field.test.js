@@ -9,6 +9,7 @@
 // written into a report is believed exactly as much as a recorded kind would be. A value
 // that names none of the three kinds is "unreadable", counted apart from both.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

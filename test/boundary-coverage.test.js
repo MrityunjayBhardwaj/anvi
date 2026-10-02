@@ -22,6 +22,7 @@
 // graded separately because that coverage disappears the moment someone edits a
 // paragraph, and nothing would say so.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

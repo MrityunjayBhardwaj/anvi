@@ -38,6 +38,7 @@
 // Fixtures are hermetic — a throwaway HOME this file builds — so every verdict is a
 // fact about the code and not about this machine's catalogues.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

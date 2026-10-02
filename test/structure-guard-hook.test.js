@@ -13,6 +13,7 @@
 // in-process decision that says how much was examined.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

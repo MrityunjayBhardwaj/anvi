@@ -19,6 +19,7 @@
 // cited code — their freshness is a version question — so they do not demote a green.
 // Drift is drift however little was compared, so YELLOW/RED keep their state.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

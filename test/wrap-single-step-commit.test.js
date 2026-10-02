@@ -19,6 +19,7 @@
 // clone is how the store's embedded repositories end up NOT checked out (#422).
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

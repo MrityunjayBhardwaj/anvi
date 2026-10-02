@@ -33,6 +33,7 @@
 // asserted in every group — including the ones whose point is that nothing was found.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

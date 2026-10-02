@@ -15,6 +15,7 @@
 // precondition, controls) are only real end to end. Running it against this repo would
 // mutate this repo, which is why the spec carries a `root:`.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

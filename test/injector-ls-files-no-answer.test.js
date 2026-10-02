@@ -20,6 +20,7 @@
 // itself, on its direct child, in ~50 ms on both. The control is the same hook with
 // ls-files answering, which grades H1 and caches it.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

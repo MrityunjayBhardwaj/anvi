@@ -16,6 +16,7 @@
 // temp dir, so the cache can be read to tell "graded GREEN" (a cached null) from "never
 // graded" (no key at all) — GREEN prints nothing, so the output alone cannot.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

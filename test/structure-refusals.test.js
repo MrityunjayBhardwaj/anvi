@@ -7,6 +7,7 @@
 // denial reddens the golden case rather than passing a guessed one.
 
 'use strict';
+require('./meter-sandbox');
 
 const fs = require('fs');
 const os = require('os');

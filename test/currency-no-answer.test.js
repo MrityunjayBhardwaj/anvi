@@ -13,6 +13,7 @@
 // that call is killed (no status → the verdict must say NOT checked) and once where git
 // says no (status 128, as real git does for a missing object → today's answer).
 'use strict';
+require('./meter-sandbox');
 const path = require('path');
 let pass = 0, fail = 0;
 const ok = (c, m) => c ? (pass++, console.log(`  ✓ ${m}`)) : (fail++, console.log(`  ✗ ${m}`));

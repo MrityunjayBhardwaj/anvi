@@ -27,6 +27,7 @@
 //
 // Runs the hook the way the harness does (spawn + stdin JSON) against a throwaway repo.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
