@@ -1481,7 +1481,8 @@ loosened until it stops firing guards nothing.
   text begins `PreToolUse:<Tool> hook error: BLOCKED: this edit to` (`toolDenialKind` alone
   also marks ordinary permission rules); a notice is a `hook_success` attachment whose stdout
   carries `structure guard:` context. A window with no edit in the package is NOT MEASURED
-  (exit 2), never a clean zero; a refusal exits 1 and needs a ruling, right or wrong.
+  (exit 2), never a clean zero; a refusal exits 1 and needs a ruling, right or wrong (exit 3,
+  untested, and the exposure counts are below, #603).
   **The shape has already changed once, so a changed shape is said, never read as zero
   (#549).** Over every `permission-rule` record on this machine, a hook's refusal was recorded
   bare (`BLOCKED: …`) on 2.1.260–2.1.277 and wrapped (`PreToolUse:<Tool> hook error: BLOCKED:
@@ -1511,6 +1512,22 @@ loosened until it stops firing guards nothing.
   applied edits, says the count every time, and prints NOT MEASURED (exit 2) when no edit in the
   window was judged. A cold graph build measured 3.2–5.5s at load ~40 against the hook's 10s
   budget, and every change to the file list forces one.
+- **A zero is read against the chances to refuse, not the edits (#603).** "0 refused of 50
+  edits" said nothing when a replay of that window found 0 chances in 66 edits. So for every
+  edit that landed in the corpus, the report compares the file's imports just before the edit
+  with those of the proposed content, resolved by the guard's own extractor, and classes each
+  added import: within one component · across, allowed · across, baselined · across, NOT
+  allowed · unresolved. A chance is a refusal, or a not-allowed import that landed; the second
+  is listed as MISSED, with what the guard did. The prior content is the result's recorded
+  `originalFile`; Claude Code records it as null on most Edits (stave, 2.1.278–2.1.287), and for
+  those the edit's own text gives an UPPER BOUND — imports in the new text not in the old — so a
+  zero is firm and a hit is a POSSIBLE chance, listed apart. Every run ends with a TRIAL READING
+  line. Exit 1 something to read (a refusal, a missed or a possible chance) · 2 not measured
+  (also: no design to compute exposure with, from the registry or `--design`) · 3 UNTESTED, no
+  chance in the window. There is no clean exit: a trial passes by a person's rulings on its
+  refusals, never by a window's count. Not counted as chances: a new cycle inside one component,
+  and edits through Bash. Over stave's 60 days to 2026-10-02: 697 edits landed, 405 computed, 0
+  chances, 12 crossings all allowed — the replay's figure, reached by another route.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
