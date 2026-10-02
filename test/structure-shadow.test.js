@@ -143,8 +143,11 @@ console.log('\nCOULD NOT LOOK — every failure is not-measured, with its reason
     const r = shadow(e, check);
     ok(r && r.outcome === 'not-measured' && why.test(r.why), `${what} → not-measured (${r && r.why})`);
   }
-  const old = shadow(e, CHECK, 22);
-  ok(old.outcome === 'not-measured' && /Node 22 cannot load the check/.test(old.why), 'a Node too old to load the check → not-measured');
+  const old = shadow(e, { ...CHECK, node: 23 }, 22);
+  ok(old.outcome === 'not-measured' && /Node 22 cannot load the check — it needs Node 23/.test(old.why),
+     'a Node older than the check says it needs → not-measured');
+  ok(shadow(e, { ...CHECK, node: 23 }, 23).outcome === 'judged' && shadow(e, CHECK, 18).outcome === 'judged',
+     'the check\'s own minimum decides: met, or none named, it runs');
   const t0 = Date.now();
   const hang = shadow(e, { ...CHECK, adapter: HANG });
   const took = Date.now() - t0;

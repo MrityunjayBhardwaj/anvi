@@ -365,7 +365,8 @@ function evaluate(payload, deps) {
 // as runnable code reviewed in its own history; this hook owns the moment, the record and "not
 // measured". A registry entry may name a check:
 //   "check": { "adapter": "<abs program>", "root": "<repo root, relative to the package dir>",
-//              "files": ["<repo-relative files of the check itself>"], "mode": "shadow" }
+//              "files": ["<repo-relative files of the check itself>"], "mode": "shadow",
+//              "node"?: <the lowest Node major the adapter runs on> }
 // The adapter is a program, run as a child of this Node: it reads { root, rel, before, after } as
 // JSON on stdin (`before` null for a new file) and prints { examined, before, after, allowed } —
 // the reaches the project's check finds in each version of the file ({ rule, reach }), and the
@@ -378,7 +379,6 @@ function evaluate(payload, deps) {
 // ruled on #600). Every way it cannot look is a row of its own — "could not look" never reads as
 // "nothing found". Only `"mode": "shadow"` exists; any other mode is recorded as not measured.
 const CHECK_TIMEOUT_MS = 3000;
-const CHECK_MIN_NODE = 23;   // a TypeScript check loads through Node's type stripping
 // THE SHADOW SPENDS ONLY WHAT IS LEFT (#607). It runs before the decision is printed, and a hook
 // past its registered timeout is killed and the edit goes through — so a slow check after a cold
 // graph build could lose a refusal the graph rule had already decided. It gets what remains of
@@ -424,7 +424,10 @@ function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, sp
   if (!JUDGED_TOOLS.includes(tool)) return unmeasured(UNJUDGED_TOOLS[tool]);
   // An edit to the check itself is a design change: never judged by the thing it changes (#600).
   if ((check.files || []).includes(row.rel)) return { ...row, outcome: 'check-file' };
-  if (nodeMajor < CHECK_MIN_NODE) return unmeasured(`Node ${nodeMajor} cannot load the check — it needs Node ${CHECK_MIN_NODE} or later`);
+  // The lowest Node is the CHECK's property, not this hook's: stave's is TypeScript loaded through
+  // Node's type stripping (23+), a plain JavaScript check runs on any Node this hook runs on.
+  if (check.node !== undefined && !(nodeMajor >= check.node))
+    return unmeasured(`Node ${nodeMajor} cannot load the check — it needs Node ${check.node} or later`);
 
   const after = proposedContent(tool, { ...input, file_path: abs }, readFile);
   if (after === null) return { ...row, outcome: 'edit-shape' };
@@ -557,7 +560,7 @@ function noticesOnce(sessionId, notices, stateDir) {
 }
 
 module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
-  shadowCheck, shadowLogPath, recordShadow, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, CHECK_MIN_NODE, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
+  shadowCheck, shadowLogPath, recordShadow, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
 if (require.main === module) {
   // What this run costs, one row per run (#527). Guarded like any shared module: a

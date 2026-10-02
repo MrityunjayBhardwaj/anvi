@@ -1533,7 +1533,7 @@ loosened until it stops firing guards nothing.
   chances, 12 crossings all allowed — the replay's figure, reached by another route.
 - **The project's own check, in SHADOW (`scripts/structure-shadow.js`, #600).** What counts as a
   violation belongs to the codebase; anvi owns the moment, the record and "not measured". A
-  registry entry may name `"check": { "adapter", "root", "files", "mode": "shadow" }`: `adapter` is
+  registry entry may name `"check": { "adapter", "root", "files", "mode": "shadow", "node"? }`: `adapter` is
   a program kept beside the registry (stave's is in the store, `instances/stave-boundary-adapter.mjs`,
   calling stave's own `measureBoundary`), `root` is the repository root relative to the package dir,
   `files` are the check's own files (repo-relative). After the graph decision, the hook runs the
@@ -1544,7 +1544,8 @@ loosened until it stops firing guards nothing.
   charged to the edit. **Shadow refuses nothing and prints nothing**: it appends one row per edit to
   `~/.claude/structure-guard-cache/shadow/<package id>.jsonl` and cannot change the decision. Every
   way it cannot look is a `not-measured` row with its reason — the adapter crashing, hanging past
-  its time, printing no JSON or the wrong shape, Node below 23, a MultiEdit, a mode other than
+  its time, printing no JSON or the wrong shape, a Node below the check's own `node` (stave's: 23, for type
+  stripping), a MultiEdit, a mode other than
   shadow, a failure of the shadow step itself. **Its time is what is left of the hook's budget
   (#607)**: it runs before the decision is printed, and a hook killed at its 10 s timeout lets the
   edit through, so a slow check after a cold graph build would lose a refusal the graph rule had
