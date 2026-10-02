@@ -1519,8 +1519,11 @@ loosened until it stops firing guards nothing.
   added import: within one component · across, allowed · across, baselined · across, NOT
   allowed · unresolved. A chance is a refusal, or a not-allowed import that landed; the second
   is listed as MISSED, with what the guard did. The prior content is the result's recorded
-  `originalFile`; Claude Code records it as null on most Edits (stave, 2.1.278–2.1.287), and for
-  those the edit's own text gives an UPPER BOUND — imports in the new text not in the old — so a
+  `originalFile`. Claude Code replaces it with null when the prior content is over 10,000
+  characters, at the moment the record is appended to the transcript, for every tool (read from
+  the shipped 2.1.287 bundle; on stave every recorded prior was ≤ 9,618 characters). So a null
+  prior means a large file: a Write recorded as an `update` with one is NOT COMPUTED, never
+  treated as a new file; for an Edit, the edit's own text gives an UPPER BOUND — imports in the new text not in the old — so a
   zero is firm and a hit is a POSSIBLE chance, listed apart. Every run ends with a TRIAL READING
   line. Exit 1 something to read (a refusal, a missed or a possible chance) · 2 not measured
   (also: no design to compute exposure with, from the registry or `--design`) · 3 UNTESTED, no

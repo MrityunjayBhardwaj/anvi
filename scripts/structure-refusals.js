@@ -164,8 +164,10 @@ function readTranscript(file, pkgDir, filter, since, until) {
     if (!c) continue;
     // The file as it was just before the edit: a string, null for a file the edit created, or
     // undefined when the result recorded neither (then exposure is not computed for it).
-    if (toolResult && typeof toolResult === 'object' && 'originalFile' in toolResult)
+    if (toolResult && typeof toolResult === 'object' && 'originalFile' in toolResult) {
       c.prior = typeof toolResult.originalFile === 'string' ? toolResult.originalFile : null;
+      c.resultType = toolResult.type || null;          // a Write's 'create' or 'update'
+    }
     const text = textOf(b.content);
     if (!b.is_error) { c.outcome = 'applied'; continue; }
     if (REFUSAL.test(text)) {
@@ -214,9 +216,16 @@ function exposureOf(c, frame, extractorFor) {
   if (c.tool === 'MultiEdit') return { kind: 'not computed', why: 'MultiEdit' };
   const ex = extractorFor(c.checkoutDir);
   if (ex.notMeasured) return { kind: 'not computed', why: ex.notMeasured };
-  // EXACT when the prior content is known: a Write, or an Edit whose result recorded
-  // `originalFile`. ESTIMATED from the edit's own text when it did not — Claude Code records
-  // `originalFile: null` on most Edits (measured on stave, 2.1.278–2.1.287). Every import an Edit
+  // WHY THE PRIOR IS OFTEN MISSING (read from the shipped 2.1.287 bundle): when a record is
+  // appended to the transcript, a tool result whose `originalFile` is longer than 10,000
+  // characters has it replaced by null — for every tool, Write included. On stave every recorded
+  // prior was ≤ 9,618 characters and 86 of the 87 null-prior Edits whose file still exists are
+  // over 10,000 now. So a null prior means "a large file", never "no file", except on a Write
+  // whose result says `type: 'create'`.
+  if (c.tool === 'Write' && c.prior === null && c.resultType !== 'create')
+    return { kind: 'not computed', why: 'an overwrite whose prior content was over 10,000 characters, so not recorded' };
+  // EXACT when the prior content is known: a created file, or an edit whose result recorded
+  // `originalFile`. ESTIMATED from the edit's own text when it did not. Every import an Edit
   // adds is in its new text, so "in the new text, not in the old" is an UPPER BOUND: a zero is
   // firm, a hit is only possible (a type-only import, or one the file already had elsewhere).
   let before, after, method;

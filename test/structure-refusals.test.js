@@ -351,6 +351,12 @@ exports.create = pkgDir => ({ id: 'fixture@1', configFiles: [], edges(rel, conte
   ok(firm.exit === 3 && /across, allowed 1/.test(firm.out) && !/POSSIBLE/.test(firm.out),
      'an estimated allowed import is counted as a crossing, not a chance');
 
+  const overwrite = read([write('src/a/two.ts', "import { v } from '../c/four';\n" + P0, null).map((l, i) => i ? l.replace('"type":"create"', '"type":"update"') : l)], EMPTY);
+  ok(overwrite.exit === 3 && /exposure not computed \(an overwrite whose prior content was over 10,000 characters/.test(overwrite.out) && !/MISSED/.test(overwrite.out),
+     `a Write recorded as an UPDATE with a null prior is a large file overwritten, not a new one — not computed, never a missed chance (exit ${overwrite.exit})`);
+  const created = read([write('src/a/born.ts', "import { v } from '../c/four';\n")], EMPTY);
+  ok(created.exit === 1 && /MISSED CHANCES — 1/.test(created.out), 'a Write recorded as a CREATE still counts every import it adds');
+
   const unresolved = read([edit('src/a/two.ts', P0, P0, "import { v } from '../gone/moved';\n" + P0)], EMPTY);
   ok(unresolved.exit === 3 && /unresolved now 1/.test(unresolved.out), 'an import that does not resolve now is counted as unresolved, not as a crossing');
 
