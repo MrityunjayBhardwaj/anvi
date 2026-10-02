@@ -14,6 +14,7 @@
 // empty, which is the assertion that would catch a regression to console.log.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

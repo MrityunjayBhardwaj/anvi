@@ -13,6 +13,7 @@
 //   - a run that rewrites its own reference, which made the old instrument unable to
 //     report growth at all
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -14,6 +14,7 @@
 // they share, and the seam that makes it two states rather than a boolean.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

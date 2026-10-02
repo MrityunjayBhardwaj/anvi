@@ -14,6 +14,7 @@
 // the thing the author had already done, printed because the hook could not read what
 // they wrote.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

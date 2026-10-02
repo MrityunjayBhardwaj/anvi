@@ -18,6 +18,7 @@
 //   BEHAVIOUR — driven through a real hook process, because "a process per event"
 //               is the whole defect and an in-process test cannot see it.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -4,6 +4,7 @@
 // derivation for both ref spellings, and readVendorFor + computeCurrency end-to-end
 // with an injected readVendor (no real store touched).
 'use strict';
+require('./meter-sandbox');
 const {
   parseVendorManifest, vendorManifestRel, readVendorFor,
   computeCurrency, nudgeFor,

@@ -27,6 +27,7 @@
 // | tar -x` — several checks need a real `.git` and throw without one, so an extracted
 // tarball reports harness failures a reader cannot tell from a regression.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

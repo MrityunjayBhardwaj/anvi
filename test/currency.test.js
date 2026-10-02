@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Unit test for hooks/currency.js — mocked git + fileExists, no real repo.
 'use strict';
+require('./meter-sandbox');
 const {
   computeCurrency, extractRefFiles, parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges,
   extractFileSpecs, specExists, lintEntry, lineAnchoredRefs, LINT,

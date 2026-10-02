@@ -19,6 +19,7 @@
 // widely the tail occurs rides along as evidence in the row, never as a filter.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

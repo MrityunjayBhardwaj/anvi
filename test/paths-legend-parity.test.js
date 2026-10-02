@@ -44,6 +44,7 @@
 // another name; all 14 legend entries do not. It is derived rather than enumerated — it
 // names no variable and no path, so the next alias under a different name is caught too.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

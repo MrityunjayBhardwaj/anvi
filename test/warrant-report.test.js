@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // warrant-report — the reader for the absent-warrant instance store.
 //
 // WHAT THIS SUITE HAS TO PROVE, and why each group is here.

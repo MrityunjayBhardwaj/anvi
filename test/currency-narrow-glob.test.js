@@ -31,6 +31,7 @@
 // not a finding. And a repo git cannot read must produce NO finding at all: "cannot
 // tell" becoming an accusation is the failure this project has now shipped twice.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

@@ -28,6 +28,7 @@
 // the second defect hid inside the first.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

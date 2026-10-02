@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // /anvi:update shows each project's freshness counts, and the changelog says why (#529 step 5).
 //
 // Delivered entries now state their freshness on every edit. An update is the moment

@@ -28,6 +28,7 @@
 //   absence     an entry whose point is that the name is gone — the finding inverts it
 //   vendored    a citation into a library or a reference area is not about this repo
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

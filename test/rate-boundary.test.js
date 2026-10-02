@@ -24,6 +24,7 @@
 // the value that must NOT reach it, and the value that must.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

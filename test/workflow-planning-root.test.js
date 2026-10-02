@@ -29,6 +29,7 @@
 // lines it claims, and is asserted to still match something: an exemption that has gone
 // stale is indistinguishable from a matcher that has stopped working.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

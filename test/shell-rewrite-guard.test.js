@@ -17,6 +17,7 @@
 // the obvious guess and are pinned here as their own cases: braces do NOT restore
 // word-splitting, and command substitution DOES split.
 'use strict';
+require('./meter-sandbox');
 const { spawnSync } = require('child_process');
 const path = require('path');
 

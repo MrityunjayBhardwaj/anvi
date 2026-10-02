@@ -9,6 +9,7 @@
 // the TypeScript extractor meets, which the hook's own tests pin separately.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

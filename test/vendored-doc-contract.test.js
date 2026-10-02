@@ -39,6 +39,7 @@
 //     counts were each correct while the total they were said to sum to was not.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const { inventory } = require('../scripts/vendor-drift.js');

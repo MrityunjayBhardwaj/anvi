@@ -16,6 +16,7 @@
 // writer so the fixture cannot encode a record shape the reader would reject.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

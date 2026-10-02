@@ -61,6 +61,7 @@
 // written shell there, and is exactly what separates the debugger's
 // `DEBUG_DIR="$(node "$CLI_PATH" …)"` from a report template full of `$VAR` mentions.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

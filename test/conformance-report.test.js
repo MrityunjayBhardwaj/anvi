@@ -15,6 +15,7 @@
 // resolver read the SAME temp store. Two sources for "home" would be two answers.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

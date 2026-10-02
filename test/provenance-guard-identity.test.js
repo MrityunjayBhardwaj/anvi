@@ -16,6 +16,7 @@
 // Runs the hook the way the harness does (spawn + stdin JSON) against a throwaway
 // HOME, so the result is a fact about the code and not about this machine.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

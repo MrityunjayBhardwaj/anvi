@@ -10,6 +10,7 @@
 // The count comes from the shipped report's --json (primaries only, YELLOW or RED), never
 // from a second implementation of the verdict.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

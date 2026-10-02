@@ -46,6 +46,7 @@
 // Stated plainly so nobody later reads the scoping as evidence of a hazard that
 // was actually observed. It was not. What was observed is that it is free.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const { REGISTRATIONS } = require('../scripts/register-hooks.cjs');

@@ -31,6 +31,7 @@
 // prose with those blocks removed — two regions, two questions, neither answering for
 // the other.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

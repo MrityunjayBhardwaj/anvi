@@ -16,6 +16,7 @@
 //      matching produces the same clean report as a catalogue with nothing wrong.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

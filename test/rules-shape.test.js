@@ -12,6 +12,7 @@
 // that import is the only thing that loads it. A renamed file with a stale import
 // loads nothing and fails nowhere else.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

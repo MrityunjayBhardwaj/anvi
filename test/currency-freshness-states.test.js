@@ -18,6 +18,7 @@
 //                     a green compared only part of what it cites · nothing the entry
 //                     cites can be diffed here
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

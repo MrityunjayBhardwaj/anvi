@@ -19,6 +19,7 @@
 // step the same defect here, which is the point.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 

@@ -11,6 +11,7 @@
 // vouched for a file nobody diffed. That is the assertion the old text could not fail,
 // because no test asserted the text at all — verified before writing this file.
 'use strict';
+require('./meter-sandbox');
 const { computeCurrency, verdictScope, greenScopeText } = require('../hooks/currency.js');
 
 let pass = 0, fail = 0;

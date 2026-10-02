@@ -12,6 +12,7 @@
 //     not on every repeat edit (58% of edits on anvi re-edit a file already edited)
 // The hook is spawned as the harness spawns it, with a private TMPDIR for its caches.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

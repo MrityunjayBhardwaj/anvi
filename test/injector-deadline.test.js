@@ -14,6 +14,7 @@
 // past any timeout), slow (1 s, under the timeout, so only the budget can stop it), and
 // a control where every call goes straight to git.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

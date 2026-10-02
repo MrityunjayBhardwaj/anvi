@@ -23,6 +23,7 @@
 // on a fleet diff. The accident is part of the incumbent's contract; the assertions below
 // pin it deliberately rather than leaving it to be rediscovered.
 'use strict';
+require('./meter-sandbox');
 const { readField, readFieldAll, declaredItems, extractFileSpecs, newestValidated } =
   require('../hooks/currency.js');
 

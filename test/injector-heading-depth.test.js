@@ -24,6 +24,7 @@
 // its divider rather than swallowing the next boundary. A widening that goes too far
 // delivers one boundary's checks under another's name.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

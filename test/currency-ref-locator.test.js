@@ -28,6 +28,7 @@
 //                first is a defect.
 //   order        a locator written BEFORE its path is not a citation of that path.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const c = require(path.join(__dirname, '..', 'hooks', 'currency.js'));

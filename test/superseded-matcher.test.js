@@ -29,6 +29,7 @@
 // recoverable from inside a session. Wrong in the safe direction, and GROUP 4 pins it.
 
 'use strict';
+require('./meter-sandbox');
 const path = require('path');
 
 let pass = 0, fail = 0;

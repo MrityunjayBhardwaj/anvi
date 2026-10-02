@@ -18,6 +18,7 @@
 // case asserting that something was NOT flagged also asserts that the thing was examined.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

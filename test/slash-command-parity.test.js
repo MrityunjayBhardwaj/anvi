@@ -33,6 +33,7 @@
 // before (every shell script, once), and `grep` silently contributes nothing for a file
 // it decides is binary — absence indistinguishable from a clean file.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');

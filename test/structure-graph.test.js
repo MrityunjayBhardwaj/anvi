@@ -14,6 +14,7 @@
 // both leave a graph behind; only the count of files handed to the extractor tells them apart.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

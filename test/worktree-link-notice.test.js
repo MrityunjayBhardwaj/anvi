@@ -7,6 +7,7 @@
 // resolves the project said nothing in an unlinked worktree, which reads exactly like a project
 // without catalogues. Real processes, a hermetic HOME and store, and real `git worktree add`.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

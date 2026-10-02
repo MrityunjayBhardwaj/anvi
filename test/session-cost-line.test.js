@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // session-cost-line — the wrap and the session report say what this session's hooks cost,
 // from the meter's rows, in one line (#527 step 5).
 //

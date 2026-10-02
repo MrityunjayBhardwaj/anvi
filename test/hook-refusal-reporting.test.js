@@ -29,6 +29,7 @@
 //   CONTROL   — the verified caller must actually be served. Without that, every
 //               "no leak" assertion below passes vacuously on a broken fixture.
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

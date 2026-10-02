@@ -15,6 +15,7 @@
 // EXPLAINING the layout, and must point at the canonical document.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');

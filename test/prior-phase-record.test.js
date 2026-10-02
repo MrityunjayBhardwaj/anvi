@@ -24,6 +24,7 @@
 // self-confirming shape nearly shipped in the generator's own suite.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

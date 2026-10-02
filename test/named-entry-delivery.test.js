@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+require('./meter-sandbox');
 // named-entry-delivery — the hook that delivers the catalogue entries a prompt names.
 //
 // WHAT THIS SUITE HAS TO PROVE, ordered by how much damage the defect would do.

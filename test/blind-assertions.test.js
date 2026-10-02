@@ -19,6 +19,7 @@
 // silence case is a shape that was actually observed in that run.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
