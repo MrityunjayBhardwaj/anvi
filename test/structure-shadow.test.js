@@ -157,6 +157,25 @@ console.log('\nCOULD NOT LOOK — every failure is not-measured, with its reason
      'a failure inside the shadow step is a not-measured row, never a missing one');
 }
 
+console.log('\nTHE BUDGET — the shadow spends only what is left, so it can never cost the decision its timeout (#607):');
+{
+  const REG = require(path.join(__dirname, '..', 'scripts', 'register-hooks.cjs'));
+  const mine = REG.REGISTRATIONS.filter(r => r[2] === 'structure-guard-hook.js');
+  ok(mine.length === 1 && mine[0][3] * 1000 === H.HOOK_BUDGET_MS,
+     `the hook's budget equals its registered timeout (${mine.length && mine[0][3]}s registered, ${H.HOOK_BUDGET_MS} ms assumed)`);
+  const e = edit('pkg/src/low/a.ts', 'export const a = 1;\n', '// REACH:owner:owner#acorn\nexport const a = 1;\n');
+  const deps = budgetMs => ({ registry: { packages: [entry({ ...CHECK, adapter: HANG })] }, readFile, spawn: spawnSync, nodeMajor: 25, budgetMs });
+  let spawned = false;
+  const none = H.shadowCheck(e, { ...deps(200), spawn: (...a) => { spawned = true; return spawnSync(...a); } });
+  ok(none.outcome === 'not-measured' && /no time left in the hook's budget — 200 ms remained/.test(none.why) && !spawned,
+     'with less than the minimum left, the check is not started and the row says why');
+  const t0 = Date.now();
+  const cut = H.shadowCheck(e, deps(800));
+  const took = Date.now() - t0;
+  ok(cut.outcome === 'not-measured' && /longer than 800 ms/.test(cut.why) && took < 2000,
+     `a hang is cut at the time that is left, not the full 3 s (${took} ms)`);
+}
+
 console.log('\nTHROUGH THE HOOK — shadow refuses nothing, prints nothing, and leaves one row per edit:');
 {
   register(CHECK);
@@ -166,6 +185,8 @@ console.log('\nTHROUGH THE HOOK — shadow refuses nothing, prints nothing, and 
   ok(rows.length === 1 && rows[0].outcome === 'judged' && rows[0].added[0].onList === false && rows[0].graph === 'allow' &&
      rows[0].session === 'sess-h' && rows[0].package === PKG && typeof rows[0].ms === 'number' && rows[0].ts,
      'the row records the chance, the graph rule\'s decision, the session, the package and the time taken');
+  ok(rows[0].budgetMs > 0 && rows[0].budgetMs < H.HOOK_BUDGET_MS - H.EXIT_MARGIN_MS,
+     `the hook gave the shadow what was left of its budget (${rows[0].budgetMs} ms), not a fixed allowance`);
   const up = hook(edit('pkg/src/low/a.ts', 'export const a = 1;\n', "import { m } from '../mid/m';\n// REACH:owner:owner#krill\nexport const a = m;\n", 'sess-h'));
   rows = logRows();
   ok(up.exit === 2 && rows.length === 2 && rows[1].graph === 'deny' && rows[1].outcome === 'judged',

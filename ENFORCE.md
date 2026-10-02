@@ -1544,8 +1544,13 @@ loosened until it stops firing guards nothing.
   charged to the edit. **Shadow refuses nothing and prints nothing**: it appends one row per edit to
   `~/.claude/structure-guard-cache/shadow/<package id>.jsonl` and cannot change the decision. Every
   way it cannot look is a `not-measured` row with its reason — the adapter crashing, hanging past
-  3 s, printing no JSON or the wrong shape, Node below 23, a MultiEdit, a mode other than shadow, a
-  failure of the shadow step itself. An edit to one of the check's own files is a `check-file` row:
+  its time, printing no JSON or the wrong shape, Node below 23, a MultiEdit, a mode other than
+  shadow, a failure of the shadow step itself. **Its time is what is left of the hook's budget
+  (#607)**: it runs before the decision is printed, and a hook killed at its 10 s timeout lets the
+  edit through, so a slow check after a cold graph build would lose a refusal the graph rule had
+  already decided. It gets at most 3 s, never more than the registered 10 s less the time already
+  spent and a 1.5 s margin, and does not start with under 0.5 s left; each row records the budget
+  it was given. An edit to one of the check's own files is a `check-file` row:
   a design change for the owner, never judged by the check it changes. The report lists every
   would-be refusal for the owner to rule right or wrong, and every edit to the check. Exit 1
   something to read · 2 not measured (no check registered, an unreadable log) · 3 UNTESTED — never

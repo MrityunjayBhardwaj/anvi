@@ -379,6 +379,14 @@ function evaluate(payload, deps) {
 // "nothing found". Only `"mode": "shadow"` exists; any other mode is recorded as not measured.
 const CHECK_TIMEOUT_MS = 3000;
 const CHECK_MIN_NODE = 23;   // a TypeScript check loads through Node's type stripping
+// THE SHADOW SPENDS ONLY WHAT IS LEFT (#607). It runs before the decision is printed, and a hook
+// past its registered timeout is killed and the edit goes through — so a slow check after a cold
+// graph build could lose a refusal the graph rule had already decided. It gets what remains of
+// the registered budget (HOOK_BUDGET_MS, equal to the registrar's figure — a test holds them
+// together) less EXIT_MARGIN_MS for printing and exiting; below CHECK_MIN_MS it does not start.
+const HOOK_BUDGET_MS = 10000;
+const EXIT_MARGIN_MS = 1500;
+const CHECK_MIN_MS = 500;
 
 function shadowLogPath(stateDir, entryDir) {
   let dir = entryDir;
@@ -404,7 +412,7 @@ function shadowCheck(payload, deps) {
   catch (e) { return unmeasured(`the shadow check failed: ${e && e.message}`); }
 }
 
-function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, spawn, nodeMajor }) {
+function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, spawn, nodeMajor, budgetMs = CHECK_TIMEOUT_MS }) {
   const check = owner.entry.check;
 
   if (!check || typeof check.adapter !== 'string' || typeof check.root !== 'string')
@@ -423,9 +431,11 @@ function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, sp
   let before = null;
   try { before = readFile(abs); } catch { /* a new file: nothing before */ }
 
+  const timeout = Math.min(CHECK_TIMEOUT_MS, Math.floor(budgetMs));
+  if (!(timeout >= CHECK_MIN_MS)) return unmeasured(`no time left in the hook's budget — ${Math.max(0, Math.floor(budgetMs))} ms remained, the check needs ${CHECK_MIN_MS}`);
   const r = spawn(process.execPath, [check.adapter], { input: JSON.stringify({ root, rel: row.rel, before, after }),
-    encoding: 'utf8', timeout: CHECK_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
-  if (r.error) return unmeasured(r.error.code === 'ETIMEDOUT' ? `the check took longer than ${CHECK_TIMEOUT_MS} ms` : `the check could not run: ${r.error.message}`);
+    encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
+  if (r.error) return unmeasured(r.error.code === 'ETIMEDOUT' ? `the check took longer than ${timeout} ms` : `the check could not run: ${r.error.message}`);
   if (r.status !== 0) {
     // Node ends an uncaught error with its own version line, so the last line says nothing: the
     // line naming the error does.
@@ -547,13 +557,14 @@ function noticesOnce(sessionId, notices, stateDir) {
 }
 
 module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
-  shadowCheck, shadowLogPath, recordShadow, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, CHECK_MIN_NODE };
+  shadowCheck, shadowLogPath, recordShadow, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, CHECK_MIN_NODE, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
 if (require.main === module) {
   // What this run costs, one row per run (#527). Guarded like any shared module: a
   // missing meter on a skewed install must cost the measurement, never the hook.
   let meter = null;
   try { meter = require('./hook-meter.js'); meter.start('structure-guard-hook.js', 'PreToolUse'); } catch (_) { meter = null; }
+  const started = Date.now();
   const stdinTimeout = setTimeout(() => process.exit(0), 9000);
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -580,9 +591,10 @@ if (require.main === module) {
       // its own failures are caught here and recorded as a row, never thrown into the decision.
       try {
         const t0 = Date.now();
+        const budgetMs = HOOK_BUDGET_MS - (t0 - started) - EXIT_MARGIN_MS;
         const row = shadowCheck(payload, { registry, readFile: f => fs.readFileSync(f, 'utf8'), spawn: require('child_process').spawnSync,
-          nodeMajor: Number(process.versions.node.split('.')[0]) });
-        if (row) recordShadow(STATE_DIR, row.package, { ts: new Date().toISOString(), ...row, ms: Date.now() - t0, graph: result.decision });
+          nodeMajor: Number(process.versions.node.split('.')[0]), budgetMs });
+        if (row) recordShadow(STATE_DIR, row.package, { ts: new Date().toISOString(), ...row, ms: Date.now() - t0, budgetMs, graph: result.decision });
       } catch (e) {
         try { recordFailure(LOG, `${new Date().toISOString()}\tshadow check: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}\n`); } catch { /* nothing more to do */ }
       }
