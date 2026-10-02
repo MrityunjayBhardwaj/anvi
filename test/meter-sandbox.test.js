@@ -63,5 +63,26 @@ console.log('\nWHAT THE SANDBOX DOES, OBSERVED:');
   fs.rmSync(scratch, { recursive: true, force: true });
 }
 
+console.log('\nA CALLER\'S CLAUDE_DIR DOES NOT REACH A TEST (#608):');
+{
+  const sandbox = path.join(__dirname, 'meter-sandbox.js');
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-claude-dir-')));
+  const seen = withSandbox => spawnSync(process.execPath, ['-e',
+    `${withSandbox ? `require(${JSON.stringify(sandbox)});` : ''} process.stdout.write(String(process.env.CLAUDE_DIR));`],
+    { encoding: 'utf8', env: { ...process.env, CLAUDE_DIR: scratch } }).stdout;
+  ok(seen(false) === scratch, 'CONTROL — without the sandbox, a child sees the caller\'s CLAUDE_DIR');
+  ok(seen(true) === 'undefined', 'with it, the caller\'s CLAUDE_DIR is gone before the test runs');
+  const set = spawnSync(process.execPath, ['-e',
+    `require(${JSON.stringify(sandbox)}); process.env.CLAUDE_DIR = 'mine'; process.stdout.write(process.env.CLAUDE_DIR);`],
+    { encoding: 'utf8', env: { ...process.env, CLAUDE_DIR: scratch } }).stdout;
+  ok(set === 'mine', 'a test that sets CLAUDE_DIR itself, after the sandbox, keeps its own');
+  // The case that found it: a test that isolates HOME, run by hand under a caller's CLAUDE_DIR.
+  const lease = spawnSync(process.execPath, [path.join(__dirname, 'wrap-lease-refresh.test.js')],
+    { encoding: 'utf8', env: { ...process.env, CLAUDE_DIR: scratch } });
+  ok(lease.status === 0 && !fs.existsSync(path.join(scratch, 'anvi-harvest')),
+     `the lease test run under a caller's CLAUDE_DIR passes and writes nothing there (exit ${lease.status})`);
+  fs.rmSync(scratch, { recursive: true, force: true });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

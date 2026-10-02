@@ -1,4 +1,5 @@
-// meter-sandbox.js — keep a test's meter rows out of the real meter directory (#597).
+// meter-sandbox.js — keep a test's meter rows out of the real meter directory (#597), and a
+// caller's CLAUDE_DIR out of every test (#608).
 //
 // Hooks record one row per run under `$ANVI_METER_DIR`, else `$CLAUDE_DIR/anvi-meter`, else
 // `~/.claude/anvi-meter`. The suite runner sets the variable for every file it starts. A
@@ -14,6 +15,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
+// A CLAUDE_DIR inherited from the caller is dropped (#608). The tools read it BEFORE HOME, so a
+// test that gives its children a HOME of its own — 22 files do — still had them write wherever
+// the caller pointed: a hand run with a scratch CLAUDE_DIR failed, and one pointing at the real
+// ~/.claude would have written there. It exists for tests only and the runner never sets it, so
+// nothing is lost: a test that wants it sets it for its own children, after this line has run.
+delete process.env.CLAUDE_DIR;
 
 if (!process.env.ANVI_METER_DIR) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-test-meter-'));
