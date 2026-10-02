@@ -88,6 +88,35 @@ console.log('\nTHE GRAPH, COLD:');
      `the edges are the extractor's, keyed by package-relative path (got ${edgeKeys(r.graph).length})`);
   ok(r.graph.reexports.size === 2 && r.graph.reexports.has('src/index.ts -> src/a.ts'), 'a re-export reaches the rules as a re-export');
   ok(fs.existsSync(CACHE), 'the cache is written');
+  ok(r.graph.modules.size === 4 && !r.graph.modules.has('src/data.json') && r.graph.modules.has('src/c.ts'),
+     `a JSON file nothing imports is data, not a module — the analyser does not list it either (got ${[...r.graph.modules].sort().join(', ')})`);
+}
+
+console.log('\nA JSON FILE IS A MODULE ONLY WHEN IMPORTED (#599):');
+{
+  const pkg = path.join(DIR, 'jsonpkg');
+  const write = (rel, text) => { const f = path.join(pkg, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  write('tsconfig.json', '{}');
+  write('src/reads.ts', "import table from './table.json';\nexport const t = table;\n");
+  write('src/table.json', '{"a":1}\n');
+  write('src/ledger.json', '{"read":"with fs, never imported"}\n');
+  write('src/ambient.d.ts', 'declare const g: number;\n');
+  const jsonAware = { ...fake, configFiles: [path.join(pkg, 'tsconfig.json')],
+    edges: (rel, content) => ({ edges: [...content.matchAll(/from\s+['"]\.\/([^'"]+\.json)['"]/g)].map(m => [`src/${m[1]}`, false]), unresolved: 0 }) };
+  const r = S.buildGraph({ pkgDir: pkg, design, extractor: jsonAware, cachePath: null });
+  const mods = [...r.graph.modules].sort().join();
+  ok(r.graph.modules.has('src/table.json') && edgeKeys(r.graph).join() === 'src/reads.ts -> src/table.json',
+     `an imported JSON file is a module, with its edge (got ${mods})`);
+  ok(!r.graph.modules.has('src/ledger.json'), `an unimported JSON file is left out (got ${mods})`);
+  ok(mods === 'src/ambient.d.ts,src/reads.ts,src/table.json',
+     `an unimported declaration file stays — both producers list scripts whether or not anything imports them (got ${mods})`);
+  const proposed = S.buildGraph({ pkgDir: pkg, design, extractor: jsonAware, cachePath: null, proposed: { rel: 'src/ledger.json', content: '{"edited":true}\n' } });
+  ok(!proposed.notMeasured && !proposed.graph.modules.has('src/ledger.json') && proposed.graph.edges.length === 1,
+     'an edit proposed to an unimported JSON file builds the same graph, and does not crash');
+  const starts = S.buildGraph({ pkgDir: pkg, design, extractor: jsonAware, cachePath: null,
+    proposed: { rel: 'src/reads.ts', content: "import table from './table.json';\nimport ledger from './ledger.json';\nexport const t = [table, ledger];\n" } });
+  ok(starts.graph.modules.has('src/ledger.json') && edgeKeys(starts.graph).includes('src/reads.ts -> src/ledger.json'),
+     `an edit that STARTS importing a JSON file makes it a module in that same build (got ${edgeKeys(starts.graph).join(', ')})`);
 }
 
 console.log('\nTHE CACHE — reused per file, rebuilt when resolution could have moved:');
