@@ -37,12 +37,29 @@
 // Usage:
 //   node scripts/structure-refusals.js --package <dir> --since <ISO time>
 //        [--until <ISO time>] [--transcripts <dir>] [--json <out.json>]
+//        [--design <design.json>] [--baseline <baseline.json>] [--extractor <module>]
 //   --transcripts defaults to ~/.claude/projects: the guard runs in EVERY session on the machine,
-//   so a session started in another project that edits the package is read too.
+//   so a session started in another project that edits the package is read too. The design,
+//   baseline and extractor default to the package's entry in the guard's registry.
 //
-// Exit: 0 read, no refusal · 1 read, at least one refusal (each needs a person's ruling: right
-//       or wrong) · 2 not measured (no transcripts, no edit in the package in the window, or no refusal
-//       recognised while some denial was recorded in a shape this reader does not know)
+// EXPOSURE — A ZERO IS READ AGAINST THE CHANCES, NOT THE EDITS (#603). A trial is ruled on its
+// refusals, and "0 refused of 50 edits" said nothing when almost none of the 50 could have been
+// refused (a replay of that window found 0 chances in 66 edits). So for every applied edit in the
+// corpus, the imports of the file just before it (the tool result's recorded `originalFile`) are
+// compared with the imports of the proposed content, resolved by the guard's own extractor, and
+// each ADDED edge is classed: within one component · across, allowed · across, already in the
+// baseline · across, NOT allowed · unresolved. A chance to refuse is a refusal, or a not-allowed
+// edge that landed — the second kind is MISSED and listed, because each one is a guard that did
+// not judge, a guard defect, or a design that changed inside the window. A window with no chance
+// is UNTESTED: neither a pass nor a failure. A new cycle inside one component is not counted as a
+// chance (that needs the whole graph at that moment), and imports are resolved against the
+// checkout as it is when the report runs — both said in the output.
+//
+// Exit: 1 a person must read something: a refusal (right or wrong?), a missed chance (why was it
+//       not refused?), or a possible chance (is it real?) · 2 not measured (no transcripts, no edit in the package in the window, a
+//       denial in a shape this reader does not know, or no design to compute exposure with) ·
+//       3 UNTESTED: no chance to refuse in the window. There is no clean exit: a trial passes by
+//       a person's rulings on its refusals, never by a window's count.
 
 'use strict';
 
@@ -136,15 +153,21 @@ function readTranscript(file, pkgDir, filter, since, until) {
         if (!hit) continue;
         calls.set(b.id, { id: b.id, tool: b.name, file: hit.rel, checkout: hit.checkout, checkoutDir: hit.dir, at: ts, version: r.version || null,
           session: r.sessionId || r.session_id || path.basename(file, '.jsonl'), transcript: file,
-          outcome: 'no result', violations: [], notices: [] });
+          outcome: 'no result', violations: [], notices: [], input: b.input });
       } else if (b.type === 'tool_result') {
-        results.push({ block: b, denialKind: r.toolDenialKind || null });
+        results.push({ block: b, denialKind: r.toolDenialKind || null, toolResult: r.toolUseResult });
       }
     }
   }
-  for (const { block: b, denialKind } of results) {
+  for (const { block: b, denialKind, toolResult } of results) {
     const c = calls.get(b.tool_use_id);
     if (!c) continue;
+    // The file as it was just before the edit: a string, null for a file the edit created, or
+    // undefined when the result recorded neither (then exposure is not computed for it).
+    if (toolResult && typeof toolResult === 'object' && 'originalFile' in toolResult) {
+      c.prior = typeof toolResult.originalFile === 'string' ? toolResult.originalFile : null;
+      c.resultType = toolResult.type || null;          // a Write's 'create' or 'update'
+    }
     const text = textOf(b.content);
     if (!b.is_error) { c.outcome = 'applied'; continue; }
     if (REFUSAL.test(text)) {
@@ -176,7 +199,104 @@ function readTranscript(file, pkgDir, filter, since, until) {
 
 const count2 = (calls, where) => calls.filter(c => c.checkout === where).length;
 
-const FLAGS = new Set(['package', 'since', 'until', 'transcripts', 'json']);
+// ── exposure (#603) ──────────────────────────────────────────────────────────────────────
+const RULES = loadFromCandidates('structure-rules.js');
+const GRAPH = loadFromCandidates('structure-graph.js');
+
+// Module specifiers written in a piece of source text — lexical, so it works on the fragment an
+// Edit replaces. Type-only imports are included (the guard's compiled view drops them).
+const SPECIFIER = /(?:\bimport|\bexport)\s[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|\brequire\(\s*['"]([^'"]+)['"]\s*\)|^\s*import\s*['"]([^'"]+)['"]/gm;
+const specifiersIn = text => new Set([...String(text || '').matchAll(SPECIFIER)].map(m => m[1] || m[2] || m[3] || m[4]));
+
+// What one edit added, or why that could not be told. `extractorFor(dir)` gives the extractor
+// for the checkout the edit was made in; `frame` holds the design, its component lookup, the
+// allowed pairs and the baseline's divergence keys.
+function exposureOf(c, frame, extractorFor) {
+  if (!GRAPH.inCorpus(c.file, frame.design)) return { kind: 'outside the corpus' };
+  if (c.tool === 'MultiEdit') return { kind: 'not computed', why: 'MultiEdit' };
+  const ex = extractorFor(c.checkoutDir);
+  if (ex.notMeasured) return { kind: 'not computed', why: ex.notMeasured };
+  // WHY THE PRIOR IS OFTEN MISSING (read from the shipped 2.1.287 bundle): when a record is
+  // appended to the transcript, a tool result whose `originalFile` is longer than 10,000
+  // characters has it replaced by null — for every tool, Write included. On stave every recorded
+  // prior was ≤ 9,618 characters and 86 of the 87 null-prior Edits whose file still exists are
+  // over 10,000 now. So a null prior means "a large file", never "no file", except on a Write
+  // whose result says `type: 'create'`.
+  if (c.tool === 'Write' && c.prior === null && c.resultType !== 'create')
+    return { kind: 'not computed', why: 'an overwrite whose prior content was over 10,000 characters, so not recorded' };
+  // EXACT when the prior content is known: a created file, or an edit whose result recorded
+  // `originalFile`. ESTIMATED from the edit's own text when it did not. Every import an Edit
+  // adds is in its new text, so "in the new text, not in the old" is an UPPER BOUND: a zero is
+  // firm, a hit is only possible (a type-only import, or one the file already had elsewhere).
+  let before, after, method;
+  try {
+    if (c.tool === 'Write' || typeof c.prior === 'string') {
+      const post = HOOK.proposedContent(c.tool, c.input, () => { if (typeof c.prior !== 'string') throw new Error('no file'); return c.prior; });
+      if (post == null) return { kind: 'not computed', why: c.prior === undefined ? 'no prior content recorded'
+        : 'the proposal does not apply to the recorded content' };
+      method = 'exact';
+      before = typeof c.prior === 'string' ? ex.edges(c.file, c.prior) : { edges: [], unresolved: 0 };
+      after = ex.edges(c.file, post);
+    } else if (c.tool === 'Edit' && c.input && typeof c.input.new_string === 'string') {
+      method = 'estimated';
+      const old = specifiersIn(c.input.old_string);
+      const added = [...specifiersIn(c.input.new_string)].filter(x => !old.has(x));
+      // A side-effect import is never dropped by compilation, so the extractor resolves each one.
+      before = { edges: [], unresolved: 0 };
+      after = added.length ? ex.edges(c.file, added.map(x => `import ${JSON.stringify(x)};`).join('\n') + '\n') : { edges: [], unresolved: 0 };
+    } else return { kind: 'not computed', why: 'no prior content recorded' };
+  } catch (e) { return { kind: 'not computed', why: `the extractor failed: ${String(e.message).split('\n')[0]}` }; }
+  const had = new Set(before.edges.map(([t]) => t));
+  const added = after.edges.map(([t]) => t).filter(t => !had.has(t) && t !== c.file);
+  const from = frame.of(c.file);
+  const edges = added.map(t => {
+    const to = GRAPH.inCorpus(t, frame.design) ? frame.of(t) : undefined;
+    const key = RULES.edgeKey(c.file, t);
+    const kind = from === undefined || to === undefined ? 'unmapped'
+      : from === to ? 'within'
+      : frame.allowed.has(RULES.edgeKey(from, to)) ? 'allowed'
+      : frame.baselined.has(key) ? 'baselined' : 'NOT allowed';
+    return { key, pair: from && to ? RULES.edgeKey(from, to) : null, kind };
+  });
+  const unresolved = Math.max(0, (after.unresolved || 0) - (before.unresolved || 0));
+  const kind = edges.some(e => e.kind === 'NOT allowed') ? 'chance'
+    : edges.some(e => e.kind === 'allowed' || e.kind === 'baselined') ? 'allowed crossing' : 'no crossing';
+  return { kind, method, edges, unresolved };
+}
+
+// The design, baseline and extractor the exposure is computed with: flags first, else the guard's
+// registry entry for the package. Returns { frame } or { notMeasured }.
+function frameFor(pkgDir, args) {
+  let entry = null;
+  try {
+    const registry = JSON.parse(fs.readFileSync(HOOK.REGISTRY, 'utf8'));
+    entry = (registry.packages || []).find(p => { try { return fs.realpathSync(p.dir) === pkgDir; } catch { return false; } }) || null;
+  } catch { /* no registry: flags only */ }
+  const designPath = args.design || (entry && entry.design);
+  if (!designPath) return { notMeasured: 'the package has no design: it is not in the guard\'s registry and no --design was given' };
+  let design, baseline = null;
+  try { design = JSON.parse(fs.readFileSync(path.resolve(designPath), 'utf8')); }
+  catch (e) { return { notMeasured: `cannot read the design ${designPath}: ${e.message}` }; }
+  const problem = RULES.designProblem(design);
+  if (problem) return { notMeasured: `the design cannot be judged against: ${problem}` };
+  const baselinePath = args.baseline || (entry && entry.baseline);
+  if (baselinePath) {
+    try { baseline = JSON.parse(fs.readFileSync(path.resolve(baselinePath), 'utf8')); }
+    catch (e) { return { notMeasured: `cannot read the baseline ${baselinePath}: ${e.message}` }; }
+  }
+  const root = design.root ? String(design.root).replace(/\/+$/, '') + '/' : '';
+  const extractorEntry = args.extractor ? { extractor: path.resolve(args.extractor) } : (entry || {});
+  return { frame: {
+    design, id: RULES.designId(design), source: args.design ? 'given' : 'registry',
+    of: RULES.componentOf(design, root),
+    allowed: new Set((design.allowed || []).map(([a, b]) => RULES.edgeKey(a, b))),
+    baselined: new Set(((baseline && baseline.rules && baseline.rules.divergence) || [])),
+    baselineCount: baseline ? ((baseline.rules && baseline.rules.divergence) || []).length : null,
+    extractorEntry,
+  } };
+}
+
+const FLAGS = new Set(['package', 'since', 'until', 'transcripts', 'json', 'design', 'baseline', 'extractor']);
 
 function main(argv) {
   const args = {};
@@ -267,15 +387,86 @@ function main(argv) {
   } else print(`\n  no refusal in ${calls.length} edits` +
     (unjudged ? ` — but ${unjudged} of them landed WITHOUT being judged, so this zero covers only the other ${calls.length - unjudged}.` : '.'));
 
+  // ── exposure: what the refusal count is OF (#603) ──
+  const { frame, notMeasured: noFrame } = frameFor(pkgDir, args);
+  let toRead = 0, exposure = null;
+  if (noFrame) {
+    print(`\n  exposure: NOT COMPUTED — ${noFrame}.`);
+    print(`  TRIAL READING: NOT MEASURED — without exposure, a window with no chance to refuse cannot be told from one that passed.`);
+  } else {
+    const extractors = new Map();
+    const extractorFor = dir => {
+      const d = dir && fs.existsSync(dir) ? dir : pkgDir;
+      if (!extractors.has(d)) { try { extractors.set(d, GRAPH.loadExtractor(frame.extractorEntry, d)); } catch (e) { extractors.set(d, { notMeasured: e.message }); } }
+      return extractors.get(d);
+    };
+    const landed = new Set(['applied', 'timed out', 'cancelled']);
+    for (const c of calls) if (landed.has(c.outcome)) c.exposure = exposureOf(c, frame, extractorFor);
+    const ex = calls.filter(c => c.exposure);
+    const by = k => ex.filter(c => c.exposure.kind === k);
+    const computed = ex.filter(c => !['outside the corpus', 'not computed'].includes(c.exposure.kind));
+    const allEdges = computed.flatMap(c => c.exposure.edges);
+    const edgeCount = k => allEdges.filter(e => e.kind === k).length;
+    const whyNot = {};
+    for (const c of by('not computed')) whyNot[c.exposure.why] = (whyNot[c.exposure.why] || 0) + 1;
+    const unresolved = computed.reduce((n, c) => n + c.exposure.unresolved, 0);
+    const exactMissed = by('chance').filter(c => c.exposure.method === 'exact');
+    const possible = by('chance').filter(c => c.exposure.method === 'estimated');
+    toRead = exactMissed.length + possible.length;
+    const chances = refused.length + exactMissed.length;
+    const methods = { exact: computed.filter(c => c.exposure.method === 'exact').length, estimated: computed.filter(c => c.exposure.method === 'estimated').length };
+    exposure = { design: frame.id, chances, refused: refused.length, missed: exactMissed.length, possible: possible.length, computed: computed.length, methods,
+      crossingAllowed: by('allowed crossing').length, noCrossing: by('no crossing').length,
+      notComputed: by('not computed').length, outside: by('outside the corpus').length, unresolved };
+    print(`\n  exposure (design ${frame.id} from the ${frame.source}` +
+          (frame.baselineCount === null ? ', no baseline' : `, baseline ${frame.baselineCount} divergence`) + `):`);
+    print(`    landed edits ${ex.length} — ${by('outside the corpus').length} outside the corpus (tests, excluded) · ` +
+          `${by('not computed').length} exposure not computed` +
+          (Object.keys(whyNot).length ? ` (${Object.entries(whyNot).map(([w, n]) => `${w} ×${n}`).join('; ')})` : '') +
+          ` · ${computed.length} computed (${methods.exact} exactly from the recorded content, ${methods.estimated} estimated from the edit's own text — ` +
+          'Claude Code did not record the file before those; the estimate is an upper bound)');
+    print(`    of the ${computed.length} computed: ${exactMissed.length} added an import across components that is NOT allowed` +
+          (possible.length ? ` (and ${possible.length} possibly, estimated from the edit's text)` : '') + ' · ' +
+          `${by('allowed crossing').length} crossed only where allowed or baselined · ${by('no crossing').length} crossed nothing`);
+    print(`    imports added: ${allEdges.length} — within a component ${edgeCount('within')} · across, allowed ${edgeCount('allowed')} · ` +
+          `across, baselined ${edgeCount('baselined')} · across, NOT allowed ${edgeCount('NOT allowed')} · to an unmapped file ${edgeCount('unmapped')} · ` +
+          `unresolved now ${unresolved}`);
+    print('    not counted as chances: a new cycle inside one component (needs the whole graph), and edits made through Bash.');
+    const list = (title, rows) => {
+      if (!rows.length) return;
+      print(title);
+      rows.forEach((c, i) => {
+        print(`    ${i + 1}. ${c.at} ${c.session.slice(0, 8)} ${c.tool} ${c.file} · ${c.outcome}` + (c.checkout !== 'registered' ? ` · in a ${c.checkout} checkout` : '') +
+              // What the guard said on that edit tells the reasons apart: "not measured" is a guard
+              // that was not judging (a design mismatch, no TypeScript), silence is a guard that judged.
+              ` · the guard said: ${c.notices.length ? c.notices.join(', ') : 'nothing'}`);
+        for (const e of c.exposure.edges.filter(x => x.kind === 'NOT allowed')) print(`         ${e.key}   (${e.pair})`);
+      });
+    };
+    list(`\n  MISSED CHANCES — ${exactMissed.length}: a not-allowed import landed without a refusal. Each needs a reason ` +
+         '(the guard did not judge it, a guard defect, or the design changed inside the window):', exactMissed);
+    list(`\n  POSSIBLE CHANCES — ${possible.length}: the edit's text adds a not-allowed import, but the file before it was not recorded, ` +
+         'so whether the guard would see it is not known (a type-only import is invisible to it). Read each edit:', possible);
+    const tail = possible.length ? ` · ${possible.length} possible chance${possible.length === 1 ? '' : 's'} to read` : '';
+    print(chances === 0
+      ? `\n  TRIAL READING: ${possible.length ? 'UNTESTED unless a possible chance is real' : 'UNTESTED'} — 0 chances to refuse in this window ` +
+        `(${computed.length} edits computed, ${by('not computed').length} not${tail}). This is neither a pass nor a failure.`
+      : `\n  TRIAL READING: ${chances} chance${chances === 1 ? '' : 's'} to refuse — ${refused.length} refused (each needs a ruling, right or wrong) · ` +
+        `${exactMissed.length} missed (each needs a reason)${tail}.`);
+  }
+
   if (args.json) {
     fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: pkgDir, since, until, transcripts: files.length,
-      unreadable, badLines, calls: calls.map(({ reason, ...c }) => c) }, null, 1) + '\n');
+      unreadable, badLines, exposure, calls: calls.map(({ reason, input, prior, ...c }) => c) }, null, 1) + '\n');
     print(`  report: ${path.resolve(args.json)}`);
   }
-  // Refused → a ruling is owed · nothing recognised but denials unread → not measured, not clean.
-  return refused.length ? 1 : unrecognised.length ? 2 : 0;
+  // A ruling owed (refused, or a missed chance) · not measured (a denial unread, or no exposure)
+  // · untested (no chance). Never a clean exit: see the header.
+  if (refused.length || toRead) return 1;
+  if (unrecognised.length || noFrame) return 2;
+  return 3;
 }
 
-module.exports = { readTranscript, spellings, needles, REFUSAL, GUARD_WORDS, VIOLATION, NOTICE_KINDS };
+module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, REFUSAL, GUARD_WORDS, VIOLATION, NOTICE_KINDS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

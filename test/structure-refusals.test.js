@@ -26,8 +26,11 @@ const TX = path.join(DIR, 'transcripts');
 fs.mkdirSync(PKG, { recursive: true });
 fs.mkdirSync(path.join(TX, 'project-a', 'subagents'), { recursive: true });
 
+// A scratch HOME: the reader looks up the guard's registry there, and the real one must never answer.
+const HOME = path.join(DIR, 'home');
+fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
 const runIn = (tx, ...args) => {
-  const r = spawnSync('node', [SCRIPT, '--transcripts', tx, ...args], { encoding: 'utf8', timeout: 60000 });
+  const r = spawnSync('node', [SCRIPT, '--transcripts', tx, ...args], { encoding: 'utf8', timeout: 60000, env: { ...process.env, HOME } });
   return { exit: r.status, out: r.stdout + r.stderr };
 };
 const run = (...args) => runIn(TX, ...args);
@@ -142,7 +145,7 @@ console.log('\nA CHANGED DENIAL SHAPE IS SAID, never read as a clean zero (#549)
   const later = use('Edit', path.join(PKG, 'src/s1.ts'), T0, 'sess-s', '2.1.300');
   put('a.jsonl', [later.line, result(later.id, 'The file has been updated successfully.', false, T0, '2.1.300')]);
   const clean = runIn(tx, ...window);
-  ok(clean.exit === 0 && /no refusal in 1 edits\./.test(clean.out) && /applied WITHOUT being judged: 0/.test(clean.out) && /2\.1\.300 ×1/.test(clean.out) && /UNRECOGNISED shape: 0/.test(clean.out),
+  ok(clean.exit === 2 && /exposure: NOT COMPUTED/.test(clean.out) && /no refusal in 1 edits\./.test(clean.out) && /applied WITHOUT being judged: 0/.test(clean.out) && /2\.1\.300 ×1/.test(clean.out) && /UNRECOGNISED shape: 0/.test(clean.out),
      `edits from a version never seen before give a clean zero when nothing drifted, and name it (exit ${clean.exit})`);
 
   // The guard's reason in a changed wrapper: read as drift, not as nothing.
@@ -173,7 +176,7 @@ console.log('\nA CHANGED DENIAL SHAPE IS SAID, never read as a clean zero (#549)
   put('c.jsonl', [other.line, denied(other.id, 'BLOCKED: a gate is running against this tree — Edit → packages/editor', 'permission-rule', T0, '2.1.270'),
     rule.line, denied(rule.id, 'Permission for this command was denied by a rule in your settings.', 'permission-rule', T0, '2.1.281')]);
   const bare = runIn(tx, ...window);
-  ok(bare.exit === 0 && /UNRECOGNISED shape: 0/.test(bare.out) && /2 denied by another hook or a permission rule/.test(bare.out),
+  ok(bare.exit === 2 && /UNRECOGNISED shape: 0/.test(bare.out) && /2 denied by another hook or a permission rule/.test(bare.out),
      `another hook's bare block and a settings rule are counted as denied otherwise, not drift (exit ${bare.exit})`);
 
   // A person rejecting the call is its own kind, and is not drift.
@@ -181,7 +184,7 @@ console.log('\nA CHANGED DENIAL SHAPE IS SAID, never read as a clean zero (#549)
   const rejected = use('Edit', path.join(PKG, 'src/s4.ts'), T0, 'sess-s', '2.1.301');
   put('d.jsonl', [rejected.line, denied(rejected.id, "The user doesn't want to proceed with this tool use.", 'user-rejected', T0, '2.1.301')]);
   const user = runIn(tx, ...window);
-  ok(user.exit === 0 && /UNRECOGNISED shape: 0/.test(user.out) && /1 errored otherwise/.test(user.out), 'a user\'s rejection is not read as drift');
+  ok(user.exit === 2 && /UNRECOGNISED shape: 0/.test(user.out) && /1 errored otherwise/.test(user.out), 'a user\'s rejection is not read as drift');
 
   // A recognised refusal still exits 1 — and a drifted one beside it is still said.
   put('b.jsonl', [wrapped.line, denied(wrapped.id, 'Hook denied Edit: BLOCKED: this edit to src/s2.ts adds 1 import that erode x', 'permission-rule', T0, '2.1.300')]);
@@ -256,13 +259,127 @@ console.log('\nTIMEOUTS — an edit the guard never judged is not one it passed 
   const r = runIn(tx, ...window);
   ok(/2 applied/.test(r.out) && /applied WITHOUT being judged: 1 — the guard timed out on 1/.test(r.out),
      `the guard's timeout is counted apart; another hook's is not (${(r.out.match(/applied WITHOUT[^\n]*/) || [''])[0]})`);
-  ok(r.exit === 0 && /no refusal in 3 edits — but 1 of them landed WITHOUT being judged, so this zero covers only the other 2\./.test(r.out),
+  ok(r.exit === 2 && /no refusal in 3 edits — but 1 of them landed WITHOUT being judged, so this zero covers only the other 2\./.test(r.out),
      `the zero is said to cover only the judged edits (exit ${r.exit})`);
 
   fs.writeFileSync(path.join(tx, 't.jsonl'), [late.line, cancelled(late.id, 'Edit', GUARD), result(late.id, 'The file has been updated successfully.', false)].join('\n') + '\n');
   const none = runIn(tx, ...window);
   ok(none.exit === 2 && /NOT MEASURED — the guard judged none of the 1 edits/.test(none.out),
      `when every edit went unjudged, it is NOT MEASURED, never a clean zero (exit ${none.exit})`);
+}
+
+console.log('\nEXPOSURE — a zero is read against the chances to refuse (#603):');
+{
+  const XP = path.join(DIR, 'xp', 'packages', 'editor');
+  for (const f of ['src/a/one.ts', 'src/a/two.ts', 'src/b/three.ts', 'src/c/four.ts']) {
+    fs.mkdirSync(path.dirname(path.join(XP, f)), { recursive: true });
+    fs.writeFileSync(path.join(XP, f), 'export const v = 1;\n');
+  }
+  // An extractor in the registry's contract: relative specifiers, resolved against the package's files.
+  const EXTRACTOR = path.join(DIR, 'xp', 'extractor.js');
+  fs.writeFileSync(EXTRACTOR, `const fs = require('fs'), path = require('path');
+exports.create = pkgDir => ({ id: 'fixture@1', configFiles: [], edges(rel, content) {
+  const out = new Map(); let unresolved = 0;
+  for (const m of content.matchAll(/(?:from\\s+|import\\s+)['"](\\.[^'"]+)['"]/g)) {
+    const base = path.posix.join(path.posix.dirname(rel), m[1]);
+    const t = [base + '.ts', base].find(x => fs.existsSync(path.join(pkgDir, x)) && fs.statSync(path.join(pkgDir, x)).isFile());
+    if (t) out.set(t, false); else unresolved++;
+  }
+  return { edges: [...out], unresolved };
+} });
+`);
+  const DESIGN = path.join(DIR, 'xp', 'design.json'), BASE = path.join(DIR, 'xp', 'baseline.json'), EMPTY = path.join(DIR, 'xp', 'empty-baseline.json');
+  fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', excludes: ['.test.'],
+    components: { a: { dirs: ['a'] }, b: { dirs: ['b'] }, c: { dirs: ['c'] } }, allowed: [['a', 'b']] }));
+  fs.writeFileSync(BASE, JSON.stringify({ rules: { divergence: ['src/a/one.ts -> src/c/four.ts'] } }));
+  fs.writeFileSync(EMPTY, JSON.stringify({ rules: { divergence: [] } }));
+  const xtx = path.join(DIR, 'xp-tx');
+  const edit = (file, prior, from, to, session = 'sess-x') => {
+    const u = use('Edit', path.join(XP, file), T0, session);
+    const line = JSON.parse(u.line);
+    line.message.content[0].input = { file_path: path.join(XP, file), old_string: from, new_string: to, replace_all: false };
+    const res = JSON.parse(result(u.id, 'The file has been updated successfully.', false));
+    res.toolUseResult = { filePath: path.join(XP, file), oldString: from, newString: to, originalFile: prior, structuredPatch: [], userModified: false, replaceAll: false };
+    return [JSON.stringify(line), JSON.stringify(res)];
+  };
+  const write = (file, content, prior = null) => {
+    const u = use('Write', path.join(XP, file), T0, 'sess-x');
+    const line = JSON.parse(u.line);
+    line.message.content[0].input = { file_path: path.join(XP, file), content };
+    const res = JSON.parse(result(u.id, 'File created successfully', false));
+    res.toolUseResult = { type: prior === null ? 'create' : 'update', filePath: path.join(XP, file), content, originalFile: prior, structuredPatch: [] };
+    return [JSON.stringify(line), JSON.stringify(res)];
+  };
+  const P0 = 'export const x = 1;\n';
+  const window = (base = BASE) => ['--package', XP, '--since', '2026-09-25T00:00:00Z', '--design', DESIGN, '--baseline', base, '--extractor', EXTRACTOR];
+  const read = (lines, base) => { fs.rmSync(xtx, { recursive: true, force: true }); fs.mkdirSync(xtx, { recursive: true });
+    fs.writeFileSync(path.join(xtx, 'x.jsonl'), lines.flat().join('\n') + '\n'); return runIn(xtx, ...window(base)); };
+
+  const untested = read([
+    edit('src/a/one.ts', P0, P0, "import { v } from '../b/three';\n" + P0),        // across, allowed
+    write('src/a/fresh.ts', "import { v } from './two';\nexport const f = v;\n"),     // within one component
+    write('src/a/one.test.ts', "import { v } from '../c/four';\n"),                   // a test: outside the corpus
+  ]);
+  ok(untested.exit === 3 && /TRIAL READING: UNTESTED — 0 chances to refuse/.test(untested.out),
+     `only allowed and within-component imports: UNTESTED, exit 3 — never a clean pass (exit ${untested.exit})`);
+  ok(/within a component 1 · across, allowed 1 · across, baselined 0 · across, NOT allowed 0/.test(untested.out) && /1 outside the corpus/.test(untested.out),
+     `each added import is classed, and a test file is outside the corpus (${(untested.out.match(/imports added[^\n]*/) || [''])[0]})`);
+
+  const missed = read([edit('src/a/two.ts', P0, P0, "import { v } from '../c/four';\n" + P0)], EMPTY);
+  ok(missed.exit === 1 && /MISSED CHANCES — 1/.test(missed.out) && /src\/a\/two\.ts -> src\/c\/four\.ts\s+\(a -> c\)/.test(missed.out),
+     `a not-allowed import that landed is a MISSED chance, listed with its pair, exit 1 (exit ${missed.exit})`);
+  ok(/1 chance to refuse — 0 refused .* 1 missed/.test(missed.out), 'and the trial reading counts it as a chance');
+  ok(/src\/a\/two\.ts · applied · the guard said: nothing/.test(missed.out), 'a missed chance says what the guard said on that edit — here nothing');
+  const said = edit('src/a/two.ts', P0, P0, "import { v } from '../c/four';\n" + P0);
+  said.splice(1, 0, notice(JSON.parse(said[0]).message.content[0].id, 'Edit', 'structure guard: NOT MEASURED — editor: the design in force is not the one armed.'));
+  const notMeasured = read([said], EMPTY);
+  ok(/· the guard said: not measured/.test(notMeasured.out), 'and a guard that said NOT MEASURED there is told apart from one that judged and allowed');
+
+  const baselined = read([edit('src/a/one.ts', P0, P0, "import { v } from '../c/four';\n" + P0)]);
+  ok(baselined.exit === 3 && /across, baselined 1/.test(baselined.out) && !/MISSED/.test(baselined.out),
+     `the same pair already in the baseline is not a chance (exit ${baselined.exit})`);
+
+  const had = "import { v } from '../c/four';\n" + P0;
+  const already = read([edit('src/a/two.ts', had, 'const x = 1', 'const x = 2')], EMPTY);
+  ok(already.exit === 3 && /imports added: 0/.test(already.out),
+     `an import the file had before the edit is not ADDED by it (exit ${already.exit})`);
+
+  const possible = read([edit('src/a/two.ts', null, P0, "import { v } from '../c/four';\n" + P0)], EMPTY);
+  ok(possible.exit === 1 && /POSSIBLE CHANCES — 1/.test(possible.out) && /UNTESTED unless a possible chance is real/.test(possible.out) && /1 estimated/.test(possible.out),
+     `with no recorded prior content, the edit's text gives a POSSIBLE chance, kept apart from the exact count, and something to read: exit 1 (exit ${possible.exit})`);
+  const firm = read([edit('src/a/two.ts', null, P0, "import { v } from '../b/three';\n" + P0)], EMPTY);
+  ok(firm.exit === 3 && /across, allowed 1/.test(firm.out) && !/POSSIBLE/.test(firm.out),
+     'an estimated allowed import is counted as a crossing, not a chance');
+
+  const overwrite = read([write('src/a/two.ts', "import { v } from '../c/four';\n" + P0, null).map((l, i) => i ? l.replace('"type":"create"', '"type":"update"') : l)], EMPTY);
+  ok(overwrite.exit === 3 && /exposure not computed \(an overwrite whose prior content was over 10,000 characters/.test(overwrite.out) && !/MISSED/.test(overwrite.out),
+     `a Write recorded as an UPDATE with a null prior is a large file overwritten, not a new one — not computed, never a missed chance (exit ${overwrite.exit})`);
+  const created = read([write('src/a/born.ts', "import { v } from '../c/four';\n")], EMPTY);
+  ok(created.exit === 1 && /MISSED CHANCES — 1/.test(created.out), 'a Write recorded as a CREATE still counts every import it adds');
+
+  const unresolved = read([edit('src/a/two.ts', P0, P0, "import { v } from '../gone/moved';\n" + P0)], EMPTY);
+  ok(unresolved.exit === 3 && /unresolved now 1/.test(unresolved.out), 'an import that does not resolve now is counted as unresolved, not as a crossing');
+
+  const multi = (() => { const u = use('MultiEdit', path.join(XP, 'src/a/two.ts'), T0, 'sess-x');
+    return [u.line, result(u.id, 'Applied 2 edits.', false)]; })();
+  const notComputed = read([multi], EMPTY);
+  ok(notComputed.exit === 3 && /1 exposure not computed \(MultiEdit ×1\)/.test(notComputed.out) && /0 edits computed, 1 not/.test(notComputed.out),
+     `an edit whose exposure cannot be computed is counted as such, never as "no crossing" (exit ${notComputed.exit})`);
+
+  // The golden refusal is a chance by definition; the design only has to be readable.
+  const refused = runIn(TX, '--package', PKG, '--since', '2026-09-25T00:00:00Z', '--design', DESIGN, '--extractor', EXTRACTOR);
+  ok(refused.exit === 1 && /chances? to refuse — 1 refused/.test(refused.out), `a refusal counts as a chance that was refused (exit ${refused.exit})`);
+
+  // With no flags the design comes from the guard's registry for that package.
+  fs.writeFileSync(path.join(HOME, '.claude', 'structure-guard.json'), JSON.stringify({ packages: [{ dir: XP, design: DESIGN, baseline: EMPTY, extractor: EXTRACTOR }] }));
+  fs.writeFileSync(path.join(xtx, 'x.jsonl'), edit('src/a/two.ts', P0, P0, "import { v } from '../c/four';\n" + P0).join('\n') + '\n');
+  const viaRegistry = runIn(xtx, '--package', XP, '--since', '2026-09-25T00:00:00Z');
+  ok(viaRegistry.exit === 1 && /from the registry, baseline 0 divergence/.test(viaRegistry.out) && /MISSED CHANCES — 1/.test(viaRegistry.out),
+     `the registry entry supplies design, baseline and extractor (exit ${viaRegistry.exit})`);
+  fs.rmSync(path.join(HOME, '.claude', 'structure-guard.json'));
+  const noDesign = runIn(xtx, '--package', XP, '--since', '2026-09-25T00:00:00Z');
+  ok(noDesign.exit === 2 && /exposure: NOT COMPUTED — the package has no design/.test(noDesign.out) && /TRIAL READING: NOT MEASURED/.test(noDesign.out),
+     `with no design anywhere, the reading is NOT MEASURED, exit 2 (exit ${noDesign.exit})`);
 }
 
 console.log('\nBAD INPUT IS NOT MEASURED, never a clean zero:');
