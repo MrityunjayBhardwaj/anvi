@@ -131,15 +131,70 @@ if (phantom.length) {
 ok(phantom.length === 0,
    `every referenced command exists${phantom.length ? ` — phantom: ${phantom.map(n => '/anvi:' + n).join(', ')}` : ''}`);
 
-// ── The reverse direction, reported but not enforced ──────────────────────────
-// A command that exists and is named nowhere is not a defect: it may be reached through
-// the skill listing rather than through prose. Reported because a long list is a hint
-// that the docs have drifted behind the command set, which is the same drift in the
-// other direction — and staying silent about it would make this check look like it
-// asks a question it does not.
-const unreferenced = [...existing].filter(n => !referenced.has(n)).sort();
-console.log(`\n  (informational) ${unreferenced.length} installed command(s) named in no shipped text` +
-            `${unreferenced.length ? ': ' + unreferenced.map(n => '/anvi:' + n).join(', ') : ''}`);
+// ── The reverse direction: every installed command is listed in /anvi:help (#612) ──
+// Being named SOMEWHERE is too weak to enforce — a command mentioned once in a workflow
+// is named, and still undiscoverable. The surface that claims to be complete is the
+// help listing, so that is where the reverse direction is enforced. (It replaced an
+// informational "named in no shipped text" line, which this check makes always empty:
+// help.md is in the corpus above.)
+//
+// The installed side mirrors install.sh's own selection — `for skill_dir in
+// "$SCRIPT_DIR/skills/"anvi*/`, filtered by `skill_installable` (a SKILL.md must be
+// there) — rather than the `anvi-*` set above. That takes in `skills/anvi/`, which
+// installs as the bare `/anvi`, so the session-activation command is held to the same
+// rule instead of being carved out.
+console.log('\nreverse — every installed command is listed in /anvi:help');
+{
+  const commandOf = dir => dir === 'anvi' ? '/anvi' : '/anvi:' + dir.slice('anvi-'.length);
+  const installed = new Set(
+    fs.readdirSync(path.join(ROOT, 'skills'), { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name.startsWith('anvi'))
+      .filter(e => fs.existsSync(path.join(ROOT, 'skills', e.name, 'SKILL.md')))
+      .map(e => commandOf(e.name))
+  );
+
+  // A listing row is a command at the start of an indented line, inside the display
+  // block. Prose that mentions a command, and a description wrapped onto the next line,
+  // are not rows: counting them would let a command pass by being talked about.
+  const ROW_RE = /^ {2}(\/anvi(?::[a-z][a-z0-9-]*)?)(?=\s)/;
+  const rowsOf = text => {
+    const lines = text.split('\n');
+    const step = lines.findIndex(l => l.includes('<step name="display">'));
+    const open = lines.findIndex((l, i) => i > step && l.startsWith('```'));
+    const close = lines.findIndex((l, i) => i > open && l.startsWith('```'));
+    if (step === -1 || open === -1 || close === -1) return null;
+    return lines.slice(open + 1, close).map(l => (l.match(ROW_RE) || [])[1]).filter(Boolean);
+  };
+
+  // The parser is proved on constructed text before it is trusted on the real file.
+  // Only REAL command names appear in it: this file is in its own corpus, and a made-up
+  // name in the real syntax would be reported as a phantom by the check above.
+  const sample = '<step name="display">\n```\n  /anvi:debug   Debug\n' +
+                 '                        /anvi:fast in a wrapped description\n  /anvi    Activate\n```\n' +
+                 '  /anvi:quick   after the block\n';
+  ok(JSON.stringify(rowsOf(sample)) === '["/anvi:debug","/anvi"]',
+     'the row parser reads listing rows (bare /anvi included) and skips continuations and text outside the block');
+
+  const rows = rowsOf(fs.readFileSync(path.join(ROOT, 'workflows', 'help.md'), 'utf8'));
+  ok(rows !== null, 'workflows/help.md has the display block the listing lives in');
+  const listed = new Set(rows || []);
+  // Both sides asserted non-trivial: a parser that stopped matching would otherwise
+  // report every command missing, and an empty skills read would report none.
+  ok(installed.size > 20 && installed.has('/anvi'),
+     `found ${installed.size} installed commands, the bare /anvi among them`);
+  ok(listed.size > 20, `found ${listed.size} commands listed in /anvi:help`);
+
+  const unlisted = [...installed].filter(c => !listed.has(c)).sort();
+  ok(unlisted.length === 0,
+     `every installed command is listed in /anvi:help` +
+     (unlisted.length ? ` — unlisted: ${unlisted.join(', ')} (add a row to workflows/help.md)` : ''));
+  // The forward check above cannot see the bare `/anvi` (its pattern needs the colon),
+  // so a stale row is checked here too, for the whole listing.
+  const stale = [...listed].filter(c => !installed.has(c)).sort();
+  ok(stale.length === 0,
+     `and every row in /anvi:help is an installed command` +
+     (stale.length ? ` — not installed: ${stale.join(', ')}` : ''));
+}
 
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
