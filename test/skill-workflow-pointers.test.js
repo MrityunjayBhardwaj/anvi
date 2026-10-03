@@ -91,7 +91,8 @@ for (const rel of tracked) {
 // that quietly became empty is the most reassuring output this suite can produce, and
 // it is the defect the runner's own discovery count exists to prevent. Floors rather
 // than equalities: a fixed number would go stale the day a skill is added, quietly.
-// `anvi*` is install.sh's own glob (install.sh:646). Matching it here means the two
+// `anvi*` is install.sh's own glob (`for skill_dir in "$SCRIPT_DIR/skills/"anvi*/`, in its
+// `--dev mode` block and its `# ─── Skills ───` section). Matching it here means the two
 // sides agree by construction: a directory the installer would deploy is a directory
 // this check reads. Deriving it differently would leave a class the installer ships and
 // nothing verifies — every directory happens to match today, which is exactly the kind
