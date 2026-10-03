@@ -1,5 +1,5 @@
 ---
-name: anvi-explore
+name: anvi:explore
 description: Explore a friction point — when something doesn't exist that should. Use when hitting a wall during real work that isn't a bug (diagnose) or a design task (design). The friction becomes the product spec. Also use when the user says "why can't I do this", "this should exist", "there must be a better way", or "has anyone built this".
 argument-hint: [description of the friction]
 allowed-tools: [Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion]
