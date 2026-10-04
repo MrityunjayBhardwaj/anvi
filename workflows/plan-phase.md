@@ -34,10 +34,37 @@ INIT=$(node "$CLI_PATH" init plan-phase "${PHASE}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
 
-Also load cognitive state:
-- Read `.anvi/hetvabhasa.md` — known error patterns (inform planner pre-mortem)
-- Read `.anvi/vyapti.md` — known invariants (planner must respect)
-- Read `.anvi/krama.md` — known lifecycles (planner must sequence correctly)
+Also load cognitive state — **by boundary, never whole.** The catalogues are far too
+large to read in a planning turn, and reading "some of them" is a selection nobody
+stated. The selection is the boundary index in `dharana.md`: each boundary names the
+entries that belong to it, and the command below delivers those entries by id and says
+what it left out. Nothing is matched against the plan's text.
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list; echo "exit=$?"
+```
+
+From that list, name the boundaries this phase touches — from the phase goal and the
+files it will change. Call the chosen ids `{BOUNDARY_IDS}` (boundary ids as `--list` prints them, space-separated); every
+step below uses them. Then:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}; echo "exit=$?"
+```
+
+- **Exit 0** — the output opens with its own counts: entries indexed, delivered,
+  withheld (each withheld id named), and the index's coverage of the whole catalogue.
+  **Tell the user those counts before planning, every time — including when they are
+  zero.** A count said only when it is alarming lets silence read as safety.
+- **"No entries are indexed"** is an absence in the index, not a finding that no
+  lessons apply. Say it that way, and plan knowing the pre-mortem has no catalogue input.
+- **Exit 1** — read the message: `NO SUCH BOUNDARY` or a usage line means an id was
+  wrong, so re-read `--list`; `Cannot find module` means the script is not installed
+  here (run `/anvi:update`) — that is "could not look", not "no lessons".
+- **Exit 2** — the catalogues could not be read. Say so. Do not plan as though the
+  project had no lessons.
+- Entries that belong to no boundary are **not reachable** this way; the coverage line
+  counts them. If one is known to matter, name it and read it directly.
 </step>
 
 <step name="read_previous_phase_outcome">
@@ -96,9 +123,10 @@ Agent(
   3. What do I not know about each boundary?
   4. What transforms inputs at each boundary?
 
-  Known invariants from project: {vyapti entries if any}
-  Known lifecycles from project: {krama entries if any}
-  Known error patterns: {hetvabhasa entries if any}
+  Known invariants, lifecycles and error patterns at this phase's boundaries:
+  run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}` and read
+  its whole output, counts first. It states what it delivered and what it withheld;
+  a withheld id is not below — read it yourself if it bears on the research.
   </cognitive_context>
 
   <files_to_read>
@@ -125,15 +153,19 @@ Agent(
 
   1. Boundary scan: What are the boundaries? Who owns each piece of data?
   2. Invariant check: What invariants must the implementation respect?
-     Known project invariants: {vyapti entries}
+     Known project invariants: the "Invariants" section of the boundary entries (below)
   3. Lifecycle sequence: What's sync vs async? What ordering matters?
-     Known project lifecycles: {krama entries}
+     Known project lifecycles: the "Lifecycles" section of the boundary entries
   4. Entanglement check: Is this simple or just familiar?
   5. Interface depth: Is complexity in the right place?
   6. Pre-mortem: What reasoning error is most likely for this plan?
-     Known project error patterns: {hetvabhasa entries}
+     Known project error patterns: the "Error patterns" section of the boundary entries
   7. Existence check: What already exists? What must be understood first?
   8. UX precedent: Does this feature exist in a reference system?
+
+  The boundary entries: run
+  `node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}` and read its
+  whole output, counts first. Withheld ids are named there and are NOT in the output.
 
   Every task must include:
   - Ownership statement: who creates, transforms, consumes each piece of data
@@ -166,12 +198,14 @@ Agent(
   <cognitive_dimensions>
   In addition to standard GSD dimensions (1-7), check these cognitive dimensions:
 
+  Known invariants, lifecycles and patterns for A–C: run
+  `node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}` and read its
+  whole output, counts first. Judge A–C against what it delivered, and say which ids
+  it withheld rather than treating them as checked.
+
   A. Vyapti alignment — do plans respect known invariants?
-     Known invariants: {vyapti entries}
   B. Krama correctness — is lifecycle ordering specified for timing-sensitive tasks?
-     Known lifecycles: {krama entries}
   C. Hetvabhasa resistance — do plans mitigate known error patterns?
-     Known patterns: {hetvabhasa entries}
   D. Observation testability — are all criteria verifiable by direct observation?
   E. Ownership clarity — is data ownership unambiguous for all state?
   F. UX precedent — do features follow reference system UX or justify deviation?
@@ -220,7 +254,8 @@ Present options:
 
 <success_criteria>
 - [ ] Research completed (unless --skip-research)
-- [ ] Planner received design lens context + project catalogues
+- [ ] Planner received design lens context + the boundary entries for `{BOUNDARY_IDS}`
+- [ ] The user was told the delivered / withheld / coverage counts (zero included)
 - [ ] Plan checked with cognitive dimensions A-F (unless --skip-check)
 - [ ] Requirements coverage verified
 - [ ] Plan committed

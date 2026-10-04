@@ -1078,9 +1078,11 @@ function fieldMarker(name) {
   return new RegExp(`^[ \\t]*(?:\\*\\*)?${name}(?:\\*\\*)?:(?:\\*\\*)?[ \\t]*(.*)$`);
 }
 
-// Every occurrence of a field, in document order, each joined with its continuations.
-function readFieldAll(body, name) {
-  const lines = String(body == null ? '' : body).split('\n');
+// Every occurrence of a field as { start, end, value }: the line span [start, end) it
+// occupies and its value joined with its continuations. The span is what lets a reader
+// set a field ASIDE by the same rule that reads it (`withoutFields`) — a second notion
+// of where a field ends would be free to disagree with this one.
+function fieldOccurrences(lines, name) {
   const marker = fieldMarker(name);
   const out = [];
   for (let i = 0; i < lines.length; i++) {
@@ -1101,9 +1103,36 @@ function readFieldAll(body, name) {
       if (!FIELD_CONTINUATION.test(lines[j]) && !LIST_ITEM.test(lines[j])) break;
       value += ' ' + stripBullet(lines[j]);
     }
-    out.push(value.trim());
+    out.push({ start: i, end: j, value: value.trim() });
   }
   return out;
+}
+
+// Every occurrence of a field, in document order, each joined with its continuations.
+function readFieldAll(body, name) {
+  return fieldOccurrences(String(body == null ? '' : body).split('\n'), name).map((o) => o.value);
+}
+
+// A boundary's authored entry index (#537): ENTRIES are the entries an author placed at
+// the boundary; ENTRIES SEEDED were proposed mechanically (named in its prose, or citing
+// a file it declares) and await curation — curating moves an id up or deletes it. Both
+// are read by the planning chain (scripts/boundary-entries.js) and set aside by every
+// prose reader. One list of names, so the reader and the setter-aside cannot diverge.
+const BOUNDARY_INDEX_FIELDS = ['ENTRIES', 'ENTRIES SEEDED'];
+
+// The body with every occurrence of the named fields removed, continuations included.
+// For a reader that scrapes prose and must not count an INDEX as prose: a boundary's
+// ENTRIES lists exist for planning (#537), and the edit-time injector scraping them as
+// "named by the boundary" would hand every hook edit the whole planning list.
+function withoutFields(body, names) {
+  const lines = String(body == null ? '' : body).split('\n');
+  const drop = new Set();
+  for (const name of names) {
+    for (const o of fieldOccurrences(lines, name)) {
+      for (let k = o.start; k < o.end; k++) drop.add(k);
+    }
+  }
+  return lines.filter((_, k) => !drop.has(k)).join('\n');
 }
 
 // The first occurrence. `undefined` for both "no such field" and "the field is empty",
@@ -2492,5 +2521,5 @@ module.exports = {
   // field the same way the gate does BY CONSTRUCTION rather than by two implementations
   // agreeing. Every time these two questions were answered twice, the answers diverged
   // and the least-implementing reader was the silent one.
-  readField, readFieldAll, declaredItems,
+  readField, readFieldAll, declaredItems, withoutFields, BOUNDARY_INDEX_FIELDS,
 };

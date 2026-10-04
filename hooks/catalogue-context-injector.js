@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession, worktreeLinkNotice } = require('./anvi-paths.js');
-const { computeCurrency, freshnessState, freshnessReason, NOT_CHECKED_REASONS, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, GIT_MAX_BUFFER } = require('./currency.js');
+const { computeCurrency, freshnessState, freshnessReason, NOT_CHECKED_REASONS, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, withoutFields, BOUNDARY_INDEX_FIELDS, GIT_MAX_BUFFER } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -583,7 +583,12 @@ process.stdin.on('end', () => {
           // tested for CONTENT rather than for the presence of the key — lives at the
           // definition in currency.js.
           declares: boundaryDeclares(boundaryContent),
-          content: boundaryContent.trim(),
+          // The entry index is set aside here, ONCE, because every reader below scrapes
+          // ids out of `content` as "named by the boundary". The index lists everything
+          // that belongs to a boundary — for the hooks boundary, near two hundred — and
+          // it exists for planning (#537). Scraped, it would hand every hook edit the
+          // whole planning list. What the boundary's prose names is unchanged.
+          content: withoutFields(boundaryContent, BOUNDARY_INDEX_FIELDS).trim(),
         });
       }
     }
