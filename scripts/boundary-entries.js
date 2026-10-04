@@ -26,9 +26,9 @@
 // cannot be selected by this chain; that count is the index's honest coverage.
 //
 // Usage:
-//   node boundary-entries.js --list [--dir <project>]        boundaries and index sizes
-//   node boundary-entries.js B1 B5 [--dir <project>]         deliver those boundaries' entries
-//   node boundary-entries.js --propose [--dir <project>]     draft ENTRIES SEEDED (writes nothing)
+//   node boundary-entries.js --list [--dir=<project>]        boundaries and index sizes
+//   node boundary-entries.js B<n> [B<m> ...] [--dir=<project>] deliver those boundaries' entries
+//   node boundary-entries.js --propose [--dir=<project>]     draft ENTRIES SEEDED (writes nothing)
 // Exit: 0 answered (even "nothing indexed"); 1 usage / unknown boundary; 2 could not look.
 'use strict';
 const fs = require('fs');

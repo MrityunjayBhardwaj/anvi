@@ -45,7 +45,7 @@ node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list; echo "exit=$?"
 ```
 
 From that list, name the boundaries this phase touches — from the phase goal and the
-files it will change. Call the chosen ids `{BOUNDARY_IDS}` (for example `B1 B5`); every
+files it will change. Call the chosen ids `{BOUNDARY_IDS}` (boundary ids as `--list` prints them, space-separated); every
 step below uses them. Then:
 
 ```bash
