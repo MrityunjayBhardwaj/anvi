@@ -58,7 +58,9 @@ node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}; echo "exit
   zero.** A count said only when it is alarming lets silence read as safety.
 - **"No entries are indexed"** is an absence in the index, not a finding that no
   lessons apply. Say it that way, and plan knowing the pre-mortem has no catalogue input.
-- **Exit 1** — a boundary id was wrong; re-read `--list`.
+- **Exit 1** — read the message: `NO SUCH BOUNDARY` or a usage line means an id was
+  wrong, so re-read `--list`; `Cannot find module` means the script is not installed
+  here (run `/anvi:update`) — that is "could not look", not "no lessons".
 - **Exit 2** — the catalogues could not be read. Say so. Do not plan as though the
   project had no lessons.
 - Entries that belong to no boundary are **not reachable** this way; the coverage line
