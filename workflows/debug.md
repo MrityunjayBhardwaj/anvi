@@ -245,11 +245,23 @@ Wait for recurrence before promoting to catalogue (dharana promotion criteria).
 
 **Then commit the knowledge (MANDATORY — catalogues that aren't committed don't exist):**
 
-After appending entries, commit `~/.anvideck` and push:
+After appending entries, commit this project's catalogues — and only them — then push.
+`<project>` is this project's folder under `~/.anvideck/projects/`, the `[project]` the
+catalogue check in `load_catalogues` found.
 
 ```bash
-cd ~/.anvideck && git add -A && git commit -m "📝 catalogues: [entry IDs] — [one-line symptom], fixed in [PR #N / sha]" && git push
+git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
+  git -C ~/.anvideck commit -m "📝 catalogues: [entry IDs] — [one-line symptom], fixed in [PR #N / sha]" -- projects/<project>/.anvi/ ||
+  { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "catalogues NOT committed; nothing left staged" >&2; false; }
+git -C ~/.anvideck push
 ```
+
+Run the first three lines as one command. `~/.anvideck` is ONE repository shared by every
+project and every session on this machine, so a whole-store `git add -A` and a commit without
+a pathspec take whatever another session has staged — a half-written harvest, say — into
+this commit under this message. The pathspec keeps the commit to this project's catalogues;
+the `add` is still needed because a pathspec commit silently skips a brand-new file; and the
+fallback unstages on failure, so nothing waits staged for the checkpoint to sweep up.
 
 Message format matches the established ledger style (e.g. `📝 catalogues: SP177 + SV84 — #618
 was a parity-tool false-positive, fixed in PR #619`). This makes the .anvideck git log the

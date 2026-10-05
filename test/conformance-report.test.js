@@ -408,6 +408,11 @@ console.log('\ndurable — the store, and this project inside it');
   const c = classifyDurability('linked', storeState());
   eq(c.state, 'UNCOMMITTED', 'an uncommitted catalogue file in the store');
   has(c.remedy, 'git add -A', 'remedy commits and pushes it');
+  // The store is shared by every session: a bare `git commit` after a scoped add still takes
+  // whatever ANOTHER session has staged (#621), so the commit names the same path the add does.
+  const addPath = (c.remedy.match(/git add -A -- ("[^"]+")/) || [])[1];
+  ok(addPath && c.remedy.includes(`git commit -- ${addPath}`),
+     `remedy commits only the path it staged, never the whole index (got ${JSON.stringify(c.remedy)})`);
   git(STORE, 'add', '-A'); git(STORE, 'commit', '-q', '-m', 'catalogue'); git(STORE, 'push', '-q');
 }
 {

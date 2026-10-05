@@ -586,7 +586,7 @@ function classifyDurability(storeName, store) {
   const catalogueDirty = dirty.filter(l => !l.slice(3).replace(/^"|"$/g, '').startsWith(mirrorPrefix));
   if (catalogueDirty.length) {
     return check('durable', 'UNCOMMITTED', `${catalogueDirty.length} catalogue path(s) under ${rel} are uncommitted in the store`,
-      { remedy: `cd "${store.root}" && git add -A -- "${rel}" && git commit && git push` });
+      { remedy: `cd "${store.root}" && git add -A -- "${rel}" && git commit -- "${rel}" && git push` });
   }
   // Committed is not durable. Losing an entry because it was never pushed is the
   // same outcome as losing it because it was never committed, by a slightly
