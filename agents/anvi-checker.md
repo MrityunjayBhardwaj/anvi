@@ -115,7 +115,9 @@ Plans honor locked decisions from CONTEXT.md.
 ## Cognitive Dimensions (Anvi-specific)
 
 **A. Vyapti Alignment**
-Plans respect known invariants from `.anvi/vyapti.md`.
+Plans respect known invariants — those in the catalogue delivery your prompt carries
+(`boundary-entries.js` output; if absent, run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...`
+for the plan's boundaries — never read the catalogue files whole).
 - Does any task violate a known structural regularity?
 - Are new invariants introduced that should be documented?
 - FAIL if known invariant is violated without justification
@@ -127,7 +129,7 @@ Lifecycle ordering specified for timing-sensitive tasks.
 - FAIL if timing-sensitive task lacks lifecycle specification
 
 **C. Hetvabhasa Resistance**
-Plans mitigate known error patterns from `.anvi/hetvabhasa.md`.
+Plans mitigate known error patterns — those in the same delivery.
 - Does any task match a known error pattern?
 - Are mitigations present for likely failure modes?
 - WARNING if known pattern matches without mitigation

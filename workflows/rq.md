@@ -40,14 +40,17 @@ Gather current context from 5 sources:
 - $ARGUMENTS if provided (focus area)
 
 **2. What does the project know? (catalogues)**
-- `.anvi/hetvabhasa.md` — known error patterns (check for matching patterns)
-- `.anvi/vyapti.md` — known invariants (check for MISALIGNED / NOT YET IMPLEMENTED)
-- `.anvi/krama.md` — known lifecycles (check for relevant sequences)
 - `.anvi/dharana.md` — boundaries, observation targets, Ground Truth inventory
+- `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` — the boundaries, how many entries each indexes, and how
+  much of the catalogue no boundary reaches
+- `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` (or `--file=<path>`) for the boundaries the current work
+  touches — check its error patterns for matches, its invariants for MISALIGNED / NOT YET
+  IMPLEMENTED, its lifecycles for relevant sequences. Never read the catalogue files whole.
+  Say its counts line, zero included; a non-zero exit is "could not look".
 
 **3. What is grounded vs ungrounded?**
-- Scan catalogue entries for `**REF:**` field presence
-- List ungrounded entries relevant to current work
+- The session-start GROUNDING line gives the catalogue-wide count
+- List the ungrounded entries among those delivered above (no `**REF:**` field)
 - Check which boundaries have Ground Truth docs vs not
 
 **4. What do Ground Truth docs reveal?**

@@ -1457,6 +1457,36 @@ function boundaryDeclares(content) {
     || (!!kindsField && kindsField.split(',').some(k => k.trim() && !/^\[.*\]$/.test(k.trim())));
 }
 
+// Does a boundary's own declaration SELECT this file? 'FILES', 'KINDS', or null.
+//
+// The edit-time injector asks this of every file it is about to edit, and planning's
+// delivery script asks it of a failing file named in a bug report (#622). Two askers
+// is the condition under which every other predicate in this file was moved here: had
+// each kept its own copy, a file would belong to a boundary when edited and to none
+// when debugged, and nothing would fail.
+//
+// The declarations only. The injector's third step — guessing from the boundary's
+// prose — is deliberately not part of this answer: a guessed boundary is not the
+// file's boundary, and a caller that delivers lessons by it must not present a guess
+// as a declaration. A caller that wants the guess asks `guessMatchesFile` separately.
+//
+// KINDS: items match the whole relative path when they contain a slash, the basename
+// otherwise — the rule the injector has always applied, moved here unchanged.
+function matchesKind(kindsField, relPath) {
+  const base = String(relPath).split('/').pop();
+  return String(kindsField).split(',').map(k => k.trim()).filter(Boolean).some(k => {
+    try { return new RegExp(`^${globBody(k)}$`).test(k.includes('/') ? relPath : base); } catch { return false; }
+  });
+}
+
+function boundarySelectsFile(content, relPath) {
+  const filesField = readField(content, 'FILES');
+  if (filesField !== undefined && declaredItems(filesField).some(d => matchesDeclaredFile(d, relPath))) return 'FILES';
+  const kindsField = readField(content, 'KINDS');
+  if (kindsField !== undefined && matchesKind(kindsField, relPath)) return 'KINDS';
+  return null;
+}
+
 // Is this sha an actual commit in the repo `git` runs in? A FIX: sha can be dead
 // (squash/rebase dropped it) or foreign (an anvi_artifacts / sibling-repo sha).
 // Trusting one unverified yields a verdict computed against a commit that isn't
@@ -2507,6 +2537,9 @@ module.exports = {
   // splitBoundaries is — the lint counts what the hook guesses about, and two answers
   // to either question is a disagreement no per-consumer test can fail.
   boundaryLabel, boundaryDeclares,
+  // Which boundaries a file's declarations place it in — asked at edit time by the
+  // injector and at debug time by boundary-entries.js --file (#622).
+  boundarySelectsFile, matchesKind,
   // The guess, and the regions it is allowed to read. Exported because the relation now
   // runs in both directions — the hook asks which boundaries a file reaches, the
   // proposer asks which files a boundary reaches — and a proposer drafting declarations

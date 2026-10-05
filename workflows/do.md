@@ -36,7 +36,10 @@ Based on activity type, Read the relevant cognitive spec files BEFORE routing.
 Read ~/.claude/anvi/cognitive-os/adaptive-observation.md
 Read ~/.claude/anvi/cognitive-os/modes/diagnose.md
 Read ~/.claude/anvi/cognitive-os/translation.md
-Read .anvi/hetvabhasa.md (check for known patterns FIRST)
+Run node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<each file the symptom involves>
+    (no file named yet? run it with --list and name the boundaries instead). Check the
+    error patterns it delivers FIRST. Say its counts line, zero included; never read the
+    catalogue files whole. A non-zero exit is "could not look", not "no known patterns".
 Read .anvi/dharana.md (which boundaries are in scope?)
 Read ~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md for boundaries being debugged (if they exist)
 ```
@@ -47,7 +50,10 @@ Read ~/.claude/anvi/cognitive-os/dharana-spec.md
 Read ~/.claude/anvi/cognitive-os/modes/design.md
 Read ~/.claude/anvi/cognitive-os/translation.md
 Read .anvi/dharana.md (boundaries, org health, invariant spans)
-Read .anvi/vyapti.md (invariants the plan must respect)
+Run node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list, then node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...
+    for the boundaries the plan touches (invariants the plan must respect). Say its counts
+    line, zero included; never read the catalogue files whole. A non-zero exit is "could
+    not look", not "no invariants".
 ```
 
 ### EXECUTE

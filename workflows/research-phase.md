@@ -39,11 +39,28 @@ If exists: offer to skip or redo.
 </step>
 
 <step name="gather_context">
-Load cognitive state for researcher:
-- `.anvi/vyapti.md` — invariants the research should respect
-- `.anvi/krama.md` — lifecycles the research should understand
-- `.anvi/hetvabhasa.md` — error patterns to watch for
-- CONTEXT.md if exists — locked user decisions
+Load cognitive state for researcher — catalogue entries by boundary, never by reading the
+catalogue files whole (on a mature project they run to megabytes):
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list; echo "exit=$?"
+```
+
+From that list, name the boundaries this phase touches.
+Call the chosen ids `{BOUNDARY_IDS}` (space-separated, as `--list` prints them); the
+researcher prompt below runs the delivery with them. Run it once here too:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}; echo "exit=$?"
+```
+
+- **Tell the user the counts line** (indexed, delivered, withheld — each withheld id named —
+  and the index's coverage) every time, including when they are zero.
+- A **non-zero exit is "could not look", never "no lessons"**: exit 1 is a wrong boundary id
+  or a missing script (`Cannot find module` → `/anvi:update`); exit 2 is catalogues that
+  could not be read. Say which.
+
+Also: CONTEXT.md if it exists — locked user decisions.
 </step>
 
 <step name="spawn_researcher">
@@ -59,9 +76,9 @@ Agent(
   3. For each boundary: what do I not know? What transforms inputs?
   4. Which of my assumptions are unverified?
 
-  Known project invariants: {vyapti entries}
-  Known project lifecycles: {krama entries}
-  Known error patterns: {hetvabhasa entries}
+  Known project invariants, lifecycles and error patterns: run
+  `node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}` and read its output. Its counts line says
+  what it withheld; read a withheld entry yourself before relying on it.
 
   Verify findings via official sources before presenting as authoritative.
   Your training is a hypothesis — confirm with direct observation.

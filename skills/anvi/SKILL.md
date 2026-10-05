@@ -22,7 +22,8 @@ the cognitive checks. Report to the user:
 ```
 
 Then check if project catalogues exist:
-- If `.anvi/` exists in project root: load `hetvabhasa.md`, `vyapti.md`, `krama.md`
+- If `.anvi/` exists in project root: run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` for the
+  boundaries and coverage, and deliver entries by boundary as work begins (see below)
 - If `.anvi/` does NOT exist: inform user — "No project catalogues found. Run `/anvi:init` to create them."
 
 ### If argument is a lens name (`/anvi diagnose`, `/anvi design`, `/anvi review`, `/anvi recover`):
@@ -44,10 +45,12 @@ Always load on activation:
 2. `~/.claude/anvi/cognitive-os/translation.md` — output translation rules
 3. `~/.claude/anvi/cognitive-os/context-rot.md` — compression protocol
 
-Load if project catalogues exist (`.anvi/` in project root):
-4. `.anvi/hetvabhasa.md` — project error patterns
-5. `.anvi/vyapti.md` — project invariants
-6. `.anvi/krama.md` — project lifecycle patterns
+If project catalogues exist (`.anvi/` in project root), never read them whole — on a
+mature project they run to megabytes. Instead:
+4. `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` — boundaries, entries indexed, coverage
+5. `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` (or `--file=<path>`) for the boundaries the work
+   touches — error patterns, invariants and lifecycles, with a counts line said to the
+   user every time; a non-zero exit is "could not look"
 
 ## Critical Rules
 

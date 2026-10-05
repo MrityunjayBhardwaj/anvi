@@ -25,10 +25,11 @@ Read these files to load the cognitive operating system:
 
 ### 2. Load project catalogues (if they exist)
 
-Check for `.anvi/` in the project root:
-- `.anvi/hetvabhasa.md` — known error patterns (check FIRST before investigating)
-- `.anvi/vyapti.md` — known invariants (the bug may be a violation)
-- `.anvi/krama.md` — known lifecycle patterns (timing bugs are immediately classifiable)
+Not by reading the catalogue files whole — on a mature project they run to megabytes.
+The debug workflow delivers them by the files the bug involves
+(`node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<path>`): error patterns (check FIRST before
+investigating), invariants (the bug may be a violation), lifecycles (timing bugs are
+immediately classifiable), with a counts line said to the user every time.
 
 ### 3. Execute the debug workflow
 

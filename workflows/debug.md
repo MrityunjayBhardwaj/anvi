@@ -36,13 +36,11 @@ Read these files to inform orchestrator decisions:
 **Load project catalogues if they exist:**
 
 Check for `.anvi/` (or `~/.anvideck/projects/[project]/.anvi/`) in the project:
-- `.anvi/hetvabhasa.md` — known error patterns
-- `.anvi/vyapti.md` — known invariants
-- `.anvi/krama.md` — known lifecycle patterns
 - `.anvi/dharana.md` — boundaries, observation targets, Ground Truth inventory
 
-If hetvabhasa entries exist, extract keywords from each entry's trigger/signal fields.
-Match against the bug symptoms to provide known-pattern candidates.
+The error patterns, invariants and lifecycles are NOT read whole — on a mature project
+they run to megabytes, and a partial read believed complete is the failure. They are
+delivered by boundary in the next step, from the files the bug involves.
 </step>
 
 <step name="identify_boundaries">
@@ -52,6 +50,21 @@ From the bug description + dharana boundary list:
 1. Which files/modules are involved?
 2. Which dharana boundaries do those files touch?
 3. For each boundary: does a Ground Truth doc exist?
+4. Deliver the catalogue entries for those files:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<file> [--file=<file> ...]; echo "exit=$?"
+```
+
+   It prints which boundary declares each file, then that boundary's entries.
+   Call the whole output `{CATALOGUE_DELIVERY}`; later steps use it.
+   - **Tell the user the counts line** — indexed, delivered, withheld — every time,
+     including zero.
+   - **"NO BOUNDARY DECLARES THIS FILE"** is a gap in the declarations, not a finding that
+     no patterns apply. Name the boundaries yourself from `--list` and deliver them with
+     `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...`, or say the catalogue was not consulted.
+   - **A non-zero exit is "could not look"**: exit 1 is a wrong id or a missing script
+     (`/anvi:update`), exit 2 is catalogues that could not be read. Say which.
 
 ```
 BOUNDARY ANALYSIS:
@@ -100,7 +113,9 @@ as part of its prompt. It cannot form a hypothesis without having read this firs
 If $ARGUMENTS contains error messages, unexpected behavior, or symptom keywords:
 
 1. Extract keywords from the bug description
-2. Compare against hetvabhasa entries (2+ keyword overlap = candidate)
+2. Compare against the error patterns in `{CATALOGUE_DELIVERY}` (2+ keyword overlap =
+   candidate) — not against the whole catalogue. Withheld ids are named in its counts
+   line; if one looks relevant by title, read that entry before ruling it out.
 3. For each candidate, include its **REF:** field (Ground Truth citation)
 
 ```
@@ -157,10 +172,8 @@ Agent(
   5. For audio bugs: observe WAV, not event log. Event log is inference.
 
   ## Catalogue Context
-  Boundaries: {matched boundaries from dharana}
-  Error patterns: {matched hetvabhasa entries with REFs}
-  Invariants: {relevant vyapti entries with REFs}
-  Lifecycles: {relevant krama entries with REFs}
+  {CATALOGUE_DELIVERY — the delivery output from step identify_boundaries, verbatim,
+   counts line included}
 
   <mode>
   symptoms_prefilled: {true/false}
