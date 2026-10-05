@@ -53,13 +53,33 @@ ok(/partial commit/i.test(step1) && /#422/.test(step1),
    'the step names the partial-commit mechanism and the embedded-repository failure it was checked against');
 
 // ── the command, run ─────────────────────────────────────────────────────────
-// Lifted from the paragraph as written: the lines before `push`, indentation removed, the
-// project placeholder filled in. `~` is the scratch HOME, so the reader's command runs as-is.
-const lines = commitPara.split('\n').map(l => l.replace(/^ {4}/, ''));
-const pushAt = lines.findIndex(l => /^git -C ~\/\.anvideck push\b/.test(l));
-const harvest = lines.slice(0, pushAt < 0 ? lines.length : pushAt)
-  .filter(l => l.trim() !== '' && /git|^\s*\{|^\s*\}/.test(l)).join('\n').replace(/<project>/g, 'p');
-ok(pushAt > 0 && /commit -m/.test(harvest), 'CONTROL — the harvest command was lifted out, with the push left as its own line');
+// Lifted from the text as written: from the store `add` to the line before the store `push`,
+// indentation removed, the project placeholder filled in. `~` is the scratch HOME, so the
+// reader's command runs as-is. The debug and execute-phase workflows commit catalogues to the
+// same shared store and must carry the same shape (#621), so their commands are lifted and run
+// by the same rule — a door that is only read could be scoped on paper and wide in git.
+function lift(section) {
+  const ls = section.split('\n');
+  const from = ls.findIndex(l => /^\s*git -C ~\/\.anvideck add\b/.test(l));
+  const to = ls.findIndex((l, i) => i > from && /^\s*git -C ~\/\.anvideck push\b/.test(l));
+  if (from < 0 || to < 0) return '';
+  const cmd = ls.slice(from, to).filter(l => l.trim() !== '');
+  const indent = Math.min(...cmd.map(l => l.match(/^ */)[0].length));
+  return cmd.map(l => l.slice(indent)).join('\n').replace(/<project>/g, 'p');
+}
+const stepOf = (file, name) => {
+  const t = fs.readFileSync(path.join(ROOT, 'workflows', file), 'utf8');
+  const a = t.indexOf(`<step name="${name}">`);
+  return a < 0 ? '' : t.slice(a, t.indexOf('</step>', a));
+};
+const harvest = lift(commitPara);
+ok(/commit -m/.test(harvest) && !/\bpush\b/.test(harvest), 'CONTROL — the harvest command was lifted out, with the push left as its own line');
+const SUBJECTS = [['sess-wrap harvest', harvest]];
+for (const [file, step] of [['debug.md', 'catalogue_update'], ['execute-phase.md', 'catalogue_update']]) {
+  const cmd = lift(stepOf(file, step));
+  ok(/commit -m/.test(cmd) && !/\bpush\b/.test(cmd), `CONTROL — ${file} ${step}: the store commit command was lifted out`);
+  SUBJECTS.push([`${file} ${step}`, cmd]);
+}
 
 const DIR = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-wrap-commit-')));
 const ENV = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
@@ -91,9 +111,9 @@ function scratchStore(name) {
 const shells = [['sh', '/bin/sh']];
 for (const [name, bin] of [['bash', '/bin/bash'], ['zsh', '/bin/zsh']]) if (fs.existsSync(bin)) shells.push([name, bin]);
 
-for (const [shell, bin] of shells) {
-  console.log(`\nTHE COMMAND UNDER ${shell} — against a cloned store whose embedded repository is not checked out:`);
-  const S = scratchStore(`store-${shell}`);
+for (const [subject, harvest] of SUBJECTS) for (const [shell, bin] of shells) {
+  console.log(`\n${subject.toUpperCase()} UNDER ${shell} — against a cloned store whose embedded repository is not checked out:`);
+  const S = scratchStore(`store-${subject.replace(/\W+/g, '-')}-${shell}`);
   const kit = path.join(S.store, 'projects/q/ref/sources/kit');
   ok(fs.existsSync(kit) && fs.readdirSync(kit).length === 0, 'CONTROL — the clone left the embedded repository as an empty directory, the shape that breaks a wide partial commit');
 

@@ -166,8 +166,21 @@ After phase verification passes, check all executor results for new discoveries:
 4. Only catalogue patterns from bugs diagnosed in one pass (not multi-attempt)
 5. New hetvabhasa entries include `**FIX:**` — the commit sha / PR from this phase that
    resolved the bug the pattern came from
-6. **Commit the knowledge (MANDATORY):** if catalogues live in `~/.anvideck`, commit and push:
-   `cd ~/.anvideck && git add -A && git commit -m "📝 catalogues: [entry IDs] — [phase N summary], fixed in [sha/PR]" && git push`
+6. **Commit the knowledge (MANDATORY):** if catalogues live in `~/.anvideck`, commit this
+   project's catalogues — and only them — then push. `<project>` is this project's folder
+   under `~/.anvideck/projects/`, the `[project]` of the Ground Truth check in `initialize`:
+
+   ```bash
+   git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
+     git -C ~/.anvideck commit -m "📝 catalogues: [entry IDs] — [phase N summary], fixed in [sha/PR]" -- projects/<project>/.anvi/ ||
+     { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "catalogues NOT committed; nothing left staged" >&2; false; }
+   git -C ~/.anvideck push
+   ```
+
+   Run the first three lines as one command. The store is ONE repository shared by every
+   project and session on this machine: a whole-store `git add -A`, or a commit without a
+   pathspec, takes whatever another session has staged into this commit. The `add` stays
+   because a pathspec commit silently skips a brand-new file; the fallback unstages on failure.
    (If catalogues are in-repo `.anvi/`, they ride the project's own commits instead.)
    The Stop-hook backstop auto-commits anything left dirty, but with a generic message —
    write the rich one here while the context is fresh.
