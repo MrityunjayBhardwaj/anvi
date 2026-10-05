@@ -182,6 +182,20 @@ ok(d3.withheld.length >= 1, `entries past the budget are withheld (${d3.withheld
 ok(d3.withheld.every((id) => new RegExp(`NOT below[^\\n]*${id}`).test(d3.text)), 'and every withheld id is named in the output');
 ok(d3.withheld.every((id) => !d3.text.includes(`--- ${id} (`)), 'and none of them is in the delivered text');
 
+console.log('\nA section whose entries were all withheld does not read as empty (#625)');
+// Six large error patterns spend the budget, so the one lifecycle indexed after them is
+// withheld. Its section must name it — "0 / none delivered" read as "no lifecycle applies".
+const ents625 = new Map(entries);
+ents625.set('K9', { file: 'krama.md', text: `## K9: A large lifecycle\n${big(7900)}` });
+const idx625 = [{ id: 'B8', label: 'B8', content: '', authored: [], seeded: ['H5', 'H6', 'H7', 'H8', 'H9', 'H10', 'K9'] }];
+const d625 = be.deliver(idx625, ents625, ['B8'], () => null);
+const kramaHead = (d625.text.match(/^## Lifecycles[^\n]*\n[^\n]*/m) || [''])[0];
+ok(d625.withheld.includes('K9') && !d625.delivered.some((id) => id.startsWith('K')), `fixture: the lifecycle is withheld (${d625.withheld.join(', ')})`);
+ok(/0 delivered, 1 withheld \(K9\)/.test(kramaHead) && /every entry indexed here was withheld/.test(kramaHead),
+  `its heading names the withheld id and does not say "none" (${kramaHead.replace(/\n/g, ' ⏎ ')})`);
+ok(/^## Invariants[^\n]*: 0 delivered\n\(none indexed at these boundaries\)/m.test(d625.text),
+  'a section with nothing indexed says that instead — the two absences read differently');
+
 console.log('\nTwo boundaries share the budget — the first does not starve the second');
 // B4 comes first in the file and its seven large entries alone exceed the budget. Walked
 // boundary by boundary, B4 was spent before B1 was reached; taking turns, B1's first

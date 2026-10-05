@@ -180,10 +180,18 @@ function deliver(index, entries, wanted, stampOf) {
   lines.push(coverageLine(coverage(index, entries)));
   lines.push(delivery.freshnessLine(delivered, entries, stampOf));
 
+  // Each heading counts what was WITHHELD from it as well as what it holds. Counted as
+  // delivered alone, a section whose entries all missed the budget read "0 / none" — and a
+  // reader skimming for its slot concluded no such rule applies (#625, observed in #622).
   for (const file of ['vyapti.md', 'krama.md', 'hetvabhasa.md']) {
     const ids = delivered.filter((id) => entries.get(id).file === file);
-    lines.push('', `## ${SECTION_TITLE[file]}: ${ids.length}`);
-    if (!ids.length) { lines.push('(none delivered)'); continue; }
+    const held = withheld.filter((id) => entries.get(id).file === file);
+    lines.push('', `## ${SECTION_TITLE[file]}: ${ids.length} delivered`
+      + (held.length ? `, ${held.length} withheld (${held.join(', ')}) — read them before relying on this section` : ''));
+    if (!ids.length) {
+      lines.push(held.length ? '(every entry indexed here was withheld — see the ids above)' : '(none indexed at these boundaries)');
+      continue;
+    }
     for (const id of ids) lines.push('', `--- ${id} (${file}) ---`, bodies.get(id));
   }
   return { text: lines.join('\n'), delivered, withheld, unknown, missing };
