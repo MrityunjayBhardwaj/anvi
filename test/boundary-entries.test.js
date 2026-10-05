@@ -46,6 +46,66 @@ const produced = plan.indexOf('Call the chosen ids `{BOUNDARY_IDS}`');
 ok(produced !== -1 && produced <= firstUse, '{BOUNDARY_IDS} is defined at (or before) its first use');
 
 // ---------------------------------------------------------------------------
+// #622: the same instruction lived in about eighteen other installed files — phase work,
+// debugging, orientation, the agents those workflows spawn. The population is WALKED,
+// not listed, so a file added later is checked without anyone remembering to add it.
+console.log('\nNo installed instruction file reads a lesson catalogue whole (#622)');
+const INSTRUCTION_DIRS = ['workflows', 'agents', 'skills', 'cognitive-os', 'references', 'templates'];
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+  const p = path.join(d, e.name);
+  return e.isDirectory() ? walk(p) : e.name.endsWith('.md') ? [p] : [];
+});
+const instructionFiles = INSTRUCTION_DIRS.filter((d) => fs.existsSync(path.join(ROOT, d)))
+  .flatMap((d) => walk(path.join(ROOT, d))).map((p) => path.relative(ROOT, p).split(path.sep).join('/'));
+// Files that name a lesson catalogue for a reason other than reading it as knowledge.
+// copilot-compat/ is outside the walk on purpose: a different host, whose templates are
+// copied into projects where this script may not exist — tracked on #626.
+const NAMES_CATALOGUES_LEGITIMATELY = {
+  'skills/anvi-init/SKILL.md': 'creates the catalogue files from templates',
+  'skills/anvi-audit/SKILL.md': 'its subject is the catalogues themselves',
+  'cognitive-os/dharana-spec.md': 'describes what the catalogues are',
+};
+const LESSON_MENTION = /\b(hetvabhasa|vyapti|krama)\.md\b|\{(hetvabhasa|vyapti|krama) entries/;
+const offenders = [];
+for (const rel of instructionFiles) {
+  if (NAMES_CATALOGUES_LEGITIMATELY[rel]) continue;
+  fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
+    if (LESSON_MENTION.test(line)) offenders.push(`${rel}:${i + 1}`);
+  });
+}
+ok(instructionFiles.length > 50, `the walk found the installed instruction files (${instructionFiles.length})`);
+ok(instructionFiles.includes('workflows/plan-phase.md') && instructionFiles.includes('agents/anvi-debugger.md')
+  && instructionFiles.includes('skills/anvi/SKILL.md'), 'and it reaches workflows, agents and skills');
+ok(offenders.length === 0, `no instruction file names a lesson catalogue as something to read (${offenders.join(', ') || 'none'})`);
+ok(Object.keys(NAMES_CATALOGUES_LEGITIMATELY).every((rel) => instructionFiles.includes(rel)
+  && LESSON_MENTION.test(fs.readFileSync(path.join(ROOT, rel), 'utf8'))),
+  'every exception still exists and still names a catalogue — a stale exception is removed, not kept');
+// The predicate must be able to fire: the pre-#622 forms, each one a line from a real file.
+ok(['- Read `.anvi/hetvabhasa.md` — known error patterns', 'Known error patterns: {hetvabhasa entries}',
+  '   - krama.md — known lifecycles', 'Check against the project\'s vyāpti catalogue (`references/vyapti.md`):']
+  .every((l) => LESSON_MENTION.test(l)), 'control: the predicate fires on each old form of the instruction');
+
+console.log('\nEvery workflow that runs the delivery says the counts and what a failure means');
+const runners = instructionFiles.filter((rel) => rel.startsWith('workflows/')
+  && /boundary-entries\.js"? (--list|--file|B<n>|\{BOUNDARY_IDS\})/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
+ok(runners.length >= 10, `the delivery is run by the workflows that used to read whole (${runners.length})`);
+const silent = runners.filter((rel) => {
+  const t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  return !/counts/i.test(t) || !/zero/i.test(t) || !/could not look/i.test(t);
+});
+ok(silent.length === 0, `each says: counts every time, zero included, and non-zero exit = could not look (${silent.join(', ') || 'all do'})`);
+// A placeholder a step consumes must be produced by an earlier step.
+for (const rel of runners) {
+  const t = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  for (const ph of ['{BOUNDARY_IDS}', '{CATALOGUE_DELIVERY}']) {
+    const first = t.indexOf(ph);
+    if (first === -1) continue;
+    const def = t.search(new RegExp(`Call the (chosen ids|whole output) \`${ph.replace(/[{}]/g, '\\$&')}\``));
+    ok(def !== -1 && def <= first, `${rel}: ${ph} is defined at or before its first use`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-be-')));
 const anvi = path.join(tmp, 'proj', '.anvi');
 fs.mkdirSync(anvi, { recursive: true });
@@ -69,11 +129,15 @@ const DHARANA = [
   '',
   '### B2: An unindexed boundary',
   'FILES: src/b.js',
-  'Silent failure modes: none recorded.',
+  'Silent failure modes: none recorded. Related: src/z.js is nearby but not declared.',
   '',
   '### B3: A boundary whose entries are large',
   'FILES: src/c.js',
   '**ENTRIES SEEDED:** cited: H5, H6, H7, H8, H9, H10, H11',
+  '',
+  '### Boundary: Stylesheets',
+  'KINDS: *.css',
+  '**ENTRIES:** K1',
   '',
 ].join('\n');
 fs.writeFileSync(path.join(anvi, 'dharana.md'), DHARANA);
@@ -118,6 +182,20 @@ ok(d3.withheld.length >= 1, `entries past the budget are withheld (${d3.withheld
 ok(d3.withheld.every((id) => new RegExp(`NOT below[^\\n]*${id}`).test(d3.text)), 'and every withheld id is named in the output');
 ok(d3.withheld.every((id) => !d3.text.includes(`--- ${id} (`)), 'and none of them is in the delivered text');
 
+console.log('\nA section whose entries were all withheld does not read as empty (#625)');
+// Six large error patterns spend the budget, so the one lifecycle indexed after them is
+// withheld. Its section must name it — "0 / none delivered" read as "no lifecycle applies".
+const ents625 = new Map(entries);
+ents625.set('K9', { file: 'krama.md', text: `## K9: A large lifecycle\n${big(7900)}` });
+const idx625 = [{ id: 'B8', label: 'B8', content: '', authored: [], seeded: ['H5', 'H6', 'H7', 'H8', 'H9', 'H10', 'K9'] }];
+const d625 = be.deliver(idx625, ents625, ['B8'], () => null);
+const kramaHead = (d625.text.match(/^## Lifecycles[^\n]*\n[^\n]*/m) || [''])[0];
+ok(d625.withheld.includes('K9') && !d625.delivered.some((id) => id.startsWith('K')), `fixture: the lifecycle is withheld (${d625.withheld.join(', ')})`);
+ok(/0 delivered, 1 withheld \(K9\)/.test(kramaHead) && /every entry indexed here was withheld/.test(kramaHead),
+  `its heading names the withheld id and does not say "none" (${kramaHead.replace(/\n/g, ' ⏎ ')})`);
+ok(/^## Invariants[^\n]*: 0 delivered\n\(none indexed at these boundaries\)/m.test(d625.text),
+  'a section with nothing indexed says that instead — the two absences read differently');
+
 console.log('\nTwo boundaries share the budget — the first does not starve the second');
 // B4 comes first in the file and its seven large entries alone exceed the budget. Walked
 // boundary by boundary, B4 was spent before B1 was reached; taking turns, B1's first
@@ -148,6 +226,41 @@ const p = be.propose(index, entries, anvi);
 const pb1 = p.find((x) => x.id === 'B1');
 ok(pb1.named.length === 0 && pb1.cited.length === 0, 'B1 proposes nothing new — everything it names is already indexed');
 
+console.log('\n--file maps a file to the boundaries that DECLARE it (#622)');
+const proj0 = path.join(tmp, 'proj');
+const fm = be.boundariesForFiles(index, proj0, ['src/a.js', 'src/z.js', 'web/site.css', '/etc/hosts', path.join(proj0, 'src', 'c.js')]);
+const hitsOf = (i) => fm[i].hits.map((h) => `${h.boundary.id}:${h.via}`).join();
+ok(hitsOf(0) === 'B1:FILES', `a FILES declaration selects its file (${hitsOf(0)})`);
+ok(fm[1].hits.length === 0, 'a file named only in a boundary\'s prose is NOT selected — the guess is not a declaration');
+ok(hitsOf(2) === 'Boundary:KINDS', `a KINDS declaration selects by pattern, unnumbered boundary included (${hitsOf(2)})`);
+ok(fm[3].outside === true && fm[3].hits.length === 0, 'a path outside the project is reported as outside');
+ok(hitsOf(4) === 'B3:FILES', 'an absolute path inside the project resolves like its relative form');
+// Reached through a symlink (macOS /tmp → /private/tmp; a linked worktree dir), the same
+// file must still be inside the project — the injector compares real paths, so must this.
+fs.writeFileSync(path.join(proj0, 'src', 'c.js'), '// fixture\n');
+fs.symlinkSync(proj0, path.join(tmp, 'proj-link'));
+const viaLink = be.boundariesForFiles(index, proj0, [path.join(tmp, 'proj-link', 'src', 'c.js')])[0];
+ok(!viaLink.outside && viaLink.hits.map((h) => h.boundary.id).join() === 'B3',
+  `a file reached through a symlink to the project still maps (${viaLink.outside ? 'outside' : viaLink.rel})`);
+// From a subdirectory, a bare name is read where the reader is and matched from the root (#628).
+const fmSub = be.boundariesForFiles(index, path.join(proj0, 'src'), ['c.js'], proj0)[0];
+ok(fmSub.rel === 'src/c.js' && fmSub.hits.map((h) => h.boundary.id).join() === 'B3' && fmSub.missing === false,
+  `from a subdirectory, a bare filename maps to its declaring boundary (${fmSub.rel} → ${fmSub.hits.map((h) => h.boundary.id).join() || 'none'})`);
+const fmGone = be.boundariesForFiles(index, proj0, ['nested/src/c.js'], proj0)[0];
+ok(fmGone.missing === true && /nested\/src\/c\.js does not exist/.test(be.fileMapLines([fmGone]).join('\n')),
+  'a path that resolves to no file is flagged, even when its suffix matches a declaration');
+const fmText = be.fileMapLines(fm).join('\n');
+ok(/src\/z\.js → NO BOUNDARY DECLARES THIS FILE[^\n]*not a finding that no lessons apply/.test(fmText),
+  'an undeclared file is said to be undeclared, not lesson-free');
+const dCss = be.deliver(index, entries, [fm[2].hits[0].boundary], () => null);
+ok(dCss.delivered.join() === 'K1' && /CATALOGUE ENTRIES FOR Stylesheets/.test(dCss.text),
+  'an unnumbered boundary is delivered by object, under its own name');
+const { boundarySelectsFile } = require(path.join(ROOT, 'hooks', 'currency.js'));
+ok(boundarySelectsFile('FILES: src/a.js\nKINDS: *.css', 'x/y.css') === 'KINDS'
+  && boundarySelectsFile('FILES: src/a.js', 'src/a.js') === 'FILES'
+  && boundarySelectsFile('FILES: src/a.js', 'src/ab.js') === null,
+  'the shared predicate answers FILES, KINDS, or null — and a near-miss name is null');
+
 // ---------------------------------------------------------------------------
 console.log('\nThe CLI: an unreadable store is "not looked", never "nothing indexed"');
 const env = { ...process.env, HOME: tmp };
@@ -160,6 +273,17 @@ const r0 = spawnSync('node', [SCRIPT, 'B1', `--dir=${path.join(tmp, 'proj')}`], 
 ok(r0.status === 0 && /Delivered in full below: 5/.test(r0.stdout), `exit 0 and the same delivery through the CLI (exit ${r0.status})`);
 const r1 = spawnSync('node', [SCRIPT, '--bogus'], { encoding: 'utf8', env });
 ok(r1.status === 1, 'an unknown flag is a usage error, exit 1');
+const rf = spawnSync('node', [SCRIPT, '--file=src/a.js', '--file=src/z.js', `--dir=${path.join(tmp, 'proj')}`], { encoding: 'utf8', env });
+ok(rf.status === 0 && /src\/a\.js → B1 \(FILES\)/.test(rf.stdout) && /src\/z\.js → NO BOUNDARY DECLARES/.test(rf.stdout)
+  && /Delivered in full below: 5/.test(rf.stdout), `--file through the CLI: mapped, the undeclared one named, B1 delivered (exit ${rf.status})`);
+const rn = spawnSync('node', [SCRIPT, '--file=src/z.js', `--dir=${path.join(tmp, 'proj')}`], { encoding: 'utf8', env });
+ok(rn.status === 0 && /nothing is delivered/.test(rn.stdout) && /Index coverage:/.test(rn.stdout) && !/Delivered in full/.test(rn.stdout),
+  `a file no boundary declares delivers nothing and says so, coverage included (exit ${rn.status})`);
+const rsub = spawnSync('node', [SCRIPT, '--file=c.js', `--dir=${path.join(tmp, 'proj', 'src')}`], { encoding: 'utf8', env });
+ok(rsub.status === 0 && /src\/c\.js → B3 \(FILES\)/.test(rsub.stdout),
+  `--file from a subdirectory finds the project root by the injector's walk (exit ${rsub.status}: ${(rsub.stdout.split('\n')[1] || '').trim()})`);
+const re = spawnSync('node', [SCRIPT, '--file='], { encoding: 'utf8', env });
+ok(re.status === 1 && /not understood: --file=/.test(re.stderr), 'an empty --file is a usage error, not "no file"');
 
 // ---------------------------------------------------------------------------
 console.log('\nThe edit-time injector does not scrape the index');

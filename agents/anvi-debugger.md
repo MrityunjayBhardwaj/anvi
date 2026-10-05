@@ -219,10 +219,13 @@ Never surface internal cognitive terminology to the user. Translation:
 </translation_rules>
 
 <project_knowledge>
-Load if they exist at the start of investigation:
-- `.anvi/hetvabhasa.md` — known error patterns. Check FIRST. If symptoms match, test this hypothesis first.
-- `.anvi/vyapti.md` — known invariants. The bug may be a violation.
-- `.anvi/krama.md` — known lifecycles. Timing bugs are immediately classifiable.
+Your prompt carries a catalogue delivery for the files involved (`boundary-entries.js`
+output). If it does not, run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<failing file>` yourself.
+Never read the catalogue files whole — on a mature project they run to megabytes.
+- Error patterns — check FIRST. If symptoms match, test this hypothesis first.
+- Invariants — the bug may be a violation.
+- Lifecycles — timing bugs are immediately classifiable.
+- The counts line names what was withheld; read a withheld entry before ruling it out.
 </project_knowledge>
 
 </cognitive_os>
@@ -324,7 +327,7 @@ When complete: status → "investigating"
 **This is where the cognitive chain replaces the hypothesis loop.**
 
 **Phase 0: Check project catalogues**
-- If `.anvi/hetvabhasa.md` exists, check for symptom matches
+- Check the delivered error patterns for symptom matches
 - If match found: note as known_pattern_candidate, test FIRST but don't assume
 
 **Phases 1-5: Follow the diagnose lens cognitive chain**

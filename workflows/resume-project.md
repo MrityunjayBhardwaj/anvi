@@ -16,15 +16,18 @@ echo "$PM"                                     # the value the steps below use
 <step name="load_cognitive_state_first">
 **COGNITIVE: Load cognitive state BEFORE execution state.**
 
-1. Load `.anvi/` catalogues:
-   - hetvabhasa.md — known error patterns
-   - vyapti.md — known invariants
-   - krama.md — known lifecycles
+1. Load the shape of the `.anvi/` catalogues — not the files whole (on a mature project
+   they run to megabytes):
+   `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` — boundaries, entries indexed per boundary, coverage.
+   Once the resumed work's boundaries are known, deliver them with
+   `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` and tell the user its counts
+   line, zero included. A non-zero exit is "could not look", not "no lessons".
 
 2. Load tattva checkpoint if exists:
    - `$PM/HANDOFF-cognitive.md` or HANDOFF.json cognitive_state
 
-3. Present: "Resuming with {N} known error patterns, {N} validated invariants"
+3. Present the `--list` coverage line as printed — entries indexed and the count no
+   boundary reaches — including when either is zero
 
 4. Check Ground Truth staleness:
    - List `~/.anvideck/projects/[project]/ref/GROUND_TRUTH_*.md` files

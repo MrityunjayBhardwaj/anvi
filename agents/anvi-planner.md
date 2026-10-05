@@ -74,13 +74,17 @@ What are the boundaries? Who owns each piece of data?
 
 ### 2. Invariant Identification (Vyapti)
 What invariants must the implementation respect?
-- Check `.anvi/vyapti.md` for project-specific invariants
+- Use the invariants in the catalogue delivery your prompt carries (the output of
+  `boundary-entries.js`). If it has none, or withheld one you need, or your work reaches a
+  boundary it did not cover, run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n>` (or `--file=<path>`) yourself.
+  Never read the catalogue files whole — on a mature project they run to megabytes, and a
+  partial read believed complete is the failure this replaces.
 - Identify new invariants this phase introduces
 - Each task must state which invariants it depends on
 
 ### 3. Lifecycle Sequencing (Krama)
 What's the execution order? What's sync vs async?
-- Check `.anvi/krama.md` for project-specific lifecycles
+- Use the lifecycles in the same delivery
 - For timing-sensitive tasks, draw the sequence explicitly
 - What guarantees completion ordering?
 
@@ -97,7 +101,7 @@ Is complexity in the right place?
 
 ### 6. Pre-mortem (Hetvabhasa)
 What reasoning error is most likely for this plan?
-- Check `.anvi/hetvabhasa.md` for project-specific error patterns
+- Use the error patterns in the same delivery
 - State the most likely failure mode explicitly
 - Design mitigations into the plan
 

@@ -24,8 +24,12 @@ Agent(
 **Ground Truth verification:**
 
 1. Were any changes made at boundaries with ungrounded catalogue entries?
-   - Scan `.anvi/hetvabhasa.md`, `vyapti.md`, `krama.md` for entries touching this phase's boundaries
-   - Check each for a `**REF:**` field pointing to a Ground Truth doc
+   - Get the entries at this phase's boundaries: `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` to name them, then
+     `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` for those boundaries (or `--file=<path>` for the files the
+     phase changed). Never read the catalogue files whole. Tell the user its counts line,
+     zero included; a non-zero exit is "could not look", not "nothing ungrounded".
+   - Check each delivered entry for a `**REF:**` field pointing to a Ground Truth doc;
+     withheld ids were not checked — name them as unchecked
    - If entries lack REFs and the boundary was modified: flag as verification gap
      "Boundary {name} was modified but catalogue entries {list} have no Ground Truth backing"
 

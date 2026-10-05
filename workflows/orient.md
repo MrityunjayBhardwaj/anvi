@@ -206,9 +206,12 @@ Scan for what's known, unknown, and assumed about the current work:
 - Any knowledge from training data not confirmed against current code/docs
 
 Scan sources:
-- `.anvi/hetvabhasa.md` — known error patterns (mark as KNOWN)
-- `.anvi/vyapti.md` — known invariants (mark as KNOWN)
-- `.anvi/krama.md` — known lifecycles (mark as KNOWN)
+- `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` — the boundaries and how many entries each indexes; its
+  coverage line counts the entries no boundary reaches (those are UNKNOWN to this route)
+- `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` for the boundaries the current work touches — the entries it
+  delivers are KNOWN; the ids it withholds are named but unread, so mark them UNKNOWN.
+  Never read the catalogue files whole. Say its counts line, zero included; a non-zero exit
+  is "could not look".
 - Recent tool calls — what files were read (KNOWN) vs referenced but not read (UNKNOWN)
 - Conversation context — what was stated as fact vs what was hypothesized (ASSUMED)
 </step>

@@ -30,10 +30,26 @@ if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
 Extract: executor_model, commit_docs, sub_repos, phase_dir, plans, incomplete_plans.
 
-Also load cognitive OS state:
-- Read `.anvi/hetvabhasa.md` — known error patterns for this project
-- Read `.anvi/vyapti.md` — known invariants
-- Read `.anvi/krama.md` — known lifecycles
+Also load this phase's catalogue entries — by boundary, never by reading the catalogue
+files whole (on a mature project they run to megabytes; a partial read believed complete
+is the failure this replaces):
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list; echo "exit=$?"
+```
+
+From that list, name the boundaries this phase's plans touch (from the files they change).
+Call the chosen ids `{BOUNDARY_IDS}` (space-separated, as `--list` prints them). Then:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}; echo "exit=$?"
+```
+
+- **Tell the user the counts line** (indexed, delivered, withheld — each withheld id named —
+  and the index's coverage) every time, including when they are zero.
+- A **non-zero exit is "could not look", never "no lessons"**: exit 1 is a wrong boundary id
+  or a missing script (`Cannot find module` → `/anvi:update`); exit 2 is catalogues that
+  could not be read. Say which.
 
 Check Ground Truth coverage for this phase:
 - Read `.anvi/dharana.md` — which external system boundaries does this phase touch?

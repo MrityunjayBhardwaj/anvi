@@ -82,7 +82,11 @@ What error could make this verification seem correct but be wrong?
 
 ### 5. Invariant Alignment (Vyapti)
 Does the implementation respect known structural regularities?
-- Check `.anvi/vyapti.md` for project invariants
+- Use the invariants in the catalogue delivery your prompt carries (the output of
+  `boundary-entries.js`). If it has none, or withheld one you need, or your work reaches a
+  boundary it did not cover, run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n>` (or `--file=<path>`) yourself.
+  Never read the catalogue files whole — on a mature project they run to megabytes, and a
+  partial read believed complete is the failure this replaces.
 - Does any new code violate established patterns?
 </review_lens>
 

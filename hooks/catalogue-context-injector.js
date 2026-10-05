@@ -19,7 +19,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { projectRootFor, subjectRepoFor, resolveDirForFile, adoptSession, worktreeLinkNotice } = require('./anvi-paths.js');
-const { computeCurrency, freshnessState, freshnessReason, NOT_CHECKED_REASONS, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, readField, declaredItems, globBody, matchesDeclaredFile, splitBoundaries, boundaryLabel, boundaryDeclares, guessMatchesFile, entryDeclaresFile, withoutFields, BOUNDARY_INDEX_FIELDS, GIT_MAX_BUFFER } = require('./currency.js');
+const { computeCurrency, freshnessState, freshnessReason, NOT_CHECKED_REASONS, parseEntries, nudgeFor, capNudges, makeRefResolver, extensionsFrom, splitBoundaries, boundaryLabel, boundaryDeclares, boundarySelectsFile, guessMatchesFile, entryDeclaresFile, withoutFields, BOUNDARY_INDEX_FIELDS, GIT_MAX_BUFFER } = require('./currency.js');
 
 // --- Currency at point of use ----------------------------------------------
 // The checks above are only worth obeying if the entry that produced them is still
@@ -288,9 +288,6 @@ function saidBefore(sessionId, file, line) {
 // `/`. One live declaration therefore mapped six files for the gate and one for this
 // hook (#195). Same reason readField moved: the two consumers agree by construction, not
 // by two implementations happening to match.
-function globToRe(glob) {
-  return new RegExp(`^${globBody(glob)}$`);
-}
 
 // `boundaryLabel` and `boundaryDeclares` live in currency.js and are imported above.
 // They used to live here, and moving them is the same consolidation the split and the
@@ -309,12 +306,8 @@ function globToRe(glob) {
 // declaration mapped six files for the gate and one for the hook. The predicate is
 // unchanged; only its address is. What it does and why is documented at the definition.
 
-function matchesKind(kindsField, relPath) {
-  const base = path.basename(relPath);
-  return kindsField.split(',').map(k => k.trim()).filter(Boolean).some(k => {
-    try { return globToRe(k).test(k.includes('/') ? relPath : base); } catch { return false; }
-  });
-}
+// `matchesKind` (KINDS:) moved to currency.js with `boundarySelectsFile` (#622), for
+// the reason every predicate above moved: a second asker now exists.
 
 // This file used to carry its own field reader. It has none now: `readField` comes from
 // currency.js, which is where the gate reads these fields too, so the hook and the gate
@@ -515,11 +508,14 @@ process.stdin.on('end', () => {
       // and its author told the declaration "did not select this file", which was false.
       // A continuation naming a glob arrived nowhere at all, since no filename search can
       // match a pattern. One shape was mislabelled, the other silently lost (#194, #200).
-      const filesField = readField(boundaryContent, 'FILES');
-      let isRelevant = false;
-
-      if (filesField !== undefined) {
-        // Deterministic match: does relPath name one of the declared files? Literal or
+      //
+      // FILES: then KINDS: are asked by `boundarySelectsFile` in currency.js, the one
+      // place that answers "does this boundary's declaration select this file" — the
+      // delivery script asks the same question of a failing file (#622), and two copies
+      // would let a file belong to a boundary when edited and to none when debugged.
+      // What each predicate does, and why, is kept below with the reasoning that shaped it.
+      //
+      // FILES: — deterministic match: does relPath name one of the declared files? Literal or
         // glob, both anchored as a segment-aligned path suffix — see matchesDeclaredFile
         // for why the suffix is deliberate, why it must land on a separator, and why a
         // glob is anchored the same way a literal is.
@@ -535,8 +531,6 @@ process.stdin.on('end', () => {
         // was compared with its backticks still on and selected nothing — while the
         // declaration COUNTED, because the count is computed from the stripped form. It
         // also left parenthetical notes in, minting specs out of prose like a route list.
-        isRelevant = declaredItems(filesField).some(bf => matchesDeclaredFile(bf, relPath));
-      }
 
       // KINDS: — the second deterministic predicate, ORed with FILES:. Asks what the
       // file IS. Runs before the text fallback for the same reason FILES: does: an
@@ -545,16 +539,12 @@ process.stdin.on('end', () => {
       // coincidental one are indistinguishable in the output today, which is why a
       // boundary handing its checks to an unrelated file went unnoticed: the reader
       // has no way to tell an authoritative delivery from an accidental one.
-      let via = isRelevant ? 'FILES' : null;
+      let via = boundarySelectsFile(boundaryContent, relPath);
+      let isRelevant = via !== null;
 
       // Same reader, deliberately NOT the same item grammar: a KINDS: item is a pattern,
       // where a bracket is syntax rather than markdown decoration, so the wrapper
       // stripping that is right for a path would corrupt a character class.
-      const kindsField = readField(boundaryContent, 'KINDS');
-      if (!isRelevant && kindsField !== undefined) {
-        isRelevant = matchesKind(kindsField, relPath);
-        if (isRelevant) via = 'KINDS';
-      }
 
       if (!isRelevant) {
         // Fallback: text-based match on filename/CamelCase parts over the entry's

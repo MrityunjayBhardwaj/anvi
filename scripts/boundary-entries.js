@@ -28,7 +28,17 @@
 // Usage:
 //   node boundary-entries.js --list [--dir=<project>]        boundaries and index sizes
 //   node boundary-entries.js B<n> [B<m> ...] [--dir=<project>] deliver those boundaries' entries
+//   node boundary-entries.js --file=<path> [--file=<path> ...] [--dir=<project>]
+//                                                           deliver for the boundaries whose
+//                                                           FILES/KINDS declare those files
 //   node boundary-entries.js --propose [--dir=<project>]     draft ENTRIES SEEDED (writes nothing)
+//
+// --file is the debugging door (#622). A bug report names a symptom and a file, not a
+// boundary, so the file is mapped to the boundaries that DECLARE it — the same question
+// the edit-time injector asks, answered by the same function (currency.js
+// boundarySelectsFile). The injector's third step, guessing from a boundary's prose, is
+// not used: a guessed boundary is not the file's boundary. A file no boundary declares
+// is said to be undeclared, never treated as "no lessons apply".
 // Exit: 0 answered (even "nothing indexed"); 1 usage / unknown boundary; 2 could not look.
 'use strict';
 const fs = require('fs');
@@ -47,7 +57,7 @@ function loadFromCandidates(name) {
 const currency = loadFromCandidates('currency.js');
 const delivery = loadFromCandidates('named-entry-delivery.js');
 const { splitBoundaries, boundaryLabel, readField, readFieldAll, declaredItems, matchesDeclaredFile,
-  extractRefFiles, extractFileSpecs, parseEntries, withoutFields, BOUNDARY_INDEX_FIELDS } = currency;
+  extractRefFiles, extractFileSpecs, parseEntries, withoutFields, BOUNDARY_INDEX_FIELDS, boundarySelectsFile } = currency;
 
 // The catalogues an index may point into. dharana is excluded: its entries ARE the
 // boundaries, and a boundary is chosen by the planner, not delivered as a lesson.
@@ -98,11 +108,16 @@ function coverageLine(c) {
     + 'CANNOT be reached by this chain — an entry missing here may still apply.';
 }
 
+/**
+ * `wanted` holds boundary ids, or boundary objects from `index` — the second form is how
+ * --file delivers an unnumbered boundary, whose heading carries no id to ask for.
+ */
 function deliver(index, entries, wanted, stampOf) {
-  const unknown = wanted.filter((w) => !index.some((b) => b.id === w));
-  const chosen = index.filter((b) => wanted.includes(b.id));
+  const asked = wanted.filter((w) => typeof w === 'string');
+  const unknown = asked.filter((w) => !index.some((b) => b.id === w));
+  const chosen = index.filter((b) => wanted.includes(b) || asked.includes(b.id));
   const lines = [];
-  lines.push(`CATALOGUE ENTRIES FOR ${wanted.join(', ')} — selected by the boundary index in dharana.md, not by search.`);
+  lines.push(`CATALOGUE ENTRIES FOR ${wanted.map((w) => (typeof w === 'string' ? w : w.label)).join(', ')} — selected by the boundary index in dharana.md, not by search.`);
   if (unknown.length) lines.push(`⚠ NO SUCH BOUNDARY: ${unknown.join(', ')}. Run with --list to see the boundaries.`);
 
   // Authored ids of every chosen boundary lead, then seeded ones; first mention wins.
@@ -165,13 +180,63 @@ function deliver(index, entries, wanted, stampOf) {
   lines.push(coverageLine(coverage(index, entries)));
   lines.push(delivery.freshnessLine(delivered, entries, stampOf));
 
+  // Each heading counts what was WITHHELD from it as well as what it holds. Counted as
+  // delivered alone, a section whose entries all missed the budget read "0 / none" — and a
+  // reader skimming for its slot concluded no such rule applies (#625, observed in #622).
   for (const file of ['vyapti.md', 'krama.md', 'hetvabhasa.md']) {
     const ids = delivered.filter((id) => entries.get(id).file === file);
-    lines.push('', `## ${SECTION_TITLE[file]}: ${ids.length}`);
-    if (!ids.length) { lines.push('(none delivered)'); continue; }
+    const held = withheld.filter((id) => entries.get(id).file === file);
+    lines.push('', `## ${SECTION_TITLE[file]}: ${ids.length} delivered`
+      + (held.length ? `, ${held.length} withheld (${held.join(', ')}) — read them before relying on this section` : ''));
+    if (!ids.length) {
+      lines.push(held.length ? '(every entry indexed here was withheld — see the ids above)' : '(none indexed at these boundaries)');
+      continue;
+    }
     for (const id of ids) lines.push('', `--- ${id} (${file}) ---`, bodies.get(id));
   }
   return { text: lines.join('\n'), delivered, withheld, unknown, missing };
+}
+
+/**
+ * Which boundaries declare each file. A relative path is resolved against `baseDir` —
+ * where the reader is — and then matched relative to `root`, the project root, because
+ * declarations are written from the root. Run from a subdirectory, matching against the
+ * cwd read every declared file as undeclared (#628). One outside the root is reported as
+ * such rather than matched against relative globs.
+ */
+function boundariesForFiles(index, baseDir, files, root0 = baseDir) {
+  // Real paths on both sides, as the injector uses: a root reached through a symlink
+  // (macOS /tmp → /private/tmp, a worktree's linked dirs) would otherwise put every
+  // absolute file "outside the project".
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+  const root = real(path.resolve(root0));
+  const base = real(path.resolve(baseDir));
+  return files.map((f) => {
+    const abs = real(path.resolve(base, f));
+    const rel = path.relative(root, abs).split(path.sep).join('/');
+    if (!rel || rel.startsWith('../') || rel === '..' || path.isAbsolute(rel)) return { file: f, rel, outside: true, hits: [] };
+    // Declarations match as a path SUFFIX, so a path resolved against the wrong directory
+    // (hooks/hooks/x.js) can still match. Say when the file is not there.
+    const missing = !fs.existsSync(abs);
+    const hits = [];
+    for (const b of index) {
+      const via = boundarySelectsFile(b.content, rel);
+      if (via) hits.push({ boundary: b, via });
+    }
+    return { file: f, rel, outside: false, missing, hits };
+  });
+}
+
+/** The lines that say how each file was mapped — printed before any delivery, every time. */
+function fileMapLines(map) {
+  const lines = [`FILES → BOUNDARIES (by each boundary's FILES/KINDS declaration; prose is not searched):`];
+  for (const m of map) {
+    if (m.outside) lines.push(`  ${m.file} → outside the project; no boundary can declare it.`);
+    else if (!m.hits.length) lines.push(`  ${m.rel} → NO BOUNDARY DECLARES THIS FILE. That is a gap in dharana's declarations, not a finding that no lessons apply.`);
+    else lines.push(`  ${m.rel} → ${m.hits.map((h) => `${h.boundary.label} (${h.via})`).join(', ')}`);
+    if (!m.outside && m.missing) lines.push(`    ⚠ ${m.rel} does not exist — a relative path is read from the directory you ran in; check it.`);
+  }
+  return lines;
 }
 
 /** The ENTRIES SEEDED field each boundary would get. Mechanical; writes nothing. */
@@ -202,7 +267,7 @@ function propose(index, entries, anviDir) {
   });
 }
 
-module.exports = { readIndex, lessonEntries, coverage, coverageLine, deliver, propose, LESSON_FILES };
+module.exports = { readIndex, lessonEntries, coverage, coverageLine, deliver, propose, boundariesForFiles, fileMapLines, LESSON_FILES };
 
 if (require.main !== module) return;
 
@@ -210,10 +275,13 @@ const args = process.argv.slice(2);
 const dirArg = args.find((a) => a.startsWith('--dir='));
 const projectDir = dirArg ? dirArg.slice(6) : process.cwd();
 const wanted = args.filter((a) => /^B[0-9]+$/.test(a));
-const mode = args.includes('--list') ? 'list' : args.includes('--propose') ? 'propose' : wanted.length ? 'deliver' : null;
-const stray = args.filter((a) => !/^B[0-9]+$/.test(a) && !['--list', '--propose'].includes(a) && a !== dirArg);
+const fileArgs = args.filter((a) => a.startsWith('--file=')).map((a) => a.slice(7));
+const mode = args.includes('--list') ? 'list' : args.includes('--propose') ? 'propose'
+  : (wanted.length || fileArgs.length) ? 'deliver' : null;
+const stray = args.filter((a) => !/^B[0-9]+$/.test(a) && !['--list', '--propose'].includes(a) && a !== dirArg
+  && !(a.startsWith('--file=') && a.length > 7));
 if (!mode || stray.length) {
-  console.error(`usage: boundary-entries.js (--list | --propose | B<n> [B<n> ...]) [--dir=<project>]${stray.length ? `\nnot understood: ${stray.join(' ')}` : ''}`);
+  console.error(`usage: boundary-entries.js (--list | --propose | B<n> [B<n> ...] | --file=<path> [...]) [--dir=<project>]${stray.length ? `\nnot understood: ${stray.join(' ')}` : ''}`);
   process.exit(1);
 }
 
@@ -255,6 +323,24 @@ if (mode === 'propose') {
   process.exit(0);
 }
 
-const out = deliver(index, entries, wanted, currency.newestValidated);
+let ask = wanted;
+if (fileArgs.length) {
+  // The root by the injector's own walk (nearest dir holding .git or .anvi), so the two
+  // agree on where declarations are relative to, not only on the predicate.
+  const root = (typeof anviPaths.projectRootOfDir === 'function' && anviPaths.projectRootOfDir(path.resolve(projectDir))) || projectDir;
+  const map = boundariesForFiles(index, projectDir, fileArgs, root);
+  console.log(fileMapLines(map).join('\n'));
+  const byFile = [];
+  for (const m of map) for (const h of m.hits) if (!byFile.includes(h.boundary)) byFile.push(h.boundary);
+  ask = [...wanted, ...byFile.filter((b) => !wanted.includes(b.id))];
+  if (!ask.length) {
+    console.log('No boundary declares these files, so nothing is delivered. Run --list and name the boundaries the bug touches, '
+      + 'or read the catalogues for this area yourself — and say that the index did not reach it.');
+    console.log(coverageLine(coverage(index, entries)));
+    process.exit(0);
+  }
+  console.log('');
+}
+const out = deliver(index, entries, ask, currency.newestValidated);
 console.log(out.text);
 process.exit(out.unknown.length ? 1 : 0);

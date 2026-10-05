@@ -76,12 +76,16 @@ For each unknown from boundary scan:
 4. Tag confidence level
 
 ### Phase 3: Invariant Discovery
-- Check `.anvi/vyapti.md` for existing invariants
+- Use the invariants in the catalogue delivery your prompt carries (the output of
+  `boundary-entries.js`). If it has none, or withheld one you need, or your work reaches a
+  boundary it did not cover, run `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n>` (or `--file=<path>`) yourself.
+  Never read the catalogue files whole — on a mature project they run to megabytes, and a
+  partial read believed complete is the failure this replaces.
 - Identify new invariants this phase depends on
 - Verify invariants via direct observation if possible
 
 ### Phase 4: Risk Identification
-- Check `.anvi/hetvabhasa.md` for known error patterns
+- Use the error patterns in the same delivery
 - Identify new risks specific to this phase
 - Document mitigations for each risk
 

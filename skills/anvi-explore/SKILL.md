@@ -22,10 +22,10 @@ Load base layer:
 Load translation:
 @~/.claude/anvi/cognitive-os/translation.md
 
-Load project catalogues if they exist:
-- `.anvi/hetvabhasa.md`
-- `.anvi/vyapti.md`
-- `.anvi/krama.md`
+Load project catalogue entries if they exist — by boundary, never the files whole:
+- `node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list` — boundaries, entries indexed, coverage
+- `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` (or `--file=<path>`) for the boundaries the friction
+  touches. Say its counts line, zero included; a non-zero exit is "could not look".
 
 ## Process
 

@@ -158,7 +158,8 @@ Check against known error patterns:
 4. **Observation error:** Will my tests actually exercise the real pipeline, or just mock it?
 5. **Workaround error:** Is any part of this design a workaround for something I should be solving differently?
 
-**Also check the project's hetvābhāsa catalogue** (`references/hetvabhasa.md`) for project-specific patterns.
+**Also check the project's error patterns** at the boundaries this design touches:
+`node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` (never the catalogue file whole).
 
 **Ground Truth check:** If a Ground Truth doc covers this boundary, check its discrepancy log — are there known doc-vs-code contradictions that could cause the failure mode you're designing against?
 

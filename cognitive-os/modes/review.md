@@ -88,7 +88,8 @@ In priority order:
 
 **What reasoning error could make this change seem correct but be wrong?**
 
-Check the project's error catalogue (`references/hetvabhasa.md`) and these universal patterns:
+Check the project's error patterns for the files under review
+(`node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<path>`, never the catalogue file whole) and these universal patterns:
 
 | Error | Signal in code review |
 |-------|----------------------|
@@ -126,7 +127,8 @@ Questions:
 
 **Does this change respect the system's structural regularities?**
 
-Check against the project's vyāpti catalogue (`references/vyapti.md`):
+Check against the project's invariants for the files under review
+(`node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<path>`, never the catalogue file whole):
 - Does this change violate any known invariant?
 - Does it introduce a new invariant that should be documented?
 - Does it change the scope conditions of an existing invariant?
