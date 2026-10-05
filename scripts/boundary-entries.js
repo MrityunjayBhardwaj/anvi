@@ -54,8 +54,21 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 
-const currency = loadFromCandidates('currency.js');
-const delivery = loadFromCandidates('named-entry-delivery.js');
+// Run as a command, a module that cannot be found is "could not look" — exit 2, the
+// code every workflow already reads that way. Thrown, it was a stack trace with exit 1,
+// which the workflows read as a wrong boundary id (#629: a Copilot-only install had no
+// hooks folder at all). Required as a library, it still throws: the caller is code.
+function loadOrNotLooked(name) {
+  try { return loadFromCandidates(name); } catch (e) {
+    if (require.main !== module) throw e;
+    console.log(`NOT LOOKED: this install cannot run the catalogue delivery — ${e.message}. `
+      + 'Nothing here says which entries apply; reinstall (/anvi:update) or read the entries yourself.');
+    process.exit(2);
+  }
+}
+
+const currency = loadOrNotLooked('currency.js');
+const delivery = loadOrNotLooked('named-entry-delivery.js');
 const { splitBoundaries, boundaryLabel, readField, readFieldAll, declaredItems, matchesDeclaredFile,
   extractRefFiles, extractFileSpecs, parseEntries, withoutFields, BOUNDARY_INDEX_FIELDS, boundarySelectsFile } = currency;
 
@@ -287,7 +300,7 @@ if (!mode || stray.length) {
 
 // A refusal is not an absence: "could not read the catalogues" must never print as
 // "no entries indexed", or the planner concludes there are no lessons.
-const anviPaths = loadFromCandidates('anvi-paths.js');
+const anviPaths = loadOrNotLooked('anvi-paths.js');
 const read = typeof anviPaths.resolveDirForRead === 'function'
   ? anviPaths.resolveDirForRead(projectDir, '.anvi')
   : { dir: anviPaths.resolveDir(projectDir, '.anvi') };

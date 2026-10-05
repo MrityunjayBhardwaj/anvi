@@ -50,7 +50,7 @@ ok(produced !== -1 && produced <= firstUse, '{BOUNDARY_IDS} is defined at (or be
 // debugging, orientation, the agents those workflows spawn. The population is WALKED,
 // not listed, so a file added later is checked without anyone remembering to add it.
 console.log('\nNo installed instruction file reads a lesson catalogue whole (#622)');
-const INSTRUCTION_DIRS = ['workflows', 'agents', 'skills', 'cognitive-os', 'references', 'templates'];
+const INSTRUCTION_DIRS = ['workflows', 'agents', 'skills', 'cognitive-os', 'references', 'templates', 'copilot-compat'];
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
   const p = path.join(d, e.name);
   return e.isDirectory() ? walk(p) : e.name.endsWith('.md') ? [p] : [];
@@ -58,21 +58,29 @@ const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
 const instructionFiles = INSTRUCTION_DIRS.filter((d) => fs.existsSync(path.join(ROOT, d)))
   .flatMap((d) => walk(path.join(ROOT, d))).map((p) => path.relative(ROOT, p).split(path.sep).join('/'));
 // Files that name a lesson catalogue for a reason other than reading it as knowledge.
-// copilot-compat/ is outside the walk on purpose: a different host, whose templates are
-// copied into projects where this script may not exist — tracked on #626.
+// copilot-compat/ joined the walk with #626, once a Copilot-only install could run the
+// delivery script at all (#629).
 const NAMES_CATALOGUES_LEGITIMATELY = {
+  'copilot-compat/README.md': 'describes the one set of catalogue files both tools share',
   'skills/anvi-init/SKILL.md': 'creates the catalogue files from templates',
   'skills/anvi-audit/SKILL.md': 'its subject is the catalogues themselves',
   'cognitive-os/dharana-spec.md': 'describes what the catalogues are',
 };
 const LESSON_MENTION = /\b(hetvabhasa|vyapti|krama)\.md\b|\{(hetvabhasa|vyapti|krama) entries/;
+// Recording a NEW entry names the file it goes into, and that is a write, not a read.
+// Only the write clause itself is set aside; the rest of the line is still checked, so a
+// read cannot ride along on a line that also writes.
+const WRITE_CLAUSE = /\b(add|append)\b[^.`]{0,40}\bto `\.anvi\/(hetvabhasa|vyapti|krama)\.md`/gi;
+const readsWhole = (line) => LESSON_MENTION.test(line.replace(WRITE_CLAUSE, ''));
 const offenders = [];
 for (const rel of instructionFiles) {
   if (NAMES_CATALOGUES_LEGITIMATELY[rel]) continue;
   fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n').forEach((line, i) => {
-    if (LESSON_MENTION.test(line)) offenders.push(`${rel}:${i + 1}`);
+    if (readsWhole(line)) offenders.push(`${rel}:${i + 1}`);
   });
 }
+ok(!readsWhole('If yes, add to `.anvi/hetvabhasa.md` with: pattern name') && readsWhole('Read `.anvi/vyapti.md`, then add to `.anvi/krama.md` the order'),
+  'control: a write clause is set aside, and a read on the same line is still caught');
 ok(instructionFiles.length > 50, `the walk found the installed instruction files (${instructionFiles.length})`);
 ok(instructionFiles.includes('workflows/plan-phase.md') && instructionFiles.includes('agents/anvi-debugger.md')
   && instructionFiles.includes('skills/anvi/SKILL.md'), 'and it reaches workflows, agents and skills');
@@ -86,7 +94,7 @@ ok(['- Read `.anvi/hetvabhasa.md` — known error patterns', 'Known error patter
   .every((l) => LESSON_MENTION.test(l)), 'control: the predicate fires on each old form of the instruction');
 
 console.log('\nEvery workflow that runs the delivery says the counts and what a failure means');
-const runners = instructionFiles.filter((rel) => rel.startsWith('workflows/')
+const runners = instructionFiles.filter((rel) => (rel.startsWith('workflows/') || /^copilot-compat\/[\w-]+-hook\.md$/.test(rel))
   && /boundary-entries\.js"? (--list|--file|B<n>|\{BOUNDARY_IDS\})/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
 ok(runners.length >= 10, `the delivery is run by the workflows that used to read whole (${runners.length})`);
 const silent = runners.filter((rel) => {
@@ -271,6 +279,16 @@ ok(r2.status === 2 && /NOT LOOKED/.test(r2.stdout) && !/No entries are indexed/.
   `exit 2 and NOT LOOKED with no catalogues (exit ${r2.status})`);
 const r0 = spawnSync('node', [SCRIPT, 'B1', `--dir=${path.join(tmp, 'proj')}`], { encoding: 'utf8', env });
 ok(r0.status === 0 && /Delivered in full below: 5/.test(r0.stdout), `exit 0 and the same delivery through the CLI (exit ${r0.status})`);
+// An install without the hook modules (a Copilot-only install had none, #629) is "could
+// not look": exit 2 and NOT LOOKED, not a stack trace on exit 1 — the code the workflows
+// read as a wrong boundary id.
+const lone = path.join(tmp, 'lone', 'scripts');
+fs.mkdirSync(lone, { recursive: true });
+fs.copyFileSync(SCRIPT, path.join(lone, 'boundary-entries.js'));
+const rl = spawnSync('node', [path.join(lone, 'boundary-entries.js'), '--list', `--dir=${path.join(tmp, 'proj')}`],
+  { encoding: 'utf8', env: { ...env, HOME: path.join(tmp, 'lone') } });
+ok(rl.status === 2 && /NOT LOOKED: this install cannot run/.test(rl.stdout) && !/at Object|at Module/.test(rl.stderr),
+  `missing hook modules: exit 2 and NOT LOOKED, no stack trace (exit ${rl.status})`);
 const r1 = spawnSync('node', [SCRIPT, '--bogus'], { encoding: 'utf8', env });
 ok(r1.status === 1, 'an unknown flag is a usage error, exit 1');
 const rf = spawnSync('node', [SCRIPT, '--file=src/a.js', '--file=src/z.js', `--dir=${path.join(tmp, 'proj')}`], { encoding: 'utf8', env });

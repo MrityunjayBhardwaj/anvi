@@ -709,9 +709,15 @@ if [ -n "$PRUNE_FLAG" ] && [ -n "$ANVI_DIR" ] && [ ! -L "$ANVI_DIR" ]; then
   done
 fi
 
-# Hooks (enforcement chain — see ENFORCE.md). Claude-Code-specific: they
-# register in Claude Code's settings.json, so only install with that integration.
-if [ "$INSTALL_CLAUDE" = true ] && [ -d "$SCRIPT_DIR/hooks" ]; then
+# Hooks (enforcement chain — see ENFORCE.md). The FILES are copied on every install;
+# REGISTERING them in Claude Code's settings.json is the Claude-specific step.
+#
+# The two used to share the Claude flag, but half the installed scripts load their
+# shared modules (currency.js, anvi-paths.js, …) from this folder, so a Copilot-only
+# install shipped 12 scripts that crashed on first run (#629). An unregistered hook
+# file does nothing — Claude Code runs only what settings.json lists — so copying
+# them for every integration changes no behaviour except that the scripts now load.
+if [ -d "$SCRIPT_DIR/hooks" ]; then
   mkdir -p "$HOOKS_DIR"
   HOOK_COUNT=0
   for hook_file in "$SCRIPT_DIR/hooks/"*.js; do
@@ -719,10 +725,14 @@ if [ "$INSTALL_CLAUDE" = true ] && [ -d "$SCRIPT_DIR/hooks" ]; then
     cp "$hook_file" "$HOOKS_DIR/"
     HOOK_COUNT=$((HOOK_COUNT + 1))
   done
-  echo "  ✓ ${HOOK_COUNT} hooks installed to ${HOOKS_DIR}"
-  # Register them in settings.json (idempotent; preserves existing hooks).
-  # --migrate also prunes registrations + orphan files for retired anvi hooks.
-  node "$SCRIPT_DIR/scripts/register-hooks.cjs" $PRUNE_FLAG
+  if [ "$INSTALL_CLAUDE" = true ]; then
+    echo "  ✓ ${HOOK_COUNT} hooks installed to ${HOOKS_DIR}"
+    # Register them in settings.json (idempotent; preserves existing hooks).
+    # --migrate also prunes registrations + orphan files for retired anvi hooks.
+    node "$SCRIPT_DIR/scripts/register-hooks.cjs" $PRUNE_FLAG
+  else
+    echo "  ✓ ${HOOK_COUNT} hook modules copied to ${HOOKS_DIR} for the scripts (not registered — Claude Code was not selected)"
+  fi
 fi
 
 # Metadata

@@ -15,15 +15,35 @@ instead of UX-first (per-pattern opt-in, method chaining).
 
 ### Identify invariants for this phase:
 What structural regularities must the implementation respect?
-List vyāptis from `.anvi/vyapti.md` in the project root — the SAME file
-Claude Code's native `anvi-planner` agent reads, so invariants either tool
-has previously validated apply here too. For each: does the plan respect it?
+**Get catalogue entries by boundary, never by reading the files whole.** On a mature
+project `.anvi/`'s catalogues run to megabytes; a partial read believed complete is the
+failure. Run, in the terminal:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list; echo "exit=$?"
+```
+
+then, for the boundaries this work touches (or the files it changes):
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> [B<m> ...]; echo "exit=$?"     # or --file=<path> [--file=<path> ...]
+```
+
+It reads the SAME `.anvi/` files Claude Code's native agents use, so what either tool
+has recorded applies here too.
+- **Tell the user its counts line** — indexed, delivered, withheld (each withheld id
+  named), coverage — every time, including when they are zero.
+- **A non-zero exit is "could not look", never "no lessons"**: exit 2 (NOT LOOKED) means
+  the catalogues or the install could not be read — reinstall anvi or read the entries
+  you need yourself, and say so; exit 1 is a wrong boundary id (re-read `--list`).
+
+Take the invariants from that delivery. For each: does the plan respect it?
 If the plan violates a known vyāpti, it will produce bugs.
 
 ### Map the lifecycle:
 What's the execution order of the system this phase touches?
 Which operations are sync vs async? What runs before/after framework init?
-Check `.anvi/krama.md` for lifecycles already documented for this project.
+Take the lifecycles already documented for this project from the same delivery.
 Plans that don't account for lifecycle ordering produce timing bugs.
 
 ## During Planning (Per Task)
@@ -50,9 +70,8 @@ technical assumption works? If no experiment is identified, the plan is
 built on unverified assumptions.
 
 ### Hetvābhāsa scan:
-Check each plan against `.anvi/hetvabhasa.md` — the same error-pattern
-catalogue Claude Code's native `anvi-planner` reads, so a pattern caught in
-either tool is caught here too. Does any task replicate a pattern that
+Check each plan against the error patterns in the same delivery — a pattern
+caught in either tool is caught here too. Does any task replicate a pattern that
 previously caused bugs? If yes, the task must include specific mitigation
 (not just "be careful").
 

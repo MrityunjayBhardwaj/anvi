@@ -9,9 +9,11 @@
 **Check:** Do plan tasks respect known structural regularities?
 
 For each task in the plan:
-1. Read `.anvi/vyapti.md` in the project root — the same file Claude Code's
-   native `anvi-checker` agent reads, so an invariant validated in either
-   tool is enforced here too.
+1. Take the invariants for the plan's boundaries from
+   `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...` (never read the catalogue files whole;
+   tell the user its counts line, zero included; a non-zero exit is "could not look").
+   It reads the same `.anvi/` files Claude Code's checker uses, so an invariant
+   validated in either tool is enforced here too.
 2. Does any task action violate a known invariant?
 3. Does any task assume a regularity holds where it doesn't (scope violation)?
 
@@ -34,8 +36,7 @@ For each task that interacts with framework initialization, async operations, or
 
 For each task:
 1. Check against universal error patterns (timing, identity, scope, observation, workaround, mutation-for-observation)
-2. Check against `.anvi/hetvabhasa.md` — the same project-specific error
-   catalogue Claude Code's native `anvi-checker` agent reads
+2. Check against the project-specific error patterns in the same delivery
 3. Does the task include mitigation for the most likely error?
 
 **Pass:** Each task's acceptance criteria include at least one check that detects the most likely error pattern.
