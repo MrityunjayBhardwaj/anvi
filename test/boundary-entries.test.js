@@ -59,7 +59,7 @@ const instructionFiles = INSTRUCTION_DIRS.filter((d) => fs.existsSync(path.join(
   .flatMap((d) => walk(path.join(ROOT, d))).map((p) => path.relative(ROOT, p).split(path.sep).join('/'));
 // Files that name a lesson catalogue for a reason other than reading it as knowledge.
 // copilot-compat/ is outside the walk on purpose: a different host, whose templates are
-// copied into projects where this script may not exist — tracked on its own issue.
+// copied into projects where this script may not exist — tracked on #626.
 const NAMES_CATALOGUES_LEGITIMATELY = {
   'skills/anvi-init/SKILL.md': 'creates the catalogue files from templates',
   'skills/anvi-audit/SKILL.md': 'its subject is the catalogues themselves',
