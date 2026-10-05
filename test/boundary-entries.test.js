@@ -70,8 +70,10 @@ const LESSON_MENTION = /\b(hetvabhasa|vyapti|krama)\.md\b|\{(hetvabhasa|vyapti|k
 // Recording a NEW entry names the file it goes into, and that is a write, not a read.
 // Only the write clause itself is set aside; the rest of the line is still checked, so a
 // read cannot ride along on a line that also writes.
-const WRITE_CLAUSE = /\b(add|append)\b[^.`]{0,40}\bto `\.anvi\/(hetvabhasa|vyapti|krama)\.md`/gi;
-const readsWhole = (line) => LESSON_MENTION.test(line.replace(WRITE_CLAUSE, ''));
+// No `g` flag: a global regex keeps lastIndex between .test() calls, so a check could
+// start partway through the next line and miss the clause. replace() gets its own copy.
+const WRITE_CLAUSE = /\b(add|append)\b[^.`]{0,40}\bto `\.anvi\/(hetvabhasa|vyapti|krama)\.md`/i;
+const readsWhole = (line) => LESSON_MENTION.test(line.replace(new RegExp(WRITE_CLAUSE.source, 'gi'), ''));
 const offenders = [];
 for (const rel of instructionFiles) {
   if (NAMES_CATALOGUES_LEGITIMATELY[rel]) continue;
