@@ -92,21 +92,83 @@ function isValidProject(name) {
 function leasePath(project) { return path.join(HARVEST_DIR, `${project}.lease`); }
 function sweptPath(project) { return path.join(HARVEST_DIR, `${project}.swept`); }
 
-function acquire(project) {
-  if (!isValidProject(project)) return false;
-  try {
-    fs.mkdirSync(HARVEST_DIR, { recursive: true });
-    // Content is for a human reading the directory; freshness is judged by mtime,
-    // which is what a re-acquire refreshes.
-    fs.writeFileSync(leasePath(project), `${new Date().toISOString()}\n`);
-    return true;
-  } catch { return false; }
+// WHO holds a lease (#636). A lease used to be one file per project with nothing in it
+// but a timestamp, so it could not tell two sessions apart: a second session's
+// `acquire` silently SHARED a live lease, and whichever session released first deleted
+// the lease the other was still relying on — after which the checkpoint was free to
+// sweep the other session's half-written harvest under a generated message. The worst
+// form needs no concurrency at all: A's lease expires mid-harvest, B takes it, A
+// commits and releases, and B's protection is gone.
+//
+// So a lease records its OWNER, and the two writes respect it: `acquire` refreshes a
+// lease this session owns and REFUSES one another session holds live; `release`
+// removes only a lease this session owns. Reading (`live`) is unchanged — the
+// checkpoint hook defers to a lease whoever holds it.
+//
+// The owner is the session id Claude Code hands every shell it runs
+// (`CLAUDE_CODE_SESSION_ID`) — observed equal to the session's own `session_id` and
+// distinct per session. A runtime that provides none is ANONYMOUS, and every anonymous
+// caller is the same owner: exactly the old behaviour, no better and no worse, and the
+// CLI says so when it happens. A lease written before owners existed reads as
+// anonymous too.
+//
+// Check-then-write is not atomic. The window is the microseconds between a read and a
+// write; the overlap this fixes lasts the minutes a harvest takes.
+const ANONYMOUS = 'anonymous';
+
+function sessionOwner(env = process.env) {
+  const id = env.CLAUDE_CODE_SESSION_ID;
+  // The owner is written into a file and printed, so it is checked, not trusted.
+  return typeof id === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(id) ? id : ANONYMOUS;
 }
 
-function release(project) {
-  if (!isValidProject(project)) return false;
-  try { fs.unlinkSync(leasePath(project)); return true; }
-  catch { return false; } // already gone is success enough — the lease is not held
+function isLiveAge(mtimeMs, nowMs) {
+  const age = (nowMs - mtimeMs) / 1000;
+  // Bounded on BOTH sides, for the reason #67 gives: a future-dated lease (clock
+  // skew, a copied file) is not evidence that a harvest is running.
+  return age >= 0 && age < LEASE_SECONDS;
+}
+
+// { owner, mtimeMs, live } for a project's lease, or null when there is none.
+function readLease(project, nowMs) {
+  const now = nowMs === undefined ? Date.now() : nowMs;
+  let text, mtimeMs;
+  try {
+    text = fs.readFileSync(leasePath(project), 'utf8');
+    mtimeMs = fs.statSync(leasePath(project)).mtimeMs;
+  } catch { return null; }
+  const m = text.match(/^owner (\S+)$/m);
+  return { owner: m ? m[1] : ANONYMOUS, mtimeMs, live: isLiveAge(mtimeMs, now) };
+}
+
+// { ok: true, owner } — taken or refreshed.
+// { ok: false, reason: 'held', holder } — another session holds it live; nothing written.
+// { ok: false, reason: 'invalid' | 'error' }.
+function acquire(project, owner = ANONYMOUS, nowMs) {
+  if (!isValidProject(project)) return { ok: false, reason: 'invalid' };
+  const held = readLease(project, nowMs);
+  if (held && held.live && held.owner !== owner) return { ok: false, reason: 'held', holder: held };
+  try {
+    fs.mkdirSync(HARVEST_DIR, { recursive: true });
+    // Freshness is judged by mtime, which a re-acquire refreshes; the owner line is
+    // what `release` and the next `acquire` compare against.
+    fs.writeFileSync(leasePath(project), `${new Date().toISOString()}\nowner ${owner}\n`);
+    return { ok: true, owner };
+  } catch { return { ok: false, reason: 'error' }; }
+}
+
+// { ok: true, released: true } — this session's lease is gone.
+// { ok: true, released: false } — there was no lease; nothing to do.
+// { ok: false, reason: 'held', holder } — it belongs to another session, live or
+//   not, and is left in place: a stale lease is ignored, never deleted by someone else,
+//   because deleting it would race the harvest that is about to refresh it.
+function release(project, owner = ANONYMOUS) {
+  if (!isValidProject(project)) return { ok: false, reason: 'invalid' };
+  const held = readLease(project);
+  if (!held) return { ok: true, released: false };
+  if (held.owner !== owner) return { ok: false, reason: 'held', holder: held };
+  try { fs.unlinkSync(leasePath(project)); return { ok: true, released: true }; }
+  catch { return { ok: true, released: false }; } // gone in between: not held either way
 }
 
 // Every project holding a live lease. A stale lease is IGNORED but not deleted:
@@ -123,11 +185,7 @@ function liveLeases(nowMs) {
     if (!isValidProject(project)) continue; // never build a pathspec from a name we did not vet
     let mtime;
     try { mtime = fs.statSync(path.join(HARVEST_DIR, f)).mtimeMs / 1000; } catch { continue; }
-    const age = now - mtime;
-    // Bounded on BOTH sides, for the reason #67 gives: a future-dated lease (clock
-    // skew, a copied file) is not evidence that a harvest is running, and honouring
-    // it would defer the backstop for as long as the skew lasts.
-    if (age >= 0 && age < LEASE_SECONDS) live.push(project);
+    if (isLiveAge(mtime * 1000, now * 1000)) live.push(project);
   }
   return live.sort();
 }
@@ -276,8 +334,8 @@ function clearCheckpointFailure() {
 }
 
 module.exports = {
-  HARVEST_DIR, LEASE_SECONDS, SWEPT_WINDOW_SECONDS, isValidProject,
-  acquire, release, liveLeases, recordSwept, readSwept, clearSwept,
+  HARVEST_DIR, LEASE_SECONDS, SWEPT_WINDOW_SECONDS, ANONYMOUS, isValidProject,
+  sessionOwner, readLease, acquire, release, liveLeases, recordSwept, readSwept, clearSwept,
   recordCheckpointFailure, readCheckpointFailure, clearCheckpointFailure,
 };
 
@@ -290,10 +348,20 @@ if (require.main === module) {
     process.exit(2);
   }
   switch (cmd) {
-    case 'acquire':
-      process.exit(acquire(project) ? 0 : 1);
-    case 'release':
-      release(project); process.exit(0); // releasing an unheld lease is not an error
+    // Exit 3 is "another session holds it" — a different next move from an error (1)
+    // or a usage mistake (2), so it has its own code. Same codes as anvi-tools.
+    case 'acquire': {
+      const r = acquire(project, sessionOwner());
+      if (r.ok) process.exit(0);
+      if (r.reason === 'held') { console.error(`anvi-harvest-lease: ${project} is held by another session (${r.holder.owner})`); process.exit(3); }
+      process.exit(1);
+    }
+    case 'release': {
+      const r = release(project, sessionOwner()); // releasing an unheld lease is not an error
+      if (r.ok) process.exit(0);
+      if (r.reason === 'held') { console.error(`anvi-harvest-lease: ${project}'s lease belongs to another session (${r.holder.owner}) — left in place`); process.exit(3); }
+      process.exit(1);
+    }
     case 'live':
       for (const p of liveLeases()) console.log(p);
       process.exit(0);

@@ -272,9 +272,9 @@ nothing waits staged for the checkpoint to sweep up.
 The pathspec cannot separate two sessions writing the SAME project: a pathspec commit takes
 those files as they are on disk, half-written entries included. A session wrap announces that
 it is mid-harvest with a lease, so the command reads the leases first and does not commit
-through one. It only READS the lease — never acquire or release it here: the lease is one file
-per project, not per session, so releasing it would drop the OTHER session's lease and let the
-checkpoint sweep its unfinished harvest. If the command refuses:
+through one. It only READS the leases and never takes one: a lease announces "I am harvesting
+this project", which this step is not, and only one session can hold it at a time. If the
+command refuses:
 
 - **Another session is mid-harvest:** tell the user, and leave your entries written but
   uncommitted. Re-run the command once that session has committed (its lease is released then,

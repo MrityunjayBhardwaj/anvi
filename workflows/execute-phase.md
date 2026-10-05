@@ -188,8 +188,8 @@ After phase verification passes, check all executor results for new discoveries:
    pathspec, takes whatever another session has staged into this commit. The `add` stays
    because a pathspec commit silently skips a brand-new file; the fallback unstages on failure.
    A pathspec cannot separate two sessions writing the SAME project, so the command first reads
-   the harvest leases and does not commit through one — it only reads them, never acquires or
-   releases, because a lease is per project, not per session. On a refusal, follow the three
+   the harvest leases and does not commit through one. It only reads them: a lease announces a
+   harvest, which this step is not. On a refusal, follow the three
    cases under "Then commit the knowledge" in `~/.claude/anvi/workflows/debug.md` (`catalogue_update`).
    (If catalogues are in-repo `.anvi/`, they ride the project's own commits instead.)
    The Stop-hook backstop auto-commits anything left dirty, but with a generic message —

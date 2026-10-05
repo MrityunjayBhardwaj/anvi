@@ -401,6 +401,59 @@ drive
 ok "$(lease failure >/dev/null 2>&1; echo $?)" "0" "a clean store records nothing — it is not a failure, it is nothing to do"
 ok "$(count)" "$((BEFORE20+1))" "and it committed nothing either, so that really was the clean-store path"
 
+echo "TEST 21 — a lease has an OWNER: another session can neither share it nor release it (#636)"
+# A lease used to be a timestamp in a file named after the project. A second session's
+# acquire silently SHARED it, and release deleted it whoever had written it — so the first
+# session to finish ended the protection of the one still harvesting, and the checkpoint
+# could then sweep that harvest under a generated message. The owner is the session id
+# Claude Code gives every shell (CLAUDE_CODE_SESSION_ID); two ids stand in for two sessions.
+F21="$T/ownerhome"; mkdir -p "$F21/.claude"
+as(){ local who="$1"; shift; if [ "$who" = "-" ]; then env -u CLAUDE_CODE_SESSION_ID HOME="$F21" CLAUDE_DIR="$F21/.claude" node "$CLI15" harvest-lease "$@" 2>&1;
+      else HOME="$F21" CLAUDE_DIR="$F21/.claude" CLAUDE_CODE_SESSION_ID="$who" node "$CLI15" harvest-lease "$@" 2>&1; fi; }
+rc(){ as "$@" >/dev/null; echo $?; }
+modas(){ CLAUDE_DIR="$F21/.claude" CLAUDE_CODE_SESSION_ID="$1" node "$LEASE_MOD" "${@:2}" >/dev/null 2>&1; echo $?; }
+LF="$F21/.claude/anvi-harvest/own.lease"
+owner(){ sed -n 's/^owner //p' "$LF" 2>/dev/null; }
+expire(){ node -e 'const f=process.argv[1],t=(Date.now()-3600e3)/1000;require("fs").utimesSync(f,t,t)' "$LF"; }
+
+ok "$(rc sess-A acquire own)" "0" "session A takes the lease"
+ok "$(owner)" "sess-A" "and the lease records A as its owner"
+ok "$(rc sess-B acquire own)" "3" "session B is REFUSED while A holds it live — exit 3, not shared"
+ok "$(as sess-B acquire own | grep -c 'NOT taken: own is being harvested by another session (sess-A')" "1" "and B is told who holds it"
+ok "$(owner)" "sess-A" "the refusal wrote nothing — A still owns it"
+ok "$(rc sess-B release own)" "3" "B cannot release A's lease — exit 3"
+ok "$(as sess-B release own | grep -c 'left in place')" "1" "and is told it was left in place"
+ok "$(as sess-B live)" "own" "A's lease is still live after B's attempt — the protection held"
+ok "$(rc sess-A acquire own)" "0" "A re-acquiring its own lease is still idempotent"
+ok "$(modas sess-B acquire own)" "3" "the module's own CLI refuses B too — a second way in, same rule"
+ok "$(modas sess-B release own)" "3" "and will not release A's lease either"
+ok "$(as sess-B live)" "own" "still A's, still live"
+
+# THE CASE THAT NEEDS NO CONCURRENCY: A's harvest outruns the TTL, B takes the project,
+# and A — finishing — releases. Before owners, that release ended B's protection.
+expire
+ok "$(as sess-B live)" "" "precondition: A's lease has expired"
+ok "$(rc sess-B acquire own)" "0" "B takes over an EXPIRED lease"
+ok "$(owner)" "sess-B" "and now owns it"
+ok "$(rc sess-A release own)" "3" "A's late release is refused — the lease is B's now"
+ok "$(as sess-A live)" "own" "and B's lease is still live, so the checkpoint still defers to B's harvest"
+ok "$(rc sess-B release own)" "0" "B releases its own"
+ok "$(as sess-B release own | grep -c 'nothing to release')" "1" "a second release says there was nothing to release, exit 0"
+
+# NO SESSION ID (another runtime): every anonymous caller is the same owner — the old
+# behaviour, said out loud so it cannot pass for protection.
+ok "$(rc - acquire own)" "0" "with no session id, acquire still works"
+ok "$(as - acquire own | grep -c 'cannot tell two sessions apart')" "1" "and says it cannot tell sessions apart"
+ok "$(owner)" "anonymous" "the lease is recorded as anonymous"
+ok "$(rc sess-A acquire own)" "3" "an identified session does not take over a live anonymous lease"
+ok "$(rc - release own)" "0" "an anonymous caller releases the anonymous lease"
+# A lease written before owners existed — a timestamp and nothing else — reads as anonymous.
+mkdir -p "$(dirname "$LF")"; date -u +%Y-%m-%dT%H:%M:%SZ > "$LF"
+ok "$(rc sess-A acquire own)" "3" "a pre-owner lease still live is not taken over by an identified session"
+ok "$(rc - acquire own)" "0" "while an anonymous caller treats it as its own, as before"
+as - release own >/dev/null
+ok "$(as sess-A live)" "" "no state left behind"
+
 echo; echo "RESULT: $PASS passed, $FAIL failed"
 rm -rf "$T"
 [ "$FAIL" = 0 ]
