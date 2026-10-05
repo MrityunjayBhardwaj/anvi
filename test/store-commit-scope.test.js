@@ -20,6 +20,7 @@
 // checkpoint hook's — have no shell text to read; they have their own tests.
 
 'use strict';
+require('./meter-sandbox');
 const fs = require('fs');
 const path = require('path');
 
