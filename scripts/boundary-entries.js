@@ -198,24 +198,32 @@ function deliver(index, entries, wanted, stampOf) {
 }
 
 /**
- * Which boundaries declare each file. Paths are taken relative to the project root;
- * one outside it is reported as such rather than matched against relative globs.
+ * Which boundaries declare each file. A relative path is resolved against `baseDir` —
+ * where the reader is — and then matched relative to `root`, the project root, because
+ * declarations are written from the root. Run from a subdirectory, matching against the
+ * cwd read every declared file as undeclared (#628). One outside the root is reported as
+ * such rather than matched against relative globs.
  */
-function boundariesForFiles(index, projectDir, files) {
+function boundariesForFiles(index, baseDir, files, root0 = baseDir) {
   // Real paths on both sides, as the injector uses: a root reached through a symlink
   // (macOS /tmp → /private/tmp, a worktree's linked dirs) would otherwise put every
   // absolute file "outside the project".
   const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
-  const root = real(path.resolve(projectDir));
+  const root = real(path.resolve(root0));
+  const base = real(path.resolve(baseDir));
   return files.map((f) => {
-    const rel = path.relative(root, real(path.resolve(root, f))).split(path.sep).join('/');
+    const abs = real(path.resolve(base, f));
+    const rel = path.relative(root, abs).split(path.sep).join('/');
     if (!rel || rel.startsWith('../') || rel === '..' || path.isAbsolute(rel)) return { file: f, rel, outside: true, hits: [] };
+    // Declarations match as a path SUFFIX, so a path resolved against the wrong directory
+    // (hooks/hooks/x.js) can still match. Say when the file is not there.
+    const missing = !fs.existsSync(abs);
     const hits = [];
     for (const b of index) {
       const via = boundarySelectsFile(b.content, rel);
       if (via) hits.push({ boundary: b, via });
     }
-    return { file: f, rel, outside: false, hits };
+    return { file: f, rel, outside: false, missing, hits };
   });
 }
 
@@ -226,6 +234,7 @@ function fileMapLines(map) {
     if (m.outside) lines.push(`  ${m.file} → outside the project; no boundary can declare it.`);
     else if (!m.hits.length) lines.push(`  ${m.rel} → NO BOUNDARY DECLARES THIS FILE. That is a gap in dharana's declarations, not a finding that no lessons apply.`);
     else lines.push(`  ${m.rel} → ${m.hits.map((h) => `${h.boundary.label} (${h.via})`).join(', ')}`);
+    if (!m.outside && m.missing) lines.push(`    ⚠ ${m.rel} does not exist — a relative path is read from the directory you ran in; check it.`);
   }
   return lines;
 }
@@ -316,7 +325,10 @@ if (mode === 'propose') {
 
 let ask = wanted;
 if (fileArgs.length) {
-  const map = boundariesForFiles(index, projectDir, fileArgs);
+  // The root by the injector's own walk (nearest dir holding .git or .anvi), so the two
+  // agree on where declarations are relative to, not only on the predicate.
+  const root = (typeof anviPaths.projectRootOfDir === 'function' && anviPaths.projectRootOfDir(path.resolve(projectDir))) || projectDir;
+  const map = boundariesForFiles(index, projectDir, fileArgs, root);
   console.log(fileMapLines(map).join('\n'));
   const byFile = [];
   for (const m of map) for (const h of m.hits) if (!byFile.includes(h.boundary)) byFile.push(h.boundary);

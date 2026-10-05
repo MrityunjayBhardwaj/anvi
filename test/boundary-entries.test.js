@@ -242,6 +242,13 @@ fs.symlinkSync(proj0, path.join(tmp, 'proj-link'));
 const viaLink = be.boundariesForFiles(index, proj0, [path.join(tmp, 'proj-link', 'src', 'c.js')])[0];
 ok(!viaLink.outside && viaLink.hits.map((h) => h.boundary.id).join() === 'B3',
   `a file reached through a symlink to the project still maps (${viaLink.outside ? 'outside' : viaLink.rel})`);
+// From a subdirectory, a bare name is read where the reader is and matched from the root (#628).
+const fmSub = be.boundariesForFiles(index, path.join(proj0, 'src'), ['c.js'], proj0)[0];
+ok(fmSub.rel === 'src/c.js' && fmSub.hits.map((h) => h.boundary.id).join() === 'B3' && fmSub.missing === false,
+  `from a subdirectory, a bare filename maps to its declaring boundary (${fmSub.rel} → ${fmSub.hits.map((h) => h.boundary.id).join() || 'none'})`);
+const fmGone = be.boundariesForFiles(index, proj0, ['nested/src/c.js'], proj0)[0];
+ok(fmGone.missing === true && /nested\/src\/c\.js does not exist/.test(be.fileMapLines([fmGone]).join('\n')),
+  'a path that resolves to no file is flagged, even when its suffix matches a declaration');
 const fmText = be.fileMapLines(fm).join('\n');
 ok(/src\/z\.js → NO BOUNDARY DECLARES THIS FILE[^\n]*not a finding that no lessons apply/.test(fmText),
   'an undeclared file is said to be undeclared, not lesson-free');
@@ -272,6 +279,9 @@ ok(rf.status === 0 && /src\/a\.js → B1 \(FILES\)/.test(rf.stdout) && /src\/z\.
 const rn = spawnSync('node', [SCRIPT, '--file=src/z.js', `--dir=${path.join(tmp, 'proj')}`], { encoding: 'utf8', env });
 ok(rn.status === 0 && /nothing is delivered/.test(rn.stdout) && /Index coverage:/.test(rn.stdout) && !/Delivered in full/.test(rn.stdout),
   `a file no boundary declares delivers nothing and says so, coverage included (exit ${rn.status})`);
+const rsub = spawnSync('node', [SCRIPT, '--file=c.js', `--dir=${path.join(tmp, 'proj', 'src')}`], { encoding: 'utf8', env });
+ok(rsub.status === 0 && /src\/c\.js → B3 \(FILES\)/.test(rsub.stdout),
+  `--file from a subdirectory finds the project root by the injector's walk (exit ${rsub.status}: ${(rsub.stdout.split('\n')[1] || '').trim()})`);
 const re = spawnSync('node', [SCRIPT, '--file='], { encoding: 'utf8', env });
 ok(re.status === 1 && /not understood: --file=/.test(re.stderr), 'an empty --file is a usage error, not "no file"');
 
