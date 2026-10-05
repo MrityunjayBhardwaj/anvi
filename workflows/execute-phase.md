@@ -171,16 +171,26 @@ After phase verification passes, check all executor results for new discoveries:
    under `~/.anvideck/projects/`, the `[project]` of the Ground Truth check in `initialize`:
 
    ```bash
-   git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
-     git -C ~/.anvideck commit -m "📝 catalogues: [entry IDs] — [phase N summary], fixed in [sha/PR]" -- projects/<project>/.anvi/ ||
-     { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "catalogues NOT committed; nothing left staged" >&2; false; }
+   if ! LIVE=$(node "$HOME/.claude/anvi/bin/anvi-tools.cjs" harvest-lease live); then
+     echo "catalogues NOT committed: the harvest leases could not be read, so whether another session is mid-harvest is unknown" >&2; false
+   elif printf '%s\n' "$LIVE" | grep -qx '<project>'; then
+     echo "catalogues NOT committed: <project> is mid-harvest in another session — committing now would take its unfinished entries" >&2; false
+   else
+     git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
+       git -C ~/.anvideck commit -m "📝 catalogues: [entry IDs] — [phase N summary], fixed in [sha/PR]" -- projects/<project>/.anvi/ ||
+       { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "catalogues NOT committed; nothing left staged" >&2; false; }
+   fi
    git -C ~/.anvideck push
    ```
 
-   Run the first three lines as one command. The store is ONE repository shared by every
+   Run everything above the `push` as one command. The store is ONE repository shared by every
    project and session on this machine: a whole-store `git add -A`, or a commit without a
    pathspec, takes whatever another session has staged into this commit. The `add` stays
    because a pathspec commit silently skips a brand-new file; the fallback unstages on failure.
+   A pathspec cannot separate two sessions writing the SAME project, so the command first reads
+   the harvest leases and does not commit through one — it only reads them, never acquires or
+   releases, because a lease is per project, not per session. On a refusal, follow the three
+   cases under "Then commit the knowledge" in `~/.claude/anvi/workflows/debug.md` (`catalogue_update`).
    (If catalogues are in-repo `.anvi/`, they ride the project's own commits instead.)
    The Stop-hook backstop auto-commits anything left dirty, but with a generic message —
    write the rich one here while the context is fresh.

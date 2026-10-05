@@ -250,18 +250,40 @@ After appending entries, commit this project's catalogues — and only them — 
 catalogue check in `load_catalogues` found.
 
 ```bash
-git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
-  git -C ~/.anvideck commit -m "📝 catalogues: [entry IDs] — [one-line symptom], fixed in [PR #N / sha]" -- projects/<project>/.anvi/ ||
-  { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "catalogues NOT committed; nothing left staged" >&2; false; }
+if ! LIVE=$(node "$HOME/.claude/anvi/bin/anvi-tools.cjs" harvest-lease live); then
+  echo "catalogues NOT committed: the harvest leases could not be read, so whether another session is mid-harvest is unknown" >&2; false
+elif printf '%s\n' "$LIVE" | grep -qx '<project>'; then
+  echo "catalogues NOT committed: <project> is mid-harvest in another session — committing now would take its unfinished entries" >&2; false
+else
+  git -C ~/.anvideck add -- projects/<project>/.anvi/ &&
+    git -C ~/.anvideck commit -m "📝 catalogues: [entry IDs] — [one-line symptom], fixed in [PR #N / sha]" -- projects/<project>/.anvi/ ||
+    { git -C ~/.anvideck reset -q -- projects/<project>/.anvi/; echo "catalogues NOT committed; nothing left staged" >&2; false; }
+fi
 git -C ~/.anvideck push
 ```
 
-Run the first three lines as one command. `~/.anvideck` is ONE repository shared by every
+Run everything above the `push` as one command. `~/.anvideck` is ONE repository shared by every
 project and every session on this machine, so a whole-store `git add -A` and a commit without
-a pathspec take whatever another session has staged — a half-written harvest, say — into
-this commit under this message. The pathspec keeps the commit to this project's catalogues;
-the `add` is still needed because a pathspec commit silently skips a brand-new file; and the
-fallback unstages on failure, so nothing waits staged for the checkpoint to sweep up.
+a pathspec take whatever another session has staged into this commit under this message. The
+pathspec keeps the commit to this project's catalogues; the `add` is still needed because a
+pathspec commit silently skips a brand-new file; and the fallback unstages on failure, so
+nothing waits staged for the checkpoint to sweep up.
+
+The pathspec cannot separate two sessions writing the SAME project: a pathspec commit takes
+those files as they are on disk, half-written entries included. A session wrap announces that
+it is mid-harvest with a lease, so the command reads the leases first and does not commit
+through one. It only READS the lease — never acquire or release it here: the lease is one file
+per project, not per session, so releasing it would drop the OTHER session's lease and let the
+checkpoint sweep its unfinished harvest. If the command refuses:
+
+- **Another session is mid-harvest:** tell the user, and leave your entries written but
+  uncommitted. Re-run the command once that session has committed (its lease is released then,
+  or expires within 15 minutes). If its commit took your entries first, say so in your report
+  and name its commit, so the reasoning stays findable.
+- **This session holds the lease** (you started `/anvi:sess-wrap`): finish the wrap — its
+  commit carries these entries too.
+- **The leases could not be read:** `/anvi:update` restores the tool. Do not commit around it;
+  "could not look" is not "nobody is harvesting".
 
 Message format matches the established ledger style (e.g. `📝 catalogues: SP177 + SV84 — #618
 was a parity-tool false-positive, fixed in PR #619`). This makes the .anvideck git log the

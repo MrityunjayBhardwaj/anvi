@@ -53,14 +53,18 @@ ok(/partial commit/i.test(step1) && /#422/.test(step1),
    'the step names the partial-commit mechanism and the embedded-repository failure it was checked against');
 
 // ── the command, run ─────────────────────────────────────────────────────────
-// Lifted from the text as written: from the store `add` to the line before the store `push`,
-// indentation removed, the project placeholder filled in. `~` is the scratch HOME, so the
+// Lifted from the text as written: the whole code block holding the store `add`, up to the line
+// before the store `push`, indentation removed, the project placeholder filled in. The whole
+// block, not from the `add` down: the debug and execute-phase commands read the harvest leases
+// before they stage anything (#633), and a lift that started at the `add` would run them without
+// it. `~` is the scratch HOME, so the
 // reader's command runs as-is. The debug and execute-phase workflows commit catalogues to the
 // same shared store and must carry the same shape (#621), so their commands are lifted and run
 // by the same rule — a door that is only read could be scoped on paper and wide in git.
 function lift(section) {
   const ls = section.split('\n');
-  const from = ls.findIndex(l => /^\s*git -C ~\/\.anvideck add\b/.test(l));
+  let from = ls.findIndex(l => /^\s*git -C ~\/\.anvideck add\b/.test(l));
+  while (from > 0 && ls[from - 1].trim() !== '' && !/^\s*```/.test(ls[from - 1])) from--;
   const to = ls.findIndex((l, i) => i > from && /^\s*git -C ~\/\.anvideck push\b/.test(l));
   if (from < 0 || to < 0) return '';
   const cmd = ls.slice(from, to).filter(l => l.trim() !== '');
@@ -103,7 +107,9 @@ function scratchStore(name) {
   git(seed, 'commit', '-q', '-m', 'embedded repository');
   spawnSync('git', ['clone', '-q', '--bare', seed, bare], { env: ENV });
   const store = path.join(home, '.anvideck');
-  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  // The install the commands call into (`$HOME/.claude/anvi/bin/anvi-tools.cjs`) is this checkout.
+  fs.symlinkSync(ROOT, path.join(home, '.claude', 'anvi'));
   spawnSync('git', ['clone', '-q', bare, store], { env: ENV });
   return { home, store, bare };
 }
@@ -150,6 +156,47 @@ for (const [subject, harvest] of SUBJECTS) for (const [shell, bin] of shells) {
      'the harvest is left unstaged in the working tree, not staged where a checkpoint would take it');
   ok(git(S.store, 'rev-parse', 'HEAD').stdout.trim() === head && /^M  projects\/q\/\.anvi\/other\.md$/m.test(after),
      'nothing was committed, and the other session\'s staged file is untouched');
+}
+
+// ── the harvest lease (#633) ─────────────────────────────────────────────────
+// A pathspec keeps a commit to ONE project, but cannot separate two sessions writing the SAME
+// project: it takes the files as they are on disk. A wrap announces a harvest in progress with a
+// lease, so the debug and execute-phase commands read the leases first. Three outcomes, each run:
+// a live lease on this project refuses; a lease on another project does not; and a lease tool
+// that cannot run refuses too — "could not look" must not commit as if nobody were harvesting.
+const tools = (home, ...args) => spawnSync('node', [path.join(home, '.claude', 'anvi', 'bin', 'anvi-tools.cjs'), ...args],
+  { encoding: 'utf8', env: { ...ENV, HOME: home } });
+for (const [subject, cmd] of SUBJECTS.filter(([, c]) => /harvest-lease live/.test(c))) for (const [shell, bin] of shells) {
+  console.log(`\n${subject.toUpperCase()} UNDER ${shell} — the harvest lease:`);
+  const S = scratchStore(`lease-${subject.replace(/\W+/g, '-')}-${shell}`);
+  const runIn = (home) => spawnSync(bin, ['-c', cmd], { encoding: 'utf8', env: { ...ENV, HOME: home }, cwd: DIR });
+  const head = () => git(S.store, 'rev-parse', 'HEAD').stdout.trim();
+
+  put(S.store, 'projects/p/.anvi/hetvabhasa.md', 'one\nhalf-written by the harvesting session\n');
+  ok(tools(S.home, 'harvest-lease', 'acquire', 'p').status === 0 && /^p$/m.test(tools(S.home, 'harvest-lease', 'live').stdout),
+     'CONTROL — another session holds a live lease on this project');
+  let h = head(), r = runIn(S.home), st = git(S.store, 'status', '--porcelain').stdout;
+  ok(r.status !== 0 && head() === h, `a live lease on this project: nothing is committed, exit non-zero (got ${r.status})`);
+  ok(/mid-harvest in another session/.test(r.stderr), 'and it says why, naming the harvest in progress');
+  ok(/^ M projects\/p\/\.anvi\/hetvabhasa\.md$/m.test(st) && !/^[MADR]  projects\/p\//m.test(st),
+     'the half-written entry stays in the working tree, unstaged — not committed under this message');
+
+  tools(S.home, 'harvest-lease', 'release', 'p');
+  // `pp` CONTAINS this project's name: the lease list is matched by whole line, so a project
+  // whose name merely contains another's never blocks it.
+  tools(S.home, 'harvest-lease', 'acquire', 'pp');
+  h = head(); r = runIn(S.home);
+  const shown = git(S.store, 'show', '--name-status', '--format=', 'HEAD').stdout;
+  ok(r.status === 0 && head() !== h && /projects\/p\/\.anvi\/hetvabhasa\.md/.test(shown),
+     `a lease on ANOTHER project — one whose name contains this one's — does not stop it (got ${r.status}${r.stderr ? ': ' + r.stderr.trim() : ''})`);
+
+  put(S.store, 'projects/p/.anvi/hetvabhasa.md', 'one\nand more\n');
+  const noTool = path.join(DIR, `no-tool-${subject.replace(/\W+/g, '-')}-${shell}`);
+  fs.mkdirSync(noTool, { recursive: true });
+  fs.symlinkSync(S.store, path.join(noTool, '.anvideck'));
+  h = head(); r = runIn(noTool);
+  ok(r.status !== 0 && head() === h && /could not be read/.test(r.stderr),
+     `the lease tool cannot run: nothing is committed and it says the leases could not be read (got ${r.status})`);
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
