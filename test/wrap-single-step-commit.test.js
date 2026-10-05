@@ -182,11 +182,13 @@ for (const [subject, cmd] of SUBJECTS.filter(([, c]) => /harvest-lease live/.tes
      'the half-written entry stays in the working tree, unstaged — not committed under this message');
 
   tools(S.home, 'harvest-lease', 'release', 'p');
-  tools(S.home, 'harvest-lease', 'acquire', 'q');
+  // `pp` CONTAINS this project's name: the lease list is matched by whole line, so a project
+  // whose name merely contains another's never blocks it.
+  tools(S.home, 'harvest-lease', 'acquire', 'pp');
   h = head(); r = runIn(S.home);
   const shown = git(S.store, 'show', '--name-status', '--format=', 'HEAD').stdout;
   ok(r.status === 0 && head() !== h && /projects\/p\/\.anvi\/hetvabhasa\.md/.test(shown),
-     `a lease on ANOTHER project does not stop this one (got ${r.status}${r.stderr ? ': ' + r.stderr.trim() : ''})`);
+     `a lease on ANOTHER project — one whose name contains this one's — does not stop it (got ${r.status}${r.stderr ? ': ' + r.stderr.trim() : ''})`);
 
   put(S.store, 'projects/p/.anvi/hetvabhasa.md', 'one\nand more\n');
   const noTool = path.join(DIR, `no-tool-${subject.replace(/\W+/g, '-')}-${shell}`);
