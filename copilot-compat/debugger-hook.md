@@ -16,10 +16,18 @@ The Anvi approach subsumes the default approach:
 
 ### Before Investigation
 
-**Load project catalogues** — these live at `.anvi/` in the project root (NOT under `references/`), and are the SAME files Claude Code's native `anvi-debugger` agent reads and writes. Reading/writing the same path is what lets a Copilot session and a Claude Code session on the same project carry forward each other's findings — check these before starting:
-1. `.anvi/hetvabhasa.md` — known error patterns. Check each against the current symptoms. If a pattern matches, the investigation can shortcut directly to proving/disproving that pattern.
-2. `.anvi/vyapti.md` — known invariants. The bug might be a vyāpti violation.
-3. `.anvi/krama.md` — known lifecycle sequences. Timing bugs are immediately classifiable.
+**Load project catalogues** — these live at `.anvi/` in the project root (NOT under `references/`), and are the SAME files Claude Code's native `anvi-debugger` agent reads and writes. Reading/writing the same path is what lets a Copilot session and a Claude Code session on the same project carry forward each other's findings.
+
+Never read them whole — on a mature project they run to megabytes. Get the entries for the files the bug involves:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<file> [--file=<file> ...]; echo "exit=$?"
+```
+
+It prints which boundary declares each file, then that boundary's entries. Tell the user its counts line every time, zero included. "NO BOUNDARY DECLARES THIS FILE" is a gap in the declarations, not a finding that no patterns apply — run `--list` and name the boundaries instead. A non-zero exit is "could not look": exit 2 (NOT LOOKED) means the catalogues or the install could not be read; exit 1 is a wrong id. Then, from what it delivered:
+1. Error patterns — check each against the current symptoms. If a pattern matches, the investigation can shortcut directly to proving/disproving that pattern.
+2. Invariants — the bug might be a vyāpti violation.
+3. Lifecycles — timing bugs are immediately classifiable.
 
 ### Investigation Flow
 

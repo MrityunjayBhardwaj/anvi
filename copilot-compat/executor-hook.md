@@ -6,12 +6,32 @@
 ## Before Starting
 
 ### Load project catalogues:
-Check `.anvi/` in the project root for `hetvabhasa.md`, `vyapti.md`, and
-`krama.md` — the SAME files Claude Code's native `anvi-executor` agent reads
-and writes. These carry forward error patterns, invariants, and lifecycle
-knowledge from every previous session on this project, regardless of
-whether that session ran through Copilot or Claude Code. Load them before
-starting the first task.
+The project's `.anvi/` catalogues carry forward error patterns, invariants and
+lifecycle knowledge from every previous session on this project, whether it ran
+through Copilot or Claude Code. Load the entries for the boundaries this work touches
+before starting the first task.
+
+**Get catalogue entries by boundary, never by reading the files whole.** On a mature
+project `.anvi/`'s catalogues run to megabytes; a partial read believed complete is the
+failure. Run, in the terminal:
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" --list; echo "exit=$?"
+```
+
+then, for the boundaries this work touches (or the files it changes):
+
+```bash
+node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> [B<m> ...]; echo "exit=$?"     # or --file=<path> [--file=<path> ...]
+```
+
+It reads the SAME `.anvi/` files Claude Code's native agents use, so what either tool
+has recorded applies here too.
+- **Tell the user its counts line** — indexed, delivered, withheld (each withheld id
+  named), coverage — every time, including when they are zero.
+- **A non-zero exit is "could not look", never "no lessons"**: exit 2 (NOT LOOKED) means
+  the catalogues or the install could not be read — reinstall anvi or read the entries
+  you need yourself, and say so; exit 1 is a wrong boundary id (re-read `--list`).
 
 ## Before Each Task
 
