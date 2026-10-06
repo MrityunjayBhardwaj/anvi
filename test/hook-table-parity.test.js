@@ -292,5 +292,78 @@ for (const [f, why] of Object.entries(DELIBERATELY_UNREGISTERED)) {
   ok(fs.existsSync(path.join(HOOKS_DIR, f)), `${f}: listed as deliberately off, and still exists`);
 }
 
+// --- the fourth direction: §Registered In against the registrar (#619) --------
+//
+// §Hook Files is checked above, but §Registered In — the one-line-per-group list that two
+// of the project's own boundary descriptions cite as their contract for "what is
+// registered" — was checked by nothing, and it drifted: it still listed the deliberately
+// switched-off absent-warrant check, missed two Bash hooks, and listed three hooks another
+// tool registers as if the registrar wired them. A reader deciding whether a disabled hook
+// is live reads this list, and the recorded failure there is re-registering a hook that
+// was switched off on purpose.
+//
+// What is compared is the set of (event, matcher, file) triples — one per REGISTRATIONS
+// row — in both directions. Order within a line is NOT compared: hooks run concurrently
+// (#620), so it carries no meaning to check.
+console.log('§Registered In against registrar');
+
+// Bullets of the form "- `Event[:matcher]`: a.js, b.js (note)" inside the section. Prose
+// in the section is not a bullet and is not read, so a sentence naming a hook that is NOT
+// registered (the absent-warrant note) cannot be mistaken for a registration.
+function registeredIn(text, heading = '## Registered In') {
+  const lines = text.split('\n');
+  const start = lines.findIndex(l => l.trim() === heading);
+  if (start === -1) return null;
+  const out = [];
+  for (let i = start + 1; i < lines.length && !/^## /.test(lines[i]); i++) {
+    const m = lines[i].match(/^- `([A-Za-z]+)(?::([^`]+))?`: (.+)$/);
+    if (!m) continue;
+    for (const f of m[3].matchAll(/([A-Za-z0-9._-]+\.c?js)\b/g)) out.push(`${m[1]} ${m[2] || '-'} ${f[1]}`);
+  }
+  return [...new Set(out)].sort();
+}
+const triples = regs => [...new Set(regs.map(([e, m, f]) => `${e} ${m || '-'} ${f}`))].sort();
+
+const listed = registeredIn(enforce);
+const wired = triples(REGISTRATIONS);
+ok(listed !== null, 'the §Registered In section exists and was located');
+const notListed = listed === null ? wired : diff(wired, listed);
+const notWired = listed === null ? [] : diff(listed, wired);
+console.log(`  registrations: ${wired.length}   listed: ${listed ? listed.length : 'SECTION NOT FOUND'}`);
+console.log(`  registered but not listed: ${notListed.length}${notListed.length ? ' — ' + notListed.join(', ') : ''}`);
+console.log(`  listed but not registered: ${notWired.length}${notWired.length ? ' — ' + notWired.join(', ') : ''}`);
+ok(wired.length >= 10, `the registrar yielded its triples (${wired.length})`);
+ok(notListed.length === 0, 'every registration (event, matcher, file) is listed in §Registered In');
+ok(notWired.length === 0, 'every hook listed in §Registered In is registered on that event and matcher');
+
+// Fixtures: each direction must be able to go red, and prose must not be read.
+const RI = [
+  '## Registered In',
+  '',
+  'Intro naming `~/.claude/settings.json`.',
+  '- `SessionStart`: alpha.js',
+  '- `PreToolUse:Write|Edit`: beta.js (enforcing), gamma.js',
+  '',
+  '`delta.js` ships but is deliberately not registered.',
+  '',
+  '## Next',
+  '- `Stop`: epsilon.js',
+].join('\n');
+const riParsed = registeredIn(RI);
+ok(JSON.stringify(riParsed) === JSON.stringify(['PreToolUse Write|Edit beta.js', 'PreToolUse Write|Edit gamma.js', 'SessionStart - alpha.js']),
+  `bullets are read as triples, a "(note)" is not a file, prose and later sections are skipped (got ${JSON.stringify(riParsed)})`);
+const riRegs = [['SessionStart', null, 'alpha.js', 5], ['PreToolUse', 'Write|Edit', 'beta.js', 5],
+  ['PreToolUse', 'Write|Edit', 'gamma.js', 5], ['PreToolUse', 'Bash', 'zeta.js', 5]];
+const riMissing = diff(triples(riRegs), riParsed);
+ok(riMissing.length === 1 && riMissing[0] === 'PreToolUse Bash zeta.js',
+  `a registration missing from the list is reported (got ${JSON.stringify(riMissing)})`);
+const riExtra = diff(riParsed, triples(riRegs.filter(r => r[2] !== 'gamma.js')));
+ok(riExtra.length === 1 && riExtra[0] === 'PreToolUse Write|Edit gamma.js',
+  `a listed hook nothing registers is reported (got ${JSON.stringify(riExtra)})`);
+const riWrongMatcher = diff(riParsed, triples([['SessionStart', null, 'alpha.js', 5], ['PreToolUse', 'Write', 'beta.js', 5], ['PreToolUse', 'Write|Edit', 'gamma.js', 5]]));
+ok(riWrongMatcher.length === 1 && riWrongMatcher[0].endsWith('beta.js'),
+  `a hook listed under the wrong matcher is reported (got ${JSON.stringify(riWrongMatcher)})`);
+ok(registeredIn(RI, '## No Such Heading') === null, 'a missing section returns null, not an empty list');
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} hook table parity: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

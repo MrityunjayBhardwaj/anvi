@@ -25,32 +25,33 @@ const HOOKS_DIR = path.join(HOME, '.claude', 'hooks');
 const PRUNE = process.argv.slice(2).includes('--prune');
 
 // The Anvi hooks: [event, matcher|null, file, timeout]
-// ⚠ ORDER MATTERS WITHIN A GROUP, AND THE ENFORCING HOOKS COME FIRST.
-// Registration order is preserved into each settings.json group, and an ENFORCING
-// hook (one that may refuse a tool call — see ENFORCE.md §Liveness) must run before
-// the annotating ones. Otherwise the advisory guards spend a turn attaching context
-// to a call that is about to be denied, and the reader gets the annotation and the
-// refusal in the same breath with no way to tell which came first.
+// ORDER HERE IS FOR THE READER, NOT THE RUNTIME (#620). This file used to say the
+// enforcing hooks must come first in their group so a refusal would arrive before the
+// advice. Observed on Claude Code 2.1.291: every hook matching a tool call runs
+// CONCURRENTLY — two hooks on one event, one sleeping 2 s, started in the same
+// millisecond whichever was listed first, and the same across two matcher groups. So
+// no position makes a refusal arrive first, and a refusal must never depend on where
+// its hook sits. ensureHook appends a hook added later to the end of an existing group;
+// that is harmless, and it is why no install is "out of order". The enforcing hooks are
+// still listed first, and marked, so a reader finds them at once (ENFORCE.md §Liveness).
 const REGISTRATIONS = [
   ['SessionStart',     null,         'ground-truth-session-start.js', 5],
   ['UserPromptSubmit', null,         'debug-grounding-gate.js',       5],
   ['UserPromptSubmit', null,         'named-entry-delivery.js',       5],
-  // Enforcing — first in both of its groups, deliberately (see the note above).
+  // Enforcing (may refuse a call) — listed first for the reader; see the note above.
   ['PreToolUse',       'Bash',              'tree-lock-guard.js',     10],
   ['PreToolUse',       'Write|Edit|MultiEdit', 'tree-lock-guard.js',  10],
-  // Enforcing too, so it sits with the tree-lock guard at the head of this group. Inert for
+  // Enforcing too, listed beside the tree-lock guard. Inert for
   // a package with no entry in ~/.claude/structure-guard.json. 10s: a cold graph build on a
   // ~300-module package measured ~0.8s, a warm call ~0.2s including Node startup.
   ['PreToolUse',       'Write|Edit|MultiEdit', 'structure-guard-hook.js', 10],
-  // ⚠ THIS MATCHER IS SHARED WITH THE GUARD ABOVE AND THE TWO MUST STAY EQUAL.
-  // The guard is registered for MultiEdit — a multi-edit mutates the tree exactly as a
-  // Write does (it reports one NOT MEASURED rather than judging it: the tool is not
-  // offered on current versions, so its shape is unobserved, #533) — and running the
-  // two off different matchers would put them in
-  // different settings.json groups, where relative order is undefined and the
-  // refusal could arrive after the annotation. Widening the injector to match is
-  // the smaller change and it closes a real gap: the injector never fired on a
-  // MultiEdit, so a catalogued boundary edited that way was silently uncovered.
+  // The same matcher as the guard above, and it should stay so for COVERAGE: the guard is
+  // registered for MultiEdit — a multi-edit mutates the tree exactly as a Write does (it
+  // reports one NOT MEASURED rather than judging it: the tool is not offered on current
+  // versions, so its shape is unobserved, #533) — and the injector widened to match closed
+  // a real gap: it never fired on a MultiEdit, so a catalogued boundary edited that way was
+  // silently uncovered. (It was also kept equal so the two would share a group and run in
+  // order; hooks run concurrently, so that reason no longer applies — see the note above.)
   ['PreToolUse',       'Write|Edit|MultiEdit', 'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Read',       'catalogue-context-injector.js', 5],
   ['PreToolUse',       'Bash',       'experiment-protocol-guard.js',  5],
