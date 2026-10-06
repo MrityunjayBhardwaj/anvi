@@ -24,7 +24,7 @@ Never read them whole — on a mature project they run to megabytes. Get the ent
 node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<file> [--file=<file> ...]; echo "exit=$?"
 ```
 
-It prints which boundary declares each file, then that boundary's entries. Tell the user its counts line every time, zero included. "NO BOUNDARY DECLARES THIS FILE" is a gap in the declarations, not a finding that no patterns apply — run `--list` and name the boundaries instead. A non-zero exit is "could not look": exit 2 (NOT LOOKED) means the catalogues or the install could not be read; exit 1 is a wrong id. Then, from what it delivered:
+It prints which boundary declares each file, then that boundary's entries. Tell the user its counts line every time, zero included. "NO BOUNDARY DECLARES THIS FILE" is a gap in the declarations, not a finding that no patterns apply — run `--list` and name the boundaries instead. A non-zero exit is "could not look": exit 2 (NOT LOOKED) means the catalogues or the install could not be read — reinstall anvi, or read the entries you need yourself, and say so; exit 1 is a wrong id. Then, from what it delivered:
 1. Error patterns — check each against the current symptoms. If a pattern matches, the investigation can shortcut directly to proving/disproving that pattern.
 2. Invariants — the bug might be a vyāpti violation.
 3. Lifecycles — timing bugs are immediately classifiable.

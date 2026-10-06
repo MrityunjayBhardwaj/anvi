@@ -64,7 +64,9 @@ node "$HOME/.claude/anvi/scripts/boundary-entries.js" --file=<file> [--file=<fil
      no patterns apply. Name the boundaries yourself from `--list` and deliver them with
      `node "$HOME/.claude/anvi/scripts/boundary-entries.js" B<n> ...`, or say the catalogue was not consulted.
    - **A non-zero exit is "could not look"**: exit 1 is a wrong id or a missing script
-     (`/anvi:update`), exit 2 is catalogues that could not be read. Say which.
+     (`/anvi:update`). Exit 2 prints `NOT LOOKED` and names one of two causes: the install
+     cannot run the delivery (`/anvi:update`), or this project's catalogues could not be read
+     (read the entries yourself, or fix the project's `.anvi` link). Say which.
 
 ```
 BOUNDARY ANALYSIS:

@@ -61,8 +61,10 @@ node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}; echo "exit
 - **Exit 1** — read the message: `NO SUCH BOUNDARY` or a usage line means an id was
   wrong, so re-read `--list`; `Cannot find module` means the script is not installed
   here (run `/anvi:update`) — that is "could not look", not "no lessons".
-- **Exit 2** — the catalogues could not be read. Say so. Do not plan as though the
-  project had no lessons.
+- **Exit 2** — `NOT LOOKED`, with one of two causes named in the message: the install
+  cannot run the delivery (run `/anvi:update`), or this project's catalogues could not be
+  read (read the entries yourself, or fix the project's `.anvi` link). Say which. Do not
+  plan as though the project had no lessons.
 - Entries that belong to no boundary are **not reachable** this way; the coverage line
   counts them. If one is known to matter, name it and read it directly.
 </step>
