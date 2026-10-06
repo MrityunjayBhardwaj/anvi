@@ -732,6 +732,11 @@ if [ -d "$SCRIPT_DIR/hooks" ]; then
     node "$SCRIPT_DIR/scripts/register-hooks.cjs" $PRUNE_FLAG
   else
     echo "  ✓ ${HOOK_COUNT} hook modules copied to ${HOOKS_DIR} for the scripts (not registered — Claude Code was not selected)"
+    # The files are copied for every install, so retired ones must be deleted for every
+    # install too (#631) — only the settings half of the prune is Claude's.
+    if [ -n "$PRUNE_FLAG" ]; then
+      node "$SCRIPT_DIR/scripts/register-hooks.cjs" --prune --files-only
+    fi
   fi
 fi
 

@@ -174,6 +174,36 @@ ok '[ -s "$H/.claude/anvi/VERSION" ]' 'control: that install actually ran to com
 ok '[ -s "$H/.claude/skills/anvi-debug/SKILL.md" ]' 'listing a live skill as retired does not remove it'
 ok '[ -s "$H/.claude/agents/anvi-debugger.md" ]' 'and listing a live agent as retired does not remove it'
 
+# ── a retired hook file on an install that registers nothing (#631) ──────────
+# Since #630 every install copies the hook FILES, because half the scripts load their
+# shared modules from that folder; only Claude installs register them. Deleting a retired
+# hook's file lived inside the registrar's prune, which only Claude installs ran — so on a
+# Copilot-only install a hook anvi stopped shipping stayed in ~/.claude/hooks/ forever.
+echo ""
+echo "a retired hook file is removed on a Copilot-only --migrate, and nothing is registered"
+HKTMP="$(mktemp -d)"; HKREPO="$HKTMP/repo"
+cp -R "$REPO" "$HKREPO" 2>/dev/null; rm -rf "$HKREPO/.git"
+# REMOVED is empty today (nothing has been retired yet), so the copy names one.
+sed -i.bak "s|^  // e.g. 'old-anvi-hook.js',|  'anvi-retired-hook.js',|" "$HKREPO/scripts/register-hooks.cjs"
+ok 'node -e "process.exit(require(process.argv[1]).REMOVED.includes(\"anvi-retired-hook.js\")?0:1)" "$HKREPO/scripts/register-hooks.cjs"' 'the copy'"'"'s REMOVED really names the retired hook'
+ok '[ ! -e "$HKREPO/hooks/anvi-retired-hook.js" ]' 'and the repo copy genuinely does not ship it'
+H="$HKTMP/home"; mkdir -p "$H"
+HOME="$H" bash "$HKREPO/install.sh" --only=copilot </dev/null >/dev/null 2>&1
+HK="$H/.claude/hooks"
+echo stale > "$HK/anvi-retired-hook.js"
+echo theirs > "$HK/someone-elses-hook.js"
+echo CLOBBERED > "$HK/currency.js"
+HOME="$H" bash "$HKREPO/install.sh" --migrate --only=copilot </dev/null >/dev/null 2>&1
+ok '[ -s "$H/.claude/anvi/VERSION" ]' 'control: that install actually ran to completion'
+ok '[ -s "$HK/currency.js" ] && ! grep -q CLOBBERED "$HK/currency.js"' 'control: the same run refreshed a still-shipped hook file'
+ok '[ ! -e "$HK/anvi-retired-hook.js" ]' 'the retired hook file is gone on a Copilot-only install'
+ok '[ -s "$HK/someone-elses-hook.js" ]' 'another tool'"'"'s hook file beside it is untouched'
+ok '[ ! -e "$H/.claude/settings.json" ] || ! grep -q "hooks/" "$H/.claude/settings.json"' 'and nothing was registered — the settings half stays Claude'"'"'s'
+# A plain sync is not the pruning mode, here as everywhere else.
+echo stale > "$HK/anvi-retired-hook.js"
+HOME="$H" bash "$HKREPO/install.sh" --sync --only=copilot </dev/null >/dev/null 2>&1
+ok '[ -e "$HK/anvi-retired-hook.js" ]' 'a plain sync leaves it alone, as it does on a Claude install'
+
 # ── the dev-mode hazard ────────────────────────────────────────────────────
 # In dev mode $ANVI_DIR IS the repo, by symlink. Reclaiming through it would
 # delete the developer's own source directory — so the guard is not a formality,

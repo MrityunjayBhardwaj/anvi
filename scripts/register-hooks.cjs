@@ -23,6 +23,11 @@ const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 const HOOKS_DIR = path.join(HOME, '.claude', 'hooks');
 
 const PRUNE = process.argv.slice(2).includes('--prune');
+// --prune --files-only: delete retired hook FILES and touch nothing else (#631). For an install
+// that copies the hook files but registers nothing — Copilot-only — so a hook anvi stops
+// shipping does not stay in ~/.claude/hooks/ forever. settings.json is not read or written:
+// that half of the prune belongs to installs that register.
+const FILES_ONLY = process.argv.slice(2).includes('--files-only');
 
 // The Anvi hooks: [event, matcher|null, file, timeout]
 // ORDER HERE IS FOR THE READER, NOT THE RUNTIME (#620). This file used to say the
@@ -280,6 +285,13 @@ function pruneOrphanFiles(removed = REMOVED, hooksDir = HOOKS_DIR) {
 }
 
 function main() {
+  if (FILES_ONLY) {
+    if (!PRUNE) { console.log('  ⚠ --files-only only applies with --prune; nothing done'); return; }
+    const deleted = pruneOrphanFiles();
+    // The count every time, zero included, with what was examined.
+    console.log(`  ✓ Deleted ${deleted.length} retired hook file(s) of ${REMOVED.length} retired name(s)${deleted.length ? ': ' + deleted.join(', ') : ''} (registrations untouched)`);
+    return;
+  }
   let settings;
   try {
     settings = load();
