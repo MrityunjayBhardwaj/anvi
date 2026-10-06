@@ -26,7 +26,9 @@ User message
    stamp (newest date) and which never have — none is graded here, since this path
    runs no git, and the line says so.
 
-④ UserPromptSubmit — absent-warrant-check.js
+④ UserPromptSubmit — absent-warrant-check.js — ⛔ BUILT, NOT REGISTERED
+   It does not fire: it was switched off on purpose, and §Absent-Warrant Instances
+   records why and what must hold before it is re-added. Described below as built.
    Reads the PREVIOUS assistant turn out of the transcript and asks, of each claim
    in it, whether the observation that licenses it is present. The firing condition
    is an ABSENCE, not a match — which is why it works at a moment when the
@@ -409,13 +411,15 @@ centralized projects). See issue #5.
 
 Hooks here come in two categories, and the rule below is written for the first.
 
-**Annotating hooks — all but one.** Each wraps its body in a blanket catch and always
+**Annotating hooks — all but two.** Each wraps its body in a blanket catch and always
 exits 0. That is correct and non-negotiable *for these*: an optional annotation must
 never cost the user the thing it annotates, so a guard that cannot decide stays quiet
 and the call proceeds.
 
-**Enforcing hooks — a deliberately small second category (anvi #391).** One exists:
-`tree-lock-guard.js`. It may refuse a tool call, because the failures it catches are
+**Enforcing hooks — a deliberately small second category (anvi #391).** Two exist:
+`tree-lock-guard.js` and `structure-guard-hook.js`, which exits 2 with a deny when an edit
+adds a new divergence from the design's component graph (§Hook Files has its row, and its
+own section describes it). What follows was written for the tree-lock guard. It may refuse a tool call, because the failures it catches are
 not recoverable by re-deriving an answer — a destroyed uncommitted change, or a test
 gate that read a tree while it moved and reported a number that looks exactly like a
 real pass. There is no artifact afterwards that distinguishes that number from a true
@@ -423,7 +427,7 @@ one, which is why an advisory line is the wrong instrument. The asymmetry is the
 argument: a false positive costs one rephrased command, a false negative costs work
 that cannot be recovered by inspection.
 
-Because it can refuse, it carries five conditions the annotating hooks do not:
+Because it can refuse, the tree-lock guard carries five conditions the annotating hooks do not:
 
 1. **Refuse only the unambiguous.** A command the guard cannot classify is *allowed*.
    A guard that guesses trains reflexive overrides, which is the failure it exists to
@@ -563,16 +567,31 @@ Two things it checks that a plain loop would not:
 
 ## Registered In
 
-`~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`):
-- `SessionStart`: ground-truth-session-start.js, gsd-check-update.js
-- `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js, absent-warrant-check.js
+`~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`; one line per
+event and matcher, held to its `REGISTRATIONS` in both directions by `test/hook-table-parity.test.js`):
+- `SessionStart`: ground-truth-session-start.js
+- `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js
+- `PreToolUse:Bash`: tree-lock-guard.js (enforcing), experiment-protocol-guard.js, catalogue-id-leak-guard.js, shell-rewrite-guard.js
+- `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js (enforcing), structure-guard-hook.js (enforcing), catalogue-context-injector.js
 - `PreToolUse:Read`: catalogue-context-injector.js
-- `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js, structure-guard-hook.js (enforcing, first), catalogue-context-injector.js, gsd-prompt-guard.js
-- `PreToolUse:Bash`: experiment-protocol-guard.js, catalogue-id-leak-guard.js
-- `PostToolUse:Bash|Edit|Write|...`: gsd-context-monitor.js
 - `PostToolUse:Read`: anvi-route-logger.js
-- `PostToolUse:Artifact` / `WebFetch|WebSearch` / `mcp__.*` / `Read|Grep|Glob`: provenance-guard.js
+- `PostToolUse:Artifact`: provenance-guard.js
+- `PostToolUse:WebFetch|WebSearch`: provenance-guard.js
+- `PostToolUse:mcp__.*`: provenance-guard.js
+- `PostToolUse:Read|Grep|Glob`: provenance-guard.js
 - `Stop`: anvideck-checkpoint.js
+
+`absent-warrant-check.js` ships but is **deliberately not registered** — see §Absent-Warrant
+Instances for why, and for the condition that must be met before it is re-added. Other tools
+(GSD, for one) register their own hooks in the same file; the registrar does not wire them,
+so they are not listed here.
+
+**The order within a line means nothing at runtime.** Every hook that matches a tool call
+runs concurrently — those in one group and those in different groups alike. Observed on
+Claude Code 2.1.291 (#620): two hooks on one event, one sleeping 2 s, started within the
+same millisecond whichever was listed first, and the same held across two matcher groups.
+So an enforcing hook's refusal and an annotating hook's context arrive together whatever
+their positions, and nothing about a refusal can depend on where it is listed.
 
 Registration says the harness will RUN a hook. It does not say the hook can LOAD what it
 imports, and those are different questions once hooks share modules. After registering,
