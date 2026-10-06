@@ -624,7 +624,7 @@ Which mechanism applies depends on who else may write to the directory:
 |---|---|---|
 | Inside `~/.claude/anvi/` — anvi's own tree | **Derived**: the shipped directory is the manifest, so installing it replaces it | every copy install |
 | A directory anvi no longer ships at all | **Listed**: `RETIRED_ANVI_DIRS` in `install.sh` | `--migrate` only |
-| `~/.claude/hooks/` — shared with other tools | **Listed**: `REMOVED` in `scripts/register-hooks.cjs` | `--migrate` only |
+| `~/.claude/hooks/` — shared with other tools | **Listed**: `REMOVED` in `scripts/register-hooks.cjs` | `--migrate` only — the files on every install (a Copilot-only one runs `--prune --files-only`, #631), the registrations only where Claude Code is selected |
 | `~/.claude/skills/` — shared with other tools | **Listed**: `RETIRED_SKILLS` in `install.sh` (by directory) | `--migrate` only |
 | `~/.claude/agents/` — shared with other tools | **Listed**: `RETIRED_AGENTS` in `install.sh` (by file) | `--migrate` only |
 
