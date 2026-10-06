@@ -22,6 +22,11 @@ const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++
 
 const HOOKS = path.join(__dirname, '..', 'hooks');
 const HOOK = path.join(HOOKS, 'structure-guard-hook.js');
+// The check limit is raised for EVERY check this test runs, in-process ones included (#638):
+// under heavy load a fixture's Node startup can pass the 3 s default, and a crash fixture then
+// reads "too slow". Set before the module loads, since it reads the variable once. The default
+// itself is asserted separately below, in a process where the variable is unset.
+process.env.ANVI_STRUCTURE_CHECK_TIMEOUT_MS = '8000';
 const H = require(HOOK);
 
 const DIR = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-structure-shadow-')));
@@ -88,7 +93,11 @@ const edit = (rel, from, to, session = 's1') => ({ session_id: session, cwd: PKG
 const write = (rel, content, session = 's1') => ({ session_id: session, cwd: PKG, tool_name: 'Write',
   tool_input: { file_path: path.join(REPO, rel), content } });
 function hook(payload) {
-  const r = spawnSync('node', [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', timeout: 30000, env: { ...process.env, HOME } });
+  // A generous check limit for the spawned hook (#638): under heavy load a fixture check's Node
+  // startup alone can pass the 3 s default, and the crash fixture then reads "too slow" instead of
+  // "exited 3". The budget still caps it, so this cannot make the hook overrun.
+  const r = spawnSync('node', [HOOK], { input: JSON.stringify(payload), encoding: 'utf8', timeout: 30000,
+    env: { ...process.env, HOME, ANVI_STRUCTURE_CHECK_TIMEOUT_MS: '8000' } });
   return { exit: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 const logRows = () => { try { return fs.readFileSync(H.shadowLogPath(STATE, PKG), 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse); } catch { return []; } };
@@ -151,8 +160,14 @@ console.log('\nCOULD NOT LOOK — every failure is not-measured, with its reason
   const t0 = Date.now();
   const hang = shadow(e, { ...CHECK, adapter: HANG });
   const took = Date.now() - t0;
-  ok(hang.outcome === 'not-measured' && /longer than 3000 ms/.test(hang.why) && took < H.CHECK_TIMEOUT_MS + 2000,
-     `a hang is cut off at the budget and not-measured (${took} ms)`);
+  ok(hang.outcome === 'not-measured' && new RegExp(`longer than ${H.CHECK_TIMEOUT_MS} ms`).test(hang.why) && took < H.CHECK_TIMEOUT_MS + 2000,
+     `a hang is cut off at the limit in force and not-measured (${took} ms)`);
+  // The shipped default, read where nothing overrides it — the raised limit above is the test's.
+  const dflt = spawnSync('node', ['-e', `process.stdout.write(String(require(${JSON.stringify(HOOK)}).CHECK_TIMEOUT_MS))`],
+    { encoding: 'utf8', env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ANVI_STRUCTURE_CHECK_TIMEOUT_MS')) });
+  const raised = spawnSync('node', ['-e', `process.stdout.write(String(require(${JSON.stringify(HOOK)}).CHECK_TIMEOUT_MS))`],
+    { encoding: 'utf8', env: { ...process.env, ANVI_STRUCTURE_CHECK_TIMEOUT_MS: '4500' } });
+  ok(dflt.stdout === '3000' && raised.stdout === '4500', `the shipped limit is 3000 ms, and the variable overrides it (${dflt.stdout}, ${raised.stdout})`);
   const multi = shadow({ ...e, tool_name: 'MultiEdit', tool_input: { file_path: e.tool_input.file_path, edits: [] } });
   ok(multi.outcome === 'not-measured' && /MultiEdit is not judged/.test(multi.why), 'a MultiEdit in the package is not-measured, not skipped');
   const thrower = H.shadowCheck(e, { registry: { packages: [entry()] }, readFile, spawn: () => { throw new Error('spawn exploded'); }, nodeMajor: 25 });
@@ -199,6 +214,9 @@ console.log('\nTHROUGH THE HOOK — shadow refuses nothing, prints nothing, and 
   rows = logRows();
   ok(crashed.exit === 0 && crashed.stdout === '' && rows.length === 3 && rows[2].outcome === 'not-measured',
      'a crashing check costs one not-measured row, and the edit and the session hear nothing of it');
+  // Pinned HERE, where the row is written: the reading below prints this reason, and when it was
+  // only checked there a slow crash (recorded as "took longer") failed far from its cause (#638).
+  ok(rows[2] && /the check exited 3/.test(rows[2].why), `and the row records the crash as the crash (${rows[2] && rows[2].why})`);
   register(null);
   hook(edit('pkg/src/low/a.ts', 'export const a = 1;\n', '// d\nexport const a = 1;\n', 'sess-h'));
   ok(logRows().length === 3, 'with no check registered, the hook writes no row');

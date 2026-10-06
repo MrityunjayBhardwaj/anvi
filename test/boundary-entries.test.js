@@ -291,6 +291,30 @@ const rl = spawnSync('node', [path.join(lone, 'boundary-entries.js'), '--list', 
   { encoding: 'utf8', env: { ...env, HOME: path.join(tmp, 'lone') } });
 ok(rl.status === 2 && /NOT LOOKED: this install cannot run/.test(rl.stdout) && !/at Object|at Module/.test(rl.stderr),
   `missing hook modules: exit 2 and NOT LOOKED, no stack trace (exit ${rl.status})`);
+// Exit 2 has TWO causes, and they need different fixes (#634): the install cannot run the
+// delivery (reinstall) or this project's catalogues could not be read (resolve the link, or
+// read the entries directly). Both are read off the script's real output above, so the
+// wording the files are held to is the wording the reader will actually see.
+const installCause = (rl.stdout.match(/NOT LOOKED: (this install cannot run [^—]+?) —/) || [])[1];
+const catalogueCause = (r2.stdout.match(/NOT LOOKED: (this project's catalogues could not be read)/) || [])[1];
+ok(installCause && catalogueCause, `the script names both exit-2 causes (${JSON.stringify([installCause, catalogueCause])})`);
+// Every file that explains exit 2 must name both, each with what to do. The clause runs from
+// "exit 2" to the next bullet or blank line — a mention elsewhere in the file does not count.
+const exit2Clause = (t) => {
+  const at = t.search(/exit 2/i);
+  if (at === -1) return null;
+  const rest = t.slice(at);
+  const end = rest.search(/\n\s*\n|\n\s*- /);
+  // Whitespace collapsed: a phrase wrapped across lines is still the phrase.
+  return (end === -1 ? rest : rest.slice(0, end)).replace(/\s+/g, ' ');
+};
+const explainers = runners.filter((rel) => exit2Clause(fs.readFileSync(path.join(ROOT, rel), 'utf8')) !== null);
+ok(explainers.length >= 4, `the files that explain exit 2 were found (${explainers.length}: ${explainers.join(', ')})`);
+const oneCause = explainers.filter((rel) => {
+  const c = exit2Clause(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+  return !(/install/i.test(c) && /\/anvi:update|reinstall/i.test(c) && /catalogues/i.test(c) && /could not be read/i.test(c));
+});
+ok(oneCause.length === 0, `each names both causes of exit 2 and the install's remedy (${oneCause.join(', ') || 'all do'})`);
 const r1 = spawnSync('node', [SCRIPT, '--bogus'], { encoding: 'utf8', env });
 ok(r1.status === 1, 'an unknown flag is a usage error, exit 1');
 const rf = spawnSync('node', [SCRIPT, '--file=src/a.js', '--file=src/z.js', `--dir=${path.join(tmp, 'proj')}`], { encoding: 'utf8', env });

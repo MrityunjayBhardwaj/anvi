@@ -378,7 +378,11 @@ function evaluate(payload, deps) {
 // may refuse anyone, every would-be refusal can be put to the owner as right or wrong (the gate
 // ruled on #600). Every way it cannot look is a row of its own — "could not look" never reads as
 // "nothing found". Only `"mode": "shadow"` exists; any other mode is recorded as not measured.
-const CHECK_TIMEOUT_MS = 3000;
+// ANVI_STRUCTURE_CHECK_TIMEOUT_MS raises it for a run that needs more — the suite on a heavily
+// loaded machine, where Node's own startup can pass 3 s and a crashing check is then recorded
+// as too slow instead of as the crash it is (#638). It never lifts the hook past its budget:
+// the check still gets at most what HOOK_BUDGET_MS leaves.
+const CHECK_TIMEOUT_MS = Number(process.env.ANVI_STRUCTURE_CHECK_TIMEOUT_MS) || 3000;
 // THE SHADOW SPENDS ONLY WHAT IS LEFT (#607). It runs before the decision is printed, and a hook
 // past its registered timeout is killed and the edit goes through — so a slow check after a cold
 // graph build could lose a refusal the graph rule had already decided. It gets what remains of

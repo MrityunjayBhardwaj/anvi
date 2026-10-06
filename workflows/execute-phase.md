@@ -48,8 +48,10 @@ node "$HOME/.claude/anvi/scripts/boundary-entries.js" {BOUNDARY_IDS}; echo "exit
 - **Tell the user the counts line** (indexed, delivered, withheld — each withheld id named —
   and the index's coverage) every time, including when they are zero.
 - A **non-zero exit is "could not look", never "no lessons"**: exit 1 is a wrong boundary id
-  or a missing script (`Cannot find module` → `/anvi:update`); exit 2 is catalogues that
-  could not be read. Say which.
+  or a missing script (`Cannot find module` → `/anvi:update`). Exit 2 prints `NOT LOOKED`
+  and names one of two causes: the install cannot run the delivery (`/anvi:update`), or this
+  project's catalogues could not be read (read the entries yourself, or fix the project's
+  `.anvi` link). Say which.
 
 Check Ground Truth coverage for this phase:
 - Read `.anvi/dharana.md` — which external system boundaries does this phase touch?
