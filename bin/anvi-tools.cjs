@@ -667,7 +667,23 @@ async function main() {
       const project = args[2] || path.basename(cwd);
       switch (action) {
         case 'acquire': {
-          if (!lease.acquire(project)) { console.error(`harvest-lease: could not acquire for ${project}`); process.exitCode = 1; return; }
+          const owner = lease.sessionOwner();
+          const r = lease.acquire(project, owner);
+          // Another session is harvesting this project (#636). Exit 3, not 1: the next
+          // move is to wait, not to fix anything, and sharing the lease — what acquire
+          // used to do silently — is what let one session's release end the other's.
+          if (!r.ok && r.reason === 'held') {
+            const ago = Math.round((Date.now() - r.holder.mtimeMs) / 1000);
+            const left = Math.max(0, lease.LEASE_SECONDS - ago);
+            console.error(
+              `harvest lease NOT taken: ${project} is being harvested by another session ` +
+              `(${r.holder.owner === lease.ANONYMOUS ? 'one with no session id' : r.holder.owner}, lease refreshed ${ago}s ago).\n` +
+              `Do not write ${project}'s catalogues yet: its commit would take your entries, and yours its half-written ones.\n` +
+              `Wait for it to commit — its lease is released then, or expires in at most ${left}s — and acquire again.`);
+            process.exitCode = 3;
+            return;
+          }
+          if (!r.ok) { console.error(`harvest-lease: could not acquire for ${project}`); process.exitCode = 1; return; }
           // Taking the lease is not the same as being protected by it, and the two
           // resolve the module from DIFFERENT places: this CLI tries the repo first,
           // while the Stop hook can only require its own sibling in the installed
@@ -690,12 +706,29 @@ async function main() {
             return;
           }
           console.log(`harvest lease held for ${project} (${lease.LEASE_SECONDS}s) — the checkpoint hook will leave it alone`);
+          // Said every time it applies, so silence cannot read as "sessions are told apart".
+          if (owner === lease.ANONYMOUS) {
+            console.log('  no session id in this environment (CLAUDE_CODE_SESSION_ID unset) — this lease cannot tell two sessions apart');
+          }
           return;
         }
-        case 'release':
-          lease.release(project);
-          console.log(`harvest lease released for ${project}`);
+        case 'release': {
+          const r = lease.release(project, lease.sessionOwner());
+          if (!r.ok && r.reason === 'held') {
+            // Most often: this session's lease expired mid-harvest and another session
+            // took it. Deleting it would end THEIR protection, so it stays.
+            console.error(
+              `harvest lease NOT released: ${project}'s lease belongs to another session ` +
+              `(${r.holder.owner === lease.ANONYMOUS ? 'one with no session id' : r.holder.owner}) — left in place.\n` +
+              `If you just committed ${project}'s catalogues, your lease had expired and that session is harvesting now; ` +
+              `say so in your report, since your commit may have taken entries it had already written.`);
+            process.exitCode = 3;
+            return;
+          }
+          if (!r.ok) { console.error(`harvest-lease: could not release for ${project}`); process.exitCode = 1; return; }
+          console.log(r.released ? `harvest lease released for ${project}` : `no harvest lease held for ${project} — nothing to release`);
           return;
+        }
         case 'live':
           for (const p of lease.liveLeases()) console.log(p);
           return;

@@ -42,6 +42,12 @@ about to harvest — one per project, since a session can span several:
 
     anvi-tools harvest-lease acquire [project]     # defaults to basename(cwd)
 
+IF IT REFUSES (exit 3, "NOT taken"), another session is harvesting that project right now.
+Do not write its catalogues: one session's commit would take the other's half-written
+entries under the wrong message. Wait for that session to commit — it releases the lease —
+or for the expiry the refusal names, then acquire again. A lease records the session that
+took it, so it is never silently shared (#636).
+
 Why this comes first (#148). The Stop hook commits the store whenever a response
 finishes and the tree is dirty, which is the correct behaviour for a durability
 backstop and does not need to know what a wrap is. But it means every response
@@ -62,9 +68,11 @@ routinely runs longer. Observed at the end of one session, on its first
 attempt: acquired, and swept 975 seconds later — expired by 75.
 
 SO RE-ACQUIRE WHENEVER THE HARVEST PASSES ROUGHLY TEN MINUTES, and always
-immediately before the commit below. `acquire` is idempotent and freshness is
-judged by the lease file's mtime, which a re-acquire rewrites, so this is one
-call that costs nothing:
+immediately before the commit below. Re-acquiring a lease this session already
+holds is idempotent and freshness is judged by the lease file's mtime, which a
+re-acquire rewrites, so this is one call that costs nothing. If the re-acquire is
+REFUSED, your lease expired and another session took the project: stop and do not
+commit — the files now hold its entries as well as yours:
 
     anvi-tools harvest-lease acquire [project]     # again — refreshes the mtime
 
@@ -174,6 +182,10 @@ from either commit. Then clear the record and release the lease, in that order:
 
 If the commit fails, leave both alone — the record is the only evidence the split
 happened, and the lease is still protecting work that is still uncommitted.
+
+`release` removes only a lease THIS session holds. If it says the lease belongs to another
+session (exit 3), yours expired and that session took the project: the lease is left in place
+for it, and your report should say your commit may have carried entries it had written.
 
 Stage `.anvi/` only, not the whole project directory. The memory backup mirror
 lands under the same directory and is written by the Stop hook, not by you; it

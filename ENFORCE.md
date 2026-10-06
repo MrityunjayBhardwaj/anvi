@@ -681,7 +681,12 @@ knowledge had zero git history until 2026-07-07). Three layers keep `~/.anvideck
      `ANVI_HARVEST_LEASE_SECONDS`) and ignored when stale or future-dated, for the
      same reason the quiet period proceeds on clock skew: a backstop must never be
      stalled indefinitely by state it cannot verify. Rule and TTL live in one
-     module both sides import, `hooks/anvi-harvest-lease.js` (V7/V21).
+     module both sides import, `hooks/anvi-harvest-lease.js` (V7/V21). **A lease
+     records its owner** — the session id Claude Code gives every shell
+     (`CLAUDE_CODE_SESSION_ID`) — so a second session's `acquire` is refused (exit 3)
+     rather than silently shared, and `release` removes only the caller's own lease
+     (#636); before that, the first session to finish released the lease another was
+     still relying on. A runtime with no session id is anonymous, which shares as before.
    - **When a split happens anyway** — entries written before the lease, or a
      harvest that outran the TTL — the sweep records what it took, per project,
      with the commit sha. `anvi-tools harvest-lease swept` reads it, and the wrap
