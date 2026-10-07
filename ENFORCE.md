@@ -763,9 +763,14 @@ drifted," never "true"); every verdict is a re-verify prompt.
   grades the verdict's confidence. Currency needs **zero backfill** and sharpens
   as entries gain `VALIDATED`:
   1. `VALIDATED: <sha> <date>` — the explicit claim "confirmed against this state."
-  2. the `FIX:` sha — **only if still reachable** (`git cat-file -e`). A sha dropped
-     by a squash or belonging to another repo anchors nothing; verify, then fall
-     through rather than diff against a commit that isn't there.
+  2. the `FIX:` sha. Rungs 1 and 2 anchor **only on a commit that is on the trunk**
+     (`git merge-base --is-ancestor`; the trunk is origin/HEAD, else the only one of
+     origin/main and origin/master, else of local main and master). Existing is not
+     enough: a squash leaves the branch commit behind on the machine that made it,
+     and no clone has it, so a stamp citing it is skipped here exactly as a clone
+     skips it, and the report names it (`skipped VALIDATED <sha>: not on <trunk>`).
+     A sha from another repo anchors nothing either. When the trunk cannot be told,
+     a stamped entry is *not checked* (`no trunk`), never graded on the stamp.
   3. a `FIX:` PR/issue `#N` → its squash-merge commit.
   4. **time-based** (universal): the store's last commit touching *that entry's
      text* → the project's HEAD as of that timestamp. Every entry has a history, so

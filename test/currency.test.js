@@ -46,6 +46,7 @@ eq(extractRefFiles('`only.ts:5`.').join(','), 'only.ts', 'wrapped + :line + trai
 // once had, which is what the pre-existing RED cases intend.
 function makeGit(logMap, everKnown = null) {
   return (args) => {
+    if (args.startsWith('for-each-ref ')) return 'refs/remotes/origin/HEAD\trefs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
     const hist = args.match(/^log --oneline -1 --all -- "(.+)"$/);
     if (hist) {
       const f = hist[1];
@@ -317,6 +318,11 @@ eq(entryKind('dharana.md', dhs[0]), 'focus', 'dharana ## primary → focus');
 const gitSaysNo = (msg) => Object.assign(new Error(msg), { status: 128 });
 function ladderGit({ live = [], logMap = {}, revList = null } = {}) {
   return (args) => {
+    if (args.startsWith('for-each-ref ')) return 'refs/remotes/origin/HEAD\trefs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
+    // Ancestry is asked before existence (#643): a sha missing from the repo makes
+    // `--is-ancestor` exit 128 like git does, and every live sha here is on the trunk.
+    const mb = args.match(/^merge-base --is-ancestor ([0-9a-f]+) /);
+    if (mb) { if (!live.includes(mb[1])) throw gitSaysNo('not a valid commit name'); return ''; }
     const ce = args.match(/^cat-file -e ([0-9a-f]+)\^\{commit\}$/);
     if (ce) { if (!live.includes(ce[1])) throw gitSaysNo('bad object'); return ''; }
     const rl = args.match(/^rev-list -1 --before=/);
@@ -796,6 +802,7 @@ console.log('classifySpec — deleted vs external vs bare-name');
 // stub had to reimplement that pathspec to be useful, which is itself the tell: a test
 // double for a relation with two homes has to pick one.
 const clsGit = ({ tracked = [], history = [] } = {}) => (args) => {
+  if (args.startsWith('for-each-ref ')) return 'refs/remotes/origin/HEAD\trefs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
   if (args === 'ls-files') return tracked.join('\n');
   const hist = args.match(/^log --oneline -1 --all -- "(.+)"$/);
   if (hist) return history.includes(hist[1]) ? 'abc1234 x\n' : '';
@@ -831,6 +838,7 @@ v = computeCurrency({ validatedField: 'abc1234', refField: 'SoundLayer.ts' }, {
   fileExt: /\.(ts|js)$/i,
   fileExists: exists([]),
   git: (args) => {
+    if (args.startsWith('for-each-ref ')) return 'refs/remotes/origin/HEAD\trefs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
     if (args === 'ls-files') return 'src/engine/SoundLayer.ts';
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
     if (m) return m[2] === 'src/engine/SoundLayer.ts' ? 'h1\nh2\n' : ''; // only the REAL path has drift
@@ -938,6 +946,7 @@ eq(v.status, 'REFERENCE', 'a reference entry with NO anchor is still 🔵 — gr
 v = computeCurrency({ validatedField: 'abc1234', refField: 'src/a.ts ref/sources/x.rb' }, {
   fileExt: /\.(rb|ts)$/i, fileExists: exists(['src/a.ts']),
   git: (args) => {
+    if (args.startsWith('for-each-ref ')) return 'refs/remotes/origin/HEAD\trefs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
     if (/^ls-files/.test(args)) return '';
     const m = args.match(/log \S+\.\.HEAD .*-- "(.+)"$/);
     if (m) return m[1] === 'src/a.ts' ? 'h1\n' : '';

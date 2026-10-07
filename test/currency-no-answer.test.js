@@ -30,6 +30,7 @@ const AT = '2026-09-01T10:00:00+00:00';
 const gitWith = (on) => (args) => {
   const r = on && on(args);
   if (r !== undefined) return r;
+  if (args.startsWith('for-each-ref ')) return 'refs/remotes/origin/HEAD\trefs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
   if (/^cat-file -e /.test(args)) return '';
   if (/^log -1 --format=%cI /.test(args)) return AT + '\n';
   if (/^log \S+\.\.HEAD /.test(args)) return '';
@@ -54,7 +55,7 @@ function pair(name, entry, re, extra = {}, expectTwin) {
 }
 
 pair('a VALIDATED sha whose reachability check was killed',
-  { validatedField: `${SHA} 2026-09-01`, refField: 'a.js' }, /^cat-file -e /, {},
+  { validatedField: `${SHA} 2026-09-01`, refField: 'a.js' }, /^(merge-base --is-ancestor|cat-file -e) /, {},
   (t) => ok(t.anchor.source !== 'VALIDATED', 'twin: an unreachable sha still falls down the ladder'));
 
 pair('the PR-number rung, killed',
@@ -105,11 +106,11 @@ console.log('the Ground Truth doc history reader, killed');
 console.log('the record of what went unanswered belongs to ONE verdict');
 {
   const entry = { validatedField: `${SHA} 2026-09-01`, refField: 'a.js' };
-  const first = computeCurrency(entry, { git: gitWith(throwing(/^cat-file/, killed)), fileExists, fileExt });
+  const first = computeCurrency(entry, { git: gitWith(throwing(/^(merge-base --is-ancestor|cat-file)/, killed)), fileExists, fileExt });
   const second = computeCurrency(entry, { git: gitWith(), fileExists, fileExt });
   ok(first.couldNotLook && !second.couldNotLook && second.status === 'GREEN',
     `a clean entry after a killed one is graded on its own (got ${second.status})`);
-  ok(/git cat-file/.test(first.reason), `and the reason names what went unanswered: ${first.reason.slice(0, 40)}`);
+  ok(/git (merge-base|cat-file)/.test(first.reason), `and the reason names what went unanswered: ${first.reason.slice(0, 40)}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -76,8 +76,8 @@ if (typeof freshnessState === 'function') {
   eq(freshnessReason(v('GREEN', 'TIME')), null, 'a graded verdict has no not-checked reason');
   ok(Array.isArray(FRESHNESS_STATES) && FRESHNESS_STATES.join('|') === 'verified|drifted|never confirmed|not checked',
     'the four states are exported in print order');
-  ok(Array.isArray(NOT_CHECKED_REASONS) && NOT_CHECKED_REASONS.join('|') === 'no answer|withheld|partly compared|nothing diffable',
-    'the four reasons are exported in print order');
+  ok(Array.isArray(NOT_CHECKED_REASONS) && NOT_CHECKED_REASONS.join('|') === 'no answer|no trunk|withheld|partly compared|nothing diffable',
+    'the five reasons are exported in print order');
 }
 
 console.log('\nthe report — rows carry anchor, stamped, occurrence, state; the text prints the four counts');
@@ -153,13 +153,13 @@ if (data) {
   const nc = s.not_checked || {};
   eq(nc['nothing diffable'], 1, 'not checked: nothing diffable 1');
   eq(nc['no answer'], 0, 'not checked: no answer 0 — present as a zero, not absent');
-  eq(nc['no answer'] + nc['withheld'] + nc['partly compared'] + nc['nothing diffable'], s['not checked'], 'the reasons sum to not checked');
+  eq(nc['no answer'] + nc['no trunk'] + nc['withheld'] + nc['partly compared'] + nc['nothing diffable'], s['not checked'], 'the reasons sum to not checked');
   eq(s['verified'] + s['drifted'] + s['never confirmed'] + s['not checked'], s.primaries, 'the four parts sum to the primaries');
   eq(s.stamped, 2, 'stamped primaries 2');
 }
 const t = run([]);
 const line = (t.stdout || '').split('\n').find(l => /freshness of/.test(l)) || '';
-ok(/freshness of 5 primary entries: verified 2 · drifted 1 · never confirmed 1 · not checked 1 \(no answer 0 · withheld 0 · partly compared 0 · nothing diffable 1\)/.test(line),
+ok(/freshness of 5 primary entries: verified 2 · drifted 1 · never confirmed 1 · not checked 1 \(no answer 0 · no trunk 0 · withheld 0 · partly compared 0 · nothing diffable 1\)/.test(line),
   `the text report prints the four states with zeros (got ${JSON.stringify(line)})`);
 ok(/1 continuation/.test(t.stdout || ''), 'and says the continuation is not counted');
 // --stale hides GREEN rows; the summary is a statement about all primaries and must not shrink with it.
@@ -170,7 +170,7 @@ ok(/freshness of 5 primary entries: verified 2 /.test(st.stdout || ''), 'the cou
 // three states must still appear as 0 — a missing state reads as "not measured".
 fs.writeFileSync(path.join(CAT, 'hetvabhasa.md'), `# Hetvabhasa\n\n## H1: stamped, file unchanged\n**REF:** \`src/a.js\`\n**VALIDATED:** ${base} 2026-09-29\n`);
 const z = run([]);
-ok(/freshness of 1 primary entry: verified 1 · drifted 0 · never confirmed 0 · not checked 0 \(no answer 0 · withheld 0 · partly compared 0 · nothing diffable 0\)/.test(z.stdout || ''),
+ok(/freshness of 1 primary entry: verified 1 · drifted 0 · never confirmed 0 · not checked 0 \(no answer 0 · no trunk 0 · withheld 0 · partly compared 0 · nothing diffable 0\)/.test(z.stdout || ''),
   'every state and reason is printed at zero');
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -90,12 +90,14 @@ primaries only (continuations share their primary's verdict), always with all fo
                       no anchor at all — a green on the time anchor lands here, not in
                       verified. Stamping it is what would grade it.
 - **not checked**     no freshness verdict, with its reason in brackets: *no answer*
-                      (git never answered — retry), *withheld* (the area was refused),
+                      (git never answered — retry), *no trunk* (the entry is stamped but the
+                      trunk could not be told — set origin/HEAD), *withheld* (the area was refused),
                       *partly compared* (green, but a cited file could not be found or
                       compared — restore the `ref` link or re-point the citation),
                       *nothing diffable* (no REF this repo can diff — give it one)
-`--json` carries the same per row (`anchor`, `stamped`, `occurrence`, `state`, and
-`not_checked` with the reason) and in `states`; quote those rather than recounting
+`--json` carries the same per row (`anchor`, `stamped`, `occurrence`, `state`,
+`not_checked` with the reason, and `off_trunk` naming any stamp skipped for not being on
+the trunk) and in `states` (with `off_trunk` counted); quote those rather than recounting
 from the colours.
 
 The `── evidence recorded on N of M` line counts what licensed each primary error pattern's
@@ -167,17 +169,25 @@ Stamp only what you re-confirmed. Add or update the entry's field:
 </step>
 
 <step name="6_verify">
-**COMMIT the catalogue edits BEFORE re-running.** The report reads each entry's line
-range from the file on disk, then asks git a question anchored on that range — and git
-interprets the range against the COMMITTED content. On a dirty tree the two disagree by
-exactly the lines you inserted, so every entry BELOW your edit is queried at the wrong
-offset and attributed to whatever history sits at those lines in HEAD. Nothing errors;
-the answers are well-formed and wrong. Observed: 13 stamps produced 18 changed rows,
-five of them entries nobody had touched. **Tell: the flipped anchors are a PERMUTATION
-of existing values, traded between neighbours** — the signature of a positional offset,
-not of real change. Do not explain the surplus away as the known provisional flap; that
-converts an investigable artifact into permanent noise. Commit, re-run, and the
-untouched entries revert byte-identically.
+**COMMIT the catalogue edits BEFORE the final run.** An entry with no VALIDATED or FIX
+anchor is dated by the time rung: the report finds the entry in the COMMITTED catalogue
+(`git show HEAD:`, matched by id and occurrence) and asks `git log -L` about that
+committed span, never about the lines the entry occupies on disk. So a dirty tree no
+longer shifts its neighbours: entries below an uncommitted insertion keep their own
+dates (#162/#163). What a dirty tree still changes is the edited entries themselves —
+an entry that exists only in the working tree has no committed text to date, and
+reads "no anchor" until it is committed. Commit, then run the report you compare against.
+
+**Stamp a commit that is on the trunk.** A stamp counts only when its commit is an
+ancestor of the trunk (origin/HEAD, else the only one of origin/main and origin/master,
+else the only one of local main and master). A branch commit that a squash merge left
+behind still exists on your machine, but no clone has it, so it is skipped: the row
+grades on the next rung and says `skipped VALIDATED <sha>: not on <trunk>`, and the
+`── stamps not on the trunk` line counts it (#616). Re-confirm the entry against the
+trunk and stamp the trunk's sha; do not re-point the old stamp at its squash commit
+without checking that the entry's own files match across the two. When the trunk cannot
+be told, a stamped entry is "not checked" with the reason *no trunk* — set it with
+`git remote set-head origin -a`.
 
 Then verify the flip PER-ENTRY, not by summary counts (a count
 can move the right way for the wrong reason). Confirm exactly the scoped entries
@@ -197,9 +207,11 @@ no-reuse rule). A join on id alone pairs the parent's "before" against the
 cross-ref's "after" and manufactures a spurious flip — read once as "duplicate
 ids". Key on (id, kind) and the rows stay in separate buckets.
 
-Note a level-3 heading is NOT an addendum just by being level 3 — whole catalogues
-author every primary entry at level 3. It is an addendum only when a level-2
-heading in the same file claims the same id.
+Whether a heading is an addendum is decided by POSITION, not depth (#212): the first
+heading to claim an id is the primary, and every later heading in the same file that
+claims it again is a continuation — an `addendum` row — at any level. A level-3 heading
+is not an addendum for being level 3 (whole catalogues author every primary at level
+3), and a level-2 heading is not a primary for being level 2.
 </step>
 
 <step name="7_persist">
