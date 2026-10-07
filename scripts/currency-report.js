@@ -572,6 +572,7 @@ let partialCount = 0;
 // primary's verdict (#185), so counting it would count one claim twice.
 const states = Object.fromEntries(FRESHNESS_STATES.map(k => [k, 0]));
 const notChecked = Object.fromEntries(NOT_CHECKED_REASONS.map(k => [k, 0]));
+let offTrunkPrimaries = 0;
 let primaries = 0, stampedPrimaries = 0, continuations = 0;
 // What licensed each primary's claim (#529 step 2), counted from the EVIDENCE field alone.
 const EVIDENCE_ALL = [...EVIDENCE_KINDS, 'not recorded', 'unreadable'];
@@ -638,6 +639,9 @@ for (const cat of CATALOGUES) {
       states[state]++;
       if (reason) notChecked[reason]++;
       if (stamped) stampedPrimaries++;
+      // Counted here, above --stale's filter, so the tally is over every primary and not
+      // only the rows a filtered run happens to print.
+      if (v.anchor && v.anchor.offTrunk) offTrunkPrimaries++;
       if (ASKS_EVIDENCE.has(cat)) { evidenceAsked++; evidence[ev]++; }
     } else continuations++;
     // The same verdict the row below prints, kept as data for `--json`. Recorded
@@ -654,6 +658,9 @@ for (const cat of CATALOGUES) {
       // exist and not be the anchor, when its sha is unreachable), and which occurrence
       // of the id this row is — 1 is the primary.
       anchor: (v.anchor && v.anchor.source) || 'none',
+      // A stamp whose commit exists here but is not on the trunk, skipped as a fresh clone
+      // would skip it (#616). Present only when there is one, like `not_checked`.
+      ...(v.anchor && v.anchor.offTrunk ? { off_trunk: v.anchor.offTrunk.map(o => ({ source: o.source, sha: o.sha, trunk: o.trunk })) } : {}),
       stamped,
       occurrence: e.occurrence,
       state,
@@ -694,6 +701,12 @@ for (const cat of CATALOGUES) {
     // rung 4 never reads as confidently as one from an explicit VALIDATED.
     if (v.anchor.provisional && v.status !== 'GRAY') detail += ` (provisional — last edited ~${v.anchor.ts})`;
     const anchor = v.anchor.sha ? `${v.anchor.source}@${v.anchor.sha.slice(0, 7)}` : v.anchor.source;
+    // Named on the row, because the verdict beside it was graded WITHOUT that stamp, and a
+    // reader who knows the entry carries one would otherwise take the row as graded on it.
+    if (v.anchor.offTrunk) {
+      detail += ` (skipped ${v.anchor.offTrunk.map(o => `${o.source} ${o.sha.slice(0, 7)}`).join(', ')}: `
+        + `not on ${v.anchor.offTrunk[0].trunk} — re-confirm against the trunk and stamp its sha)`;
+    }
     // The entry's role, shown on every row so a per-id before/after join keys on
     // (id, kind) and never pairs a `## Q12` invariant against a dharana `### Q12`
     // alignment cross-ref of the same id (#79 — the double-count that once got
@@ -748,7 +761,12 @@ say(`── freshness of ${primaries} primary ${primaries === 1 ? 'entry' : 'ent
   `  (stamped ${stampedPrimaries}; ${continuations} ${continuations === 1 ? 'continuation shares its' : 'continuations share their'} primary's verdict, not counted)`);
 say('   verified = fresh since a VALIDATED stamp or the FIX commit it was written against; a time anchor');
 say('   (when the text last changed), or no anchor over cited files, is never confirmed. not checked = no');
-say('   freshness verdict: git never answered, the pointer was withheld, or nothing it cites is diffable here.');
+say('   freshness verdict: git never answered, the trunk could not be told, the pointer was withheld, or nothing');
+say('   it cites is diffable here.');
+// Printed every time, zero included: a stamp off the trunk grades here exactly as in a fresh
+// clone, so silence would read as "every stamp is on the trunk" whether or not it was asked.
+say(`── stamps not on the trunk: ${offTrunkPrimaries} of ${primaries} primary ${primaries === 1 ? 'entry' : 'entries'} `
+  + '(skipped, so each is graded as a fresh clone would grade it; the row names the stamp)');
 // Same rule as the freshness line: every kind printed, zeros included, and "not recorded"
 // kept apart from "unreadable" — the first asks for a field, the second for a fix to one.
 const recorded = EVIDENCE_KINDS.reduce((n, k) => n + evidence[k], 0);
@@ -772,7 +790,7 @@ if (jsonOnly) {
     examined: rows.length,
     counts,
     partial: partialCount,
-    states: { primaries, ...states, not_checked: notChecked, stamped: stampedPrimaries, continuations },
+    states: { primaries, ...states, not_checked: notChecked, stamped: stampedPrimaries, off_trunk: offTrunkPrimaries, continuations },
     evidence: { asked: evidenceAsked, ...evidence },
     withheld_kinds: withheldKinds,
     entries: rows,

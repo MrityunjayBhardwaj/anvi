@@ -23,6 +23,7 @@ const eq = (a, b, msg) => ok(a === b, `${msg} (got ${JSON.stringify(a)})`);
 // all, rather than only the all-compared one.
 function makeGit(logMap) {
   return (args) => {
+    if (args === 'symbolic-ref -q refs/remotes/origin/HEAD') return 'refs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
     if (/^log --oneline -1 --all --/.test(args)) return 'abc1234 once here\n';
     const m = args.match(/log (\S+)\.\.HEAD .*-- "(.+)"$/);
     if (m) {

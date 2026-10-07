@@ -30,6 +30,7 @@ const AT = '2026-09-01T10:00:00+00:00';
 const gitWith = (on) => (args) => {
   const r = on && on(args);
   if (r !== undefined) return r;
+  if (args === 'symbolic-ref -q refs/remotes/origin/HEAD') return 'refs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
   if (/^cat-file -e /.test(args)) return '';
   if (/^log -1 --format=%cI /.test(args)) return AT + '\n';
   if (/^log \S+\.\.HEAD /.test(args)) return '';

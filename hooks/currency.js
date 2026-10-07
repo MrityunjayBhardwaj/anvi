@@ -1495,6 +1495,48 @@ function isReachable(git, sha) {
   try { git(`cat-file -e ${sha}^{commit}`); return true; } catch { return false; }
 }
 
+// Existing is not enough: a squash merge leaves the branch commits behind as objects on
+// the machine that made them, so `isReachable` says yes HERE and no in a fresh clone. The
+// same stamp then anchors on one machine and silently falls down the ladder on another,
+// and neither says why (#616). The question that every clone answers alike is whether the
+// commit is on the trunk.
+//
+// The trunk is the remote's default branch (origin/HEAD); without one, the only one of
+// origin/main and origin/master; without a remote at all, the only one of local main and
+// master — the same order the structure guard uses, plus the local case, since a project
+// with no remote still squash-merges. Two candidates, or none, is a guess, so it answers
+// null and the caller reports that it could not tell. Cached per git function, like the
+// committed catalogue; a git that gave no answer is NOT cached, so the next entry asks again
+// and is marked unanswered itself rather than inheriting a quiet null.
+const trunkCache = new WeakMap();
+function trunkRef(git) {
+  if (trunkCache.has(git)) return trunkCache.get(git);
+  const ask = (args) => {
+    try { return git(args).trim() || null; } catch (e) { if (noAnswer(e)) throw e; return null; }
+  };
+  let trunk = null;
+  try {
+    const head = ask('symbolic-ref -q refs/remotes/origin/HEAD');
+    if (head) trunk = head.replace(/^refs\/remotes\//, '');
+    else {
+      for (const set of [['origin/main', 'origin/master'], ['main', 'master']]) {
+        const have = set.filter(r => ask(`rev-parse -q --verify ${r.includes('/') ? `refs/remotes/${r}` : `refs/heads/${r}`}^{commit}`));
+        if (have.length === 1) { trunk = have[0]; break; }
+        if (have.length > 1) break;
+      }
+    }
+  } catch { return null; }
+  trunkCache.set(git, trunk);
+  return trunk;
+}
+
+// Is this (existing) commit an ancestor of the trunk? true / false, or null when git could
+// not say — `merge-base --is-ancestor` exits 1 for "no", and anything else is not an answer.
+function onTrunk(git, sha, trunk) {
+  try { git(`merge-base --is-ancestor ${sha} ${trunk}`); return true; }
+  catch (e) { return e && e.status === 1 ? false : null; }
+}
+
 // The committed copy of a catalogue, parsed once per (store repo, path).
 //
 // Keyed on the storeGit FUNCTION rather than on the path: one process may consult
@@ -1644,11 +1686,25 @@ function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
   const shaRe = /\b([0-9a-f]{7,40})\b/;
 
   // Rung 1 + 2: an explicit VALIDATED beats a FIX, but both are shas that may be
-  // dead or foreign — the same guard applies to each.
+  // dead or foreign — the same guard applies to each. A sha that exists but is not on
+  // the trunk is skipped exactly as a fresh clone would skip it (it has no such object),
+  // so every machine computes the same verdict — and the skip is recorded, so the report
+  // can name the stamp instead of quietly grading on a weaker rung (#616). When the trunk
+  // itself cannot be told, the ancestry question has no answer, and the entry is not
+  // graded at all: grading on the stamp would be the unchecked claim, and falling past it
+  // would hide that it was never asked.
+  const offTrunk = [];
+  const withSkips = (a) => (offTrunk.length ? { ...a, offTrunk } : a);
   for (const [f, source] of [[validatedField, 'VALIDATED'], [fixField, 'FIX-sha']]) {
     if (!f) continue;
     const m = f.match(shaRe);
-    if (m && isReachable(git, m[1])) return { sha: m[1], source };
+    if (!m || !isReachable(git, m[1])) continue;
+    const trunk = trunkRef(git);
+    if (!trunk) return { sha: null, source: 'none', trunkUnknown: true };
+    const on = onTrunk(git, m[1], trunk);
+    if (on === null) return { sha: null, source: 'none', trunkUnknown: true };
+    if (on) return withSkips({ sha: m[1], source });
+    offTrunk.push({ source, sha: m[1], trunk });
   }
   if (fixField) {
     // Rung 3: PR/issue number → squash-merge commit whose subject ends "(#N)". The
@@ -1657,7 +1713,7 @@ function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
     for (const pm of fixField.matchAll(/#(\d+)/g)) {
       try {
         const sha = git(`log --grep="(#${pm[1]})" --fixed-strings --format=%H -1`).trim();
-        if (sha) return { sha, source: `FIX-#${pm[1]}` };
+        if (sha) return withSkips({ sha, source: `FIX-#${pm[1]}` });
       } catch { /* try next */ }
     }
   }
@@ -1665,13 +1721,13 @@ function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
   if (typeof timeAnchor === 'function') {
     try {
       const t = timeAnchor();
-      if (t && t.sha) return t;
+      if (t && t.sha) return withSkips(t);
       // The rung did not decline — it could not look. That travels with the verdict so
       // the report can say which of the two happened.
-      if (t && t.unreadable) return { sha: null, source: 'none', storeUnreadable: true };
+      if (t && t.unreadable) return withSkips({ sha: null, source: 'none', storeUnreadable: true });
     } catch { /* fall through to GRAY */ }
   }
-  return { sha: null, source: 'none' };
+  return withSkips({ sha: null, source: 'none' });
 }
 
 // --- class sensitivity ------------------------------------------------------
@@ -1721,12 +1777,11 @@ function entryKind(catalogue, entry) {
     // shape has to be admitted here too or this guard silently mislabels it.
     return /^B\d+(?:\.\d+)*$/.test(entry.id || '') ? 'boundary' : 'alignment';
   }
-  // Outside dharana, a level-3 heading is a primary entry unless it AMENDS a level-2
-  // one of the same id (parseEntries decides that by the parent's presence, never by
-  // depth alone). Giving the amendment its own kind is what keeps a per-id join from
-  // pairing the parent's "before" against the addendum's "after" — the same collision
-  // the dharana rule above fixes, which only ever covered dharana (#85).
-  if (entry && entry.amends) return 'addendum';
+  // Everything else takes its catalogue's role. A continuation never reaches this line:
+  // parseEntries marks one by POSITION (a later heading claiming an id already seen, at
+  // any depth — #212), and the `amends` test at the top answers 'addendum' for it, which
+  // is what keeps a per-id join from pairing a parent's "before" against its addendum's
+  // "after" (#85).
   return CATALOGUE_ROLE[base] || base || 'entry';
 }
 
@@ -2155,7 +2210,7 @@ function greenScopeText(scope) {
 // Store reference files are not counted against it: their freshness is a version
 // question, not drift. Drift over part of the files is still drift, so only GREEN narrows.
 const FRESHNESS_STATES = ['verified', 'drifted', 'never confirmed', 'not checked'];
-const NOT_CHECKED_REASONS = ['no answer', 'withheld', 'partly compared', 'nothing diffable'];
+const NOT_CHECKED_REASONS = ['no answer', 'no trunk', 'withheld', 'partly compared', 'nothing diffable'];
 const CHECKED_ANCHOR = (source) => source === 'VALIDATED' || source.startsWith('FIX-');
 function freshnessState(verdict) {
   if (freshnessReason(verdict)) return 'not checked';
@@ -2169,6 +2224,10 @@ function freshnessReason(verdict) {
   if (!verdict || verdict.couldNotLook) return 'no answer';
   const anchor = verdict.anchor || {};
   if (anchor.storeUnreadable) return 'no answer';
+  // A stamp was found but its commit could not be placed on or off the trunk, because the
+  // trunk itself could not be told (#616). Its own reason: the action is to set origin/HEAD
+  // (`git remote set-head origin -a`), not to retry or re-point anything.
+  if (anchor.trunkUnknown) return 'no trunk';
   if (verdict.status === 'WITHHELD') return 'withheld';
   if (verdict.status === 'GREEN' && CHECKED_ANCHOR(anchor.source || 'none')) {
     if (verdict.partial) return 'withheld';
@@ -2393,8 +2452,10 @@ function gradeEntry(entry, opts) {
     }));
     const areas = [...new Set(files.filter(x => x.reference && x.area).map(x => x.area))];
     const where = areas.length ? areas.join(', ') : 'reference area';
+    // An anchor the document check above could not resolve because the trunk could not be
+    // told travels on, so this row reads "no trunk" rather than "nothing diffable".
     return withVendor({
-      status: 'REFERENCE', anchor: { sha: null, source: 'none' }, files,
+      status: 'REFERENCE', anchor: anchor && anchor.trunkUnknown ? anchor : { sha: null, source: 'none' }, files,
       reason: `grounded in the store's ${where}; freshness is an upstream-version question, not a drift this repo can compute`,
     });
   }
@@ -2411,7 +2472,9 @@ function gradeEntry(entry, opts) {
     // version re-verify prompt still rides along (the vendor was read up front).
     return withVendor({
       status: 'GRAY', anchor, files: refFiles.map(f => ({ file: f })),
-      reason: anchor.storeUnreadable
+      reason: anchor.trunkUnknown
+        ? 'no anchor: the entry\'s stamp exists here, but the trunk could not be told (no origin/HEAD, and not exactly one of main/master), so whether the stamp is on it was never asked — set it with `git remote set-head origin -a`'
+        : anchor.storeUnreadable
         ? 'no anchor: the store could not be READ (git gave no answer: the catalogue read or its line history failed or timed out), so the time rung never finished — this is not a claim that store history is absent'
         : 'no anchor on any rung (no VALIDATED, no live FIX sha/PR, no store history)',
     });
@@ -2504,7 +2567,7 @@ function gradeEntry(entry, opts) {
 }
 
 module.exports = {
-  computeCurrency, verdictScope, greenScopeText, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, evidenceKind, EVIDENCE_KINDS, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable,
+  computeCurrency, verdictScope, greenScopeText, freshnessState, freshnessReason, FRESHNESS_STATES, NOT_CHECKED_REASONS, evidenceKind, EVIDENCE_KINDS, extractRefFiles, resolveAnchor, resolveTimeAnchor, anchorInstant, isReachable, trunkRef,
   GIT_MAX_BUFFER,
   parseEntries, sensitivityFor, entryKind, nudgeFor, capNudges, rankNudge, NUDGE_CAP, FILE_EXT,
   extractFileSpecs, specExists, classifySpec, extensionsFrom, matchedTracked,

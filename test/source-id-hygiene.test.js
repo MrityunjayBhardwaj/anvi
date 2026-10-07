@@ -103,9 +103,11 @@ for (const rel of shipped || []) {
   if (EXEMPT_FILES.has(rel)) continue;
   listed++;
   let text;
-  // Read through fs, never a shell grep: one of these files contains a NUL byte, and
-  // grep treats it as binary and skips it. The measurement that first sized this
-  // problem undercounted for exactly that reason, missing the largest module.
+  // Read through fs, never a shell grep: grep treats a file holding a NUL byte as binary
+  // and skips it. The measurement that first sized this problem undercounted for exactly
+  // that reason, missing the largest module, which then carried a raw NUL. None does now
+  // (#400: hooks/currency.js writes that delimiter as an escape), but the next one would
+  // be skipped the same way, so the read stays in fs.
   //
   // A file that cannot be read is RECORDED, not skipped (#515). Skipping it let a file
   // the index still lists — deleted from disk, say — drop out of the scan with the

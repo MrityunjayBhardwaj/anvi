@@ -46,6 +46,7 @@ const ANCHOR_AT = '2026-09-01T10:00:00+00:00';
 const mkGit = ({ fileDrift = false } = {}) => (args) => {
   if (args.startsWith('log -1 --format=%cI')) return ANCHOR_AT + '\n';
   if (args.startsWith('log') && args.includes('App.ts')) return fileDrift ? 'aaa\n' : '';
+  if (args === 'symbolic-ref -q refs/remotes/origin/HEAD') return 'refs/remotes/origin/main\n'; // the trunk, as a clone records it (#616)
   if (args.startsWith('cat-file') || args.startsWith('rev-parse')) return 'commit\n';
   if (args.startsWith('ls-files')) return '';
   return '';
