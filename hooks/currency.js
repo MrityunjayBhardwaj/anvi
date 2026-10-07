@@ -1508,24 +1508,32 @@ function isReachable(git, sha) {
 // null and the caller reports that it could not tell. Cached per git function, like the
 // committed catalogue; a git that gave no answer is NOT cached, so the next entry asks again
 // and is marked unanswered itself rather than inheriting a quiet null.
+//
+// ONE git call, not one per candidate. The edit-time hook grades inside a fixed deadline,
+// and every spawn is paid out of it: asking symbolic-ref and then rev-parse four times cost
+// a slow runner enough of that budget to leave entries ungraded that main still graded (#643).
 const trunkCache = new WeakMap();
+const TRUNK_CANDIDATES = ['refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/master', 'refs/heads/main', 'refs/heads/master'];
 function trunkRef(git) {
   if (trunkCache.has(git)) return trunkCache.get(git);
-  const ask = (args) => {
-    try { return git(args).trim() || null; } catch (e) { if (noAnswer(e)) throw e; return null; }
-  };
+  let out;
+  try { out = git(`for-each-ref --format='%(refname)%09%(symref)' ${TRUNK_CANDIDATES.join(' ')}`); }
+  catch { return null; } // git never answered (or failed): not cached, so the next entry asks again
+  const refs = new Map(String(out).split('\n').filter(Boolean).map((l) => {
+    const [name, symref = ''] = l.split('\t');
+    return [name.trim(), symref.trim()];
+  }));
+  const short = (r) => r.replace(/^refs\/(remotes|heads)\//, '');
   let trunk = null;
-  try {
-    const head = ask('symbolic-ref -q refs/remotes/origin/HEAD');
-    if (head) trunk = head.replace(/^refs\/remotes\//, '');
-    else {
-      for (const set of [['origin/main', 'origin/master'], ['main', 'master']]) {
-        const have = set.filter(r => ask(`rev-parse -q --verify ${r.includes('/') ? `refs/remotes/${r}` : `refs/heads/${r}`}^{commit}`));
-        if (have.length === 1) { trunk = have[0]; break; }
-        if (have.length > 1) break;
-      }
+  const head = refs.get('refs/remotes/origin/HEAD');
+  if (head) trunk = short(head);
+  else {
+    for (const set of [['refs/remotes/origin/main', 'refs/remotes/origin/master'], ['refs/heads/main', 'refs/heads/master']]) {
+      const have = set.filter((r) => refs.has(r));
+      if (have.length === 1) { trunk = short(have[0]); break; }
+      if (have.length > 1) break;
     }
-  } catch { return null; }
+  }
   trunkCache.set(git, trunk);
   return trunk;
 }
@@ -1698,13 +1706,22 @@ function resolveAnchor({ validatedField, fixField, git, timeAnchor }) {
   for (const [f, source] of [[validatedField, 'VALIDATED'], [fixField, 'FIX-sha']]) {
     if (!f) continue;
     const m = f.match(shaRe);
-    if (!m || !isReachable(git, m[1])) continue;
+    if (!m) continue;
+    // Ancestry FIRST, existence only when it is needed to read the answer: one spawn per
+    // stamp, as before this check existed. The edit-time hook pays every spawn out of a
+    // fixed deadline, and a cat-file before every ancestry question cost a slow runner the
+    // entries main still graded (#643). `--is-ancestor` exits 1 for "exists, not on the
+    // trunk"; anything else is either a missing commit (squash-dropped, or another repo's)
+    // or a question git did not answer, and cat-file tells those two apart.
     const trunk = trunkRef(git);
-    if (!trunk) return { sha: null, source: 'none', trunkUnknown: true };
+    if (!trunk) {
+      if (isReachable(git, m[1])) return { sha: null, source: 'none', trunkUnknown: true };
+      continue;
+    }
     const on = onTrunk(git, m[1], trunk);
-    if (on === null) return { sha: null, source: 'none', trunkUnknown: true };
     if (on) return withSkips({ sha: m[1], source });
-    offTrunk.push({ source, sha: m[1], trunk });
+    if (on === false) { offTrunk.push({ source, sha: m[1], trunk }); continue; }
+    if (isReachable(git, m[1])) return { sha: null, source: 'none', trunkUnknown: true };
   }
   if (fixField) {
     // Rung 3: PR/issue number → squash-merge commit whose subject ends "(#N)". The
