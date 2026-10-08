@@ -615,7 +615,9 @@ process.stdin.on('end', () => {
           .filter((e) => /^[A-Z]{1,3}\d+$/.test(e.id));
       } catch { hetEntries = []; }
       for (const e of hetEntries) {
-        if (entryDeclaresFile(e, relPath)) declaredErrorIds.push(e.id);
+        // Once per id: a trap and its continuations share it, and listing it per heading
+        // printed the same trap twice and spent the cap below on repeats (#617).
+        if (entryDeclaresFile(e, relPath) && !declaredErrorIds.includes(e.id)) declaredErrorIds.push(e.id);
       }
     }
 
@@ -642,7 +644,7 @@ process.stdin.on('end', () => {
     }
 
     if (hetEntries.length) {
-      const hetvabhasa = fs.readFileSync(hetvabhasaPath, 'utf8');
+      const hetLines = fs.readFileSync(hetvabhasaPath, 'utf8').split('\n');
 
       // Extract pattern IDs referenced in matched dharana boundaries
       const patternIds = [];
@@ -657,12 +659,26 @@ process.stdin.on('end', () => {
       // Declared ids lead; boundary-scraped ids follow, minus any already delivered.
       const declaredSet = new Set(declaredErrorIds);
       const scraped = [...new Set(patternIds)].filter((id) => !declaredSet.has(id));
+      // A trap is summarised by its TITLE — the whole heading line, and nothing else.
+      //
+      // It is found among the entries the shared parser already returned, not by a second
+      // heading rule. The private regex that stood here accepted only a level-2 heading, so a
+      // trap written under `###` was declared above, then failed to summarise and was dropped
+      // by a filter, vanishing from the list with no trace (#617). Its comment also promised
+      // "root cause + detection signal" while returning the title alone; the title is the
+      // deliberate choice, measured: the first two body lines of the ten traps on a hot file
+      // came to 16,373 characters against 750 for their titles, on every edit.
+      //
+      // The heading line is read from the entry's own span rather than from `title`, which the
+      // parser cuts at 70 characters for its other readers. The first occurrence is the trap;
+      // later ones are its continuations.
+      const trapById = new Map();
+      for (const e of hetEntries) if (!trapById.has(e.id)) trapById.set(e.id, e);
       const summarise = (pid) => {
-        const entryPattern = new RegExp(`^##\\s+${pid}[:\\s](.+?)(?=\\n##\\s|$)`, 'ms');
-        const entryMatch = entryPattern.exec(hetvabhasa);
-        if (!entryMatch) return null;
-        // Just the first 2 lines (root cause + detection signal)
-        return `${pid}: ${entryMatch[1].trim().split('\n').slice(0, 2).join(' | ')}`;
+        const e = trapById.get(pid);
+        if (!e) return null;
+        const heading = (hetLines[e.lineStart - 1] || '').replace(/^#{2,3}\s+/, '').replace(new RegExp(`^${pid}[:\\s]\\s*`), '').replace(/^[—–-]\s*/, '').trim(); // an id followed by a dash rather than a colon
+        return `${pid}: ${heading || String(e.title || '').trim()}`;
       };
       // ⚠ CAPPED, AND THE REMAINDER IS NAMED. Measured against the live catalogue, the
       // declared pass is precise but not small — a hot file legitimately has 23 entries
@@ -674,6 +690,11 @@ process.stdin.on('end', () => {
       const shown = declaredErrorIds.slice(0, DECLARED_CAP);
       const rest = declaredErrorIds.slice(DECLARED_CAP);
       const declaredText = shown.map(summarise).filter(Boolean);
+      // The filter stays for the SCRAPED ids only, and it is right there: the boundary scrape
+      // (`SP\d+|H\d+|P\d+`) also picks up tokens that name no trap — priority labels and
+      // number fragments. Measured over 16 projects' boundaries on 2026-10-08: 140 of 1,784
+      // scraped ids are absent from the catalogue, every one of them P-prefixed. A declared id
+      // comes from the parsed entries themselves, so it always summarises.
       const scrapedText = scraped.map(summarise).filter(Boolean);
       if (declaredText.length) {
         errorPatterns += `\nTraps whose own REF names this file: ${declaredText.join('; ')}`;
