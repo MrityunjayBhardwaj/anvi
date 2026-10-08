@@ -100,6 +100,29 @@ for mode in --sync --migrate; do
      "and $mode's refusal names the linked clone and how to repoint deliberately"
 done
 
+# ── --dev honours --only, as copy mode does (#642) ─────────────────────────────
+# Dev mode used to link skills and agents and register every hook whatever --only said, so
+# `--dev --only=copilot` wired a Claude Code nobody selected. Each case runs on a FRESH home —
+# the Copilot-only run also proves the link's parent directory is made without the skills
+# mkdir that used to create it — and the Claude run beside it is the control that must wire
+# everything, so a run that did nothing cannot read as a pass.
+echo ""
+echo "--dev honours --only"
+count_regs() { node -e 'let n=0;try{const s=require(process.argv[1]);for(const ev of Object.values(s.hooks||{}))for(const g of ev)for(const h of g.hooks||[])if(/anvi/.test(h.command||""))n++}catch{}console.log(n)' "$1"; }
+for only in copilot claude; do
+  HD="$T/home-dev-$only"; mkdir -p "$HD"
+  HOME="$HD" bash "$REPO/install.sh" --dev "--only=$only" </dev/null >"$T/dev-$only.txt" 2>&1; RC=$?
+  ok '[ "$RC" -eq 0 ]' "--dev --only=$only exits 0 (got $RC)"
+  ok '[ -L "$HD/.claude/anvi" ] && [ -d "$HD/.claude/anvi/copilot-compat" ]' "--dev --only=$only links the framework, Copilot layer included"
+  ok '[ -L "$HD/.claude/hooks/$HOOK" ]' "--dev --only=$only links the hook files the scripts use"
+done
+HC="$T/home-dev-copilot"; HL="$T/home-dev-claude"
+ok '[ "$(count_regs "$HC/.claude/settings.json")" = 0 ]' "copilot only: no hook is registered with Claude Code"
+ok '[ -z "$(ls "$HC/.claude/skills" 2>/dev/null)" ] && [ -z "$(ls "$HC/.claude/agents" 2>/dev/null)" ]' "copilot only: no skills or agents are linked"
+ok 'grep -q "not registered — Claude Code was not selected" "$T/dev-copilot.txt"' "copilot only: the output says why the hooks were not registered"
+ok '[ "$(count_regs "$HL/.claude/settings.json")" -gt 0 ]' "control — claude: hooks ARE registered"
+ok '[ -n "$(ls "$HL/.claude/skills" 2>/dev/null)" ] && [ -n "$(ls "$HL/.claude/agents" 2>/dev/null)" ]' "control — claude: skills and agents ARE linked"
+
 echo ""
 ok '[ "$(fingerprint "$REPO")" = "$REPO_BEFORE" ]' "this checkout's files were not touched by any run above"
 
