@@ -1564,7 +1564,10 @@ loosened until it stops firing guards nothing.
   violation belongs to the codebase; anvi owns the moment, the record, the refusal and "not measured". A
   registry entry may name `"check": { "adapter", "root", "files", "mode": "shadow" | "refuse", "node"? }`: `adapter` is
   a program kept beside the registry (stave's is in the store, `instances/stave-boundary-adapter.mjs`,
-  calling stave's own `measureBoundary`), `root` is the repository root relative to the package dir,
+  calling both of stave's own measurements, `measureBoundary` and `measureKrillReads` — a count the check
+  holds to a number is sent as one reach per unit past it, so one more is one added reach; and a file
+  counts as examined when ANY part of the check looked at it, #662, #663), `root` is the repository root
+  relative to the package dir,
   `files` are the check's own files (repo-relative). After the graph decision, the hook runs the
   adapter as a child of its Node with `{ root, rel, before, after }` on stdin; it answers
   `{ examined, before, after, allowed, remedies? }` — the reaches the project's check finds in each version of
