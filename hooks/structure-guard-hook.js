@@ -18,6 +18,9 @@
 // is not this edit's to answer for. And NEW means added by this edit (#544): a violation already
 // on disk that the baseline lacks — landed through Bash, a pull, a hand edit — is said once per
 // session, never refused, because refusing it would refuse an edit that did not add it.
+// A SECOND JUDGE (#600): a package may also register a check of its own, and set it to refuse.
+// Then an edit adding a reach the project's exception list does not allow, or touching the check's
+// own files without the user's go, is refused as well — see THE PROJECT'S OWN CHECK below.
 //
 // WHAT IT NEVER DOES: BLOCK ON ITS OWN IGNORANCE. An edit shape it does not recognise, an Edit
 // whose `old_string` does not match exactly once (the tool will refuse that itself), a package

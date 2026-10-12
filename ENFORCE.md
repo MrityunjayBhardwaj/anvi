@@ -1618,6 +1618,13 @@ loosened until it stops firing guards nothing.
   by this**: stave's entry stays `"mode": "shadow"` until the shadow gate above is met and the
   owner has ruled on every would-be refusal. Observed in fixtures through the hook as a process;
   on stave, see #600.
+- **A path is compared as the file system stores it (#660).** On a file system that ignores
+  letter case (the macOS default), the same file reached as `packages/EDITOR/…` used to belong to
+  "no registered package" and pass with nothing said and no row, and a check's own file named in
+  another case was not seen as one: `fs.realpathSync` follows symlinks but keeps the case it was
+  given. The existing part of an edited path, and each registered directory, are now resolved with
+  the native realpath, which returns the stored name. A file that does not exist yet keeps the
+  spelling it was given — there is nothing stored to compare it with.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>
