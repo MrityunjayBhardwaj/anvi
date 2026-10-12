@@ -567,7 +567,10 @@ skill_installable() {
 # --dev mode: symlink repo dirs instead of copying
 if [ "$MODE" = "dev" ]; then
   echo "DEV MODE: symlinking repo → live installation"
-  mkdir -p "$AGENTS_DIR" "$SKILLS_DIR"
+  # The link's own parent first: the skills/agents mkdir used to create it as a side effect,
+  # and a Copilot-only install skips that one.
+  mkdir -p "$(dirname "$ANVI_DIR")"
+  [ "$INSTALL_CLAUDE" = true ] && mkdir -p "$AGENTS_DIR" "$SKILLS_DIR"
 
   # Remove existing anvi dir and symlink — unless this is a --sync relink, where the
   # link was just resolved to this very tree and replacing it would only rewrite
@@ -578,26 +581,35 @@ if [ "$MODE" = "dev" ]; then
   fi
   echo "  ✓ ${ANVI_DIR} → ${SCRIPT_DIR}"
 
-  # Symlink skills
-  SKILL_COUNT=0
-  for skill_dir in "$SCRIPT_DIR/skills/"anvi*/; do
-    [ -d "$skill_dir" ] || continue
-    skill_installable "$skill_dir" || continue
-    skill_name=$(basename "$skill_dir")
-    rm -rf "$SKILLS_DIR/$skill_name"
-    ln -sf "$skill_dir" "$SKILLS_DIR/$skill_name"
-    SKILL_COUNT=$((SKILL_COUNT + 1))
-  done
-  echo "  ✓ ${SKILL_COUNT} skills symlinked"
+  # Skills, agents and hook registration are Claude Code's, so --only decides them here
+  # exactly as it does in copy mode (#642). Dev mode used to wire all three whatever was
+  # selected, so `--dev --only=copilot` registered 17 hooks in a Claude Code nobody asked
+  # for. The Copilot layer needs nothing extra: it lives under ${ANVI_DIR}, which is the
+  # repo itself in this mode.
+  if [ "$INSTALL_CLAUDE" = true ]; then
+    # Symlink skills
+    SKILL_COUNT=0
+    for skill_dir in "$SCRIPT_DIR/skills/"anvi*/; do
+      [ -d "$skill_dir" ] || continue
+      skill_installable "$skill_dir" || continue
+      skill_name=$(basename "$skill_dir")
+      rm -rf "$SKILLS_DIR/$skill_name"
+      ln -sf "$skill_dir" "$SKILLS_DIR/$skill_name"
+      SKILL_COUNT=$((SKILL_COUNT + 1))
+    done
+    echo "  ✓ ${SKILL_COUNT} skills symlinked"
 
-  # Symlink agents
-  AGENT_COUNT=0
-  for agent_file in "$SCRIPT_DIR/agents/"anvi-*.md; do
-    [ -f "$agent_file" ] || continue
-    ln -sf "$agent_file" "$AGENTS_DIR/$(basename "$agent_file")"
-    AGENT_COUNT=$((AGENT_COUNT + 1))
-  done
-  echo "  ✓ ${AGENT_COUNT} agents symlinked"
+    # Symlink agents
+    AGENT_COUNT=0
+    for agent_file in "$SCRIPT_DIR/agents/"anvi-*.md; do
+      [ -f "$agent_file" ] || continue
+      ln -sf "$agent_file" "$AGENTS_DIR/$(basename "$agent_file")"
+      AGENT_COUNT=$((AGENT_COUNT + 1))
+    done
+    echo "  ✓ ${AGENT_COUNT} agents symlinked"
+  else
+    echo "  – skills and agents not linked (Claude Code was not selected)"
+  fi
 
   # Symlink hooks (live edits to hook logic)
   mkdir -p "$HOOKS_DIR"
@@ -607,8 +619,13 @@ if [ "$MODE" = "dev" ]; then
     ln -sf "$hook_file" "$HOOKS_DIR/$(basename "$hook_file")"
     HOOK_COUNT=$((HOOK_COUNT + 1))
   done
-  echo "  ✓ ${HOOK_COUNT} hooks symlinked"
-  node "$SCRIPT_DIR/scripts/register-hooks.cjs"
+  # Linked for every install, registered only for Claude Code — the copy-mode rule (#630).
+  if [ "$INSTALL_CLAUDE" = true ]; then
+    echo "  ✓ ${HOOK_COUNT} hooks symlinked"
+    node "$SCRIPT_DIR/scripts/register-hooks.cjs"
+  else
+    echo "  ✓ ${HOOK_COUNT} hooks symlinked for the scripts (not registered — Claude Code was not selected)"
+  fi
 
   echo ""
   echo "Dev mode active. Edits to ${SCRIPT_DIR} are immediately live."
