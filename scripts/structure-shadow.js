@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Read a project check's SHADOW run (issue #600): what it would have refused, and whether the run
-// has seen enough to say anything.
+// Read a project check's run (issue #600): what it would have refused in SHADOW, what it did refuse
+// once set to REFUSE, and whether the run has seen enough to say anything.
 //
-// The edit-time hook runs a registered package's own check in shadow — it refuses nothing and
-// prints nothing, and writes one row per edit to a log (`structure-guard-hook.js` `shadowCheck`).
-// This reads that log. It is its own command, not a flag of `structure-refusals.js`, because its
-// input is different: the hook's own record, not the session transcripts — a shadow run tells the
-// session nothing, so a transcript holds no trace of it.
+// The edit-time hook runs a registered package's own check and writes one row per edit to a log
+// (`structure-guard-hook.js` `shadowCheck`). In shadow it refuses nothing and prints nothing; set
+// to refuse, a row says whether that edit was refused. This reads that log. It is its own command,
+// not a flag of `structure-refusals.js`, because its input is different: the hook's own record,
+// not the session transcripts — a shadow run tells the session nothing, so a transcript holds no
+// trace of it. The log is one history across both modes, and every count below says which.
 //
 // THE GATE (ruled on #600): the run lasts 7 days or until 10 edits have been judged, whichever is
 // later; every would-be refusal is then put to the owner as right or wrong; the check may refuse
@@ -14,8 +15,8 @@
 // chance to refuse is UNTESTED; one with chances has something for the owner to rule on.
 //
 // Usage: node scripts/structure-shadow.js --package <dir> --since <iso> [--days 7] [--judged 10]
-// Exit: 1 something to read (a would-be refusal, an edit to the check, or a row that could not
-//       look) · 2 not measured (no check registered for the package, unreadable input) ·
+// Exit: 1 something to read (a refusal or would-be refusal, an edit to the check, or a row that
+//       could not look) · 2 not measured (no check registered for the package, unreadable input) ·
 //       3 UNTESTED (nothing to read and no chance to refuse) — never 0.
 
 'use strict';
@@ -65,7 +66,11 @@ function read(rows, { since, now, days, judged: needJudged }) {
   const elapsed = (now - Date.parse(since)) / 864e5;
   const periodMet = elapsed >= days && judged.length >= needJudged;
   const toRead = chances.length > 0 || by('check-file').length > 0 || by('not-measured').length > 0;
-  return { rows: rows.length, judged, outside: by('outside').length, checkFile: by('check-file'), shape: by('edit-shape').length,
+  // A row written before the check could refuse names no mode: it was shadow, the only one there was.
+  const refusing = rows.filter(r => r.mode === 'refuse');
+  const refused = { reach: judged.filter(r => r.refused).length, checkFile: by('check-file').filter(r => r.refused).length };
+  return { modes: { shadow: rows.length - refusing.length, refuse: refusing.length }, refused,
+    rows: rows.length, judged, outside: by('outside').length, checkFile: by('check-file'), shape: by('edit-shape').length,
     notMeasured: by('not-measured').length, why, chances, onList, landed: [...landed], elapsed, periodMet,
     ms: { p50: pct(rows.map(r => r.ms).filter(Number.isFinite), 0.5), max: pct(rows.map(r => r.ms).filter(Number.isFinite), 1) },
     exit: toRead ? 1 : 3 };
@@ -78,24 +83,35 @@ function report(rd, a, logPath) {
   out.push(`  edits recorded: ${rd.rows} — ${rd.judged.length} judged · ${rd.outside} outside the check's population · ` +
     `${rd.checkFile.length} to the check's own files · ${rd.shape} in an edit shape not modelled · ${rd.notMeasured} NOT MEASURED`);
   for (const [w, n] of Object.entries(rd.why)) out.push(`    not measured ×${n}: ${w}`);
+  // Said every run, zero included: a log holds both modes, and a count means different things in each.
+  out.push(`  rows by the check's mode: ${rd.modes.shadow} in shadow (nothing refused) · ${rd.modes.refuse} set to refuse — ` +
+    `${rd.refused.reach + rd.refused.checkFile} REFUSED: ${rd.refused.reach} for a reach off the list · ${rd.refused.checkFile} for an edit to the check's own files`);
   out.push(`  time per edit: median ${rd.ms.p50 === null ? '—' : rd.ms.p50 + ' ms'} · slowest ${rd.ms.max === null ? '—' : rd.ms.max + ' ms'}`);
   out.push(`  reaches added: ${rd.chances.length + rd.onList.length} — ${rd.onList.length} on the project's exception list · ` +
     `${rd.chances.length} NOT on it (each a chance to refuse)`);
   if (rd.landed.length) out.push(`  already on disk and off the list (landed outside any edit hook, not charged to an edit): ${rd.landed.length}`);
-  if (rd.chances.length) {
+  const line = c => `    ${c.row.ts} · ${c.row.session || 'no session'} · ${c.row.checkout === 'registered' ? '' : 'worktree · '}${c.row.rel} · ${c.rule} ${c.reach}` +
+    (c.row.graph === 'deny' ? ' (the graph rule refused this edit too)' : '');
+  const did = rd.chances.filter(c => c.row.refused);
+  const would = rd.chances.filter(c => !c.row.refused);
+  if (did.length) {
+    out.push('', '  REFUSED — the owner rules each one right or wrong:');
+    for (const c of did) out.push(line(c));
+  }
+  if (would.length) {
     out.push('', '  WOULD-BE REFUSALS — the owner rules each one right or wrong:');
-    for (const c of rd.chances)
-      out.push(`    ${c.row.ts} · ${c.row.session || 'no session'} · ${c.row.checkout === 'registered' ? '' : 'worktree · '}${c.row.rel} · ${c.rule} ${c.reach}` +
-        (c.row.graph === 'deny' ? ' (the graph rule refused this edit too)' : ''));
+    for (const c of would) out.push(line(c));
   }
   if (rd.checkFile.length) {
     out.push('', '  EDITS TO THE CHECK ITSELF — a design change, put to the owner, never judged by the check:');
-    for (const r of rd.checkFile) out.push(`    ${r.ts} · ${r.session || 'no session'} · ${r.checkout === 'registered' ? '' : 'worktree · '}${r.rel}`);
+    for (const r of rd.checkFile) out.push(`    ${r.ts} · ${r.session || 'no session'} · ${r.checkout === 'registered' ? '' : 'worktree · '}${r.rel} · ` +
+      (r.refused ? 'REFUSED, no go given' : r.go ? `allowed on the go given ${r.go}` : 'recorded in shadow, not refused'));
   }
   out.push('', `  period: ${rd.elapsed.toFixed(1)} of ${a.days} days · ${rd.judged.length} of ${a.judged} edits judged — ` +
     (rd.periodMet ? 'MET' : 'NOT YET (whichever is later)'));
   out.push(rd.chances.length
-    ? `  SHADOW READING: ${rd.chances.length} would-be refusal${rd.chances.length === 1 ? '' : 's'} to rule on. It may refuse only if every one is ruled right${rd.periodMet ? '' : ', and the period is not yet over'}.`
+    ? `  SHADOW READING: ${rd.chances.length} chance${rd.chances.length === 1 ? '' : 's'} to rule on — ${did.length} refused · ${would.length} would-be. ` +
+      `It may refuse only if every one is ruled right${rd.periodMet ? '' : ', and the period is not yet over'}.`
     : `  SHADOW READING: UNTESTED — 0 chances to refuse in ${rd.judged.length} judged edits. This is neither a pass nor a failure.`);
   return out.join('\n');
 }

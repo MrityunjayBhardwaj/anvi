@@ -361,23 +361,34 @@ function evaluate(payload, deps) {
   return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) };
 }
 
-// THE PROJECT'S OWN CHECK, IN SHADOW (#600). What counts as a violation belongs to the codebase,
-// as runnable code reviewed in its own history; this hook owns the moment, the record and "not
+// THE PROJECT'S OWN CHECK (#600). What counts as a violation belongs to the codebase, as runnable
+// code reviewed in its own history; this hook owns the moment, the record, the refusal and "not
 // measured". A registry entry may name a check:
 //   "check": { "adapter": "<abs program>", "root": "<repo root, relative to the package dir>",
-//              "files": ["<repo-relative files of the check itself>"], "mode": "shadow",
+//              "files": ["<repo-relative files of the check itself>"], "mode": "shadow" | "refuse",
 //              "node"?: <the lowest Node major the adapter runs on> }
 // The adapter is a program, run as a child of this Node: it reads { root, rel, before, after } as
-// JSON on stdin (`before` null for a new file) and prints { examined, before, after, allowed } —
-// the reaches the project's check finds in each version of the file ({ rule, reach }), and the
-// reaches its exception list allows for that file. A child because a project's check is its own
-// code, in its own module system (stave's is ES-module TypeScript), and a crash or a hang there must
-// cost one measurement, not this hook.
+// JSON on stdin (`before` null for a new file) and prints { examined, before, after, allowed,
+// remedies? } — the reaches the project's check finds in each version of the file ({ rule, reach }),
+// the reaches its exception list allows for that file, and for a reach it does not allow, what the
+// project's check itself says about it ({ "<reach>": "<its sentence>" }). A child because a
+// project's check is its own code, in its own module system (stave's is ES-module TypeScript), and
+// a crash or a hang there must cost one measurement, not this hook.
 //
 // SHADOW REFUSES NOTHING AND PRINTS NOTHING. It records one row per edit, so that before the check
 // may refuse anyone, every would-be refusal can be put to the owner as right or wrong (the gate
 // ruled on #600). Every way it cannot look is a row of its own — "could not look" never reads as
-// "nothing found". Only `"mode": "shadow"` exists; any other mode is recorded as not measured.
+// "nothing found".
+//
+// REFUSE DENIES TWO THINGS, AND SAYS WHEN IT COULD NOT LOOK. An edit that ADDS a reach the
+// project's exception list does not allow is refused, with the project's own sentence for each
+// reach — the remedy is the project's to word, so when the adapter gives none the refusal says so
+// instead of inventing one. An edit to one of the check's own files is refused with the files
+// named: it is a design change, never judged by the check it changes, and it goes through only on
+// a go the user gave (`structure-guard.js --allow-check-edit`), which is a dated marker for that
+// one file. Every way the check cannot look — missing, crashing, too slow, a Node too old for it,
+// an exception list it cannot read — is NOT MEASURED and SAID to the session: an edit a refusing
+// check did not judge must never read as one it passed. A mode that is neither is not measured.
 // ANVI_STRUCTURE_CHECK_TIMEOUT_MS raises it for a run that needs more — the suite on a heavily
 // loaded machine, where Node's own startup can pass 3 s and a crashing check is then recorded
 // as too slow instead of as the crash it is (#638). It never lifts the hook past its budget:
@@ -392,13 +403,74 @@ const HOOK_BUDGET_MS = 10000;
 const EXIT_MARGIN_MS = 1500;
 const CHECK_MIN_MS = 500;
 
-function shadowLogPath(stateDir, entryDir) {
+const CHECK_MODES = ['shadow', 'refuse'];
+// How long a go for one of the check's own files lasts. A hook cannot know whether the edit it
+// allowed then landed, so a go cannot be spent by use; it runs out instead.
+const GO_TTL_MS = 15 * 60 * 1000;
+
+function packageId(entryDir) {
   let dir = entryDir;
   try { dir = fs.realpathSync(entryDir); } catch { /* the registered path as written */ }
-  return path.join(stateDir, 'shadow', crypto.createHash('sha1').update(dir).digest('hex').slice(0, 16) + '.jsonl');
+  return crypto.createHash('sha1').update(dir).digest('hex').slice(0, 16);
 }
 
-// The row for one edit, or null when there is nothing to record (no registered check).
+// One log per registered package, whatever the mode: a refusing check's rows continue the
+// shadow run's, so the reader sees one history.
+function shadowLogPath(stateDir, entryDir) {
+  return path.join(stateDir, 'shadow', packageId(entryDir) + '.jsonl');
+}
+
+// The marker a go leaves: one per registered package and file, so it holds in every checkout of
+// the repository and for nothing else.
+function goPath(stateDir, entryDir, rel) {
+  return path.join(stateDir, 'check-go', `${packageId(entryDir)}-${crypto.createHash('sha1').update(rel).digest('hex').slice(0, 12)}`);
+}
+
+// When the live go for this file was given, or null. Anything but a readable, recent marker is no go.
+function liveGo(stateDir, entryDir, rel, now = Date.now()) {
+  try {
+    const at = fs.statSync(goPath(stateDir, entryDir, rel)).mtimeMs;
+    return now - at <= GO_TTL_MS && at <= now + 60000 ? new Date(at).toISOString() : null;
+  } catch { return null; }
+}
+
+function recordGo(stateDir, entryDir, rel) {
+  const f = goPath(stateDir, entryDir, rel);
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, `${new Date().toISOString()}\t${rel}\n`);
+  return f;
+}
+
+const goCommand = (entryDir, rel) => {
+  const q = require('./structure-rules.js').shellWord;
+  return `  node ~/.claude/anvi/scripts/structure-guard.js --package ${q(entryDir)} --allow-check-edit ${q(rel)}`;
+};
+
+function checkFileRefusal(pkgName, rel, files, entryDir) {
+  return `BLOCKED by ${pkgName}'s own check: this edit to ${rel} changes the check itself. Its files are:\n` +
+    files.map(f => `  · ${f}`).join('\n') + '\n' +
+    'An edit to any of them is a design change, so it is never judged by the check it changes. That is the user\'s ' +
+    `decision — ask them. With their explicit go, this allows edits to ${rel} for the next ${GO_TTL_MS / 60000} minutes, in any ` +
+    'checkout of the repository, and records the go:\n' + goCommand(entryDir, rel);
+}
+
+// The project's words, not this hook's: each reach carries the sentence the project's own check
+// gives for it. A reach the adapter sent no sentence for says so — a remedy invented here would
+// be anvi's opinion about a boundary it does not own.
+function reachRefusal(pkgName, rel, chances, remedies, files) {
+  const n = chances.length;
+  return `BLOCKED by ${pkgName}'s own check: this edit to ${rel} adds ${n} reach${n === 1 ? '' : 'es'} its exception list does not allow:\n` +
+    chances.map(c => `  · ${c.rule}: ${c.reach}\n      ` + (typeof remedies[c.reach] === 'string' && remedies[c.reach].trim()
+      ? remedies[c.reach].trim()
+      : '(the project\'s check gave no remedy for this reach — read the check\'s own files, below)')).join('\n') + '\n' +
+    `The rule and the words above are ${pkgName}'s own. An exception is the project's to grant, not this edit's: its list ` +
+    'changes only by the user\'s decision — ask them. The check\'s own files, which this guard also refuses edits to without a go:\n' +
+    files.map(f => `  · ${f}`).join('\n');
+}
+
+// The row for one edit, or null when there is nothing to record (no registered check). In refuse
+// mode a row may also carry what the hook must do with it: `refused` with its `reason`, or a
+// `notice` with its `noticeKind`. Those three are for the hook, and are not written to the log.
 function shadowCheck(payload, deps) {
   const { registry } = deps;
   const tool = payload && payload.tool_name;
@@ -413,21 +485,45 @@ function shadowCheck(payload, deps) {
   const unmeasured = why => ({ ...row, rel: row.rel || owner.rel, outcome: 'not-measured', why });
   // Once the package is known, a failure of its own is a row too — never a missing one.
   try { return judgeWithCheck(owner, abs, tool, input, row, unmeasured, deps); }
-  catch (e) { return unmeasured(`the shadow check failed: ${e && e.message}`); }
+  catch (e) { return said(owner, unmeasured(`the shadow check failed: ${e && e.message}`)); }
 }
 
-function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, spawn, nodeMajor, budgetMs = CHECK_TIMEOUT_MS }) {
+// A refusing check that could not look says so (once per session per reason): the row alone is
+// read by a person later, and until then the edit would look judged.
+function said(owner, row) {
   const check = owner.entry.check;
+  if (!check || check.mode !== 'refuse' || row.outcome !== 'not-measured') return row;
+  return { ...row, noticeKind: 'check-' + crypto.createHash('sha1').update(row.why).digest('hex').slice(0, 12),
+    notice: `structure guard: NOT MEASURED — ${path.basename(owner.dir)}'s own check could not judge the edit to ${row.rel}: ${row.why}. ` +
+      'It is set to refuse, and this edit was NOT checked by it — that is not a pass.' };
+}
+
+function judgeWithCheck(owner, abs, tool, input, row, plainUnmeasured, { readFile, spawn, nodeMajor, budgetMs = CHECK_TIMEOUT_MS, stateDir = STATE_DIR, now = Date.now() }) {
+  const check = owner.entry.check;
+  const pkgName = path.basename(owner.dir);
+  const unmeasured = why => said(owner, plainUnmeasured(why));
 
   if (!check || typeof check.adapter !== 'string' || typeof check.root !== 'string')
     return unmeasured('the registry entry\'s "check" needs "adapter" and "root"');
   const root = path.resolve(owner.dir, check.root);
   row.rel = path.relative(root, realNear(abs)).split(path.sep).join('/');
   if (row.rel.startsWith('..')) return unmeasured(`the edited file is outside the check's root ${root}`);
-  if (check.mode !== 'shadow') return unmeasured(`check mode ${JSON.stringify(check.mode)} is not supported — only "shadow" exists`);
+  if (!CHECK_MODES.includes(check.mode)) return unmeasured(`check mode ${JSON.stringify(check.mode)} is not supported — it is "shadow" or "refuse"`);
+  row.mode = check.mode;
+  const refusing = check.mode === 'refuse';
+  const files = Array.isArray(check.files) ? check.files.filter(f => typeof f === 'string') : [];
+  // A refusing check with no files named would judge edits to itself — by the thing they change.
+  if (refusing && !files.length) return unmeasured('a check set to refuse needs "files" — the check\'s own files, so an edit to them is put to the user');
+  // An edit to the check itself is a design change: never judged by the check it changes (#600).
+  // Before the tool is asked about: naming the file needs no reading of the edit, so a tool whose
+  // shape is not judged is still refused here.
+  if (files.includes(row.rel)) {
+    if (!refusing) return { ...row, outcome: 'check-file' };
+    const go = liveGo(stateDir, owner.entry.dir, row.rel, now);
+    return go ? { ...row, outcome: 'check-file', go }
+      : { ...row, outcome: 'check-file', refused: true, reason: checkFileRefusal(pkgName, row.rel, files, owner.entry.dir) };
+  }
   if (!JUDGED_TOOLS.includes(tool)) return unmeasured(UNJUDGED_TOOLS[tool]);
-  // An edit to the check itself is a design change: never judged by the thing it changes (#600).
-  if ((check.files || []).includes(row.rel)) return { ...row, outcome: 'check-file' };
   // The lowest Node is the CHECK's property, not this hook's: stave's is TypeScript loaded through
   // Node's type stripping (23+), a plain JavaScript check runs on any Node this hook runs on.
   if (check.node !== undefined && !(nodeMajor >= check.node))
@@ -453,7 +549,8 @@ function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, sp
   let out;
   try { out = JSON.parse(r.stdout); } catch { return unmeasured('the check printed no JSON'); }
   const reaches = x => Array.isArray(x) && x.every(e => e && typeof e.reach === 'string' && typeof e.rule === 'string');
-  if (!out || typeof out.examined !== 'number' || !reaches(out.before) || !reaches(out.after) || !Array.isArray(out.allowed))
+  const sentences = x => x === undefined || (x && typeof x === 'object' && !Array.isArray(x) && Object.values(x).every(v => typeof v === 'string'));
+  if (!out || typeof out.examined !== 'number' || !reaches(out.before) || !reaches(out.after) || !Array.isArray(out.allowed) || !sentences(out.remedies))
     return unmeasured('the check\'s answer has the wrong shape — its interface may have moved');
   // Outside the check's population (a test, a file inside the area it guards): not a chance.
   if (out.examined === 0) return { ...row, outcome: 'outside' };
@@ -462,10 +559,20 @@ function judgeWithCheck(owner, abs, tool, input, row, unmeasured, { readFile, sp
   const added = out.after.filter(e => !had.has(e.reach)).map(e => ({ rule: e.rule, reach: e.reach, onList: allowed.has(e.reach) }));
   // On disk already and not on the list: landed outside any edit hook. Said apart, never this edit's.
   const landed = out.before.filter(e => !allowed.has(e.reach)).map(e => e.reach);
-  return { ...row, outcome: 'judged', added, landed };
+  const judged = { ...row, outcome: 'judged', added, landed };
+  if (!refusing) return judged;
+  const chances = added.filter(a => !a.onList);
+  if (chances.length) return { ...judged, refused: true, reason: reachRefusal(pkgName, row.rel, chances, out.remedies || {}, files) };
+  // Off the list and on disk before this edit: not this edit's, so not refused — and not passed
+  // in silence either, which would grandfather it by neglect (the graph rule's #544, here).
+  if (landed.length) return { ...judged, noticeKind: 'check-landed-' + crypto.createHash('sha1').update(row.rel).digest('hex').slice(0, 12),
+    notice: `structure guard: ${row.rel} already carries ${landed.length} reach${landed.length === 1 ? '' : 'es'} that ${pkgName}'s own check does not allow — ` +
+      `${landed.join(', ')}. ${landed.length === 1 ? 'It' : 'They'} landed outside the edit hook (a Bash command, a merge, a hand edit), so this edit is ` +
+      'not refused for it. Removing it, or adding an exception to the project\'s list, is the user\'s decision — ask them.' };
+  return judged;
 }
 
-function recordShadow(stateDir, entryDir, row) {
+function recordShadow(stateDir, entryDir, { reason, notice, noticeKind, ...row }) {
   const f = shadowLogPath(stateDir, entryDir);
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.appendFileSync(f, JSON.stringify(row) + '\n');
@@ -564,7 +671,7 @@ function noticesOnce(sessionId, notices, stateDir) {
 }
 
 module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
-  shadowCheck, shadowLogPath, recordShadow, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
+  shadowCheck, shadowLogPath, recordShadow, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
 if (require.main === module) {
   // What this run costs, one row per run (#527). Guarded like any shared module: a
@@ -587,37 +694,58 @@ if (require.main === module) {
       // The fast path: no registry, nothing to guard, nothing else loaded.
       if (!fs.existsSync(REGISTRY)) process.exit(0);
       const registry = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'));
-      const result = evaluate(payload, {
-        registry,
-        readFile: f => fs.readFileSync(f, 'utf8'),
-        rules: require('./structure-rules.js'),
-        graph: require('./structure-graph.js'),
-        stateDir: STATE_DIR,
-      });
-      // The project's own check, in shadow (#600): after the decision, and unable to change it —
-      // its own failures are caught here and recorded as a row, never thrown into the decision.
+      // The graph rule's own failure is caught apart (fail open, recorded, said): the project's
+      // check is a second judge, and one judge crashing must not send the other home.
+      let result;
+      try {
+        result = evaluate(payload, {
+          registry,
+          readFile: f => fs.readFileSync(f, 'utf8'),
+          rules: require('./structure-rules.js'),
+          graph: require('./structure-graph.js'),
+          stateDir: STATE_DIR,
+        });
+      } catch (e) { result = { decision: 'failed', error: e }; }
+      // The project's own check (#600): after the graph decision, on what is left of the budget.
+      // In shadow it cannot change the decision; set to refuse it is a second refusal beside the
+      // graph rule's. Its own failures are a row (and, when refusing, a notice) — never thrown.
+      let row = null;
       try {
         const t0 = Date.now();
         const budgetMs = HOOK_BUDGET_MS - (t0 - started) - EXIT_MARGIN_MS;
-        const row = shadowCheck(payload, { registry, readFile: f => fs.readFileSync(f, 'utf8'), spawn: require('child_process').spawnSync,
-          nodeMajor: Number(process.versions.node.split('.')[0]), budgetMs });
-        if (row) recordShadow(STATE_DIR, row.package, { ts: new Date().toISOString(), ...row, ms: Date.now() - t0, budgetMs, graph: result.decision });
+        row = shadowCheck(payload, { registry, readFile: f => fs.readFileSync(f, 'utf8'), spawn: require('child_process').spawnSync,
+          nodeMajor: Number(process.versions.node.split('.')[0]), budgetMs, stateDir: STATE_DIR });
+        if (row) row = { ts: new Date().toISOString(), ...row, ms: Date.now() - t0, budgetMs, graph: result.decision };
       } catch (e) {
         try { recordFailure(LOG, `${new Date().toISOString()}\tshadow check: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}\n`); } catch { /* nothing more to do */ }
       }
-      if (result.decision === 'deny') {
+      // Recording is apart from deciding: a log that cannot be written must not lose a refusal.
+      if (row) try { recordShadow(STATE_DIR, row.package, row); } catch (e) {
+        try { recordFailure(LOG, `${new Date().toISOString()}\tshadow row not written: ${e && e.message}\n`); } catch { /* nothing more to do */ }
+      }
+      // Both judges refuse on their own (ruled on #600), in one answer: a hook prints one decision.
+      const reasons = [result.decision === 'deny' ? result.reason : null, row && row.refused ? row.reason : null].filter(Boolean);
+      if (reasons.length) {
+        const reason = reasons.join('\n\n');
         process.stdout.write(JSON.stringify({ hookSpecificOutput: {
-          hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.reason } }));
-        process.stderr.write(result.reason + '\n');
+          hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }));
+        process.stderr.write(reason + '\n');
         process.exit(2);
       }
+      const notices = [];
+      if (result.decision === 'failed') {
+        const e = result.error;
+        try { recordFailure(LOG, `${new Date().toISOString()}\t${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}\n`); } catch { /* nothing more to do */ }
+        notices.push([undefined, `structure guard: FAILED and allowed the edit — ${e && e.message}. Details in ${LOG}.`]);
+      }
       if (result.decision === 'unmeasured')
-        noticeOnce(payload.session_id, result.noticeKind
+        notices.push([result.noticeKind, result.noticeKind
           ? `structure guard: NOT MEASURED — ${result.why}. Edits made with it are not being checked; Write and Edit still are.`
-          : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`, STATE_DIR, result.noticeKind);
+          : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`]);
       if (result.decision === 'allow')
-        noticesOnce(payload.session_id, [['fixed', result.notice], ['landed', result.landedNotice],
-          [result.unmappedKind, result.unmappedNotice]].filter(([, t]) => t), STATE_DIR);
+        notices.push(['fixed', result.notice], ['landed', result.landedNotice], [result.unmappedKind, result.unmappedNotice]);
+      if (row && row.notice) notices.push([row.noticeKind, row.notice]);
+      noticesOnce(payload.session_id, notices.filter(([, t]) => t), STATE_DIR);
       process.exit(0);
     } catch (e) {
       // Fail open on its own bugs — and record it, because a crash and "nothing to refuse"

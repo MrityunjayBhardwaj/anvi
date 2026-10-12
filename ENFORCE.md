@@ -1560,22 +1560,23 @@ loosened until it stops firing guards nothing.
   refusals, never by a window's count. Not counted as chances: a new cycle inside one component,
   and edits through Bash. Over stave's 60 days to 2026-10-02: 697 edits landed, 405 computed, 0
   chances, 12 crossings all allowed — the replay's figure, reached by another route.
-- **The project's own check, in SHADOW (`scripts/structure-shadow.js`, #600).** What counts as a
-  violation belongs to the codebase; anvi owns the moment, the record and "not measured". A
-  registry entry may name `"check": { "adapter", "root", "files", "mode": "shadow", "node"? }`: `adapter` is
+- **The project's own check, in SHADOW or set to REFUSE (`scripts/structure-shadow.js`, #600).** What counts as a
+  violation belongs to the codebase; anvi owns the moment, the record, the refusal and "not measured". A
+  registry entry may name `"check": { "adapter", "root", "files", "mode": "shadow" | "refuse", "node"? }`: `adapter` is
   a program kept beside the registry (stave's is in the store, `instances/stave-boundary-adapter.mjs`,
   calling stave's own `measureBoundary`), `root` is the repository root relative to the package dir,
   `files` are the check's own files (repo-relative). After the graph decision, the hook runs the
   adapter as a child of its Node with `{ root, rel, before, after }` on stdin; it answers
-  `{ examined, before, after, allowed }` — the reaches the project's check finds in each version of
-  the file, and those its exception list allows for that file. A chance is a reach the edit ADDS
+  `{ examined, before, after, allowed, remedies? }` — the reaches the project's check finds in each version of
+  the file, those its exception list allows for that file, and for a reach it does not allow, the
+  project's own sentence about it (`{ "<reach>": "<sentence>" }`). A chance is a reach the edit ADDS
   that the list does not allow; a reach already on disk and off the list is recorded as landed, not
   charged to the edit. **Shadow refuses nothing and prints nothing**: it appends one row per edit to
   `~/.claude/structure-guard-cache/shadow/<package id>.jsonl` and cannot change the decision. Every
   way it cannot look is a `not-measured` row with its reason — the adapter crashing, hanging past
   its time, printing no JSON or the wrong shape, a Node below the check's own `node` (stave's: 23, for type
-  stripping), a MultiEdit, a mode other than
-  shadow, a failure of the shadow step itself. **Its time is what is left of the hook's budget
+  stripping), a MultiEdit, a mode that is neither
+  shadow nor refuse, a failure of the step itself. **Its time is what is left of the hook's budget
   (#607)**: it runs before the decision is printed, and a hook killed at its 10 s timeout lets the
   edit through, so a slow check after a cold graph build would lose a refusal the graph rule had
   already decided. It gets at most 3 s, never more than the registered 10 s less the time already
@@ -1591,6 +1592,32 @@ loosened until it stops firing guards nothing.
   list → check-file; 0.2–0.6 s per edit. The 60-day replay planned first could not be run: the
   area the check guards was created on 2026-10-01, and 311 of 404 past edits have no recorded
   prior content for the check's type checker to read.
+  **Set to refuse (`"mode": "refuse"`), it is a second judge beside the graph rule** (ruled on
+  #600: both refuse). An edit that adds a reach off the project's list is denied with
+  `BLOCKED by <package>'s own check: this edit to <file> adds N reach(es) …`, each reach followed
+  by the project's own sentence; a reach the adapter sent no sentence for says so, because a remedy
+  worded here would be anvi's opinion about a boundary it does not own. When the graph rule
+  refuses the same edit, one answer carries both refusals. A reach off the list that was on disk
+  before the edit is said once per session and not refused. **An edit to one of the check's own
+  files is denied with every file named** — whatever the tool, MultiEdit included, since naming the
+  file needs no reading of the edit — until the user gives a go:
+  `structure-guard.js --package <registered dir> --allow-check-edit <repo-relative file>` writes a
+  dated marker (`structure-guard-cache/check-go/`) for that one file, good for 15 minutes in any
+  checkout of the repository; the row then carries `go`. A go cannot be spent by use, because a
+  hook cannot know whether the edit it allowed landed; it runs out instead. A refusing check with
+  no `files` is not measured: it would judge edits to itself. **Every way a refusing check cannot
+  look is SAID** — `structure guard: NOT MEASURED — <package>'s own check could not judge the
+  edit …`, once per session per reason, as well as recorded: the check missing, crashing, slower
+  than its time, on a Node below its own minimum, unable to read its exception list. None of them
+  denies and none is silent. The graph rule crashing no longer skips the check: its failure is
+  caught apart, said as before, and the check still judges. Rows from both modes share the one
+  log, each naming its `mode`; `structure-shadow.js` counts them by mode, lists refused reaches
+  apart from would-be ones, and says for each edit to the check whether it was refused or went
+  through on a go. `structure-refusals.js` counts a refusal by the check alone apart from the
+  graph rule's (it is not a chance for the design) and lists it for a ruling. **Nothing is armed
+  by this**: stave's entry stays `"mode": "shadow"` until the shadow gate above is met and the
+  owner has ruled on every would-be refusal. Observed in fixtures through the hook as a process;
+  on stave, see #600.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
   judged at edit time. The report over the package — `--package <dir> --design <d>

@@ -87,7 +87,7 @@ console.log('\nWHAT IS NOT A REFUSAL BY THIS GUARD:');
   // 2 sessions: the golden record keeps the real session it was captured from.
   ok(/3 Write\/Edit\/MultiEdit calls in 2 sessions/.test(r.out),
      `edits outside the package, before the window, and Bash calls are not counted; a subagent's transcript is (${(r.out.match(/(\d+) Write\/Edit/) || [])[1]} counted)`);
-  ok(/1 applied · 1 REFUSED by the guard · 1 denied by another hook or a permission rule · 0 errored otherwise/.test(r.out) && /UNRECOGNISED shape: 0/.test(r.out),
+  ok(/1 applied · 1 REFUSED by the guard · 0 refused by the project's own check alone · 1 denied by another hook or a permission rule · 0 errored otherwise/.test(r.out) && /UNRECOGNISED shape: 0/.test(r.out),
      'another hook\'s block is an error, not this guard\'s refusal; the golden refusal is still the only one');
   ok(!/src\/a\.ts -> src\/z\.ts/.test(r.out) && !/src\/c\.ts/.test(r.out), 'neither the outside nor the early refusal is listed');
 }
@@ -115,7 +115,7 @@ console.log('\nNOTICES — said, not refused, each counted by kind:');
   ];
   fs.writeFileSync(path.join(TX, 'project-a', 'notices.jsonl'), lines.join('\n') + '\n');
   const r = run('--package', PKG, '--since', '2026-09-25T00:00:00Z');
-  ok(/on disk 1 · fixed 1 · not measured 1 · failed 0 · unmapped 1/.test(r.out),
+  ok(/on disk 1 · fixed 1 · not measured 1 · failed 0 · unmapped 1 · check: on disk 0/.test(r.out),
      `a joined output counts both its kinds, and another hook's context counts as none (${(r.out.match(/notices said[^\n]*/) || [''])[0]})`);
   ok(/5 applied · 1 REFUSED/.test(r.out), 'an edit with a notice is still an applied edit');
 }
@@ -389,6 +389,49 @@ console.log('\nBAD INPUT IS NOT MEASURED, never a clean zero:');
   ok(run('--package', PKG, '--since', '2026-09-25T00:00:00Z', '--bogus', 'x').exit === 2, 'an unknown flag');
   const empty = spawnSync('node', [SCRIPT, '--transcripts', path.join(DIR, 'none'), '--package', PKG, '--since', '2026-09-25T00:00:00Z'], { encoding: 'utf8' });
   ok(empty.status === 2 && /no transcripts/.test(empty.stdout), 'a transcripts directory with nothing in it');
+}
+
+console.log('\nTHE PROJECT\'S OWN CHECK REFUSING (#600) — a second judge, counted apart from the graph rule:');
+{
+  const tx = path.join(DIR, 'transcripts-check');
+  fs.mkdirSync(path.join(tx, 'p'), { recursive: true });
+  const CHECK = 'BLOCKED by pkg\'s own check: this edit to pkg/src/a.ts adds 1 reach its exception list does not allow:\n  · owner: owner#acorn\n';
+  const GRAPH = 'BLOCKED: this edit to src/b.ts adds 1 import that erode x:\n  · divergence: src/b.ts -> src/z.ts\n';
+  const alone = use('Edit', path.join(PKG, 'src/a.ts'), T0, 'sess-c');
+  const both = use('Edit', path.join(PKG, 'src/b.ts'), T0, 'sess-c');
+  const fine = use('Edit', path.join(PKG, 'src/c.ts'), T0, 'sess-c');
+  const said = use('Edit', path.join(PKG, 'src/d.ts'), T0, 'sess-c');
+  fs.writeFileSync(path.join(tx, 'p', 'check.jsonl'), [
+    alone.line, result(alone.id, 'PreToolUse:Edit hook error: ' + CHECK, true),
+    both.line, result(both.id, 'PreToolUse:Edit hook error: ' + GRAPH + '\n' + CHECK, true),
+    fine.line, result(fine.id, 'The file has been updated successfully.', false),
+    said.line, notice(said.id, 'Edit', 'structure guard: pkg/src/d.ts already carries 1 reach that pkg\'s own check does not allow — door#old.'),
+    result(said.id, 'The file has been updated successfully.', false),
+  ].join('\n') + '\n');
+  const r = runIn(tx, '--package', PKG, '--since', '2026-09-25T00:00:00Z');
+  ok(/2 applied · 1 REFUSED by the guard · 1 refused by the project's own check alone · 0 denied by another hook/.test(r.out) && /UNRECOGNISED shape: 0/.test(r.out),
+     `the check's refusal is neither the graph rule's nor another hook's: counted on its own (${(r.out.match(/edits in the package[^\n]*/) || [''])[0].slice(0, 160)})`);
+  ok(/REFUSED BY THE PROJECT'S OWN CHECK ALONE — 1 of 4 edits/.test(r.out) && /1\. \S+ sess-c\s+Edit .*src\/a\.ts/.test(r.out) && r.exit === 1,
+     `and listed for a ruling, exit 1 (got ${r.exit})`);
+  ok(/divergence src\/b\.ts -> src\/z\.ts\n\s+\(the project's own check refused this edit too\)/.test(r.out),
+     'an edit both judges refused is the graph rule\'s refusal, and says the check refused it too');
+  ok(/check: on disk 1/.test(r.out), 'the check\'s notice of a reach already on disk is counted by its own kind');
+  // Only the check refused: the line must not read as a clean window for the hook as a whole.
+  const only = path.join(DIR, 'transcripts-check-only');
+  fs.mkdirSync(path.join(only, 'p'), { recursive: true });
+  const a2 = use('Edit', path.join(PKG, 'src/a.ts'), T0, 'sess-d');
+  fs.writeFileSync(path.join(only, 'p', 'c.jsonl'), [a2.line, result(a2.id, CHECK, true)].join('\n') + '\n');
+  const o = runIn(only, '--package', PKG, '--since', '2026-09-25T00:00:00Z');
+  ok(o.exit === 1 && /no refusal by the graph rule in 1 edits/.test(o.out) && /REFUSED BY THE PROJECT'S OWN CHECK ALONE — 1 of 1/.test(o.out),
+     `a window where only the check refused says whose zero it is, bare wrapper included (exit ${o.exit})`);
+  // The check's words inside a wrapper this reader does not know: drift, never a quiet zero.
+  const drift = path.join(DIR, 'transcripts-check-drift');
+  fs.mkdirSync(path.join(drift, 'p'), { recursive: true });
+  const a3 = use('Edit', path.join(PKG, 'src/a.ts'), T0, 'sess-e');
+  fs.writeFileSync(path.join(drift, 'p', 'c.jsonl'), [a3.line, result(a3.id, 'Hook denied (new wording): ' + CHECK, true)].join('\n') + '\n');
+  const d = runIn(drift, '--package', PKG, '--since', '2026-09-25T00:00:00Z');
+  ok(/UNRECOGNISED shape: 1/.test(d.out) && /0 refused by the project's own check alone/.test(d.out) && d.exit === 2,
+     `the check's words in an unknown wrapper are UNRECOGNISED, not denied-by-another (exit ${d.exit})`);
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
