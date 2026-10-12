@@ -55,6 +55,15 @@ const REGISTRY = path.join(os.homedir(), '.claude', 'structure-guard.json');
 const STATE_DIR = path.join(os.homedir(), '.claude', 'structure-guard-cache');
 const LOG = path.join(STATE_DIR, 'errors.log');
 
+// A path as the file system stores it: symlinks followed AND the stored letter case (#660). On a
+// file system that ignores case (the macOS default) `fs.realpathSync` keeps the case it was given,
+// so the same file reached as `packages/EDITOR/…` compared unequal to its registered directory —
+// the edit belonged to "no registered package" and passed with no record — and a check's own file
+// in another case was not recognised as one. The native call returns the stored name.
+function stored(p) {
+  try { return fs.realpathSync.native(p); } catch { return fs.realpathSync(p); }
+}
+
 // The existing part of a path, resolved through symlinks, with the rest re-attached — a Write
 // may name a file (and directories) that do not exist yet.
 function realNear(p) {
@@ -66,7 +75,7 @@ function realNear(p) {
     tail.unshift(path.basename(head));
     head = up;
   }
-  try { head = fs.realpathSync(head); } catch { /* keep as resolved */ }
+  try { head = stored(head); } catch { /* keep as resolved */ }
   return path.join(head, ...tail);
 }
 
@@ -148,7 +157,7 @@ function packageFor(filePath, registry) {
   for (const entry of (registry && Array.isArray(registry.packages) ? registry.packages : [])) {
     if (!entry || typeof entry.dir !== 'string') continue;
     let dir;
-    try { dir = fs.realpathSync(entry.dir); } catch { continue; }
+    try { dir = stored(entry.dir); } catch { continue; }
     const hit = checkoutMatch(target, dir);
     if (!hit) continue;
     if (!best || hit.dir.length > best.dir.length) best = { entry, ...hit };

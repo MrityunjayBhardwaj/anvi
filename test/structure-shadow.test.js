@@ -364,6 +364,23 @@ console.log('\nTHE READING — never a pass; chances are put to the owner, no ch
   ok(read('not-a-date').exit === 2, 'a --since that is not a time is NOT MEASURED');
 }
 
+console.log('\nA PATH IN ANOTHER LETTER CASE (#660) — the same file, so the same judgement:');
+{
+  // Only a file system that ignores case can show this; on one that does not, the other spelling
+  // is another file, and saying so beats passing in silence.
+  const other = path.join(REPO, 'PKG', 'src', 'low', 'a.ts');
+  if (!fs.existsSync(other)) console.log('  – not applicable here: this file system distinguishes case, so a differently-cased path is a different file');
+  else {
+    const owner = H.packageFor(other, { packages: [entry(REFUSE)] });
+    ok(owner && owner.rel === 'src/low/a.ts' && owner.dir === PKG, `a path with the package directory in another case still belongs to the package (${owner && owner.rel})`);
+    const r = refuse({ ...BAD, tool_input: { ...BAD.tool_input, file_path: other } });
+    ok(r && r.refused === true && r.rel === 'pkg/src/low/a.ts', 'and an edit through it is judged and refused like any other');
+    const c = refuse(write('pkg/src/check/BOUNDARY.ts', 'export const rule = 3;\n'), REFUSE, { stateDir: path.join(DIR, 'no-go-here') });
+    ok(c && c.outcome === 'check-file' && c.refused === true && c.rel === 'pkg/src/check/boundary.ts',
+       `a check's own file named in another case is still the check's own file (${c && c.outcome}, ${c && c.rel})`);
+  }
+}
+
 // A second home, so the shadow run read above keeps its own log.
 const HOME2 = path.join(DIR, 'home2');
 const STATE2 = path.join(HOME2, '.claude', 'structure-guard-cache');
