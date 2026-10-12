@@ -270,7 +270,7 @@ console.log('\nSET TO REFUSE, AND COULD NOT LOOK — every failure is said as no
     const r = refuse(BAD, check);
     ok(r && r.outcome === 'not-measured' && why.test(r.why) && !('refused' in r) &&
        /^structure guard: NOT MEASURED — pkg's own check could not judge the edit to pkg\/src\/low\/a\.ts: /.test(r.notice || '') === (check.mode === 'refuse'),
-       `${what} → not measured${check.mode === 'refuse' ? ', said' : ' (a mode nobody set to refuse says nothing)'}, never refused (${r && r.why.slice(0, 60)})`);
+       `${what} → not measured${check.mode === 'refuse' ? ', said' : ' (a mode nobody set to refuse says nothing)'}, never refused (${String(r && r.why).slice(0, 60)})`);
   }
   const slow = refuse(BAD, { ...REFUSE, adapter: HANG }, { budgetMs: 800 });
   ok(slow.outcome === 'not-measured' && /longer than 800 ms/.test(slow.why) && /that is not a pass/.test(slow.notice) && !('refused' in slow),
