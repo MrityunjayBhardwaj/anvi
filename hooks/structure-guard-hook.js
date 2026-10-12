@@ -541,9 +541,11 @@ function judgeWithCheck(owner, abs, tool, input, row, plainUnmeasured, { readFil
   if (r.error) return unmeasured(r.error.code === 'ETIMEDOUT' ? `the check took longer than ${timeout} ms` : `the check could not run: ${r.error.message}`);
   if (r.status !== 0) {
     // Node ends an uncaught error with its own version line, so the last line says nothing: the
-    // line naming the error does.
+    // line naming the error does. And it BEGINS with the error's name — Node prints the source line
+    // that threw first, and `throw new Error(...)` there would be quoted in place of the message.
     const lines = String(r.stderr || '').split('\n').map(l => l.trim()).filter(Boolean);
-    const said = lines.find(l => /\b\w*Error\b/.test(l)) || lines.find(l => !/^Node\.js v/.test(l)) || 'no message';
+    const said = lines.find(l => /^(?:Uncaught )?[\w.]*Error\b/.test(l)) || lines.find(l => /\b\w*Error\b/.test(l)) ||
+      lines.find(l => !/^Node\.js v/.test(l)) || 'no message';
     return unmeasured(`the check exited ${r.status}${r.signal ? ` (${r.signal})` : ''}: ${said.slice(0, 300)}`);
   }
   let out;

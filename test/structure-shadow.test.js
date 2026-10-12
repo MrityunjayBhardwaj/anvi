@@ -87,6 +87,7 @@ function main({ root, rel, before, after }) {
 const LISTLESS = adapter('listless-check.js', fs.readFileSync(GOOD, 'utf8').split(JSON.stringify(LIST)).join(JSON.stringify(path.join(DIR, 'no-such-list.json'))));
 const BADREMEDY = adapter('badremedy-check.js', READ_STDIN + "function main() { process.stdout.write(JSON.stringify({ examined: 1, before: [], after: [], allowed: [], remedies: ['x'] })); }\n");
 const CRASH = adapter('crash-check.js', "process.stderr.write('boom: cannot find module typescript\\n'); process.exit(3);\n");
+const THROW = adapter('throw-check.js', "function f() { throw new Error('boundary: cannot map the subpath'); }\nf();\n");
 const HANG = adapter('hang-check.js', 'setTimeout(() => {}, 60000);\n');
 const GARBAGE = adapter('garbage-check.js', "process.stdout.write('not json');\n");
 const MOVED = adapter('moved-check.js', READ_STDIN + "function main() { process.stdout.write(JSON.stringify({ reaches: [] })); }\n");
@@ -152,6 +153,7 @@ console.log('\nCOULD NOT LOOK — every failure is not-measured, with its reason
   const e = edit('pkg/src/low/a.ts', 'export const a = 1;\n', '// REACH:owner:owner#acorn\nexport const a = 1;\n');
   const cases = [
     ['a crash', { ...CHECK, adapter: CRASH }, /exited 3: boom: cannot find module typescript/],
+    ['an uncaught error, by its message and not the source line that threw', { ...CHECK, adapter: THROW }, /exited 1: Error: boundary: cannot map the subpath$/],
     ['garbage on stdout', { ...CHECK, adapter: GARBAGE }, /printed no JSON/],
     ['a moved interface', { ...CHECK, adapter: MOVED }, /wrong shape/],
     ['a missing adapter', { ...CHECK, adapter: path.join(DIR, 'nope.js') }, /exited 1: Error: Cannot find module/],
