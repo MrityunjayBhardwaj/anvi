@@ -11,6 +11,13 @@
 //     `PreToolUse:<Tool> hook error: BLOCKED: this edit to ` — the hook's reason, verbatim.
 //     The record's `toolDenialKind` is `permission-rule`, but that also marks ordinary
 //     permission rules, so the content is what identifies the guard.
+//   · a REFUSAL BY THE PROJECT'S OWN CHECK (#600) is the same record whose content begins
+//     `BLOCKED by <package>'s own check: this edit to ` — the hook's second judge. Alone, it is
+//     counted apart: it is not the graph rule's refusal and not a chance for the design. When
+//     both judges refuse, the hook prints the graph rule's reason first and the check's after it,
+//     so that edit is the graph rule's refusal and is marked as refused by the check too. That
+//     wording is this repository's own (hooks/structure-guard-hook.js), built in fixtures; no
+//     real session has produced one yet.
 //   · a NOTICE (said, not refused) is an `attachment` of type `hook_success`, hookName
 //     `PreToolUse:<Tool>`, whose `stdout` is the hook's JSON with `additionalContext`
 //     beginning `structure guard:`.
