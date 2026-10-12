@@ -282,7 +282,9 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   const known = run('--design', d, '--graph', clean, '--baseline', base, '--write-baseline', path.join(DIR, 'known.json'), '--allow-growth');
   // --ref is the ninth: it needs a git checkout, so its parsing is witnessed in "A BASELINE IS
   // WRITTEN FROM THE DEFAULT BRANCH" below, where it measures a ref the working tree is not on.
-  ok(FLAGS.length === 9 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
+  // --allow-check-edit is the tenth: it judges nothing and takes only --package, so it is
+  // witnessed where its marker is read, in test/structure-shadow.test.js ("A GO").
+  ok(FLAGS.length === 10 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
      `the ${FLAGS.length} known flags all still parse — the check refuses the unknown, not everything (got ${known.status})`);
 
   const out = path.join(DIR, 'written.json');

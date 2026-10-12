@@ -11,6 +11,13 @@
 //     `PreToolUse:<Tool> hook error: BLOCKED: this edit to ` — the hook's reason, verbatim.
 //     The record's `toolDenialKind` is `permission-rule`, but that also marks ordinary
 //     permission rules, so the content is what identifies the guard.
+//   · a REFUSAL BY THE PROJECT'S OWN CHECK (#600) is the same record whose content begins
+//     `BLOCKED by <package>'s own check: this edit to ` — the hook's second judge. Alone, it is
+//     counted apart: it is not the graph rule's refusal and not a chance for the design. When
+//     both judges refuse, the hook prints the graph rule's reason first and the check's after it,
+//     so that edit is the graph rule's refusal and is marked as refused by the check too. That
+//     wording is this repository's own (hooks/structure-guard-hook.js), built in fixtures; no
+//     real session has produced one yet.
 //   · a NOTICE (said, not refused) is an `attachment` of type `hook_success`, hookName
 //     `PreToolUse:<Tool>`, whose `stdout` is the hook's JSON with `additionalContext`
 //     beginning `structure guard:`.
@@ -81,6 +88,11 @@ const REFUSAL = /^(?:PreToolUse:(?:Write|Edit|MultiEdit) hook error: )?BLOCKED: 
 // The guard's own words: they survive a change of wrapper, so finding them outside the known
 // shape means the shape moved, not that the guard went quiet.
 const GUARD_WORDS = /BLOCKED: this edit to .* adds \d+ import/;
+// The project's own check refusing (#600) — a second judge in the same hook, with its own opening
+// words. Alone it is not the graph rule's refusal and not a chance for the design; beside one, in
+// the same answer, the edit is the graph rule's refusal and says the check refused it too.
+const CHECK_REFUSAL = /^(?:PreToolUse:(?:Write|Edit|MultiEdit) hook error: )?BLOCKED by .*'s own check: this edit to /;
+const CHECK_WORDS = /BLOCKED by .*'s own check: this edit to /;
 // `layer` stays readable: transcripts written before the component graph (#554) carry it.
 const VIOLATION = /^\s*·\s*(divergence|layer|cycle):\s*(\S+ -> \S+)\s*$/gm;
 // What each notice says, by its own opening words (hooks/structure-guard-hook.js).
@@ -90,6 +102,7 @@ const NOTICE_KINDS = [
   ['not measured', /NOT MEASURED/],
   ['failed', /FAILED and allowed the edit/],
   ['unmapped', /belongs to no component of/],
+  ['check: on disk', /already carries \d+ reach/],
 ];
 
 function listTranscripts(dir) {
@@ -174,7 +187,9 @@ function readTranscript(file, pkgDir, filter, since, until) {
       c.outcome = 'refused';
       c.reason = text;
       c.violations = [...text.matchAll(VIOLATION)].map(m => ({ rule: m[1], key: m[2] }));
-    } else if (GUARD_WORDS.test(text)) { c.outcome = 'unrecognised'; c.reason = text; }
+      c.checkToo = CHECK_WORDS.test(text);
+    } else if (CHECK_REFUSAL.test(text)) { c.outcome = 'refused by the check'; c.reason = text; }
+    else if (GUARD_WORDS.test(text) || CHECK_WORDS.test(text)) { c.outcome = 'unrecognised'; c.reason = text; }
     // A user's rejection is its own kind, and is not this.
     else if (denialKind === 'permission-rule' || /^PreToolUse:\w+ hook error: /.test(text)) c.outcome = 'denied otherwise';
     else c.outcome = 'errored';
@@ -329,6 +344,7 @@ function main(argv) {
 
   const count = k => calls.filter(c => c.outcome === k).length;
   const refused = calls.filter(c => c.outcome === 'refused');
+  const byCheck = calls.filter(c => c.outcome === 'refused by the check');
   const notices = {};
   for (const c of calls) for (const k of c.notices) notices[k] = (notices[k] || 0) + 1;
   const sessions = new Set(calls.map(c => c.session));
@@ -337,7 +353,8 @@ function main(argv) {
   print(`  read: ${files.length} transcripts under ${dir}` + (unreadable ? ` (${unreadable} unreadable)` : '') +
         (badLines ? ` · ${badLines} unparseable lines skipped` : ''));
   print(`  edits in the package: ${calls.length} Write/Edit/MultiEdit calls in ${sessions.size} sessions — ` +
-        `${count('applied')} applied · ${refused.length} REFUSED by the guard · ${count('denied otherwise')} denied by another hook or a permission rule · ` +
+        `${count('applied')} applied · ${refused.length} REFUSED by the guard · ${count('refused by the check')} refused by the project's own check alone · ` +
+        `${count('denied otherwise')} denied by another hook or a permission rule · ` +
         `${count('errored')} errored otherwise · ${count('no result')} with no result`);
   // Said every time, zero included: an edit the guard never judged is not an edit it passed.
   const unjudged = count('timed out') + count('cancelled');
@@ -380,12 +397,20 @@ function main(argv) {
       print(`    ${i + 1}. ${c.at} ${c.session.slice(0, 8)} ${c.tool} ${c.file}`);
       for (const v of c.violations) print(`         ${v.rule.padEnd(6)} ${v.key}`);
       if (!c.violations.length) print('         (no violation line could be read from the reason — read the transcript)');
+      if (c.checkToo) print('         (the project\'s own check refused this edit too)');
     });
     if (unrecognised.length) print(`  UNRECOGNISED: ${unrecognisedText}`);
   } else if (unrecognised.length) {
     print(`\n  no refusal RECOGNISED — but UNRECOGNISED: ${unrecognisedText}`);
-  } else print(`\n  no refusal in ${calls.length} edits` +
+  } else print(`\n  no refusal${byCheck.length ? ' by the graph rule' : ''} in ${calls.length} edits` +
     (unjudged ? ` — but ${unjudged} of them landed WITHOUT being judged, so this zero covers only the other ${calls.length - unjudged}.` : '.'));
+  // The project's own check refusing alone (#600): not the graph rule's refusal and not a chance
+  // for the design, so it is outside the exposure below — but a refusal a person must rule on.
+  if (byCheck.length) {
+    print(`\n  REFUSED BY THE PROJECT'S OWN CHECK ALONE — ${byCheck.length} of ${calls.length} edits; each needs a ruling, right or wrong ` +
+          '(the reaches are in the check\'s own log: structure-shadow.js):');
+    byCheck.forEach((c, i) => print(`    ${i + 1}. ${c.at} ${c.session.slice(0, 8)} ${c.tool} ${c.file}`));
+  }
 
   // ── exposure: what the refusal count is OF (#603) ──
   const { frame, notMeasured: noFrame } = frameFor(pkgDir, args);
@@ -462,11 +487,11 @@ function main(argv) {
   }
   // A ruling owed (refused, or a missed chance) · not measured (a denial unread, or no exposure)
   // · untested (no chance). Never a clean exit: see the header.
-  if (refused.length || toRead) return 1;
+  if (refused.length || byCheck.length || toRead) return 1;
   if (unrecognised.length || noFrame) return 2;
   return 3;
 }
 
-module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, REFUSAL, GUARD_WORDS, VIOLATION, NOTICE_KINDS };
+module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, REFUSAL, GUARD_WORDS, CHECK_REFUSAL, CHECK_WORDS, VIOLATION, NOTICE_KINDS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

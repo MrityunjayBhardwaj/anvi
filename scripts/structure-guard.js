@@ -25,6 +25,14 @@
 //        [--write-baseline <out.json> [--allow-growth]] [--ref <git ref>]
 //   node scripts/structure-guard.js --design <design.json> --graph <depcruise.json> --package <dir>
 //        [--extractor <module>] [--arm --baseline <baseline.json>]
+//   node scripts/structure-guard.js --package <registered dir> --allow-check-edit <repo-relative file>
+//
+// A GO FOR ONE OF A PROJECT CHECK'S OWN FILES (#600). A package whose registered check is set to
+// refuse has edits to the check's own files refused at edit time: they are a design change, the
+// user's to decide. `--allow-check-edit` records that decision as a dated marker for that one
+// file; the hook lets edits to it through for 15 minutes, in any checkout of the repository, and
+// its log row carries the go. It judges nothing and needs no design. A file the registry does not
+// name as the check's own, or a check that is not refusing, is NOT MEASURED: there is no go to give.
 //
 // A BASELINE IS WRITTEN FROM THE DEFAULT BRANCH, NEVER THE WORKING TREE (#562). A package's
 // checkout can sit on a feature branch with uncommitted files, and writing from it would store
@@ -105,7 +113,7 @@ function arm(entry) {
 // note, a CI step — runs with an argument that does nothing and still exits 0, which reads as
 // "measured, nothing new" (#511). A typo lands the same way: `--baselien b.json` would run with
 // no baseline at all and judge every grandfathered violation as new.
-const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm', 'ref']);
+const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm', 'ref', 'allow-check-edit']);
 const REMOVED = { before: 'the new-module report was removed (#509): it flagged 85% of new files' };
 
 function git(cwd, ...a) {
@@ -155,6 +163,30 @@ function checkoutAtRef(pkgDir, asked) {
   return { dir, ref: chosen.ref, why: chosen.why, sha, date, cleanup };
 }
 
+// Record the user's go for an edit to one of a refusing check's own files. The registry and the
+// state directory are the hook's own, so the marker lands exactly where the hook will look.
+function allowCheckEdit(args, print, stop) {
+  const extra = Object.keys(args).filter(k => k !== 'package' && k !== 'allow-check-edit');
+  if (extra.length) return stop(`--allow-check-edit takes only --package beside it, not ${extra.map(k => '--' + k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())).join(', ')}`);
+  if (!args.package) return stop('--allow-check-edit needs --package <the registered package dir>');
+  let H, registry, pkg;
+  try { H = loadFromCandidates('structure-guard-hook.js'); } catch (e) { return stop(e.message); }
+  try { registry = JSON.parse(fs.readFileSync(H.REGISTRY, 'utf8')); } catch (e) { return stop(`cannot read the registry ${H.REGISTRY}: ${e.message}`); }
+  try { pkg = fs.realpathSync(args.package); } catch { return stop(`no such package ${args.package}`); }
+  const entry = (Array.isArray(registry.packages) ? registry.packages : []).find(e => { try { return fs.realpathSync(e.dir) === pkg; } catch { return false; } });
+  if (!entry || !entry.check) return stop(`${H.REGISTRY} registers no check for ${pkg}, so it has no files of its own to allow an edit to`);
+  if (entry.check.mode !== 'refuse') return stop(`the check registered for ${pkg} is in mode ${JSON.stringify(entry.check.mode)}, not "refuse" — it refuses no edit, so there is no go to give`);
+  const files = Array.isArray(entry.check.files) ? entry.check.files : [];
+  const rel = args['allow-check-edit'];
+  if (!files.includes(rel)) return stop(`${rel} is not one of the check's own files — the registry names: ${files.join(', ') || 'none'}`);
+  let marker;
+  try { marker = H.recordGo(H.STATE_DIR, entry.dir, rel); } catch (e) { return stop(`the go could not be recorded: ${e.message}`); }
+  print(`structure-guard: go recorded — edits to ${rel} are allowed until ${new Date(Date.now() + H.GO_TTL_MS).toISOString()} ` +
+        `(${H.GO_TTL_MS / 60000} minutes), in any checkout of the repository. Only this file; every other file of the check is still refused.`);
+  print(`  marker: ${marker}`);
+  return 0;
+}
+
 function main(argv) {
   const args = {};
   const unknown = [];
@@ -183,6 +215,7 @@ function main(argv) {
   const print = s => console.log(s);
   const stop = why => { print(`structure-guard: NOT MEASURED — ${why}`); return 2; };
   if (unknown.length) return stop(`unrecognised argument${unknown.length > 1 ? 's' : ''} — ${unknown.join(' · ')}`);
+  if (args['allow-check-edit'] !== undefined) return allowCheckEdit(args, print, stop);
   if (!args.design || (!args.graph && !args.package))
     return stop('usage: --design <design.json> and --graph <depcruise.json> and/or --package <dir>');
   if (args.ref && !args.package) return stop('--ref names the commit a package is measured at, so it needs --package');
