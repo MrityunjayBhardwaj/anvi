@@ -146,6 +146,14 @@ function defaultRef(root) {
     ' — pass --ref <branch> to name the one to measure' };
 }
 
+// The other checkouts of the repository `top` is a checkout of, as git lists them.
+function otherWorktrees(top) {
+  const out = git(top, 'worktree', 'list', '--porcelain');
+  if (!out) return [];
+  return out.split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9))
+    .map(p => { try { return fs.realpathSync(p); } catch { return null; } }).filter(p => p && p !== top);
+}
+
 // A copy of the package as it is at `ref`, from `git archive` of the whole repository (a
 // package's tsconfig may extend one above it). node_modules is untracked, so it is not in any
 // ref: each one on the way down to the package is linked from the checkout, which is where
@@ -166,13 +174,23 @@ function checkoutAtRef(pkgDir, asked) {
   if (x.status !== 0) { cleanup(); return { notMeasured: `git archive of ${chosen.ref} failed: ${(x.stderr || '').trim()}` }; }
   const dir = path.join(tmp, inRepo);
   if (!fs.existsSync(dir)) { cleanup(); return { notMeasured: `${inRepo || '.'} does not exist at ${chosen.ref} (${sha.slice(0, 8)})` }; }
+  // A checkout that is only ever branched FROM may never have been installed (stave's main
+  // checkout has no node_modules; its worktrees do). So each level is linked from this checkout
+  // when it has one, else from the first other worktree of the same repository that does — and
+  // the run says whose it borrowed, because that is the TypeScript the graph was built with.
+  const roots = [top, ...otherWorktrees(top)];
+  const borrowed = new Set();
   const parts = inRepo ? inRepo.split(path.sep) : [];
   for (let i = 0; i <= parts.length; i++) {
-    const live = path.join(top, ...parts.slice(0, i), 'node_modules');
     const there = path.join(tmp, ...parts.slice(0, i), 'node_modules');
-    if (fs.existsSync(live) && !fs.existsSync(there)) fs.symlinkSync(live, there);
+    if (fs.existsSync(there)) continue;
+    const from = roots.find(r => fs.existsSync(path.join(r, ...parts.slice(0, i), 'node_modules')));
+    if (!from) continue;
+    fs.symlinkSync(path.join(from, ...parts.slice(0, i), 'node_modules'), there);
+    if (from !== top) borrowed.add(from);
   }
-  return { dir, ref: chosen.ref, why: chosen.why, sha, date, cleanup };
+  const why = chosen.why + (borrowed.size ? `; node_modules borrowed from the worktree ${[...borrowed].join(', ')}, since this checkout has none` : '');
+  return { dir, ref: chosen.ref, why, sha, date, top, inRepo, modulesFrom: [...borrowed], cleanup };
 }
 
 // What a proposed design reclassifies, in both directions (#536). `a` is the graph and design in
@@ -555,6 +573,6 @@ function main(argv) {
 }
 
 // Re-exported so the report's tests and the rules' tests import one surface.
-module.exports = { ...R, compareGraphs, reclassify, main };
+module.exports = { ...R, compareGraphs, reclassify, checkoutAtRef, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

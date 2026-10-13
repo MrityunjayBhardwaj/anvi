@@ -724,6 +724,27 @@ console.log('\nA BASELINE IS WRITTEN FROM THE DEFAULT BRANCH, NEVER THE WORKING 
   const px = run('--proposed', dx);
   ok(px.status === 2 && /NOT MEASURED — under the proposed design: /.test(px.stdout),
      `a proposal whose own corpus cannot support a verdict is NOT MEASURED, not judged on the other design's graph (exit ${px.status})`);
+  // A checkout with no node_modules borrows them from a worktree of the same repository that has
+  // them, and says whose (#667): a checkout that is only ever branched from is often never installed.
+  const WT = path.join(DIR, 'refrepo-wt');
+  git(REPO, 'worktree', 'add', '-q', '--detach', WT, 'main');
+  fs.mkdirSync(path.join(WT, 'node_modules', 'marker'), { recursive: true });
+  const EXM = path.join(DIR, 'marker-extractor.js');
+  fs.writeFileSync(EXM, `const fs = require('fs'), path = require('path'); const base = require(${JSON.stringify(EX)});
+module.exports = { create: (pkgDir, entry) => fs.existsSync(path.join(pkgDir, '..', '..', 'node_modules', 'marker'))
+  ? base.create(pkgDir, entry) : { notMeasured: 'fixture: no node_modules beside the archive' } };`);
+  const runM = (...a) => spawnSync(process.execPath, [GUARD, '--design', d, '--package', PK, '--extractor', EXM, ...a], { encoding: 'utf8' });
+  const bor = runM('--write-baseline', out('ref-borrowed.json'));
+  ok(bor.status === 0 && bor.stdout.includes(`node_modules borrowed from the worktree ${fs.realpathSync(WT)}, since this checkout has none`),
+     `a checkout with no node_modules is measured with a worktree's, and says whose (exit ${bor.status})`);
+  fs.mkdirSync(path.join(REPO, 'node_modules', 'marker'), { recursive: true });
+  const own = runM('--write-baseline', out('ref-own.json'));
+  ok(own.status === 0 && !/borrowed/.test(own.stdout), `one that has its own uses its own, and says nothing of borrowing (exit ${own.status})`);
+  fs.rmSync(path.join(REPO, 'node_modules'), { recursive: true, force: true });
+  fs.rmSync(path.join(WT, 'node_modules'), { recursive: true, force: true });
+  const nomod = runM('--write-baseline', out('ref-nomod.json'));
+  ok(nomod.status === 2 && /fixture: no node_modules beside the archive/.test(nomod.stdout), `with none anywhere it is NOT MEASURED, as before (exit ${nomod.status})`);
+  git(REPO, 'worktree', 'remove', '--force', WT);
   const f = run('--write-baseline', out('ref-feat.json'), '--ref', 'feat', '--allow-growth');
   ok(f.status === 0 && /measured feat at/.test(f.stdout) && read(out('ref-feat.json')).rules.divergence.length === 1,
      `--ref names another commit, and only its committed import is recorded, not the uncommitted one (exit ${f.status})`);

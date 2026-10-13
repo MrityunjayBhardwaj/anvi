@@ -44,7 +44,7 @@
 // Usage:
 //   node scripts/structure-refusals.js --package <dir> --since <ISO time>
 //        [--until <ISO time>] [--transcripts <dir>] [--json <out.json>]
-//        [--design <design.json>] [--baseline <baseline.json>] [--extractor <module>]
+//        [--design <design.json>] [--baseline <baseline.json>] [--extractor <module>] [--ref <git ref>]
 //   --transcripts defaults to ~/.claude/projects: the guard runs in EVERY session on the machine,
 //   so a session started in another project that edits the package is read too. The design,
 //   baseline and extractor default to the package's entry in the guard's registry.
@@ -72,6 +72,14 @@
 // named a design count toward none. The design's own `versions` list, when it has one, gives each
 // id its date and reason.
 //
+// THE DEFAULT BRANCH, JUDGED WHOLE (#667). The counts above see only the edit tools. A file changed
+// through Bash, a merge or an editor is never judged and leaves no record, so the report also
+// measures the package at the default branch (or --ref) through a temporary `git archive`, under
+// the design and baseline in force, and lists every import there that neither allows — with the
+// commit that first carried it inside the window, or the fact that it predates the window. When
+// that cannot be done (no git checkout, no TypeScript, no baseline) it says NOT LOOKED AT or NOT
+// COMPUTED, and the trial reading says the door is uncounted — never a quiet zero.
+//
 // Exit: 1 a person must read something: a refusal (right or wrong?), a missed chance (why was it
 //       not refused?), or a possible chance (is it real?) · 2 not measured (no transcripts, no edit in the package in the window, a
 //       denial in a shape this reader does not know, or no design to compute exposure with) ·
@@ -83,6 +91,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 // The hook's own package rule, so the report counts exactly the edits the hook judges (#546).
@@ -348,11 +357,81 @@ function frameFor(pkgDir, args) {
     allowed: new Set((design.allowed || []).map(([a, b]) => RULES.edgeKey(a, b))),
     baselined: new Set(((baseline && baseline.rules && baseline.rules.divergence) || [])),
     baselineCount: baseline ? ((baseline.rules && baseline.rules.divergence) || []).length : null,
+    baseline,
     extractorEntry,
   } };
 }
 
-const FLAGS = new Set(['package', 'since', 'until', 'transcripts', 'json', 'design', 'baseline', 'extractor']);
+// ── what is on the default branch, however it got there (#667) ───────────────────────────
+// The guard judges Write, Edit and MultiEdit. A file changed through Bash (a patch script, sed,
+// git mv), a merge or a person's editor is never judged, and no transcript record says an import
+// arrived that way — so "0 missed" above counts only the edit tools. What CAN be read at any time
+// is the result: the package at the default branch, judged whole under the design in force,
+// against the baseline in force. An import there that the design does not allow and the baseline
+// does not hold was refused by nobody, whichever door it came through. Each is listed with the
+// commit that first carried it inside the window, or said to predate the window.
+function gitOut(cwd, ...a) {
+  const r = spawnSync('git', ['-C', cwd, ...a], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout : null;
+}
+function onDefaultBranch(pkgDir, frame, ref, since, calls) {
+  if (!frame.baseline) return { notComputed: 'no baseline is in force, so every import the design does not allow would count' };
+  if (typeof frame.baseline.designId === 'string' && frame.baseline.designId !== frame.id)
+    return { notComputed: `the baseline was measured under design ${frame.baseline.designId}, not the design in force (${frame.id})` };
+  let GUARD;
+  try { GUARD = require(path.join(__dirname, 'structure-guard.js')); } catch (e) { return { notComputed: `cannot load structure-guard.js: ${e.message}` }; }
+  if (!fs.existsSync(pkgDir)) return { notComputed: `${pkgDir} no longer exists` };
+  const at = GUARD.checkoutAtRef(pkgDir, ref);
+  if (!at) return { notLooked: `${pkgDir} is not inside a git checkout, so it has no default branch` };
+  if (at.notMeasured) return { notComputed: at.notMeasured };
+  try {
+    let ex, got;
+    try {
+      ex = GRAPH.loadExtractor(frame.extractorEntry, at.dir);
+      got = GRAPH.buildGraph({ pkgDir: at.dir, design: frame.design, extractor: ex, cachePath: null, proposed: null });
+    } catch (e) { return { notComputed: `the graph could not be built: ${String(e.message).split('\n')[0]}` }; }
+    if (got.notMeasured) return { notComputed: got.notMeasured };
+    const why = RULES.notMeasured(got.graph);
+    if (why) return { notComputed: why };
+    const results = RULES.judge(got.graph, frame.design);
+    const ledger = RULES.ratchet(results, frame.baseline);
+    const sinceDate = new Date(since);
+    const found = RULES.RULES.flatMap(rule => ledger[rule].fresh.map(f => ({ rule, key: f.key, pair: f.pair || null }))).map(f => {
+      const [from, to] = f.key.split(' -> ');
+      const inRepo = path.posix.join(at.inRepo.split(path.sep).join('/'), from);
+      // Does the file, as it was at a commit, import the target? Asked of the same extractor the
+      // graph was built with, so "has the import" means what the guard means by it.
+      const has = commit => {
+        const text = gitOut(at.top, 'show', `${commit}:${inRepo}`);
+        if (text === null) return false;
+        try { return ex.edges(from, text).edges.some(([t]) => t === to); } catch { return null; }
+      };
+      // Every commit on the branch that touched the importing file, oldest first; the carrier is
+      // the first one inside the window whose content has the import when its predecessor's did not.
+      const all = (gitOut(at.top, 'log', '--format=%H %cI', at.sha, '--', inRepo) || '').trim().split('\n').filter(Boolean).reverse()
+        .map(l => ({ sha: l.slice(0, 40), date: new Date(l.slice(41)) }));
+      let carried = null, before = false, unknown = false, had = false;
+      for (const c of all) {
+        const now = has(c.sha);
+        if (now === null) { unknown = true; break; }
+        if (now && !had) { if (c.date < sinceDate) before = true; else { before = false; carried = c.sha; } }
+        had = now;
+      }
+      if (!had && !unknown) unknown = true;      // the graph has it at the tip, so a walk that ends without it failed
+      if (carried) {
+        const [sha, date, ...subject] = (gitOut(at.top, 'show', '-s', '--format=%h %cI %s', carried) || '').trim().split(' ');
+        carried = { sha, date, subject: subject.join(' ') };
+      }
+      const onFile = calls.filter(c => c.file === from);
+      const missed = onFile.some(c => c.exposure && (c.exposure.edges || []).some(e => e.key === f.key && e.kind === 'NOT allowed'));
+      return { ...f, carried: unknown ? null : carried, before: !unknown && before, unknown, calls: onFile.length, missed };
+    });
+    return { ref: at.ref, why: at.why, sha: at.sha, date: at.date, modules: got.graph.modules.size, edges: got.graph.edges.length,
+      examined: results.divergence.examined, held: ledger.divergence.grandfathered, found };
+  } finally { at.cleanup(); }
+}
+
+const FLAGS = new Set(['package', 'since', 'until', 'transcripts', 'json', 'design', 'baseline', 'extractor', 'ref']);
 
 function main(argv) {
   const args = {};
@@ -455,7 +534,7 @@ function main(argv) {
 
   // The design in force, its baseline and extractor: both sections below are read against it.
   const { frame, notMeasured: noFrame } = frameFor(pkgDir, args);
-  let toRead = 0, exposure = null;
+  let toRead = 0, exposure = null, branch = null;
 
   // ── the design's evidence: refusals per component pair, per design version (#536) ──
   // Printed every time, zero included. A count never crosses a design version: a design that
@@ -553,7 +632,28 @@ function main(argv) {
          '(the guard did not judge it, a guard defect, or the design changed inside the window):', exactMissed);
     list(`\n  POSSIBLE CHANCES — ${possible.length}: the edit's text adds a not-allowed import, but the file before it was not recorded, ` +
          'so whether the guard would see it is not known (a type-only import is invisible to it). Read each edit:', possible);
-    const tail = possible.length ? ` · ${possible.length} possible chance${possible.length === 1 ? '' : 's'} to read` : '';
+    // ── the default branch, judged whole (#667) ──
+    branch = onDefaultBranch(pkgDir, frame, args.ref, since, calls);
+    if (branch.notLooked) print(`\n  ON THE DEFAULT BRANCH: NOT LOOKED AT — ${branch.notLooked}. Imports written outside the edit tools are not counted anywhere in this report.`);
+    else if (branch.notComputed) print(`\n  ON THE DEFAULT BRANCH: NOT COMPUTED — ${branch.notComputed}. Imports written outside the edit tools are not counted anywhere in this report.`);
+    else {
+      const k = branch.found.length;
+      print(`\n  ON THE DEFAULT BRANCH, IN NEITHER THE DESIGN NOR THE BASELINE — ${k} import${k === 1 ? '' : 's'} at ${branch.ref} ${branch.sha.slice(0, 8)} (${branch.date}; ref chosen by ${branch.why}), ` +
+            `judged whole: ${branch.modules} modules · ${branch.edges} edges · ${branch.examined} cross between components · ${branch.held} held by the baseline.` +
+            (k ? ' Nobody refused these, whichever door they came through (an edit tool, Bash, a merge, an editor) — each needs a reason:' : ''));
+      branch.found.forEach((f, i) => {
+        print(`    ${i + 1}. ${f.rule.padEnd(10)} ${f.key}` + (f.pair ? `   (${f.pair})` : ''));
+        print('         ' + (f.unknown ? 'the commit that carried it could not be told from the file\'s history'
+          : f.carried ? `carried by ${f.carried.sha} ${f.carried.date} ${f.carried.subject}`
+          : `already there before this window began (${since}) — the window does not explain it`));
+        print(`         edit-tool calls on that file in the window: ${f.calls} — ` + (f.missed ? 'one of them added it: it is among the MISSED CHANCES above'
+          : f.before ? 'none added it' : 'none added it, so it was written through another door'));
+      });
+      toRead += k;
+    }
+    const tail = (possible.length ? ` · ${possible.length} possible chance${possible.length === 1 ? '' : 's'} to read` : '') +
+      (branch.found ? ` · ${branch.found.length} on the default branch that nobody refused${branch.found.length ? ' (each needs a reason)' : ''}`
+        : ' · the default branch was NOT read, so imports written outside the edit tools are uncounted');
     print(chances === 0
       ? `\n  TRIAL READING: ${possible.length ? 'UNTESTED unless a possible chance is real' : 'UNTESTED'} — 0 chances to refuse in this window ` +
         `(${computed.length} edits computed, ${by('not computed').length} not${tail}). This is neither a pass nor a failure.`
@@ -563,7 +663,7 @@ function main(argv) {
 
   if (args.json) {
     fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: pkgDir, since, until, transcripts: files.length,
-      unreadable, badLines, exposure, byDesign: groups, calls: calls.map(({ reason, input, prior, ...c }) => c) }, null, 1) + '\n');
+      unreadable, badLines, exposure, defaultBranch: branch, byDesign: groups, calls: calls.map(({ reason, input, prior, ...c }) => c) }, null, 1) + '\n');
     print(`  report: ${path.resolve(args.json)}`);
   }
   // A ruling owed (refused, or a missed chance) · not measured (a denial unread, or no exposure)
@@ -573,6 +673,6 @@ function main(argv) {
   return 3;
 }
 
-module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, groupRefusals, JUDGED_UNDER, PAIR_OF, REFUSAL, GUARD_WORDS, CHECK_REFUSAL, CHECK_WORDS, VIOLATION, NOTICE_KINDS };
+module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, onDefaultBranch, groupRefusals, JUDGED_UNDER, PAIR_OF, REFUSAL, GUARD_WORDS, CHECK_REFUSAL, CHECK_WORDS, VIOLATION, NOTICE_KINDS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

@@ -1521,6 +1521,24 @@ loosened until it stops firing guards nothing.
   first drifted refusal and never on a version that did not drift, so no per-version capture is
   kept. A denial without the guard's words (another hook's, or a settings permission rule — the
   record cannot tell them apart) is counted where it can be seen, not called drift.
+- **The default branch is judged whole, because the edit tools are not the only door (#667).**
+  The hook judges Write, Edit and MultiEdit. A file changed through Bash (a patch script, `sed`,
+  `git mv`), a merge or a person's editor is never judged and leaves no record, so the report's
+  "missed chances" counted only the edit tools: on stave, imports the design does not allow reached
+  the default branch during the trial through `python3` scripts run in Bash while the reading said
+  0 missed. So `structure-refusals.js` also measures the package at the default branch (or
+  `--ref`) through a temporary `git archive`, under the design and baseline in force, and lists
+  every import there that neither allows: nobody refused it, whichever door it came through. Each
+  names the commit that first carried it inside the window (the first whose content has the import
+  when its predecessor's did not, asked of the same extractor the graph was built with), or says it
+  predates the window; each says how many edit-tool calls touched that file and whether one of
+  them is the missed chance already listed. The count is in the trial reading beside "missed" and
+  forces exit 1. When it cannot be measured (no git checkout, no baseline, a baseline from another
+  design, no TypeScript) the section says NOT LOOKED AT or NOT COMPUTED and the reading says the
+  door is uncounted. A checkout with no `node_modules` of its own (one only ever branched from)
+  borrows them from another worktree of the same repository and the run says whose; that applies
+  to every measurement from a ref, a baseline write included. This reports; it refuses nothing.
+  Whether Bash is judged at all, or a merge is checked instead, is still open on #667.
 - **A design changes on evidence, in a fixed order (#536).** Once the guard refuses, a refusal
   means one of three things: the import is wrong (fix it), the design is right and this edge is a
   deliberate exception (record the one-import exception), or the design is wrong (change the
