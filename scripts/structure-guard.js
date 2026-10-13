@@ -26,6 +26,17 @@
 //   node scripts/structure-guard.js --design <design.json> --graph <depcruise.json> --package <dir>
 //        [--extractor <module>] [--arm --baseline <baseline.json>]
 //   node scripts/structure-guard.js --package <registered dir> --allow-check-edit <repo-relative file>
+//   node scripts/structure-guard.js --design <design.json> --proposed <design.json>
+//        (--graph <depcruise.json> | --package <dir>) [--baseline <baseline.json>] [--ref <git ref>]
+//
+// A PROPOSED DESIGN IS REVIEWED ON WHAT IT RECLASSIFIES (#536). A design change moves edges in
+// BOTH directions — some violations stop being violations, some obeying edges become new ones —
+// and the diff of the design file shows neither. `--proposed` judges one graph under the design
+// in force and under the proposed one and prints both directions with their keys, why each edge
+// stopped being a violation (declared, inside one component now, or no longer examined at all —
+// the last is a loosening that reads like a repair), and what the baseline in force would then
+// hold for nothing. It writes nothing and arms nothing. A package inside a git checkout is
+// measured from the default branch, as a baseline is.
 //
 // A GO FOR ONE OF A PROJECT CHECK'S OWN FILES (#600). A package whose registered check is set to
 // refuse has edits to the check's own files refused at edit time: they are a design change, the
@@ -44,7 +55,8 @@
 // measured as it is on disk, and the run says so.
 //
 // Exit: 0 nothing new / the graphs agree (and the package is armed, with --arm) ·
-//       1 a NEW violation, a baseline write that would grow, or graphs that disagree ·
+//       1 a NEW violation, a baseline write that would grow, graphs that disagree, or a proposed
+//         design that reclassifies something (a person reviews it) ·
 //       2 not measured (the input could not support a verdict)
 
 'use strict';
@@ -65,7 +77,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
-const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, designCheck, designProblem, retiredSections, byPair } = R;
+const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, designCheck, designProblem, designVersions, designId, componentOf, retiredSections, byPair } = R;
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -113,7 +125,7 @@ function arm(entry) {
 // note, a CI step — runs with an argument that does nothing and still exits 0, which reads as
 // "measured, nothing new" (#511). A typo lands the same way: `--baselien b.json` would run with
 // no baseline at all and judge every grandfathered violation as new.
-const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm', 'ref', 'allow-check-edit']);
+const FLAGS = new Set(['design', 'graph', 'package', 'extractor', 'baseline', 'write-baseline', 'allow-growth', 'arm', 'ref', 'allow-check-edit', 'proposed']);
 const REMOVED = { before: 'the new-module report was removed (#509): it flagged 85% of new files' };
 
 function git(cwd, ...a) {
@@ -161,6 +173,99 @@ function checkoutAtRef(pkgDir, asked) {
     if (fs.existsSync(live) && !fs.existsSync(there)) fs.symlinkSync(live, there);
   }
   return { dir, ref: chosen.ref, why: chosen.why, sha, date, cleanup };
+}
+
+// What a proposed design reclassifies, in both directions (#536). `a` is the graph and design in
+// force, `b` the proposed pair — two graphs, because a design also says which files are in the
+// corpus. Each edge that changes side carries where it stood on the other side, so "stopped being
+// a violation" can be told apart: declared, inside one component, or no longer examined.
+function reclassify(a, b) {
+  const side = ({ graph, design }) => {
+    const of = componentOf(design, graph.root);
+    const allowed = new Set((design.allowed || []).map(([x, y]) => edgeKey(x, y)));
+    const found = new Map(judge(graph, design).divergence.found.map(f => [f.key, f]));
+    // Where an edge stands under this design when it is NOT a divergence there.
+    const standing = (from, to) => {
+      if (!graph.modules.has(from) || !graph.modules.has(to)) return 'outside the corpus (not examined)';
+      const ca = of(from), cb = of(to);
+      if (ca === undefined || cb === undefined) return 'touches a module outside every component (not examined)';
+      if (ca === cb) return `inside one component (${ca})`;
+      return allowed.has(edgeKey(ca, cb)) ? `declared (${edgeKey(ca, cb)})` : `a divergence (${edgeKey(ca, cb)})`;
+    };
+    return { found, standing, results: judge(graph, design) };
+  };
+  const A = side(a), B = side(b);
+  const ends = key => key.split(' -> ');
+  const stopped = [...A.found.values()].filter(f => !B.found.has(f.key))
+    .map(f => ({ key: f.key, pair: f.pair, now: B.standing(...ends(f.key)) }));
+  const became = [...B.found.values()].filter(f => !A.found.has(f.key))
+    .map(f => ({ key: f.key, pair: f.pair, was: A.standing(...ends(f.key)) }));
+  const moved = [...A.found.values()].filter(f => B.found.has(f.key) && B.found.get(f.key).pair !== f.pair)
+    .map(f => ({ key: f.key, pair: f.pair, now: B.found.get(f.key).pair }));
+  const ua = new Set(A.results.divergence.unmapped), ub = new Set(B.results.divergence.unmapped);
+  return { stopped, became, moved, A: A.results, B: B.results,
+    newlyUnmapped: [...ub].filter(m => !ua.has(m)).sort(), newlyMapped: [...ua].filter(m => !ub.has(m)).sort(),
+    corpus: { left: [...a.graph.modules].filter(m => !b.graph.modules.has(m)).sort(), joined: [...b.graph.modules].filter(m => !a.graph.modules.has(m)).sort() } };
+}
+
+function printReclassification(r, ctx, print) {
+  const { idA, idB, baseline, frame, proposed, graphA, graphB } = ctx;
+  const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  print(`structure-guard: RECLASSIFICATION — design in force ${idA} → proposed ${idB}. Nothing is written and nothing is armed: ` +
+        'a design change is reviewed on this, not on the diff of the design file.');
+  if (idA === idB) print('  the proposed design has the SAME id as the design in force — it changes no verdict (only commentary differs).');
+  for (const [name, g, res] of [['the design in force', graphA, r.A], ['the proposed design', graphB, r.B]])
+    print(`  under ${name}: ${g.modules.size} modules · ${g.edges.length} edges · ${res.divergence.examined} cross between components · ` +
+          `${res.divergence.found.length} not declared · ${res.divergence.unmapped.length} modules outside every component`);
+  const held = baseline && !frame.mismatch ? new Set((baseline.rules && baseline.rules.divergence) || []) : null;
+  const group = (rows, by) => {
+    const m = new Map();
+    for (const x of rows) { const k = by(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+    return [...m].sort((x, y) => y[1].length - x[1].length || (x[0] < y[0] ? -1 : 1));
+  };
+  const heldStopped = held ? r.stopped.filter(x => held.has(x.key)).length : null;
+  print(`\n  STOP BEING VIOLATIONS — ${n(r.stopped.length, 'edge', 'edges')} the design in force does not declare and the proposed one no longer refuses` +
+        (held ? ` (${heldStopped} of them held by the baseline in force)` : baseline ? ' (the baseline was measured under another design, so it is not consulted)' : ' (no baseline given)') + ':');
+  for (const [k, rows] of group(r.stopped, x => `${x.pair}  →  ${x.now}`)) {
+    print(`    ${String(rows.length).padStart(4)}  ${k}`);
+    for (const x of rows) print(`            ${x.key}` + (held && held.has(x.key) ? '   (in the baseline)' : ''));
+  }
+  const unseen = r.stopped.filter(x => /not examined/.test(x.now)).length;
+  if (unseen) print(`    CAUTION: ${unseen} of these stop only because the proposed design no longer EXAMINES them — that is a blind spot gained, not an edge allowed.`);
+  print(`\n  BECOME VIOLATIONS — ${n(r.became.length, 'edge', 'edges')} the design in force does not refuse and the proposed one does not declare:`);
+  for (const [k, rows] of group(r.became, x => `${x.pair}  ←  was ${x.was}`)) {
+    print(`    ${String(rows.length).padStart(4)}  ${k}`);
+    for (const x of rows) print(`            ${x.key}`);
+  }
+  print(`\n  STAY VIOLATIONS, AT ANOTHER PAIR — ${n(r.moved.length, 'edge', 'edges')}:`);
+  for (const [k, rows] of group(r.moved, x => `${x.pair}  →  ${x.now}`)) {
+    print(`    ${String(rows.length).padStart(4)}  ${k}`);
+    for (const x of rows) print(`            ${x.key}`);
+  }
+  print(`\n  modules: ${r.newlyUnmapped.length} newly outside every component · ${r.newlyMapped.length} newly mapped · ` +
+        `${r.corpus.left.length} leave the corpus · ${r.corpus.joined.length} join it`);
+  for (const [label, xs] of [['newly outside every component', r.newlyUnmapped], ['newly mapped', r.newlyMapped], ['leaves the corpus', r.corpus.left], ['joins the corpus', r.corpus.joined]])
+    for (const m of xs) print(`      ${label}: ${m}`);
+  const absA = new Set(r.A.divergence.absences);
+  const idle = r.B.divergence.absences.filter(p => !absA.has(p));
+  print(`  declared edges nothing uses under the proposed design: ${r.B.divergence.absences.length}` +
+        (idle.length ? ` — ${idle.length} of them not idle under the design in force: ${idle.join(', ')}` : ''));
+  // What re-measuring the baseline under the proposal would then meet — said here so the review
+  // of the design and the size of the re-baseline are read together.
+  if (held) {
+    const now = new Set(r.B.divergence.found.map(f => f.key));
+    const fresh = [...now].filter(k => !held.has(k)).length, gone = [...held].filter(k => !now.has(k)).length;
+    print(`  against the baseline in force (${held.size} divergence): under the proposed design ${now.size - fresh} of its ${now.size} are held, ` +
+          `${fresh} would be NEW, and ${gone} baseline key${gone === 1 ? '' : 's'} would no longer occur`);
+  }
+  const series = designVersions(proposed);
+  print(`  the proposed design's own record: ` + (series.note ? `${series.note}.`
+    : `${series.current.date || 'no date'} · ${series.current.reason}`));
+  const total = r.stopped.length + r.became.length + r.moved.length + r.newlyUnmapped.length + r.newlyMapped.length + r.corpus.left.length + r.corpus.joined.length;
+  print(total === 0 ? '\n  NOTHING RECLASSIFIED — every edge stands under the proposed design exactly where it stands under the design in force.'
+    : `\n  RECLASSIFIED — ${r.stopped.length} stop being violations · ${r.became.length} become violations · ${r.moved.length} change pair. ` +
+      'Adopting the design is a person\'s decision: it changes the design id, so the baseline is then re-measured under it and the package re-armed.');
+  return total === 0 ? 0 : 1;
 }
 
 // Record the user's go for an edit to one of a refusing check's own files. The registry and the
@@ -229,6 +334,16 @@ function main(argv) {
 
   const problem = designProblem(design);
   if (problem) return stop(problem);
+  let proposed = null;
+  if (args.proposed !== undefined) {
+    const clash = ['write-baseline', 'allowGrowth', 'arm'].filter(k => args[k] !== undefined);
+    if (clash.length) return stop('--proposed only reports: it writes no baseline and arms nothing, so it cannot be combined with ' +
+      clash.map(k => '--' + k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())).join(', '));
+    if (args.graph && args.package) return stop('--proposed judges ONE graph under two designs — give --graph or --package, not both');
+    try { proposed = readJson(args.proposed, 'proposed design'); } catch (e) { return stop(e.message); }
+    const bad = designProblem(proposed);
+    if (bad) return stop(`the proposed design cannot be judged against: ${bad}`);
+  }
   if (baseline && !baseline.rules) return stop(`the baseline ${args.baseline} has no "rules" section — refusing to treat it as empty`);
   // Which design the baseline was measured under, against the one in force (#535).
   const frame = designCheck(design, baseline, null);
@@ -239,19 +354,22 @@ function main(argv) {
     try { S = loadFromCandidates('structure-graph.js'); pkgDir = fs.realpathSync(args.package); }
     catch (e) { return stop(e.message); }
     let at = null;
-    if (args['write-baseline'] || args.ref) {
+    if (args['write-baseline'] || args.ref || proposed) {
       at = checkoutAtRef(pkgDir, args.ref);
       if (at && at.notMeasured) return stop(at.notMeasured);
       if (!at && args.ref) return stop(`--ref ${args.ref} needs a package inside a git checkout, and ${pkgDir} is not in one`);
     }
-    let got;
+    let got, gotProposed = null;
     try {
       const dir = at ? at.dir : pkgDir;
       const extractor = S.loadExtractor(args.extractor ? { extractor: args.extractor } : {}, dir);
       got = S.buildGraph({ pkgDir: dir, design, extractor, cachePath: null, proposed: null });
+      // A design also says which files are in the corpus, so the proposed one gets its own graph.
+      if (proposed) gotProposed = S.buildGraph({ pkgDir: dir, design: proposed, extractor, cachePath: null, proposed: null });
     } finally { if (at) at.cleanup(); }
     if (got.notMeasured) return stop(got.notMeasured);
-    built = { pkgDir, graph: got.graph, extractor: got.stats.extractor, at };
+    if (gotProposed && gotProposed.notMeasured) return stop(`under the proposed design: ${gotProposed.notMeasured}`);
+    built = { pkgDir, graph: got.graph, extractor: got.stats.extractor, at, proposedGraph: gotProposed && gotProposed.graph };
   }
   const analyser = cruise ? loadGraph(cruise, design) : null;
 
@@ -314,6 +432,17 @@ function main(argv) {
   const graph = built ? built.graph : analyser;
   const why = notMeasured(graph);
   if (why) return stop(why);
+
+  if (proposed) {
+    const graphB = built ? built.proposedGraph : loadGraph(cruise, proposed);
+    const whyB = notMeasured(graphB);
+    if (whyB) return stop(`under the proposed design: ${whyB}`);
+    if (built) print(built.at
+      ? `structure-guard: measured ${built.at.ref} at ${built.at.sha.slice(0, 8)} (${built.at.date}) through git archive — not the working tree (ref chosen by ${built.at.why})`
+      : `structure-guard: measured ${built.pkgDir} as it is on disk — it is not inside a git checkout, so there is no branch to measure instead`);
+    return printReclassification(reclassify({ graph, design }, { graph: graphB, design: proposed }),
+      { idA: frame.id, idB: designId(proposed), baseline, frame, proposed, graphA: graph, graphB }, print);
+  }
 
   // A baseline measured under another design is not judged: its keys belong to another frame,
   // and a design change that legalises an edge would otherwise read as a clean sprint. The
@@ -426,6 +555,6 @@ function main(argv) {
 }
 
 // Re-exported so the report's tests and the rules' tests import one surface.
-module.exports = { ...R, compareGraphs, main };
+module.exports = { ...R, compareGraphs, reclassify, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

@@ -284,7 +284,9 @@ console.log('\nTHE COMMAND — exit status and what it prints:');
   // WRITTEN FROM THE DEFAULT BRANCH" below, where it measures a ref the working tree is not on.
   // --allow-check-edit is the tenth: it judges nothing and takes only --package, so it is
   // witnessed where its marker is read, in test/structure-shadow.test.js ("A GO").
-  ok(FLAGS.length === 10 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
+  // --proposed is the eleventh: it only reports and refuses --write-baseline beside it, so it is
+  // witnessed in "A PROPOSED DESIGN" below.
+  ok(FLAGS.length === 11 && known.status === 0 && !/NOT MEASURED/.test(known.stdout),
      `the ${FLAGS.length} known flags all still parse — the check refuses the unknown, not everything (got ${known.status})`);
 
   const out = path.join(DIR, 'written.json');
@@ -588,6 +590,90 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
      `with no extractor named and no TypeScript beside the package, --package is not measured (got ${noTs.status})`);
 }
 
+console.log('\nA PROPOSED DESIGN — what it reclassifies, in both directions, with keys (#536):');
+{
+  const write = (name, obj) => { const f = path.join(DIR, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const run = (...args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
+  const comps = { low: { dirs: ['low'] }, mid: { dirs: ['mid'] }, top: { dirs: ['top'] } };
+  const inForce = design(comps, [['mid', 'low']]);
+  const d = write('re-design.json', inForce);
+  const g = write('re-graph.json', cruise({
+    'src/low/a.ts': ['src/mid/m.ts'],            // low -> mid: not declared (in the baseline)
+    'src/low/b.ts': ['src/mid/m.ts'],            // low -> mid: not declared (not in the baseline)
+    'src/mid/m.ts': ['src/low/c.ts'],            // mid -> low: declared
+    'src/low/c.ts': [], 'src/top/t.ts': ['src/low/c.ts'],   // top -> low: not declared
+  }));
+  const base = write('re-base.json', { designId: G.designId(inForce), rules: { divergence: ['src/low/a.ts -> src/mid/m.ts'], cycle: [] } });
+
+  // CONTROL: a proposal that changes nothing a verdict reads — commentary only — reclassifies nothing.
+  const same = run('--design', d, '--graph', g, '--proposed', write('re-same.json', { ...inForce, history: 'a note', versions: [] }));
+  ok(same.status === 0 && /NOTHING RECLASSIFIED/.test(same.stdout) && /SAME id as the design in force/.test(same.stdout) &&
+     /STOP BEING VIOLATIONS — 0 edges/.test(same.stdout) && /BECOME VIOLATIONS — 0 edges/.test(same.stdout),
+     `a proposal that changes only commentary reports zero in both directions, exit 0 (got ${same.status})`);
+  ok(/under the design in force: 5 modules · 4 edges · 4 cross between components · 3 not declared/.test(same.stdout),
+     'and says what was examined beside the zeros');
+
+  // Both directions at once: the arrow between low and mid is turned round.
+  const turned = run('--design', d, '--graph', g, '--baseline', base, '--proposed', write('re-turned.json', design(comps, [['low', 'mid']])));
+  const t = turned.stdout;
+  ok(turned.status === 1 && /RECLASSIFIED — 2 stop being violations · 1 become violations · 0 change pair/.test(t),
+     `turning an arrow round moves edges both ways, exit 1 for a person to review (got ${turned.status})`);
+  ok(/STOP BEING VIOLATIONS — 2 edges[^\n]*\(1 of them held by the baseline in force\)/.test(t) &&
+     /\n\s+2  low -> mid  →  declared \(low -> mid\)\n\s+src\/low\/a\.ts -> src\/mid\/m\.ts   \(in the baseline\)\n\s+src\/low\/b\.ts -> src\/mid\/m\.ts\n/.test(t),
+     'what stops being a violation is listed by KEY under its pair, with why, and the baseline\'s own are marked');
+  ok(/BECOME VIOLATIONS — 1 edge [^\n]*\n\s+1  mid -> low  ←  was declared \(mid -> low\)\n\s+src\/mid\/m\.ts -> src\/low\/c\.ts\n/.test(t),
+     'what becomes a violation is listed by key, with where it stood under the design in force');
+  ok(!/src\/top\/t\.ts/.test(t), 'an edge that is a violation under both, at the same pair, is in neither list');
+  ok(/against the baseline in force \(1 divergence\): under the proposed design 0 of its 2 are held, 2 would be NEW, and 1 baseline key would no longer occur/.test(t),
+     'and what re-measuring the baseline under the proposal would meet is said: held, new, and keys that no longer occur');
+  ok(!/against the baseline in force/.test(same.stdout), 'with no baseline given, nothing is claimed about one');
+
+  // Moving a FILE: low/c.ts is mapped into mid. One side at least is non-empty, with keys.
+  const moved = run('--design', d, '--graph', g, '--proposed',
+    write('re-moved.json', design({ ...comps, mid: { dirs: ['mid'], files: ['low/c.ts'] } }, [['mid', 'low']])));
+  ok(moved.status === 1 && /STAY VIOLATIONS, AT ANOTHER PAIR — 1 edge:\n\s+1  top -> low  →  top -> mid\n\s+src\/top\/t\.ts -> src\/low\/c\.ts/.test(moved.stdout),
+     `moving a file re-homes its violations: the same key, at another pair (exit ${moved.status})`);
+  ok(/declared edges nothing uses under the proposed design: 1 — 1 of them not idle under the design in force: mid -> low/.test(moved.stdout),
+     'and a declared edge the move leaves unused is said');
+
+  // An edge that "stops" only because nothing examines it any more is a blind spot, and says so.
+  const blind = run('--design', d, '--graph', g, '--proposed', write('re-blind.json', design({ mid: { dirs: ['mid'] }, top: { dirs: ['top'] } }, [])));
+  ok(blind.status === 1 && /→  touches a module outside every component \(not examined\)/.test(blind.stdout) &&
+     /CAUTION: 3 of these stop only because the proposed design no longer EXAMINES them/.test(blind.stdout) &&
+     /3 newly outside every component/.test(blind.stdout) && /newly outside every component: src\/low\/a\.ts/.test(blind.stdout),
+     `a violation that stops because its module left every component is a blind spot gained, and is called one (exit ${blind.status})`);
+  ok(!/CAUTION/.test(turned.stdout), 'the caution is not unconditional: declaring an edge raises none');
+  const cut = run('--design', d, '--graph', g, '--proposed', write('re-cut.json', { ...inForce, excludes: ['low/a'] }));
+  ok(cut.status === 1 && /→  outside the corpus \(not examined\)/.test(cut.stdout) && /1 leave the corpus/.test(cut.stdout) && /leaves the corpus: src\/low\/a\.ts/.test(cut.stdout),
+     `and so is one that stops because the proposal excludes its file (exit ${cut.status})`);
+
+  // The proposed design's own record of why it exists.
+  const next = design(comps, [['low', 'mid']]);
+  const recorded = run('--design', d, '--graph', g, '--proposed', write('re-recorded.json',
+    { ...next, versions: [{ id: G.designId(inForce), date: '2026-10-01', reason: 'first' }, { id: G.designId(next), date: '2026-10-13', reason: 'low now owns the readers mid used to' }] }));
+  ok(/the proposed design's own record: 2026-10-13 · low now owns the readers mid used to/.test(recorded.stdout), 'a proposal that records its reason has it printed');
+  ok(/the proposed design's own record: the design records no "versions"/.test(turned.stdout), 'one that records none is told so');
+  const stale = run('--design', d, '--graph', g, '--proposed', write('re-stale.json', { ...next, versions: [{ id: G.designId(inForce), date: '2026-10-01', reason: 'first' }] }));
+  ok(/has no entry for the id in force \([0-9a-f]{12}\) — it was changed without its reason being recorded/.test(stale.stdout),
+     'and one whose record stops at the earlier version is told its change has no reason on record');
+
+  // A baseline from another design is not consulted, and says so.
+  const foreign = run('--design', d, '--graph', g, '--baseline', write('re-foreign.json', { designId: '000000000000', rules: { divergence: ['src/low/a.ts -> src/mid/m.ts'] } }),
+    '--proposed', path.join(DIR, 're-turned.json'));
+  ok(/the baseline was measured under another design, so it is not consulted/.test(foreign.stdout) && !/in the baseline\)/.test(foreign.stdout),
+     'a baseline measured under another design marks nothing');
+
+  // It only reports.
+  const bad = run('--design', d, '--graph', g, '--proposed', write('re-bad.json', design(comps, [['low', 'mid'], ['mid', 'low']])));
+  ok(bad.status === 2 && /the proposed design cannot be judged against: the declared edges form a cycle/.test(bad.stdout), `a proposal the guard would refuse whole is NOT MEASURED (exit ${bad.status})`);
+  const missing = run('--design', d, '--graph', g, '--proposed', path.join(DIR, 'no-such-design.json'));
+  ok(missing.status === 2 && /cannot read proposed design/.test(missing.stdout), `an unreadable proposal is NOT MEASURED (exit ${missing.status})`);
+  const wr = run('--design', d, '--graph', g, '--proposed', path.join(DIR, 're-turned.json'), '--write-baseline', path.join(DIR, 're-out.json'));
+  ok(wr.status === 2 && /--proposed only reports/.test(wr.stdout) && !fs.existsSync(path.join(DIR, 're-out.json')), `with --write-baseline it refuses, and writes nothing (exit ${wr.status})`);
+  const novalue = run('--design', d, '--graph', g, '--proposed');
+  ok(novalue.status === 2 && /--proposed: has no value/.test(novalue.stdout), `--proposed with no file is NOT MEASURED, never a judge run under one design (exit ${novalue.status})`);
+}
+
 console.log('\nA BASELINE IS WRITTEN FROM THE DEFAULT BRANCH, NEVER THE WORKING TREE (#562):');
 {
   // A real repository whose checkout is on a feature branch carrying a committed violation and
@@ -622,6 +708,22 @@ console.log('\nA BASELINE IS WRITTEN FROM THE DEFAULT BRANCH, NEVER THE WORKING 
      `writing measures origin/main, and says which ref and why (exit ${w.status})`);
   ok(fs.existsSync(out('ref-base.json')) && read(out('ref-base.json')).rules.divergence.length === 0,
      'so neither the feature branch\'s committed import nor the uncommitted file is recorded');
+  // A proposed design is reviewed on the default branch too (#536): the feature branch's upward
+  // import and the scratch file are in neither graph.
+  const dp = path.join(DIR, 'pkg-design-proposed.json');
+  fs.writeFileSync(dp, JSON.stringify({ ...read(d), allowed: [] }));
+  const pr = run('--proposed', dp);
+  ok(pr.status === 1 && /measured origin\/main at [0-9a-f]{8} .* through git archive — not the working tree/.test(pr.stdout) &&
+     /BECOME VIOLATIONS — 1 edge [^\n]*\n\s+1  mid -> low  ←  was declared \(mid -> low\)\n\s+src\/mid\/m\.ts -> src\/low\/a\.ts/.test(pr.stdout) &&
+     !/scratch\.ts/.test(pr.stdout) && !/src\/low\/a\.ts -> src\/mid\/m\.ts/.test(pr.stdout),
+     `a proposed design is judged on origin/main through the package's own graph, not on the working tree (exit ${pr.status})`);
+  // A design also says which files are in the corpus, so the proposal gets a graph of its own:
+  // one that excludes every file has nothing left to judge, and says so.
+  const dx = path.join(DIR, 'pkg-design-proposed-empty.json');
+  fs.writeFileSync(dx, JSON.stringify({ ...read(d), excludes: ['low/', 'mid/'] }));
+  const px = run('--proposed', dx);
+  ok(px.status === 2 && /NOT MEASURED — under the proposed design: /.test(px.stdout),
+     `a proposal whose own corpus cannot support a verdict is NOT MEASURED, not judged on the other design's graph (exit ${px.status})`);
   const f = run('--write-baseline', out('ref-feat.json'), '--ref', 'feat', '--allow-growth');
   ok(f.status === 0 && /measured feat at/.test(f.stdout) && read(out('ref-feat.json')).rules.divergence.length === 1,
      `--ref names another commit, and only its committed import is recorded, not the uncommitted one (exit ${f.status})`);

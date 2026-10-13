@@ -160,6 +160,30 @@ function designCheck(design, baseline, armedId) {
   return { id, measuredUnder, mismatch, unstamped: !mismatch && !measuredUnder };
 }
 
+// ── the design as a series (#536) ────────────────────────────────────────────────────
+// Once the guard refuses, a design evolves under pressure, and its history has to read as a list
+// of REASONS, not of diffs: for each version its id, the date, and why it was authored. That
+// record is the design's own "versions" list. It is commentary — no part of the id — so writing a
+// reason never invalidates a baseline. What is checked is only that the version IN FORCE is on
+// the record: a design whose id moved without an entry was changed with no reason given.
+function designVersions(design) {
+  const id = designId(design);
+  const raw = design && design.versions;
+  if (raw === undefined) return { id, entries: [], current: null,
+    note: 'the design records no "versions" (id, date, reason for each), so why it is as it is, is not on record' };
+  if (!Array.isArray(raw)) return { id, entries: [], current: null, note: 'the design\'s "versions" is not a list, so it is not read' };
+  const entries = raw.filter(e => isObject(e) && typeof e.id === 'string')
+    .map(e => ({ id: e.id, date: typeof e.date === 'string' ? e.date : null, reason: typeof e.reason === 'string' && e.reason.trim() ? e.reason.trim() : null }));
+  const current = entries.find(e => e.id === id) || null;
+  const note = !current ? `the design's "versions" has no entry for the id in force (${id}) — it was changed without its reason being recorded`
+    : !current.reason ? `the design's "versions" names the id in force (${id}) but gives no reason for it` : null;
+  return { id, entries, current, note };
+}
+
+// How many different imports refused at one component pair, under one design version, make the
+// refusals the design's question instead of the edits' (#536): one is an edit, two is a flag.
+const DESIGN_OWED_AT = 3;
+
 // ── the graph ────────────────────────────────────────────────────────────────────────
 
 function loadGraph(cruise, design) {
@@ -336,6 +360,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 }
 
 module.exports = {
-  RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, designId, designProblem, designCheck, loadGraph, notMeasured, onCycle,
+  RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, judge, ratchet, planBaseline,
 };

@@ -434,6 +434,103 @@ console.log('\nTHE PROJECT\'S OWN CHECK REFUSING (#600) — a second judge, coun
      `the check's words in an unknown wrapper are UNRECOGNISED, not denied-by-another (exit ${d.exit})`);
 }
 
+console.log('\nTHE DESIGN\'S EVIDENCE — refusals per component pair, per design version (#536):');
+{
+  const RM = require(path.join(__dirname, '..', 'hooks', 'structure-rules.js'));
+  const READER = require(SCRIPT);
+  const comps = { a: { dirs: ['a'] }, b: { dirs: ['b'] }, c: { dirs: ['c'] } };
+  const NOW = { root: 'src', components: comps, allowed: [['a', 'b']] };
+  const EARLIER = { root: 'src', components: comps, allowed: [] };
+  const write = (name, obj) => { const f = path.join(DIR, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const dNow = write('ev-design.json', NOW);
+  const idNow = RM.designId(NOW), idEarlier = RM.designId(EARLIER);
+  // The refusal's words are the HOOK's, built by its own function from the rules' own findings —
+  // so a change in how the hook words a refusal reddens these cases instead of passing a copy.
+  const refusal = (design, ...edges) => {
+    const modules = new Set(edges.flat());
+    const fresh = RM.divergences({ root: 'src/', modules, edges }, design).found.map(f => ({ rule: 'divergence', ...f }));
+    return 'PreToolUse:Edit hook error: ' + GH.refusalText('editor', edges[0][0], fresh, { modules: 9, edges: 9 }, PKG, { design: dNow, baseline: dNow }, design, null);
+  };
+  const tx = name => { const d = path.join(DIR, name); fs.mkdirSync(path.join(d, 'p'), { recursive: true }); return d; };
+  const put = (dir, rows) => fs.writeFileSync(path.join(dir, 'p', 't.jsonl'), rows.flatMap(([file, text]) => {
+    const u = use('Edit', path.join(PKG, file), T0, 'sess-ev');
+    return [u.line, result(u.id, text, text !== 'ok')];
+  }).join('\n') + '\n');
+  const sample = refusal(NOW, ['src/b/x.ts', 'src/a/one.ts']);
+  ok(READER.REFUSAL.test(sample) && (sample.match(READER.JUDGED_UNDER) || [])[1] === idNow,
+     `the hook's refusal names the design it was judged under, and the reader reads that id out of it (${idNow})`);
+  ok([...sample.matchAll(READER.PAIR_OF)].map(m => `${m[1]} @ ${m[2]} -> ${m[3]}`).join() === 'src/b/x.ts -> src/a/one.ts @ b -> a',
+     'and the component pair of each refused import, from the refusal\'s own words');
+
+  // Three different imports at b -> a; two at c -> b; one import refused three times at a -> c.
+  const one = tx('ev-one');
+  put(one, [
+    ['src/b/x.ts', refusal(NOW, ['src/b/x.ts', 'src/a/one.ts'])],
+    ['src/b/y.ts', refusal(NOW, ['src/b/y.ts', 'src/a/one.ts'])],
+    ['src/b/z.ts', refusal(NOW, ['src/b/z.ts', 'src/a/two.ts'])],
+    ['src/c/p.ts', refusal(NOW, ['src/c/p.ts', 'src/b/x.ts'])],
+    ['src/c/q.ts', refusal(NOW, ['src/c/q.ts', 'src/b/x.ts'])],
+    ['src/a/r.ts', refusal(NOW, ['src/a/r.ts', 'src/c/p.ts'])],
+    ['src/a/r.ts', refusal(NOW, ['src/a/r.ts', 'src/c/p.ts'])],
+    ['src/a/r.ts', refusal(NOW, ['src/a/r.ts', 'src/c/p.ts'])],
+  ]);
+  const r = runIn(one, '--package', PKG, '--since', '2026-09-25T00:00:00Z', '--design', dNow);
+  const line = re => (r.out.split('\n').find(l => re.test(l)) || '');
+  ok(new RegExp(`design ${idNow} \\(in force\\): 8 refusals`).test(r.out) && /REFUSALS BY COMPONENT PAIR, PER DESIGN VERSION — 8 refusals/.test(r.out),
+     'refusals are grouped under the design in force, of the 8 in the window');
+  ok(/^\s+3 imports refused 3 times\s+b -> a\s+← DESIGN-OWED/.test(line(/ b -> a /)),
+     `three different imports refused at one pair are the design's question (${line(/ b -> a /).trim().slice(0, 60)})`);
+  ok(/\n\s+src\/b\/x\.ts -> src\/a\/one\.ts\n\s+src\/b\/y\.ts -> src\/a\/one\.ts\n\s+src\/b\/z\.ts -> src\/a\/two\.ts\n/.test(r.out), 'and its imports are listed by key');
+  ok(/^\s+2 imports refused 2 times\s+c -> b\s+a flag$/.test(line(/ c -> b /)), `two at a pair are a flag, NOT the design's question — the threshold does something (${line(/ c -> b /).trim()})`);
+  ok(/^\s+1 import  refused 3 times\s+a -> c\s+an edit$/.test(line(/ a -> c /)),
+     `one import refused three times is one edit retried, not three reasons (${line(/ a -> c /).trim()})`);
+  ok((r.out.match(/DESIGN-OWED/g) || []).length === 1, 'exactly one pair is marked');
+  ok(/design not named: 0 refusals from before a refusal named its design/.test(r.out), 'and the unnamed count is said at zero');
+
+  // Refusals under an EARLIER design do not count toward the design in force.
+  const two = tx('ev-two');
+  put(two, [
+    ['src/b/x.ts', refusal(EARLIER, ['src/b/x.ts', 'src/a/one.ts'])],
+    ['src/b/y.ts', refusal(EARLIER, ['src/b/y.ts', 'src/a/one.ts'])],
+    ['src/b/z.ts', refusal(EARLIER, ['src/b/z.ts', 'src/a/two.ts'])],
+    ['src/b/w.ts', refusal(NOW, ['src/b/w.ts', 'src/a/two.ts'])],
+    // Before refusals named their design: the same words without the id.
+    ['src/b/v.ts', refusal(NOW, ['src/b/v.ts', 'src/a/two.ts']).replace(`judged under design ${idNow}, against`, 'judged against')],
+    ['src/b/u.ts', 'ok'],
+  ]);
+  const dSeries = write('ev-design-series.json', { ...NOW, versions: [
+    { id: idEarlier, date: '2026-09-27', reason: 'declare only what is used today' },
+    { id: idNow, date: '2026-10-02', reason: 'a reads b by design' }] });
+  const e = runIn(two, '--package', PKG, '--since', '2026-09-25T00:00:00Z', '--design', dSeries);
+  const el = re => (e.out.split('\n').find(l => re.test(l)) || '');
+  ok(new RegExp(`design ${idNow} \\(in force · 2026-10-02 · a reads b by design\\): 1 refusal\\n\\s+1 import  refused 1 time\\s+b -> a\\s+an edit\\n`).test(e.out),
+     'the design in force counts only its own refusal — one, an edit — and carries its date and reason');
+  ok(new RegExp(`design ${idEarlier} \\(an earlier or other version — NOT counted toward the design in force · 2026-09-27 · declare only what is used today\\): 3 refusals\\n\\s+3 imports refused 3 times\\s+b -> a$`, 'm').test(e.out),
+     'the earlier version\'s three are listed under it, with its reason, and not marked');
+  ok(!/DESIGN-OWED/.test(e.out), 'so old friction does not condemn the design that replaced it');
+  ok(/design not named: 1 refusal from before a refusal named its design — counted toward no version\n\s+1 import  refused 1 time\s+b -> a$/m.test(e.out),
+     'a refusal from before refusals named their design counts toward no version, and is still shown');
+  ok(!/note: /.test(e.out), 'a design whose record names the version in force raises no note');
+  const bare = runIn(two, '--package', PKG, '--since', '2026-09-25T00:00:00Z', '--design', dNow);
+  ok(/note: the design records no "versions" \(id, date, reason for each\)/.test(bare.out), 'a design with no record of its versions is told so');
+  const j = path.join(DIR, 'ev.json');
+  runIn(two, '--package', PKG, '--since', '2026-09-25T00:00:00Z', '--design', dSeries, '--json', j);
+  const by = JSON.parse(fs.readFileSync(j, 'utf8')).byDesign;
+  ok(by.length === 3 && by.find(g => g.id === idEarlier).pairs[0].imports.length === 3 && by.find(g => g.id === null).refusals === 1,
+     'the JSON report carries the same groups');
+
+  // No refusal at all: the zero is said, under the design in force.
+  const none = tx('ev-none');
+  put(none, [['src/b/u.ts', 'ok']]);
+  const z = runIn(none, '--package', PKG, '--since', '2026-09-25T00:00:00Z', '--design', dNow);
+  ok(new RegExp(`design ${idNow} \\(in force\\): no refusal at any pair`).test(z.out) && /PER DESIGN VERSION — 0 refusals/.test(z.out),
+     'a window with no refusal says so under the design in force — the section is never silent');
+  // No design to be found: versions are listed as the refusals name them, none called in force.
+  const lost = runIn(two, '--package', PKG, '--since', '2026-09-25T00:00:00Z');
+  ok(/no design in force to count against \(the package has no design/.test(lost.out) && new RegExp(`design ${idEarlier} \\(as the refusals name it\\): 3 refusals`).test(lost.out),
+     'without a design to read, each version is listed as the refusals name it and none is called the one in force');
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
