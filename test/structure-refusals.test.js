@@ -531,6 +531,121 @@ console.log('\nTHE DESIGN\'S EVIDENCE — refusals per component pair, per desig
      'without a design to read, each version is listed as the refusals name it and none is called the one in force');
 }
 
+console.log('\nTHE DEFAULT BRANCH, JUDGED WHOLE — an import nobody refused, whichever door it came through (#667):');
+{
+  const RM = require(path.join(__dirname, '..', 'hooks', 'structure-rules.js'));
+  const REPO = path.join(DIR, 'db', 'repo'), DP = path.join(REPO, 'packages', 'editor');
+  const git = (date, ...a) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: REPO, encoding: 'utf8',
+    env: { ...process.env, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } });
+  const put = (rel, text) => { const f = path.join(DP, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  const commit = (date, msg) => { git(date, 'add', '-A'); git(date, 'commit', '-qm', msg); return git(date, 'rev-parse', '--short', 'HEAD').stdout.trim(); };
+  const IMPORT = "import { v } from '../c/four';\n", PLAIN = 'export const v = 1;\n';
+  fs.mkdirSync(REPO, { recursive: true });
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: REPO });
+  for (const f of ['src/a/one.ts', 'src/a/bash.ts', 'src/a/tool.ts', 'src/b/three.ts', 'src/c/four.ts']) put(f, PLAIN);
+  put('src/a/old.ts', IMPORT + PLAIN);      // in the baseline
+  put('src/a/pre.ts', IMPORT + PLAIN);      // on the branch before the window, and not in the baseline
+  commit('2026-09-20T00:00:00Z', 'before the window');
+  // Written with no edit-tool call at all: added, taken out, and put back — the carrier is the last.
+  put('src/a/bash.ts', IMPORT + PLAIN); commit('2026-09-26T00:00:00Z', 'a patch script adds it');
+  put('src/a/bash.ts', PLAIN); commit('2026-09-26T01:00:00Z', 'and takes it out');
+  put('src/a/bash.ts', IMPORT + PLAIN); const carrier = commit('2026-09-26T02:00:00Z', 'and puts it back');
+  // A later commit that only touches the file, the import still there, is not the carrier.
+  put('src/a/bash.ts', IMPORT + PLAIN + '// touched\n'); commit('2026-09-26T03:00:00Z', 'a later touch');
+  put('src/a/tool.ts', IMPORT + PLAIN); commit('2026-09-27T00:00:00Z', 'an edit tool adds one');
+  git('2026-09-27T00:00:00Z', 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  // The checkout sits on a feature branch with one more committed and one uncommitted: neither is on the default branch.
+  git('2026-09-28T00:00:00Z', 'checkout', '-qb', 'feat');
+  put('src/a/feat.ts', IMPORT + PLAIN); commit('2026-09-28T00:00:00Z', 'feat only');
+  put('src/a/scratch.ts', IMPORT + PLAIN);
+
+  const EX = path.join(DIR, 'db', 'extractor.js');
+  fs.writeFileSync(EX, `const fs = require('fs'), path = require('path');
+exports.create = pkgDir => ({ id: 'fixture@1', configFiles: [], edges(rel, content) {
+  const out = new Map(); let unresolved = 0;
+  for (const m of content.matchAll(/(?:from\\s+|import\\s+)['"](\\.[^'"]+)['"]/g)) {
+    const t = path.posix.join(path.posix.dirname(rel), m[1]) + '.ts';
+    if (fs.existsSync(path.join(pkgDir, t))) out.set(t, false); else unresolved++;
+  }
+  return { edges: [...out], unresolved };
+} });
+`);
+  const DESIGN_OBJ = { root: 'src', components: { a: { dirs: ['a'] }, b: { dirs: ['b'] }, c: { dirs: ['c'] } }, allowed: [['a', 'b']] };
+  const w = (name, obj) => { const f = path.join(DIR, 'db', name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const D = w('design.json', DESIGN_OBJ);
+  const key = f => `src/a/${f}.ts -> src/c/four.ts`;
+  const B = w('baseline.json', { designId: RM.designId(DESIGN_OBJ), rules: { divergence: [key('old')], cycle: [] } });
+  const tx = path.join(DIR, 'db-tx'); fs.mkdirSync(path.join(tx, 'p'), { recursive: true });
+  // The one edit-tool call: an Edit that adds the import to tool.ts, its prior content recorded.
+  const u = use('Edit', path.join(DP, 'src/a/tool.ts'), '2026-09-26T12:00:00.000Z', 'sess-db');
+  const line = JSON.parse(u.line);
+  line.message.content[0].input = { file_path: path.join(DP, 'src/a/tool.ts'), old_string: 'export const v', new_string: IMPORT + 'export const v', replace_all: false };
+  const res = JSON.parse(result(u.id, 'The file has been updated successfully.', false, '2026-09-26T12:00:00.000Z'));
+  res.toolUseResult = { originalFile: PLAIN };
+  fs.writeFileSync(path.join(tx, 'p', 't.jsonl'), [JSON.stringify(line), JSON.stringify(res)].join('\n') + '\n');
+  const read = (...extra) => runIn(tx, '--package', DP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', B, '--extractor', EX, ...extra);
+
+  const leftovers = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('structure-guard-ref-')).length;
+  const before = leftovers();
+  const r = read();
+  const block = (r.out.split('ON THE DEFAULT BRANCH')[1] || '').split('TRIAL READING')[0];
+  ok(/, IN NEITHER THE DESIGN NOR THE BASELINE — 3 imports at origin\/main [0-9a-f]{8} /.test(r.out) && /judged whole: 7 modules · 4 edges · 4 cross between components · 1 held by the baseline/.test(r.out),
+     `the default branch is judged whole: 3 imports nobody refused, of 4 that cross, 1 held (${(r.out.match(/BASELINE — \d+ imports?/) || ['none'])[0]})`);
+  ok(new RegExp(`divergence\\s+${key('bash').replace(/[.]/g, '\\.')}   \\(a -> c\\)\\n\\s+carried by ${carrier} \\S+ and puts it back\\n\\s+edit-tool calls on that file in the window: 0 — none added it, so it was written through another door`).test(block),
+     'an import no edit tool wrote names the commit that carried it — the one that put it back, not the first that ever had it — and says another door');
+  ok(new RegExp(`${key('pre').replace(/[.]/g, '\\.')}   \\(a -> c\\)\\n\\s+already there before this window began \\(2026-09-25T00:00:00\\.000Z\\) — the window does not explain it\\n\\s+edit-tool calls on that file in the window: 0 — none added it\\n`).test(block),
+     'one that predates the window is said to, and is not blamed on another door');
+  ok(new RegExp(`${key('tool').replace(/[.]/g, '\\.')}   \\(a -> c\\)\\n\\s+carried by [0-9a-f]+ \\S+ an edit tool adds one\\n\\s+edit-tool calls on that file in the window: 1 — one of them added it: it is among the MISSED CHANCES above`).test(block),
+     'one an edit tool wrote is tied to the missed chance already listed, not counted as a second mystery');
+  ok(!/feat\.ts|scratch\.ts|old\.ts/.test(block), 'the feature branch\'s import, the uncommitted file and the baseline\'s own import are not listed');
+  ok(r.exit === 1 && /TRIAL READING: 1 chance to refuse — 0 refused[^\n]*· 1 missed[^\n]*· 3 on the default branch that nobody refused \(each needs a reason\)\./.test(r.out),
+     `and the trial reading carries the count beside "missed", exit 1 (got ${r.exit})`);
+  const feat = read('--ref', 'feat');
+  ok(/— 4 imports at feat [0-9a-f]{8} /.test(feat.out) && /src\/a\/feat\.ts -> src\/c\/four\.ts/.test(feat.out) && !/scratch\.ts/.test(feat.out),
+     '--ref reads another commit: its committed import joins, the uncommitted file still does not');
+  const j = path.join(DIR, 'db', 'out.json');
+  read('--json', j);
+  const jb = JSON.parse(fs.readFileSync(j, 'utf8')).defaultBranch;
+  ok(jb.found.length === 3 && jb.found.find(f => f.key === key('bash')).carried.sha === carrier && jb.found.find(f => f.key === key('pre')).before === true,
+     'the JSON report carries the same findings');
+
+  // CONTROL: a baseline that holds all of them — the zero is said, with what was examined, and forces nothing.
+  const full = w('baseline-full.json', { designId: RM.designId(DESIGN_OBJ), rules: { divergence: ['old', 'pre', 'bash', 'tool'].map(key), cycle: [] } });
+  const tx0 = path.join(DIR, 'db-tx0'); fs.mkdirSync(path.join(tx0, 'p'), { recursive: true });
+  const quiet = use('Edit', path.join(DP, 'src/a/one.ts'), '2026-09-26T12:00:00.000Z', 'sess-db0');
+  fs.writeFileSync(path.join(tx0, 'p', 't.jsonl'), [quiet.line, result(quiet.id, 'The file has been updated successfully.', false, '2026-09-26T12:00:00.000Z')].join('\n') + '\n');
+  const z = runIn(tx0, '--package', DP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', full, '--extractor', EX);
+  ok(z.exit === 3 && /BASELINE — 0 imports at origin\/main [0-9a-f]{8} [^\n]*4 held by the baseline\.\n/.test(z.out) && /· 0 on the default branch that nobody refused\)/.test(z.out),
+     `with nothing unheld the zero is said beside what was examined, and the window stays UNTESTED (exit ${z.exit})`);
+
+  // Nothing refused, nothing missed, and still something to read: the branch alone forces the exit.
+  const alone = runIn(tx0, '--package', DP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', B, '--extractor', EX);
+  ok(alone.exit === 1 && /TRIAL READING: UNTESTED — 0 chances to refuse[^\n]*· 3 on the default branch that nobody refused \(each needs a reason\)\)/.test(alone.out) &&
+     /src\/a\/tool\.ts -> src\/c\/four\.ts[^\n]*\n[^\n]*\n\s+edit-tool calls on that file in the window: 0 — none added it, so it was written through another door/.test(alone.out),
+     `a window whose edit tools added nothing still exits 1 when the branch holds imports nobody refused (exit ${alone.exit})`);
+
+  // COULD NOT LOOK is never NOTHING FOUND.
+  const other = w('baseline-other.json', { designId: '000000000000', rules: { divergence: [], cycle: [] } });
+  const nb = runIn(tx0, '--package', DP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', other, '--extractor', EX);
+  ok(/ON THE DEFAULT BRANCH: NOT COMPUTED — the baseline was measured under design 000000000000, not the design in force/.test(nb.out) &&
+     /the default branch was NOT read, so imports written outside the edit tools are uncounted/.test(nb.out) && !/on the default branch that nobody refused/.test(nb.out),
+     'a baseline from another design is NOT COMPUTED, and the reading says the door is uncounted');
+  const none = runIn(tx0, '--package', DP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--extractor', EX);
+  ok(/ON THE DEFAULT BRANCH: NOT COMPUTED — no baseline is in force/.test(none.out), 'so is a run with no baseline');
+  const badRef = read('--ref', 'no-such-branch');
+  ok(/ON THE DEFAULT BRANCH: NOT COMPUTED — no-such-branch is not a commit/.test(badRef.out) && /NOT read/.test(badRef.out), 'and a ref that is not a commit');
+  // Outside any git checkout: a scratch copy with the same files.
+  const COPY = path.join(DIR, 'db', 'copy', 'packages', 'editor');
+  fs.cpSync(DP, COPY, { recursive: true });
+  const txc = path.join(DIR, 'db-txc'); fs.mkdirSync(path.join(txc, 'p'), { recursive: true });
+  const cq = use('Edit', path.join(COPY, 'src/a/one.ts'), '2026-09-26T12:00:00.000Z', 'sess-dbc');
+  fs.writeFileSync(path.join(txc, 'p', 't.jsonl'), [cq.line, result(cq.id, 'The file has been updated successfully.', false, '2026-09-26T12:00:00.000Z')].join('\n') + '\n');
+  const nc = runIn(txc, '--package', COPY, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', B, '--extractor', EX);
+  ok(/ON THE DEFAULT BRANCH: NOT LOOKED AT — [^\n]* is not inside a git checkout, so it has no default branch/.test(nc.out) && /NOT read/.test(nc.out),
+     'a package outside any git checkout is NOT LOOKED AT — never "0 imports"');
+  ok(leftovers() === before, `no temporary copy of the branch is left behind (${leftovers() - before} extra)`);
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
