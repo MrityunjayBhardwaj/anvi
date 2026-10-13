@@ -538,6 +538,68 @@ console.log('\nTHE READING, SET TO REFUSE — refusals are listed apart from wou
      'a shadow log says so, zero included, and its chance stays a would-be refusal');
 }
 
+console.log('\nWHICH ADAPTER JUDGED (#665) — a row names it, and the gate counts only the one registered now:');
+{
+  const id = f => require('crypto').createHash('sha1').update(fs.readFileSync(f)).digest('hex').slice(0, 12);
+  const BAD = (session = 'v') => edit('pkg/src/low/a.ts', 'export const a = 1;\n', '// REACH:owner:owner#acorn\nexport const a = 1;\n', session);
+  const judged = shadow(BAD());
+  ok(judged.outcome === 'judged' && judged.adapter === id(GOOD) && /^[0-9a-f]{12}$/.test(judged.adapter), `a judged row names the adapter that judged it, by its content (${judged.adapter})`);
+  const outside = shadow(write('pkg/src/low/__tests__/t.ts', '// REACH:owner:owner#acorn\n'));
+  ok(outside.outcome === 'outside' && outside.adapter === id(GOOD), 'a row the adapter called outside names it too — the adapter decided that');
+  const crashed = shadow(BAD(), { ...CHECK, adapter: CRASH });
+  ok(crashed.outcome === 'not-measured' && crashed.adapter === id(CRASH) && crashed.adapter !== judged.adapter, 'a row from an adapter that ran and failed names THAT adapter');
+  const missing = shadow(BAD(), { ...CHECK, adapter: path.join(DIR, 'nope.js') });
+  ok(missing.outcome === 'not-measured' && !('adapter' in missing), 'an adapter that cannot be read is named by nothing, and the row says it could not look');
+  const own = shadow(edit('pkg/src/check/boundary.ts', 'x', 'y'));
+  const old = shadow(BAD(), { ...CHECK, node: 99 });
+  ok(own.outcome === 'check-file' && !('adapter' in own) && old.outcome === 'not-measured' && !('adapter' in old),
+     'a row decided before the adapter ran (the check\'s own file, a Node too old) names none — nothing judged it');
+  const COPY = adapter('good-copy.js', fs.readFileSync(GOOD, 'utf8'));
+  const CHANGED = adapter('good-changed.js', fs.readFileSync(GOOD, 'utf8') + '\n// one rule more\n');
+  ok(H.checkVersion(COPY) === id(GOOD) && H.checkVersion(CHANGED) !== id(GOOD) && H.checkVersion(path.join(DIR, 'nope.js')) === null,
+     'the name follows the content: the same program at another path is the same adapter, a changed one is another, an unreadable one is null');
+
+  // The reading, from a home of its own: two edits judged by one adapter, then the adapter changes.
+  const SCRIPT = path.join(__dirname, '..', 'scripts', 'structure-shadow.js');
+  const HOME4 = path.join(DIR, 'home4');
+  const STATE4 = path.join(HOME4, '.claude', 'structure-guard-cache');
+  const REGISTRY4 = path.join(HOME4, '.claude', 'structure-guard.json');
+  fs.mkdirSync(path.join(HOME4, '.claude'), { recursive: true });
+  const register4 = a => fs.writeFileSync(REGISTRY4, JSON.stringify({ packages: [entry({ ...CHECK, adapter: a })] }));
+  const hook4 = p => spawnSync('node', [HOOK], { input: JSON.stringify(p), encoding: 'utf8', timeout: 30000, env: { ...process.env, HOME: HOME4, ANVI_STRUCTURE_CHECK_TIMEOUT_MS: '8000' } });
+  const read4 = (extra = []) => { const r = spawnSync('node', [SCRIPT, '--package', PKG, '--since', '2000-01-01T00:00:00Z', '--registry', REGISTRY4, '--state', STATE4, ...extra],
+    { encoding: 'utf8', env: { ...process.env, HOME: HOME4 } }); return { exit: r.status, out: r.stdout + r.stderr }; };
+  register4(GOOD);
+  hook4(BAD('v1'));
+  hook4(edit('pkg/src/low/a.ts', 'export const a = 1;\n', '// c\nexport const a = 1;\n', 'v2'));
+  const rows4 = () => fs.readFileSync(H.shadowLogPath(STATE4, PKG), 'utf8').trim().split('\n').map(JSON.parse);
+  ok(rows4().length === 2 && rows4().every(r => r.outcome === 'judged' && r.adapter === id(GOOD)), 'the hook, as a process, writes the adapter into each row of the log');
+  const same = read4(['--judged', '2']);
+  ok(new RegExp(`judged edits by the adapter that judged them: 2 by ${id(GOOD)} \\(registered now\\) · 0 by another · 0 from before rows named one`).test(same.out) &&
+     /2 of 2 edits judged by the adapter registered now — MET/.test(same.out) && !/judged by another adapter|before rows named/.test(same.out.split('WOULD-BE')[1]),
+     'with the adapter unchanged, every judged row counts toward the gate and no chance is marked');
+  register4(CHANGED);
+  const moved = read4(['--judged', '2']);
+  ok(new RegExp(`0 by ${id(CHANGED)} \\(registered now\\) · 2 by another \\(${id(GOOD)} ×2\\) · 0 from before`).test(moved.out) &&
+     /0 of 2 edits judged by the adapter registered now — NOT YET/.test(moved.out),
+     'once the registered adapter changes, the rows it did not judge stop counting toward the gate — the period is NOT YET again');
+  ok(moved.exit === 1 && new RegExp(`owner owner#acorn \\(judged by another adapter, ${id(GOOD)}\\)`).test(moved.out) &&
+     /1 chance to rule on/.test(moved.out),
+     'a would-be refusal from the earlier adapter is still listed for the owner, marked as judged by another');
+  // A row from before rows named an adapter: the log's own older shape.
+  const { adapter: _gone, ...unnamed } = rows4()[0];
+  fs.appendFileSync(H.shadowLogPath(STATE4, PKG), JSON.stringify({ ...unnamed, session: 'older' }) + '\n');
+  hook4(edit('pkg/src/low/a.ts', 'export const a = 1;\n', '// d\nexport const a = 1;\n', 'v3'));
+  const mixed = read4(['--judged', '2']);
+  ok(new RegExp(`1 by ${id(CHANGED)} \\(registered now\\) · 2 by another \\(${id(GOOD)} ×2\\) · 1 from before rows named one`).test(mixed.out) &&
+     /edits recorded: 4 — 4 judged/.test(mixed.out) && /1 of 2 edits judged by the adapter registered now — NOT YET/.test(mixed.out) &&
+     /older · pkg\/src\/low\/a\.ts · owner owner#acorn \(judged before rows named an adapter\)/.test(mixed.out),
+     'the three kinds are counted apart and sum to the judged total; a chance from an unnamed row says so');
+  register4(path.join(DIR, 'nope.js'));
+  const gone = read4();
+  ok(gone.exit === 2 && /NOT MEASURED — cannot read the adapter registered/.test(gone.out), 'when the registered adapter cannot be read, the reading is NOT MEASURED — there is nothing to count against');
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
