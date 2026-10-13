@@ -14,6 +14,11 @@
 // only with zero wrong ones AND at least one chance. So this never prints a pass. A run with no
 // chance to refuse is UNTESTED; one with chances has something for the owner to rule on.
 //
+// WHICH ADAPTER JUDGED (#665): a row names the adapter that ran, by its content's hash. The gate's
+// "edits judged" counts only rows judged by the adapter registered NOW — an edit judged by other
+// rules says nothing about these. Every judged row is still counted and shown, by adapter, and a
+// would-be refusal from an earlier adapter is still listed, marked: it is still the owner's to read.
+//
 // Usage: node scripts/structure-shadow.js --package <dir> --since <iso> [--days 7] [--judged 10]
 // Exit: 1 something to read (a refusal or would-be refusal, an edit to the check, or a row that
 //       could not look) · 2 not measured (no check registered for the package, unreadable input) ·
@@ -54,7 +59,7 @@ function parseArgs(argv) {
 const pct = (xs, p) => { if (!xs.length) return null; const s = [...xs].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; };
 
 // The reading, from the rows alone — exported so the test drives it without a filesystem.
-function read(rows, { since, now, days, judged: needJudged }) {
+function read(rows, { since, now, days, judged: needJudged, adapter }) {
   const by = o => rows.filter(r => r.outcome === o);
   const judged = by('judged');
   const chances = [];
@@ -64,12 +69,19 @@ function read(rows, { since, now, days, judged: needJudged }) {
   const why = {};
   for (const r of by('not-measured')) why[r.why] = (why[r.why] || 0) + 1;
   const elapsed = (now - Date.parse(since)) / 864e5;
-  const periodMet = elapsed >= days && judged.length >= needJudged;
+  // By the adapter that judged them: registered now, another one, or from before rows named one.
+  const versions = { now: 0, unnamed: 0, others: {} };
+  for (const r of judged) {
+    if (!r.adapter) versions.unnamed++;
+    else if (r.adapter === adapter) versions.now++;
+    else versions.others[r.adapter] = (versions.others[r.adapter] || 0) + 1;
+  }
+  const periodMet = elapsed >= days && versions.now >= needJudged;
   const toRead = chances.length > 0 || by('check-file').length > 0 || by('not-measured').length > 0;
   // A row written before the check could refuse names no mode: it was shadow, the only one there was.
   const refusing = rows.filter(r => r.mode === 'refuse');
   const refused = { reach: judged.filter(r => r.refused).length, checkFile: by('check-file').filter(r => r.refused).length };
-  return { modes: { shadow: rows.length - refusing.length, refuse: refusing.length }, refused,
+  return { adapter, versions, modes: { shadow: rows.length - refusing.length, refuse: refusing.length }, refused,
     rows: rows.length, judged, outside: by('outside').length, checkFile: by('check-file'), shape: by('edit-shape').length,
     notMeasured: by('not-measured').length, why, chances, onList, landed: [...landed], elapsed, periodMet,
     ms: { p50: pct(rows.map(r => r.ms).filter(Number.isFinite), 0.5), max: pct(rows.map(r => r.ms).filter(Number.isFinite), 1) },
@@ -86,11 +98,17 @@ function report(rd, a, logPath) {
   // Said every run, zero included: a log holds both modes, and a count means different things in each.
   out.push(`  rows by the check's mode: ${rd.modes.shadow} in shadow (nothing refused) · ${rd.modes.refuse} set to refuse — ` +
     `${rd.refused.reach + rd.refused.checkFile} REFUSED: ${rd.refused.reach} for a reach off the list · ${rd.refused.checkFile} for an edit to the check's own files`);
+  // Said every run, zeros included: which rules judged is what makes a judged count mean anything.
+  const others = Object.entries(rd.versions.others);
+  out.push(`  judged edits by the adapter that judged them: ${rd.versions.now} by ${rd.adapter} (registered now) · ` +
+    `${others.reduce((n, [, c]) => n + c, 0)} by another${others.length ? ` (${others.map(([v, c]) => `${v} ×${c}`).join(', ')})` : ''} · ` +
+    `${rd.versions.unnamed} from before rows named one`);
   out.push(`  time per edit: median ${rd.ms.p50 === null ? '—' : rd.ms.p50 + ' ms'} · slowest ${rd.ms.max === null ? '—' : rd.ms.max + ' ms'}`);
   out.push(`  reaches added: ${rd.chances.length + rd.onList.length} — ${rd.onList.length} on the project's exception list · ` +
     `${rd.chances.length} NOT on it (each a chance to refuse)`);
   if (rd.landed.length) out.push(`  already on disk and off the list (landed outside any edit hook, not charged to an edit): ${rd.landed.length}`);
   const line = c => `    ${c.row.ts} · ${c.row.session || 'no session'} · ${c.row.checkout === 'registered' ? '' : 'worktree · '}${c.row.rel} · ${c.rule} ${c.reach}` +
+    (c.row.adapter === rd.adapter ? '' : c.row.adapter ? ` (judged by another adapter, ${c.row.adapter})` : ' (judged before rows named an adapter)') +
     (c.row.graph === 'deny' ? ' (the graph rule refused this edit too)' : '');
   const did = rd.chances.filter(c => c.row.refused);
   const would = rd.chances.filter(c => !c.row.refused);
@@ -107,12 +125,12 @@ function report(rd, a, logPath) {
     for (const r of rd.checkFile) out.push(`    ${r.ts} · ${r.session || 'no session'} · ${r.checkout === 'registered' ? '' : 'worktree · '}${r.rel} · ` +
       (r.refused ? 'REFUSED, no go given' : r.go ? `allowed on the go given ${r.go}` : 'recorded in shadow, not refused'));
   }
-  out.push('', `  period: ${rd.elapsed.toFixed(1)} of ${a.days} days · ${rd.judged.length} of ${a.judged} edits judged — ` +
+  out.push('', `  period: ${rd.elapsed.toFixed(1)} of ${a.days} days · ${rd.versions.now} of ${a.judged} edits judged by the adapter registered now — ` +
     (rd.periodMet ? 'MET' : 'NOT YET (whichever is later)'));
   out.push(rd.chances.length
     ? `  SHADOW READING: ${rd.chances.length} chance${rd.chances.length === 1 ? '' : 's'} to rule on — ${did.length} refused · ${would.length} would-be. ` +
       `It may refuse only if every one is ruled right${rd.periodMet ? '' : ', and the period is not yet over'}.`
-    : `  SHADOW READING: UNTESTED — 0 chances to refuse in ${rd.judged.length} judged edits. This is neither a pass nor a failure.`);
+    : `  SHADOW READING: UNTESTED — 0 chances to refuse in ${rd.judged.length} judged edits (${rd.versions.now} by the adapter registered now). This is neither a pass nor a failure.`);
   return out.join('\n');
 }
 
@@ -131,6 +149,12 @@ function main() {
     console.log(`structure-shadow: NOT MEASURED — ${regPath} registers no check for ${pkg}, so there is no shadow run to read`);
     process.exit(2);
   }
+  // Without the adapter registered now there is nothing to count the gate against.
+  const adapter = typeof entry.check.adapter === 'string' ? H.checkVersion(entry.check.adapter) : null;
+  if (!adapter) {
+    console.log(`structure-shadow: NOT MEASURED — cannot read the adapter registered for ${pkg} (${entry.check.adapter}), so no row can be matched to it`);
+    process.exit(2);
+  }
   const logPath = H.shadowLogPath(a.state || H.STATE_DIR, entry.dir);
   let text = '';
   try { text = fs.readFileSync(logPath, 'utf8'); }
@@ -140,7 +164,7 @@ function main() {
   for (const line of text.split('\n').filter(Boolean)) { try { rows.push(JSON.parse(line)); } catch { bad++; } }
   if (bad) { console.log(`structure-shadow: NOT MEASURED — ${bad} unreadable line${bad === 1 ? '' : 's'} in ${logPath}`); process.exit(2); }
   const since = Date.parse(a.since);
-  const rd = read(rows.filter(r => Date.parse(r.ts) >= since), { since: a.since, now: Date.now(), days: a.days, judged: a.judged });
+  const rd = read(rows.filter(r => Date.parse(r.ts) >= since), { since: a.since, now: Date.now(), days: a.days, judged: a.judged, adapter });
   console.log(report(rd, a, logPath));
   process.exit(rd.exit);
 }

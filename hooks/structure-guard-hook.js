@@ -510,6 +510,15 @@ function said(owner, row) {
       'It is set to refuse, and this edit was NOT checked by it — that is not a pass.' };
 }
 
+// Which adapter judged a row (#665): the rules a row was judged by are the adapter's, and an
+// adapter changes. A row names the one that ran, so a count never adds edits judged by different
+// rules without saying so. The content's hash, not its path — the path stays while the rules move.
+// One read of a small file this hook is about to run; null when it cannot be read, and the run
+// that follows says why.
+function checkVersion(adapter) {
+  try { return crypto.createHash('sha1').update(fs.readFileSync(adapter)).digest('hex').slice(0, 12); } catch { return null; }
+}
+
 function judgeWithCheck(owner, abs, tool, input, row, plainUnmeasured, { readFile, spawn, nodeMajor, budgetMs = CHECK_TIMEOUT_MS, stateDir = STATE_DIR, now = Date.now() }) {
   const check = owner.entry.check;
   const pkgName = path.basename(owner.dir);
@@ -548,6 +557,9 @@ function judgeWithCheck(owner, abs, tool, input, row, plainUnmeasured, { readFil
 
   const timeout = Math.min(CHECK_TIMEOUT_MS, Math.floor(budgetMs));
   if (!(timeout >= CHECK_MIN_MS)) return unmeasured(`no time left in the hook's budget — ${Math.max(0, Math.floor(budgetMs))} ms remained, the check needs ${CHECK_MIN_MS}`);
+  // From here the adapter runs, so every row below — judged, outside, or could not look — names it.
+  const version = checkVersion(check.adapter);
+  if (version) row.adapter = version;
   const r = spawn(process.execPath, [check.adapter], { input: JSON.stringify({ root, rel: row.rel, before, after }),
     encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
   if (r.error) return unmeasured(r.error.code === 'ETIMEDOUT' ? `the check took longer than ${timeout} ms` : `the check could not run: ${r.error.message}`);
@@ -685,7 +697,7 @@ function noticesOnce(sessionId, notices, stateDir) {
 }
 
 module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
-  shadowCheck, shadowLogPath, recordShadow, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
+  shadowCheck, shadowLogPath, recordShadow, checkVersion, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
 if (require.main === module) {
   // What this run costs, one row per run (#527). Guarded like any shared module: a

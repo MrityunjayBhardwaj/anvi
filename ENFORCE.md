@@ -1589,7 +1589,11 @@ loosened until it stops firing guards nothing.
   would-be refusal for the owner to rule right or wrong, and every edit to the check. Exit 1
   something to read · 2 not measured (no check registered, an unreadable log) · 3 UNTESTED — never
   0. The gate (ruled on #600): 7 days or 10 judged edits, whichever is later; the check may refuse
-  only with zero wrong would-be refusals and at least one chance. Observed on stave (2026-10-02,
+  only with zero wrong would-be refusals and at least one chance. Each row the adapter judged names
+  it by its content's hash, and the gate counts only edits judged by the adapter registered NOW (#665):
+  an edit judged by other rules says nothing about these. The report prints the judged edits by adapter
+  every run — registered now, another, from before rows named one — and marks a would-be refusal an
+  earlier adapter raised, which is still the owner's to read. Observed on stave (2026-10-02,
   planted edits never written): an `acorn` import in `toolbar/Toolbar.tsx` → a chance not on the
   list; a comment → judged, nothing added; a `codeView/` file and a test → outside; the exception
   list → check-file; 0.2–0.6 s per edit. The 60-day replay planned first could not be run: the
