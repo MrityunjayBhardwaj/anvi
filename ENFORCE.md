@@ -1521,6 +1521,40 @@ loosened until it stops firing guards nothing.
   first drifted refusal and never on a version that did not drift, so no per-version capture is
   kept. A denial without the guard's words (another hook's, or a settings permission rule — the
   record cannot tell them apart) is counted where it can be seen, not called drift.
+- **A design changes on evidence, in a fixed order (#536).** Once the guard refuses, a refusal
+  means one of three things: the import is wrong (fix it), the design is right and this edge is a
+  deliberate exception (record the one-import exception), or the design is wrong (change the
+  design, before the code). Three reports say which. **(1) Refusals per component pair, per design
+  version.** A refusal names the design it was judged under (`judged under design <id>`), since
+  the transcript is the only record a refusal leaves. `structure-refusals.js` groups refusals by
+  that id and then by pair, every run, zero included: at one pair under one design, 1 different
+  import refused is an edit, 2 a flag, 3 or more **DESIGN-OWED**. It counts different imports, not
+  refusals, so one import retried three times is one edit; both numbers are printed. Refusals under
+  another design id are listed under it and count toward that version only, so old friction does
+  not condemn the design that replaced it; a refusal from before refusals named their design
+  counts toward no version. The pair is read from the refusal's own words, never recomputed from
+  the design on disk now. **(2) What a proposed design reclassifies.** `structure-guard.js
+  --design <in force> --proposed <design> (--graph | --package)` judges one graph under both and
+  prints both directions by key: edges that stop being violations (with why: declared, inside one
+  component now, or no longer examined, which is a blind spot gained and is called one; the
+  baseline's own are marked), edges that become violations (with where they stood), and edges that
+  stay violations at another pair, plus modules that leave or join a component or the corpus. It
+  writes nothing and arms nothing; a package in a git checkout is measured from the default
+  branch, as a baseline is. Exit 0 only when nothing is reclassified. **(3) The design as a
+  series.** A design may carry `"versions": [{ "id", "date", "reason" }]`. It is commentary, no
+  part of the id, so writing a reason invalidates no baseline. Both reports print the reason beside
+  each id and say when the version in force has no entry: the design changed with no reason
+  recorded. **The order:** record the observation that forced the change (which pair, how many
+  imports, what honouring the design cost) → author the design change as its own commit, with its
+  `versions` entry, before the code → read the reclassification, re-measure the baseline under the
+  new id and re-arm → then write the code that obeys → state the general rule in the sprint's
+  record. A design changed in the same commit as the code it permits cannot be reviewed. **The
+  tests a change must pass:** the count (3 at one pair within one version); the span (honouring
+  the design touches more files than the previous change in the same concern did); the one-off
+  (a single edge with no sibling expected is an exception, not a redesign); the principle (the
+  change names the concern it adds or moves as a general rule, or the answer is the exception).
+  The design belongs to the project, so the change is the owner's call; these reports bring the
+  count. Nothing here edits a design.
 - **A git worktree of the registered repository is the same package (#546).** Registration is
   by real path, so an edit in a worktree was not judged and nothing said so — and on the day
   stave was armed, 24 of its 24 edits were made in a worktree. The hook now maps a file to the

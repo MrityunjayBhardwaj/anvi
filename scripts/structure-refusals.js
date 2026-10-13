@@ -62,6 +62,16 @@
 // chance (that needs the whole graph at that moment), and imports are resolved against the
 // checkout as it is when the report runs — both said in the output.
 //
+// THE DESIGN'S EVIDENCE — REFUSALS PER COMPONENT PAIR, PER DESIGN VERSION (#536). A refusal means
+// the import is wrong, or the edge is a deliberate exception, or the design is wrong; without a
+// count the third is decided by whoever is most frustrated. So every run groups the refusals by
+// the design id each one names (the hook writes `judged under design <id>` into its reason) and
+// then by component pair: 1 different import refused at a pair is an edit, 2 a flag, 3 or more
+// DESIGN-OWED. Different IMPORTS, not refusals — one import retried three times is one edit.
+// Refusals under another design id count toward that version only; refusals from before the hook
+// named a design count toward none. The design's own `versions` list, when it has one, gives each
+// id its date and reason.
+//
 // Exit: 1 a person must read something: a refusal (right or wrong?), a missed chance (why was it
 //       not refused?), or a possible chance (is it real?) · 2 not measured (no transcripts, no edit in the package in the window, a
 //       denial in a shape this reader does not know, or no design to compute exposure with) ·
@@ -95,6 +105,35 @@ const CHECK_REFUSAL = /^(?:PreToolUse:(?:Write|Edit|MultiEdit) hook error: )?BLO
 const CHECK_WORDS = /BLOCKED by .*'s own check: this edit to /;
 // `layer` stays readable: transcripts written before the component graph (#554) carry it.
 const VIOLATION = /^\s*·\s*(divergence|layer|cycle):\s*(\S+ -> \S+)\s*$/gm;
+// Which design a refusal was judged under, and which component pair each refused import is at —
+// both in the hook's own words (#536). The pair is read from the refusal, never recomputed from
+// the design on disk now: that design may be a later version, with the file mapped elsewhere.
+// A refusal written before refusals named their design has no id, and counts toward no version.
+const JUDGED_UNDER = /^\(judged under design ([0-9a-f]{12}), against its baseline over /m;
+const PAIR_OF = /^\s*·\s*divergence:\s*(\S+ -> \S+)\s*\n\s+(.+?) imports (.+?), which the design does not declare\s*$/gm;
+
+// Refusals grouped by the design version that made them, then by component pair. At each pair:
+// the refusals, and the DIFFERENT imports refused. The second is the evidence — one import an
+// agent retried three times is one edit refused three times, not three reasons to doubt the design.
+function groupRefusals(refused) {
+  const groups = new Map();
+  for (const c of refused) {
+    const id = c.design || null;
+    if (!groups.has(id)) groups.set(id, { id, refusals: 0, noPair: 0, pairs: new Map() });
+    const g = groups.get(id);
+    g.refusals++;
+    if (!c.pairs || !c.pairs.length) { g.noPair++; continue; }
+    for (const { key, pair } of c.pairs) {
+      if (!g.pairs.has(pair)) g.pairs.set(pair, { pair, refusals: new Set(), imports: new Set() });
+      g.pairs.get(pair).refusals.add(c.id);
+      g.pairs.get(pair).imports.add(key);
+    }
+  }
+  return [...groups.values()].map(g => ({ ...g, pairs: [...g.pairs.values()]
+    .map(p => ({ pair: p.pair, refusals: p.refusals.size, imports: [...p.imports].sort() }))
+    .sort((x, y) => y.imports.length - x.imports.length || y.refusals - x.refusals || (x.pair < y.pair ? -1 : 1)) }));
+}
+
 // What each notice says, by its own opening words (hooks/structure-guard-hook.js).
 const NOTICE_KINDS = [
   ['on disk', /already on disk but not in its baseline/],
@@ -188,6 +227,8 @@ function readTranscript(file, pkgDir, filter, since, until) {
       c.reason = text;
       c.violations = [...text.matchAll(VIOLATION)].map(m => ({ rule: m[1], key: m[2] }));
       c.checkToo = CHECK_WORDS.test(text);
+      c.design = (text.match(JUDGED_UNDER) || [])[1] || null;
+      c.pairs = [...text.matchAll(PAIR_OF)].map(m => ({ key: m[1], pair: `${m[2]} -> ${m[3]}` }));
     } else if (CHECK_REFUSAL.test(text)) { c.outcome = 'refused by the check'; c.reason = text; }
     else if (GUARD_WORDS.test(text) || CHECK_WORDS.test(text)) { c.outcome = 'unrecognised'; c.reason = text; }
     // A user's rejection is its own kind, and is not this.
@@ -412,9 +453,49 @@ function main(argv) {
     byCheck.forEach((c, i) => print(`    ${i + 1}. ${c.at} ${c.session.slice(0, 8)} ${c.tool} ${c.file}`));
   }
 
-  // ── exposure: what the refusal count is OF (#603) ──
+  // The design in force, its baseline and extractor: both sections below are read against it.
   const { frame, notMeasured: noFrame } = frameFor(pkgDir, args);
   let toRead = 0, exposure = null;
+
+  // ── the design's evidence: refusals per component pair, per design version (#536) ──
+  // Printed every time, zero included. A count never crosses a design version: a design that
+  // already fixed a pair must not be condemned by the friction that made it change.
+  const groups = groupRefusals(refused);
+  {
+    const N = RULES.DESIGN_OWED_AT;
+    const series = frame ? RULES.designVersions(frame.design) : null;
+    const entry = id => series && series.entries.find(e => e.id === id);
+    const about = id => { const e = entry(id); return e ? `${e.date ? ` · ${e.date}` : ''}${e.reason ? ` · ${e.reason}` : ''}` : ''; };
+    const times = n => `${n} time${n === 1 ? '' : 's'}`;
+    const rows = (g, counted) => {
+      for (const p of g.pairs) {
+        const k = p.imports.length;
+        print(`        ${String(k).padStart(3)} import${k === 1 ? ' ' : 's'} refused ${times(p.refusals).padEnd(9)} ${p.pair}` + (!counted ? ''
+          : k >= N ? `   ← DESIGN-OWED: ${N} or more different imports refused at one pair under one design — the design's question, not the edits'`
+          : k === 2 ? '   a flag' : '   an edit'));
+        if (counted && k >= N) for (const key of p.imports) print(`              ${key}`);
+      }
+      if (g.noPair) print(`        ${String(g.noPair).padStart(3)} refusal${g.noPair === 1 ? '' : 's'} at no component pair (a file-level cycle, or a reason no pair could be read from)`);
+    };
+    print(`\n  REFUSALS BY COMPONENT PAIR, PER DESIGN VERSION — ${refused.length} refusal${refused.length === 1 ? '' : 's'} by the graph rule in this window. ` +
+          `Counted in DIFFERENT imports refused at one pair under one design: 1 is an edit, 2 a flag, ${N} or more the design's question.`);
+    if (frame) {
+      const g = groups.find(x => x.id === frame.id);
+      print(`    design ${frame.id} (in force${about(frame.id)}): ` + (g ? `${g.refusals} refusal${g.refusals === 1 ? '' : 's'}` : 'no refusal at any pair'));
+      if (g) rows(g, true);
+      if (series.note) print(`      note: ${series.note}.`);
+    } else print(`    no design in force to count against (${noFrame}) — every version below is listed as the refusals name it, none is marked as the one in force.`);
+    for (const g of groups.filter(x => x.id && !(frame && x.id === frame.id))) {
+      print(`    design ${g.id} (${frame ? 'an earlier or other version — NOT counted toward the design in force' : 'as the refusals name it'}${about(g.id)}): ` +
+            `${g.refusals} refusal${g.refusals === 1 ? '' : 's'}`);
+      rows(g, !frame);
+    }
+    const unnamed = groups.find(x => x.id === null);
+    print(`    design not named: ${unnamed ? unnamed.refusals : 0} refusal${unnamed && unnamed.refusals === 1 ? '' : 's'} from before a refusal named its design — counted toward no version`);
+    if (unnamed) rows(unnamed, false);
+  }
+
+  // ── exposure: what the refusal count is OF (#603) ──
   if (noFrame) {
     print(`\n  exposure: NOT COMPUTED — ${noFrame}.`);
     print(`  TRIAL READING: NOT MEASURED — without exposure, a window with no chance to refuse cannot be told from one that passed.`);
@@ -482,7 +563,7 @@ function main(argv) {
 
   if (args.json) {
     fs.writeFileSync(path.resolve(args.json), JSON.stringify({ package: pkgDir, since, until, transcripts: files.length,
-      unreadable, badLines, exposure, calls: calls.map(({ reason, input, prior, ...c }) => c) }, null, 1) + '\n');
+      unreadable, badLines, exposure, byDesign: groups, calls: calls.map(({ reason, input, prior, ...c }) => c) }, null, 1) + '\n');
     print(`  report: ${path.resolve(args.json)}`);
   }
   // A ruling owed (refused, or a missed chance) · not measured (a denial unread, or no exposure)
@@ -492,6 +573,6 @@ function main(argv) {
   return 3;
 }
 
-module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, REFUSAL, GUARD_WORDS, CHECK_REFUSAL, CHECK_WORDS, VIOLATION, NOTICE_KINDS };
+module.exports = { readTranscript, spellings, needles, exposureOf, frameFor, groupRefusals, JUDGED_UNDER, PAIR_OF, REFUSAL, GUARD_WORDS, CHECK_REFUSAL, CHECK_WORDS, VIOLATION, NOTICE_KINDS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

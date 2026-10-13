@@ -148,6 +148,9 @@ console.log('\nREFUSED — a new violation that starts in the edited file:');
   ok(r.exit === 2 && r.denied, `an upward import is REFUSED — exit 2 and a deny payload (got exit ${r.exit})`);
   ok(/divergence: src\/low\/a\.ts -> src\/mid\/m\.ts/.test(r.reason), 'the refusal names the edge and the rule');
   ok(/Remedies:/.test(r.reason), 'and carries the remedy');
+  // Refusals are counted per design version, and the transcript is the only record one leaves (#536).
+  ok(r.reason.includes(`(judged under design ${R.designId(JSON.parse(fs.readFileSync(DESIGN, 'utf8')))}, against its baseline over `),
+     'and names the design it was judged under, by id');
   // The whole command, flag by flag, from the registry entry — so a remedy that names the script
   // but not the files it needs, or names the wrong one, reddens here.
   ok(!/in a worktree/.test(r.reason), 'a refusal in the registered checkout says nothing about worktrees');

@@ -242,7 +242,9 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design, workt
   if (fresh.some(f => f.rule === 'cycle')) remedies.push('  · cycle — break the loop; one of the two modules is doing the other\'s job');
   return `BLOCKED: this edit to ${rel} adds ${fresh.length} import${fresh.length === 1 ? '' : 's'} that erode ${pkgName}'s declared structure:\n` +
     lines.join('\n') + '\n' +
-    `(judged against its baseline over ${examined.modules} modules and ${examined.edges} edges)\n` +
+    // The design id is in the refusal itself (#536): refusals are counted per design version, and
+    // the transcript is the only record a refusal leaves.
+    `(judged under design ${R.designId(design)}, against its baseline over ${examined.modules} modules and ${examined.edges} edges)\n` +
     'Remedies:\n' + remedies.join('\n') + '\n' + exceptionText(pairs.length > 0) + '\n' +
     baselineCommand(pkgDir, entry, true, worktree);
 }
