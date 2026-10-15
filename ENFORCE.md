@@ -1508,7 +1508,9 @@ loosened until it stops firing guards nothing.
   that reached the default branch unjudged is NEW in every branch cut after it, and refusing each
   of those merges for it would hold them all hostage to one ruling. What the base carried is said
   beside the merge as the user's to rule on. Nothing new is silent; could not look (including a
-  fork point it cannot find) is allowed and said on that merge. Each judgement is a row in
+  fork point it cannot find) is allowed and said on that merge. It works inside a 50 s budget of
+  its 60 s registration (#671): every call it makes gets only what is left, and when too little is,
+  the merge is NOT MEASURED and said — a hook killed at its timeout would pass it with no record. Each judgement is a row in
   `~/.claude/structure-guard-cache/merges.jsonl`. It cannot see a merge made outside Claude Code
   (the web page, a person's terminal); the trial report's judgement of the default branch does.
   It does not judge at commit: most commits are `git add … && git commit …` in one command, and a

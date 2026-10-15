@@ -46,6 +46,12 @@ const REGISTRY = path.join(os.homedir(), '.claude', 'structure-guard.json');
 const STATE_DIR = path.join(os.homedir(), '.claude', 'structure-guard-cache');
 const LOG = path.join(STATE_DIR, 'errors.log');
 const MERGE_LOG = path.join(STATE_DIR, 'merges.jsonl');
+// Inside the 60 s it is registered with (#671). A hook Claude Code kills at its timeout lets the
+// call through with no row and no word — a merge passed unjudged, looking exactly like a clean one.
+// So every call it makes gets only what is left of this budget, and below MIN_CALL_MS it stops and
+// says the merge was not judged.
+const BUDGET_MS = 50000;
+const MIN_CALL_MS = 1500;
 
 // Flags of `gh pr merge` that take a value, so the value is not read as the pull request.
 const VALUED = new Set(['-R', '--repo', '-b', '--body', '-F', '--body-file', '-t', '--subject',
@@ -209,7 +215,8 @@ function judgeMerge(m, entry, deps) {
   // after it. Refusing a merge for what it did not add would hold every later merge hostage to it.
   // So the commit it branched from is judged too, and only what the branch adds is refused.
   const baseRef = `refs/remotes/origin/${pr.baseRefName}`;
-  if (pr.baseRefName) git(run, top, 'fetch', '-q', 'origin', `${pr.baseRefName}:${baseRef}`);
+  // `+`, as a plain fetch updates a remote-tracking ref: a force-pushed base must not leave a stale fork point.
+  if (pr.baseRefName) git(run, top, 'fetch', '-q', 'origin', `+${pr.baseRefName}:${baseRef}`);
   const fork = pr.baseRefName && git(run, top, 'merge-base', sha, baseRef);
   if (!fork) return { outcome: 'not-measured', pr: pr.number, sha,
     why: `the head carries ${head.lines.length} violation${head.lines.length === 1 ? '' : 's'}, but where #${pr.number} branched from ${pr.baseRefName || 'its base'} could not be found, so what it adds cannot be told from what it inherits` };
@@ -258,8 +265,24 @@ function refusalText(entry, r) {
     'and both are their decision.';
 }
 
+// Out of budget: thrown by a timed call, caught per merge and reported as not measured.
+class OutOfTime extends Error {}
+
+// deps.run with each call's deadline cut to what is left of the budget.
+function timed(deps, run) {
+  const deadline = deps.started + (deps.budgetMs || BUDGET_MS);
+  return (cmd, args, opts = {}) => {
+    const left = deadline - deps.now();
+    if (left < MIN_CALL_MS)
+      throw new OutOfTime(`out of time — ${Math.round((deps.now() - deps.started) / 1000)} s of its ${Math.round((deps.budgetMs || BUDGET_MS) / 1000)} s spent before \`${cmd} ${args.filter(a => !a.includes('/')).slice(0, 3).join(' ')}\``);
+    return run(cmd, args, { ...opts, timeoutMs: Math.min(opts.timeoutMs || left, left) });
+  };
+}
+
 // The decision for one Bash call: { decision: 'skip' | 'allow' | 'deny', reason?, notice?, rows }.
-function evaluate(payload, deps) {
+function evaluate(payload, given) {
+  const deps = { ...given, started: given.started === undefined ? given.now() : given.started };
+  deps.run = timed(deps, given.run);
   const input = (payload && payload.tool_input) || {};
   const merges = mergesIn(input.command, payload && payload.cwd);
   if (!merges.length) return { decision: 'skip', rows: [] };
@@ -272,9 +295,14 @@ function evaluate(payload, deps) {
     const repo = repoKey(m.repo) || (/github\.com/.test(m.pr || '') && repoKey(m.pr)) ||
       (m.dir && repoKey(originOf(deps.run, m.dir)));
     if (!repo) continue;                                   // not a GitHub repository this hook can name
-    for (const entry of packagesOf(repo, registry, deps.run)) {
+    let owners;
+    try { owners = packagesOf(repo, registry, deps.run); }
+    catch (e) { if (!(e instanceof OutOfTime)) throw e; notices.push(`structure guard: NOT MEASURED — a merge into ${repo} was not judged: ${e.message}.`); rows.push({ repo, outcome: 'not-measured', why: e.message }); continue; }
+    for (const entry of owners) {
       const t0 = deps.now();
-      const r = m.unreadable ? { outcome: 'not-measured', why: m.unreadable } : judgeMerge(m, entry, deps);
+      let r;
+      try { r = m.unreadable ? { outcome: 'not-measured', why: m.unreadable } : judgeMerge(m, entry, deps); }
+      catch (e) { if (!(e instanceof OutOfTime)) throw e; r = { outcome: 'not-measured', why: e.message }; }
       rows.push({ package: entry.dir, repo, ...r, ms: deps.now() - t0 });
       if (r.outcome === 'refused') refusals.push(refusalText(entry, r));
       if (r.carried && r.carried.length) notices.push(carriedText(repo, r));
@@ -292,11 +320,12 @@ function runSync(cmd, args, { cwd, timeoutMs } = {}) {
   return { status: r.status, signal: r.signal, stdout: r.stdout || '', stderr: r.stderr || '', error: r.error && r.error.message };
 }
 
-module.exports = { words, subcommands, mergesIn, repoKey, newImports, judgeMerge, evaluate, refusalText, carriedText, MERGE_LOG };
+module.exports = { BUDGET_MS, MIN_CALL_MS, words, subcommands, mergesIn, repoKey, newImports, judgeMerge, evaluate, refusalText, carriedText, MERGE_LOG };
 
 if (require.main === module) {
   let meter = null;
   try { meter = require('./hook-meter.js'); meter.start('structure-merge-hook.js', 'PreToolUse'); } catch (_) { meter = null; }
+  const started = Date.now();
   const stdinTimeout = setTimeout(() => process.exit(0), 5000);
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -317,6 +346,7 @@ if (require.main === module) {
         readFile: f => fs.readFileSync(f, 'utf8'),
         guardScript: guardScript(),
         now: () => Date.now(),
+        started,
       });
       if (result.rows.length) {
         const ts = new Date().toISOString();

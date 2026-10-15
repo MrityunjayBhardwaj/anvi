@@ -103,6 +103,7 @@ const register = (over = {}) => fs.writeFileSync(REG, JSON.stringify({ packages:
 
 const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
 const rows = () => { try { return fs.readFileSync(ROWS, 'utf8').split('\n').filter(Boolean).map(JSON.parse); } catch { return []; } };
+const REGS_TIMEOUT = () => require(path.join(ROOT, 'scripts', 'register-hooks.cjs')).REGISTRATIONS.find(r => r[2] === 'structure-merge-hook.js')[3];
 function fire(command, { head = ERODING, env = {}, cwd = DIR } = {}) {
   fs.rmSync(CALLS, { force: true });
   const r = spawnSync(process.execPath, [HOOK], {
@@ -226,6 +227,36 @@ console.log('\nCOULD NOT LOOK IS NEVER NOTHING FOUND:');
   register();
   const garbage = spawnSync(process.execPath, [HOOK], { input: 'not json{{', encoding: 'utf8', env: { ...process.env, HOME } });
   ok(garbage.status === 0 && garbage.stdout === '', 'unreadable input is silent and exits 0');
+}
+
+console.log('\nIT STOPS INSIDE ITS OWN TIMEOUT (#671):');
+{
+  // A fake clock and a fake runner: each call is recorded with the deadline it was given, and a
+  // slow `gh` spends most of the budget.
+  let clock = 0;
+  const seen = [];
+  const fakeRun = slowGh => (cmd, args, opts) => {
+    seen.push({ cmd, args, timeoutMs: opts.timeoutMs, left: 10000 - clock });
+    if (cmd === 'git' && args.includes('remote.origin.url')) return { status: 0, stdout: 'git@github.com:Acme/Widget.git\n' };
+    if (cmd === 'git' && args.includes('--show-toplevel')) return { status: 0, stdout: REPO + '\n' };
+    if (cmd === 'git' && args.includes('cat-file')) return { status: 0, stdout: 'commit\n' };
+    if (cmd === 'gh') { clock += slowGh; return { status: 0, stdout: JSON.stringify({ number: 7, headRefOid: ERODING, baseRefName: 'main' }) }; }
+    clock += 100;
+    return { status: 0, stdout: '' };
+  };
+  const deps = slowGh => ({ registry: () => ({ packages: [{ dir: PKG, design: DESIGN, baseline: BASE, designId: ID }] }),
+    run: fakeRun(slowGh), rules: R, readFile: f => fs.readFileSync(f, 'utf8'), guardScript: HOOK, now: () => clock, started: 0, budgetMs: 10000 });
+  const payload = { cwd: DIR, tool_name: 'Bash', tool_input: { command: 'gh pr merge 7 --repo Acme/Widget' } };
+  const slow = M.evaluate(payload, deps(9000));
+  ok(slow.decision === 'allow' && /NOT MEASURED — this merge into acme\/widget was allowed without being judged: out of time — 9 s of its 10 s spent/.test(slow.notice || '') &&
+     slow.rows.length === 1 && slow.rows[0].outcome === 'not-measured',
+     `a gh that spends the budget leaves the merge NOT MEASURED, said and recorded, before the hook could be killed (${(slow.notice || '').slice(0, 140)})`);
+  ok(seen.every(c => c.timeoutMs <= c.left), `every call it made was given no more than the time left (${seen.map(c => `${c.cmd}:${c.timeoutMs}/${c.left}`).join(' ')})`);
+  clock = 0; seen.length = 0;
+  const quick = M.evaluate(payload, deps(0));
+  ok(quick.decision === 'allow' && quick.rows[0].outcome === 'clean' && seen.some(c => c.cmd === process.execPath),
+     `with time to spare the same merge is judged (${quick.rows[0].outcome})`);
+  ok(M.BUDGET_MS + 5000 <= REGS_TIMEOUT() * 1000, `the budget (${M.BUDGET_MS} ms) leaves room inside the registered timeout for start-up and the reply`);
 }
 
 console.log('\nREGISTERED WITH ITS FILTER:');
