@@ -1559,7 +1559,8 @@ loosened until it stops firing guards nothing.
   door is uncounted. A checkout with no `node_modules` of its own (one only ever branched from)
   borrows them from another worktree of the same repository and the run says whose; that applies
   to every measurement from a ref, a baseline write included. This reports; it refuses nothing.
-  Whether Bash is judged at all, or a merge is checked instead, is still open on #667.
+  Ruled on #667: Bash is not judged at edit time; the merge is (`hooks/structure-merge-hook.js`, below,
+  under "At merge"), and this report still counts what lands by a door no hook sees.
 - **A design changes on evidence, in a fixed order (#536).** Once the guard refuses, a refusal
   means one of three things: the import is wrong (fix it), the design is right and this edge is a
   deliberate exception (record the one-import exception), or the design is wrong (change the
