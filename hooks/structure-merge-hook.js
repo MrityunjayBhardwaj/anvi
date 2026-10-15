@@ -23,6 +23,9 @@
 // `pull/<n>/head` when it is not already local, judged by the guard itself —
 // `scripts/structure-guard.js --ref <head>` with the registry's design and baseline. One judge,
 // not a copy of it. NEW there means: in the package at that commit, not declared and not held.
+// When the head has any, the commit it branched from is judged the same way, and only what the
+// branch ADDS is refused; what it inherits from the default branch is said beside the merge, as
+// the user's to rule on, and does not hold it.
 //
 // WHAT IT NEVER DOES: REFUSE ON ITS OWN IGNORANCE. No network, an unknown pull request, a command
 // it cannot read (a `$(…)` where the number should be), no TypeScript, a design edited since it
@@ -171,7 +174,7 @@ function newImports(stdout) {
   return lines;
 }
 
-// One merge, one package: { outcome: 'refused' | 'clean' | 'not-measured', … }.
+// One merge, one package: { outcome: 'refused' | 'carried' | 'clean' | 'not-measured', … }.
 function judgeMerge(m, entry, deps) {
   const { run, rules, readFile } = deps;
   const top = git(run, entry.dir, 'rev-parse', '--show-toplevel');
@@ -184,7 +187,7 @@ function judgeMerge(m, entry, deps) {
   if (entry.designId && entry.designId !== id)
     return { outcome: 'not-measured', why: `the design on disk is ${id}, but the package was armed under ${entry.designId}` };
   const view = run('gh', ['pr', 'view', ...(m.pr ? [m.pr] : []), ...(m.repo ? ['--repo', m.repo] : []),
-    '--json', 'number,headRefOid,headRefName,state'], { cwd: m.dir || top, timeoutMs: 15000 });
+    '--json', 'number,headRefOid,headRefName,baseRefName,state'], { cwd: m.dir || top, timeoutMs: 15000 });
   let pr;
   try { pr = JSON.parse(view.stdout); } catch { pr = null; }
   if (view.status !== 0 || !pr || !/^[0-9a-f]{40}$/.test(pr.headRefOid || ''))
@@ -197,18 +200,51 @@ function judgeMerge(m, entry, deps) {
   }
   const script = deps.guardScript;
   if (!script) return { outcome: 'not-measured', pr: pr.number, sha, why: 'the structure guard script is not installed beside this hook' };
-  const args = [script, '--package', entry.dir, '--design', entry.design, '--baseline', entry.baseline, '--ref', sha,
-    ...(entry.extractor ? ['--extractor', entry.extractor] : [])];
-  const g = run(process.execPath, args, { timeoutMs: 40000 });
-  if (g.status === 0) return { outcome: 'clean', pr: pr.number, sha };
-  const imports = g.status === 1 ? newImports(g.stdout) : [];
-  if (imports.length) return { outcome: 'refused', pr: pr.number, sha, imports };
-  // Exit 1 with no NEW block is not a refusal: the guard also exits 1 when it crashes.
-  const said = String(g.stdout || '').split('\n').find(l => /NOT MEASURED/.test(l));
-  const error = String(g.stderr || '').split('\n').find(l => /^\w*Error\b/.test(l.trim()));
-  return { outcome: 'not-measured', pr: pr.number, sha,
-    why: said ? said.replace(/^structure-guard:\s*/, '')
+  const at = guardAt(run, script, entry);
+  const head = at(sha);
+  if (head.why) return { outcome: 'not-measured', pr: pr.number, sha, why: head.why };
+  if (!head.lines.length) return { outcome: 'clean', pr: pr.number, sha };
+  // NEW at the head is not all this pull request's doing: an import that reached the default branch
+  // unjudged (the web page, a person's terminal, a merge before this hook) is NEW in every branch cut
+  // after it. Refusing a merge for what it did not add would hold every later merge hostage to it.
+  // So the commit it branched from is judged too, and only what the branch adds is refused.
+  const baseRef = `refs/remotes/origin/${pr.baseRefName}`;
+  if (pr.baseRefName) git(run, top, 'fetch', '-q', 'origin', `${pr.baseRefName}:${baseRef}`);
+  const fork = pr.baseRefName && git(run, top, 'merge-base', sha, baseRef);
+  if (!fork) return { outcome: 'not-measured', pr: pr.number, sha,
+    why: `the head carries ${head.lines.length} violation${head.lines.length === 1 ? '' : 's'}, but where #${pr.number} branched from ${pr.baseRefName || 'its base'} could not be found, so what it adds cannot be told from what it inherits` };
+  const base = at(fork);
+  if (base.why) return { outcome: 'not-measured', pr: pr.number, sha, base: fork, why: `at the commit it branched from (${fork.slice(0, 8)}): ${base.why}` };
+  const inherited = new Set(base.lines);
+  const imports = head.lines.filter(l => !inherited.has(l));
+  const carried = head.lines.filter(l => inherited.has(l));
+  return { outcome: imports.length ? 'refused' : 'carried', pr: pr.number, sha, base: fork, imports, carried };
+}
+
+// The guard's verdict on the package at one commit: { lines } (NEW, one line each; none = clean)
+// or { why } when it gave none.
+function guardAt(run, script, entry) {
+  return ref => {
+    const g = run(process.execPath, [script, '--package', entry.dir, '--design', entry.design, '--baseline', entry.baseline,
+      '--ref', ref, ...(entry.extractor ? ['--extractor', entry.extractor] : [])], { timeoutMs: 40000 });
+    if (g.status === 0) return { lines: [] };
+    const lines = g.status === 1 ? newImports(g.stdout) : [];
+    if (lines.length) return { lines };
+    // Exit 1 with no NEW block is not a refusal: the guard also exits 1 when it crashes.
+    const said = String(g.stdout || '').split('\n').find(l => /NOT MEASURED/.test(l));
+    const error = String(g.stderr || '').split('\n').find(l => /^\w*Error\b/.test(l.trim()));
+    return { why: said ? said.replace(/^structure-guard:\s*/, '')
       : `the guard exited ${g.status === null ? `on ${g.signal || 'a timeout'}` : g.status} with no verdict${error ? ` (${error.trim()})` : ''}` };
+  };
+}
+
+// What the default branch already carries, said beside a merge that did not add it.
+function carriedText(repo, r) {
+  const n = r.carried.length;
+  return `structure guard: ${n} violation${n === 1 ? '' : 's'} on ${repo}'s default branch ${n === 1 ? 'is' : 'are'} in neither the design ` +
+    `nor the baseline. Pull request #${r.pr} did not add ${n === 1 ? 'it' : 'them'} — ${n === 1 ? 'it was' : 'they were'} already there ` +
+    `where it branched (${r.base.slice(0, 8)}) — so ${n === 1 ? 'it does' : 'they do'} not hold this merge, but each needs the user's ruling:\n` +
+    r.carried.map(l => `  ${l}`).join('\n');
 }
 
 function refusalText(entry, r) {
@@ -216,8 +252,8 @@ function refusalText(entry, r) {
   return `structure guard: this merge is refused. Pull request #${r.pr} (head ${r.sha.slice(0, 8)}) would bring ` +
     `${n} violation${n === 1 ? '' : 's'} into ${path.basename(entry.dir)} that the design does not allow and the baseline does not hold:\n` +
     r.imports.map(l => `  ${l}`).join('\n') + '\n' +
-    'None of them was refused when it was written — the edit-time guard judges only Write and Edit, so these came through ' +
-    'Bash, an editor or another program. Remove the import on the branch and push, or, if it is deliberate, ask the user: ' +
+    `${n === 1 ? 'It was not' : 'None of them was'} refused when it was written — the edit-time guard judges only Write and Edit, ` +
+    `so ${n === 1 ? 'it' : 'these'} came through Bash, an editor or another program. Remove the import on the branch and push, or, if it is deliberate, ask the user: ` +
     'allowing it is a design change (measure it first with structure-guard.js --proposed) or a baseline that holds it, ' +
     'and both are their decision.';
 }
@@ -241,12 +277,13 @@ function evaluate(payload, deps) {
       const r = m.unreadable ? { outcome: 'not-measured', why: m.unreadable } : judgeMerge(m, entry, deps);
       rows.push({ package: entry.dir, repo, ...r, ms: deps.now() - t0 });
       if (r.outcome === 'refused') refusals.push(refusalText(entry, r));
+      if (r.carried && r.carried.length) notices.push(carriedText(repo, r));
       if (r.outcome === 'not-measured')
         notices.push(`structure guard: NOT MEASURED — this merge into ${repo} was allowed without being judged: ${r.why}.`);
     }
   }
-  if (refusals.length) return { decision: 'deny', reason: refusals.join('\n\n'), rows };
-  return { decision: 'allow', notice: notices.join('\n') || null, rows };
+  if (refusals.length) return { decision: 'deny', reason: [...refusals, ...notices].join('\n\n'), rows };
+  return { decision: 'allow', notice: notices.join('\n\n') || null, rows };
 }
 
 // spawnSync with a deadline, the shape `evaluate` reads.
@@ -255,7 +292,7 @@ function runSync(cmd, args, { cwd, timeoutMs } = {}) {
   return { status: r.status, signal: r.signal, stdout: r.stdout || '', stderr: r.stderr || '', error: r.error && r.error.message };
 }
 
-module.exports = { words, subcommands, mergesIn, repoKey, newImports, judgeMerge, evaluate, refusalText, MERGE_LOG };
+module.exports = { words, subcommands, mergesIn, repoKey, newImports, judgeMerge, evaluate, refusalText, carriedText, MERGE_LOG };
 
 if (require.main === module) {
   let meter = null;

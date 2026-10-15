@@ -140,7 +140,7 @@ User message
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
-| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, spawned only for a `gh pr merge` subcommand (`"if": "Bash(gh pr merge:*)"`): judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the head carries a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667). Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call | `~/.claude/hooks/structure-merge-hook.js` |
+| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, spawned only for a `gh pr merge` subcommand (`"if": "Bash(gh pr merge:*)"`): judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -1503,8 +1503,12 @@ loosened until it stops firing guards nothing.
   value the shell would compute is not guessed), continues only when a registered package's
   checkout has that repository as `origin`, reads the head with `gh pr view`, fetches
   `pull/<n>/head` if needed, and runs the guard itself on it (`--ref <head>`, the registry's
-  design, baseline and extractor). A NEW violation refuses the merge; nothing new is silent; could
-  not look is allowed and said on that merge. Each judgement is a row in
+  design, baseline and extractor). When the head has NEW violations, the commit the branch forked
+  from its base is judged the same way, and only what the branch ADDS refuses the merge: an import
+  that reached the default branch unjudged is NEW in every branch cut after it, and refusing each
+  of those merges for it would hold them all hostage to one ruling. What the base carried is said
+  beside the merge as the user's to rule on. Nothing new is silent; could not look (including a
+  fork point it cannot find) is allowed and said on that merge. Each judgement is a row in
   `~/.claude/structure-guard-cache/merges.jsonl`. It cannot see a merge made outside Claude Code
   (the web page, a person's terminal); the trial report's judgement of the default branch does.
   It does not judge at commit: most commits are `git add … && git commit …` in one command, and a

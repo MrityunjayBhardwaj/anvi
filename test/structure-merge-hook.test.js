@@ -41,6 +41,28 @@ git(REPO, 'commit', '-qam', 'an upward import, written through Bash');
 const ERODING = git(REPO, 'rev-parse', 'HEAD').stdout.trim();
 git(REPO, 'checkout', '-q', 'main');
 
+// The remote: a local bare repository standing in for GitHub through an insteadOf rewrite, so
+// origin still NAMES Acme/Widget while fetches reach the fixture. Its `main` is clean; its
+// `inherits` already carries the upward import, as a default branch does after an unjudged merge.
+// A further commit on top of that, adding a second import, exists only there, as pull/7/head.
+const BARE = path.join(DIR, 'origin.git');
+git(DIR, 'init', '-q', '--bare', BARE);
+git(REPO, 'push', '-q', BARE, 'main:refs/heads/main', `${ERODING}:refs/heads/inherits`);
+const OTHER = path.join(DIR, 'elsewhere');
+git(DIR, 'clone', '-q', REPO, OTHER);
+git(OTHER, 'checkout', '-q', ERODING);
+fs.writeFileSync(path.join(OTHER, 'packages', 'app', 'src', 'high', 'h2.ts'), 'export const h2 = 2;\n');
+fs.writeFileSync(path.join(OTHER, 'packages', 'app', 'src', 'low', 'b.ts'), "import { h2 } from '../high/h2';\nexport const b = h2;\n");
+git(OTHER, 'add', '-A'); git(OTHER, 'commit', '-qm', 'only on the remote');
+const REMOTE_ONLY = git(OTHER, 'rev-parse', 'HEAD').stdout.trim();
+git(OTHER, 'push', '-q', BARE, 'HEAD:refs/pull/7/head');
+git(OTHER, 'checkout', '-q', ERODING);
+fs.writeFileSync(path.join(OTHER, 'packages', 'app', 'src', 'high', 'h.ts'), "import { a } from '../low/a';\n// a comment\nexport const h = a;\n");
+git(OTHER, 'commit', '-qam', 'touches nothing structural');
+const ON_INHERITED = git(OTHER, 'rev-parse', 'HEAD').stdout.trim();
+git(OTHER, 'push', '-q', BARE, 'HEAD:refs/pull/8/head');
+git(REPO, 'config', `url.${BARE}.insteadOf`, 'git@github.com:Acme/Widget.git');
+
 const EX = path.join(DIR, 'extractor.js');
 fs.writeFileSync(EX, [
   "const fs = require('fs'), path = require('path');",
@@ -68,7 +90,7 @@ fs.mkdirSync(BIN);
 fs.writeFileSync(path.join(BIN, 'gh'), `#!/bin/sh
 echo "$*" >> "${CALLS}"
 if [ -n "$FAKE_GH_FAIL" ]; then echo "$FAKE_GH_FAIL" >&2; exit 1; fi
-printf '{"number":7,"headRefOid":"%s","headRefName":"feat","state":"OPEN"}' "$FAKE_HEAD"
+printf '{"number":%s,"headRefOid":"%s","headRefName":"feat","baseRefName":"%s","state":"OPEN"}' "\${FAKE_NUMBER:-7}" "$FAKE_HEAD" "\${FAKE_BASE:-main}"
 `);
 fs.chmodSync(path.join(BIN, 'gh'), 0o755);
 
@@ -152,6 +174,29 @@ console.log('\nREFUSED, ALLOWED, AND WHAT EACH LEAVES BEHIND:');
   ok(byUrl.exit === 2 && byUrl.denied, 'a pull request given as its URL names its repository');
 }
 
+console.log('\nONLY WHAT THE BRANCH ADDS IS REFUSED:');
+{
+  register();
+  ok(git(REPO, 'cat-file', '-t', REMOTE_ONLY).status !== 0, 'the fixture\'s head is not in the local repository before the merge');
+  const both = fire('gh pr merge 7 --repo Acme/Widget', { head: REMOTE_ONLY, env: { FAKE_BASE: 'inherits' } });
+  ok(both.exit === 2 && both.denied && /src\/low\/b\.ts -> src\/high\/h2\.ts/.test(both.reason),
+     `a head that is only on the remote is fetched, and the import it adds is refused (exit ${both.exit})`);
+  const [refusal, carried] = both.reason.split('\n\nstructure guard: ');
+  ok(!/src\/low\/a\.ts -> src\/high\/h\.ts/.test(refusal) && /would bring 1 violation /.test(refusal),
+     'the refusal names only what the branch adds, not what its base already carried');
+  // The inherited upward import is three violations: its divergence and the two edges of the cycle it closes.
+  ok(/^3 violations on acme\/widget's default branch are in neither the design nor the baseline\. Pull request #7 did not add them/.test(carried || '') &&
+     /src\/low\/a\.ts -> src\/high\/h\.ts/.test(carried || ''), `what the base carried is said beside it, as the user's to rule on (${(carried || '').slice(0, 120)})`);
+  const row = rows().pop() || {};
+  ok(row.outcome === 'refused' && row.imports.length === 1 && row.carried.length === 3 && /^[0-9a-f]{40}$/.test(row.base || ''),
+     'the row keeps both lists and the commit the branch was judged against');
+  ok(/It was not refused when it was written/.test(refusal) && /None of them was refused/.test(fire('gh pr merge 7 --repo Acme/Widget').reason),
+     'and speaks of one import as one, of several as several');
+  const inherit = fire('gh pr merge 8 --repo Acme/Widget', { head: ON_INHERITED, env: { FAKE_BASE: 'inherits', FAKE_NUMBER: '8' } });
+  ok(inherit.exit === 0 && !inherit.denied && /Pull request #8 did not add them/.test(inherit.notice) && (rows().pop() || {}).outcome === 'carried',
+     `a branch that adds nothing is allowed, even on a default branch that carries a violation — and the violation is said (exit ${inherit.exit})`);
+}
+
 console.log('\nCOULD NOT LOOK IS NEVER NOTHING FOUND:');
 {
   register();
@@ -159,24 +204,9 @@ console.log('\nCOULD NOT LOOK IS NEVER NOTHING FOUND:');
   ok(ghDown.exit === 0 && !ghDown.denied && /NOT MEASURED — this merge into acme\/widget was allowed without being judged: gh pr view 7 did not answer: error connecting/.test(ghDown.notice),
      `gh failing allows the merge and says it was not judged (exit ${ghDown.exit})`);
   ok((rows().pop() || {}).outcome === 'not-measured', 'and records it as not measured');
-  // A head that exists only on the remote is fetched as pull/7/head. The remote is a local bare
-  // repository standing in for GitHub through an insteadOf rewrite, so origin still NAMES Acme/Widget.
-  const BARE = path.join(DIR, 'origin.git');
-  git(DIR, 'init', '-q', '--bare', BARE);
-  const OTHER = path.join(DIR, 'elsewhere');
-  git(DIR, 'clone', '-q', REPO, OTHER);
-  git(OTHER, 'checkout', '-q', ERODING);
-  fs.writeFileSync(path.join(OTHER, 'packages', 'app', 'src', 'high', 'h2.ts'), 'export const h2 = 2;\n');
-  fs.writeFileSync(path.join(OTHER, 'packages', 'app', 'src', 'low', 'b.ts'), "import { h2 } from '../high/h2';\nexport const b = h2;\n");
-  git(OTHER, 'add', '-A'); git(OTHER, 'commit', '-qm', 'only on the remote');
-  const REMOTE_ONLY = git(OTHER, 'rev-parse', 'HEAD').stdout.trim();
-  git(OTHER, 'push', '-q', BARE, `HEAD:refs/pull/7/head`);
-  git(REPO, 'config', `url.${BARE}.insteadOf`, 'git@github.com:Acme/Widget.git');
-  ok(git(REPO, 'cat-file', '-t', REMOTE_ONLY).status !== 0, 'the fixture\'s head is not in the local repository before the merge');
-  const fetched = fire('gh pr merge 7 --repo Acme/Widget', { head: REMOTE_ONLY });
-  ok(fetched.exit === 2 && fetched.denied && /src\/low\/b\.ts -> src\/high\/h2\.ts/.test(fetched.reason),
-     `a head that is only on the remote is fetched and judged (exit ${fetched.exit}) ${fetched.notice.slice(0, 160)}`);
-  git(REPO, 'config', '--unset', `url.${BARE}.insteadOf`);
+  const noBase = fire('gh pr merge 7 --repo Acme/Widget', { env: { FAKE_BASE: 'no-such-branch' } });
+  ok(noBase.exit === 0 && !noBase.denied && /where #7 branched from no-such-branch could not be found, so what it adds cannot be told from what it inherits/.test(noBase.notice),
+     'a head with violations whose fork point cannot be found is not measured, never refused for what it may only inherit');
   const absent = fire('gh pr merge 7 --repo Acme/Widget', { head: 'f'.repeat(40) });
   ok(absent.exit === 0 && /is not in .*fetching pull\/7\/head did not bring it/.test(absent.notice), 'a head that is not local and cannot be fetched is not measured');
   register({ designId: '000000000000' });
