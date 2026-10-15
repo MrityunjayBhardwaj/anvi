@@ -29,7 +29,7 @@ const PRUNE = process.argv.slice(2).includes('--prune');
 // that half of the prune belongs to installs that register.
 const FILES_ONLY = process.argv.slice(2).includes('--files-only');
 
-// The Anvi hooks: [event, matcher|null, file, timeout]
+// The Anvi hooks: [event, matcher|null, file, timeout, if?]
 // ORDER HERE IS FOR THE READER, NOT THE RUNTIME (#620). This file used to say the
 // enforcing hooks must come first in their group so a refusal would arrive before the
 // advice. Observed on Claude Code 2.1.291: every hook matching a tool call runs
@@ -50,6 +50,11 @@ const REGISTRATIONS = [
   // a package with no entry in ~/.claude/structure-guard.json. 10s: a cold graph build on a
   // ~300-module package measured ~0.8s, a warm call ~0.2s including Node startup.
   ['PreToolUse',       'Write|Edit|MultiEdit', 'structure-guard-hook.js', 10],
+  // Enforcing: the same judge at the door every line passes through, whoever wrote it (#667).
+  // The fifth field is Claude Code's `if` filter: the hook is spawned only for a command with a
+  // `gh pr merge` subcommand (observed on 2.1.299), so the other Bash calls cost nothing. 60s: a
+  // `gh pr view`, at worst a fetch of the head, and a whole-package judgement (~1.5s on stave).
+  ['PreToolUse',       'Bash',       'structure-merge-hook.js',       60, 'Bash(gh pr merge:*)'],
   // The same matcher as the guard above, and it should stay so for COVERAGE: the guard is
   // registered for MultiEdit — a multi-edit mutates the tree exactly as a Write does (it
   // reports one NOT MEASURED rather than judging it: the tool is not offered on current
@@ -96,7 +101,7 @@ function normMatcher(m) {
   return String(m).split('|').map(s => s.trim()).sort().join('|');
 }
 
-function ensureHook(settings, event, matcher, file, timeout) {
+function ensureHook(settings, event, matcher, file, timeout, cond) {
   settings.hooks = settings.hooks || {};
   // Guard: hooks (or this event's list) exists but has the wrong shape.
   // Assigning named keys onto an array is silently dropped by JSON.stringify —
@@ -127,6 +132,7 @@ function ensureHook(settings, event, matcher, file, timeout) {
 
   group.hooks.push({
     type: 'command',
+    ...(cond ? { if: cond } : {}),
     command: `node "${path.join(HOOKS_DIR, file)}"`,
     timeout,
   });
@@ -305,8 +311,8 @@ function main() {
   let prunedRegs = new Set();
   let superseded = { removed: [], examined: 0 };
   try {
-    for (const [event, matcher, file, timeout] of REGISTRATIONS) {
-      if (ensureHook(settings, event, matcher, file, timeout)) added++;
+    for (const [event, matcher, file, timeout, cond] of REGISTRATIONS) {
+      if (ensureHook(settings, event, matcher, file, timeout, cond)) added++;
     }
     if (PRUNE) prunedRegs = pruneRegistrations(settings);
     superseded = pruneSupersededMatchers(settings);
