@@ -526,6 +526,19 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   ok(judged.status === 1 && /examined 2 modules · 1 edges/.test(judged.stdout) && judged.stdout.includes(EDGE),
      `--package judges the graph the hook builds, and refuses its new violation (got ${judged.status})`);
   ok(/graph built by lines@1/.test(judged.stdout), 'and says which extractor built it');
+  // A crash is not a refusal (#672): Node's own exit code for an uncaught error is 1, the code above.
+  const crashed = run(['--design', d, '--package', PK, '--extractor', path.join(DIR, 'no-such-extractor.js')]);
+  ok(crashed.status === 2 && /^structure-guard: NOT MEASURED — the guard crashed, so it gave no verdict: Error: Cannot find module/m.test(crashed.stdout) &&
+     !/NEW/.test(crashed.stdout),
+     `a guard that crashes inside its run (a missing extractor) is NOT MEASURED, exit 2 — never 1, a refusal's code (got ${crashed.status}: ${crashed.stdout.trim()})`);
+  ok(crashed.stdout.trim().split('\n').length === 1 && /no-such-extractor\.js/.test(crashed.stderr),
+     'it says so on one line, and the stack still reaches stderr');
+  const lone = path.join(DIR, 'lone', 'scripts', 'structure-guard.js');
+  fs.mkdirSync(path.dirname(lone), { recursive: true });
+  fs.copyFileSync(GUARD, lone);
+  const unloaded = spawnSync(process.execPath, [lone, '--design', d, '--package', PK], { encoding: 'utf8', env: { ...process.env, HOME } });
+  ok(unloaded.status === 2 && /NOT MEASURED — the guard crashed.*cannot locate structure-rules\.js/.test(unloaded.stdout),
+     `a guard that cannot load its shared modules — before its run starts — is NOT MEASURED too (got ${unloaded.status}: ${unloaded.stdout.trim()})`);
   ok(run(['--design', d, '--package', PK, '--extractor', EX, '--baseline', base]).status === 0,
      'against a baseline holding that edge, the package graph has nothing new');
   const stale = write('pkg-base-stale.json', { rules: { divergence: [EDGE, 'src/low/gone.ts -> src/mid/m.ts'], cycle: [] } });

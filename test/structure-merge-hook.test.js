@@ -222,8 +222,9 @@ console.log('\nCOULD NOT LOOK IS NEVER NOTHING FOUND:');
   const blind = fire('gh pr merge 7 --repo Acme/Widget');
   ok(blind.exit === 0 && !blind.denied && /NOT MEASURED/.test(blind.notice) && (rows().pop() || {}).outcome === 'not-measured',
      `a guard that cannot judge allows the merge and says why (${blind.notice.slice(0, 160)})`);
-  ok(/exited 1 with no verdict \(Error: Cannot find module/.test(blind.notice),
-     'a guard that CRASHED exits 1 like a refusal; with no NEW block it is not read as one, and its error is quoted');
+  ok(/allowed without being judged: the guard crashed, so it gave no verdict: Error: Cannot find module/.test(blind.notice) &&
+     (blind.notice.match(/NOT MEASURED/g) || []).length === 1,
+     'a guard that CRASHED is not read as a refusal, and the merge says what the crash was');
   register();
   const garbage = spawnSync(process.execPath, [HOOK], { input: 'not json{{', encoding: 'utf8', env: { ...process.env, HOME } });
   ok(garbage.status === 0 && garbage.stdout === '', 'unreadable input is silent and exits 0');

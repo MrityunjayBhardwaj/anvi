@@ -237,10 +237,12 @@ function guardAt(run, script, entry) {
     if (g.status === 0) return { lines: [] };
     const lines = g.status === 1 ? newImports(g.stdout) : [];
     if (lines.length) return { lines };
-    // Exit 1 with no NEW block is not a refusal: the guard also exits 1 when it crashes.
+    // A refusal is read from the imports it names, never from the exit code alone. A crash the guard
+    // catches says NOT MEASURED and exits 2 (#672); one it cannot — a syntax error stops the file before
+    // its handler exists — still exits 1 with only Node's error on stderr, quoted here.
     const said = String(g.stdout || '').split('\n').find(l => /NOT MEASURED/.test(l));
     const error = String(g.stderr || '').split('\n').find(l => /^\w*Error\b/.test(l.trim()));
-    return { why: said ? said.replace(/^structure-guard:\s*/, '')
+    return { why: said ? said.replace(/^structure-guard:\s*(NOT MEASURED\s*—\s*)?/, '')
       : `the guard exited ${g.status === null ? `on ${g.signal || 'a timeout'}` : g.status} with no verdict${error ? ` (${error.trim()})` : ''}` };
   };
 }
