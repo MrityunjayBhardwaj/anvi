@@ -646,6 +646,72 @@ exports.create = pkgDir => ({ id: 'fixture@1', configFiles: [], edges(rel, conte
   ok(leftovers() === before, `no temporary copy of the branch is left behind (${leftovers() - before} extra)`);
 }
 
+console.log('\nAN EDIT WHOSE CHECKOUT IS GONE — sized against the default branch, never left blind (#674):');
+{
+  const RM = require(path.join(__dirname, '..', 'hooks', 'structure-rules.js'));
+  const REPO = path.join(DIR, 'nx', 'repo'), NP = path.join(REPO, 'packages', 'editor'), SIB = path.join(DIR, 'nx', 'sibling');
+  const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' });
+  const PLAIN = 'export const v = 1;\n', IMPORT = "import { v } from '../c/four';\n";
+  for (const f of ['src/a/one.ts', 'src/c/four.ts']) { fs.mkdirSync(path.dirname(path.join(NP, f)), { recursive: true }); fs.writeFileSync(path.join(NP, f), PLAIN); }
+  git(REPO, 'init', '-q', '-b', 'main'); git(REPO, 'add', '-A'); git(REPO, 'commit', '-qm', 'init');
+  git(REPO, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  ok(git(REPO, 'worktree', 'add', '-q', SIB).status === 0, 'a sibling worktree of the repository');
+  // Like TypeScript, this extractor loads only where node_modules is installed beside the package.
+  const EX = path.join(DIR, 'nx', 'extractor.js');
+  fs.writeFileSync(EX, `const fs = require('fs'), path = require('path');
+exports.create = pkgDir => !fs.existsSync(path.join(pkgDir, 'node_modules')) ? { notMeasured: 'no TypeScript resolvable from ' + pkgDir }
+  : { id: 'fixture@1', configFiles: [], edges(rel, content) {
+  const out = new Map(); let unresolved = 0;
+  for (const m of content.matchAll(/from\\s+['"](\\.[^'"]+)['"]/g)) {
+    const t = path.posix.join(path.posix.dirname(rel), m[1]) + '.ts';
+    if (fs.existsSync(path.join(pkgDir, t))) out.set(t, false); else unresolved++;
+  }
+  return { edges: [...out], unresolved };
+} };
+`);
+  const DESIGN_OBJ = { root: 'src', components: { a: { dirs: ['a'] }, c: { dirs: ['c'] } }, allowed: [] };
+  const D = path.join(DIR, 'nx', 'design.json'); fs.writeFileSync(D, JSON.stringify(DESIGN_OBJ));
+  const B = path.join(DIR, 'nx', 'baseline.json'); fs.writeFileSync(B, JSON.stringify({ designId: RM.designId(DESIGN_OBJ), rules: { divergence: [], cycle: [] } }));
+  // One Edit that adds a forbidden import, prior content recorded, made in `where`.
+  const window = (name, where) => {
+    const tx = path.join(DIR, 'nx', name); fs.mkdirSync(path.join(tx, 'p'), { recursive: true });
+    const file = path.join(where, 'packages/editor/src/a/one.ts');
+    const u = use('Edit', file, '2026-09-26T12:00:00.000Z', 'sess-' + name);
+    const line = JSON.parse(u.line);
+    line.message.content[0].input = { file_path: file, old_string: 'export const v', new_string: IMPORT + 'export const v', replace_all: false };
+    const res = JSON.parse(result(u.id, 'The file has been updated successfully.', false, '2026-09-26T12:00:00.000Z'));
+    res.toolUseResult = { originalFile: PLAIN };
+    fs.writeFileSync(path.join(tx, 'p', 't.jsonl'), [JSON.stringify(line), JSON.stringify(res)].join('\n') + '\n');
+    return runIn(tx, '--package', NP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', B, '--extractor', EX);
+  };
+  const GONE = path.join(DIR, 'nx', 'removed-wt');
+  const leftovers = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('structure-guard-ref-')).length;
+  const before = leftovers();
+
+  fs.mkdirSync(path.join(SIB, 'packages', 'editor', 'node_modules'), { recursive: true });
+  const sized = window('gone', GONE);
+  ok(/1 in a checkout that no longer exists/.test(sized.out) && /0 exposure not computed · 1 computed \(1 exactly/.test(sized.out),
+     `an edit in a deleted worktree is sized, though the registered checkout has no node_modules (${(sized.out.match(/\d+ exposure not computed[^·]*/) || ['none'])[0]})`);
+  ok(new RegExp(`sized against the default branch: 1 of the 1 computed — [^\\n]*resolved against origin/main [0-9a-f]{8}, node_modules from ${SIB.replace(/[/.]/g, '\\$&')};`).test(sized.out),
+     'and the run says it was sized against the default branch, and whose node_modules did it');
+  ok(sized.exit === 1 && /MISSED CHANCES — 1/.test(sized.out) && /src\/a\/one\.ts -> src\/c\/four\.ts\s+\(a -> c\)/.test(sized.out),
+     `so its forbidden import is a chance the reading counts, not a blind spot (exit ${sized.exit})`);
+
+  // CONTROL: no checkout has node_modules — not computed, with both reasons, never a clean zero.
+  fs.rmSync(path.join(SIB, 'packages', 'editor', 'node_modules'), { recursive: true });
+  const blind = window('blind', GONE);
+  ok(blind.exit === 3 && /1 exposure not computed \(no TypeScript resolvable from [^;]*; nor could the default branch stand in: no TypeScript resolvable from /.test(blind.out) &&
+     /0 edits computed, 1 not/.test(blind.out) && /sized against the default branch: 0 of the 0 computed\n/.test(blind.out),
+     `with no checkout to borrow from, the edit stays not computed and says why twice (exit ${blind.exit})`);
+
+  // CONTROL: an edit whose own checkout can size it is sized there, and the zero is said.
+  fs.mkdirSync(path.join(NP, 'node_modules'));
+  const inPlace = window('in-place', REPO);
+  ok(/sized against the default branch: 0 of the 1 computed\n/.test(inPlace.out) && /MISSED CHANCES — 1/.test(inPlace.out),
+     'an edit its own checkout can size is sized there — the default branch stands in for nothing');
+  ok(leftovers() === before, `no temporary copy of the branch is left behind (${leftovers() - before} extra)`);
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
