@@ -57,9 +57,22 @@
 // Exit: 0 nothing new / the graphs agree (and the package is armed, with --arm) ·
 //       1 a NEW violation, a baseline write that would grow, graphs that disagree, or a proposed
 //         design that reclassifies something (a person reviews it) ·
-//       2 not measured (the input could not support a verdict)
+//       2 not measured (the input could not support a verdict, or the guard crashed — never 1)
 
 'use strict';
+
+// A CRASH IS NOT A REFUSAL (#672). Node exits 1 on an error nothing caught — the code this command
+// gives a NEW violation — so a caller reading the exit code alone took a missing extractor for "this
+// would bring a violation". Run as a command, any uncaught error, including one loading the shared
+// modules below, is NOT MEASURED (exit 2) with the error on one line; the stack still goes to stderr.
+if (require.main === module) {
+  process.on('uncaughtException', e => {
+    const said = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    console.log(`structure-guard: NOT MEASURED — the guard crashed, so it gave no verdict: ${said.split('\n')[0]}`);
+    console.error(e instanceof Error ? e.stack : said);
+    process.exitCode = 2;
+  });
+}
 
 const fs = require('fs');
 const os = require('os');
