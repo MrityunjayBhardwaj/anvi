@@ -1629,7 +1629,12 @@ loosened until it stops firing guards nothing.
   the shipped 2.1.287 bundle; on stave every recorded prior was ≤ 9,618 characters). So a null
   prior means a large file: a Write recorded as an `update` with one is NOT COMPUTED, never
   treated as a new file; for an Edit, the edit's own text gives an UPPER BOUND — imports in the new text not in the old — so a
-  zero is firm and a hit is a POSSIBLE chance, listed apart. Every run ends with a TRIAL READING
+  zero is firm and a hit is a POSSIBLE chance, listed apart. The extractor's TypeScript comes
+  from the checkout the edit was made in; when that checkout is gone (a worktree deleted after
+  its merge) or was never installed, the edit is sized against the default branch with
+  node_modules borrowed from a sibling worktree, the copy the default-branch section judges, and
+  every run says how many were sized that way and with whose node_modules (#674). Before this,
+  a reading taken after stave's cleanup sized 0 of 5 edits; after it, 5 of 5. Every run ends with a TRIAL READING
   line. Exit 1 something to read (a refusal, a missed or a possible chance) · 2 not measured
   (also: no design to compute exposure with, from the registry or `--design`) · 3 UNTESTED, no
   chance in the window. There is no clean exit: a trial passes by a person's rulings on its

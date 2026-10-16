@@ -326,7 +326,7 @@ function exposureOf(c, frame, extractorFor) {
   const unresolved = Math.max(0, (after.unresolved || 0) - (before.unresolved || 0));
   const kind = edges.some(e => e.kind === 'NOT allowed') ? 'chance'
     : edges.some(e => e.kind === 'allowed' || e.kind === 'baselined') ? 'allowed crossing' : 'no crossing';
-  return { kind, method, edges, unresolved };
+  return { kind, method, edges, unresolved, ...(ex.via ? { via: ex.via } : {}) };
 }
 
 // The design, baseline and extractor the exposure is computed with: flags first, else the guard's
@@ -580,13 +580,37 @@ function main(argv) {
     print(`  TRIAL READING: NOT MEASURED — without exposure, a window with no chance to refuse cannot be told from one that passed.`);
   } else {
     const extractors = new Map();
+    const load = d => { try { return GRAPH.loadExtractor(frame.extractorEntry, d); } catch (e) { return { notMeasured: e.message }; } };
+    // AN EDIT WHOSE CHECKOUT CANNOT SIZE IT (#674). The extractor's TypeScript comes from the
+    // checkout the edit was made in. A worktree deleted after its merge is gone, and the checkout
+    // stave's worktrees branch from was never installed — so every reading taken after a cleanup
+    // went blind on the edits made there. Such an edit is sized against the default branch through
+    // `checkoutAtRef`, the copy the default-branch section judges, with node_modules borrowed from a
+    // sibling worktree; the run says how many were, and with whose TypeScript. Only when that copy
+    // cannot load the extractor either is the edit not computed, with both reasons.
+    let stand = null;
+    const standIn = () => {
+      if (stand) return stand;
+      let G;
+      try { G = require(path.join(__dirname, 'structure-guard.js')); } catch (e) { return (stand = { notMeasured: `cannot load structure-guard.js: ${e.message}` }); }
+      const at = fs.existsSync(pkgDir) ? G.checkoutAtRef(pkgDir, args.ref) : null;
+      if (!at || at.notMeasured) return (stand = { notMeasured: at ? at.notMeasured : `${pkgDir} is not inside a git checkout` });
+      const ex = load(at.dir);
+      if (ex.notMeasured) { at.cleanup(); return (stand = { notMeasured: ex.notMeasured }); }
+      const via = `${at.ref} ${at.sha.slice(0, 8)}, node_modules from ${at.modulesFrom.length ? at.modulesFrom.join(', ') : at.top}`;
+      return (stand = { ex: { ...ex, via }, at });
+    };
     const extractorFor = dir => {
       const d = dir && fs.existsSync(dir) ? dir : pkgDir;
-      if (!extractors.has(d)) { try { extractors.set(d, GRAPH.loadExtractor(frame.extractorEntry, d)); } catch (e) { extractors.set(d, { notMeasured: e.message }); } }
-      return extractors.get(d);
+      if (!extractors.has(d)) extractors.set(d, load(d));
+      const own = extractors.get(d);
+      if (!own.notMeasured) return own;
+      const s = standIn();
+      return s.ex || { notMeasured: `${own.notMeasured}; nor could the default branch stand in: ${s.notMeasured}` };
     };
     const landed = new Set(['applied', 'timed out', 'cancelled']);
-    for (const c of calls) if (landed.has(c.outcome)) c.exposure = exposureOf(c, frame, extractorFor);
+    try { for (const c of calls) if (landed.has(c.outcome)) c.exposure = exposureOf(c, frame, extractorFor); }
+    finally { if (stand && stand.at) stand.at.cleanup(); }
     const ex = calls.filter(c => c.exposure);
     const by = k => ex.filter(c => c.exposure.kind === k);
     const computed = ex.filter(c => !['outside the corpus', 'not computed'].includes(c.exposure.kind));
@@ -602,7 +626,8 @@ function main(argv) {
     const methods = { exact: computed.filter(c => c.exposure.method === 'exact').length, estimated: computed.filter(c => c.exposure.method === 'estimated').length };
     exposure = { design: frame.id, chances, refused: refused.length, missed: exactMissed.length, possible: possible.length, computed: computed.length, methods,
       crossingAllowed: by('allowed crossing').length, noCrossing: by('no crossing').length,
-      notComputed: by('not computed').length, outside: by('outside the corpus').length, unresolved };
+      notComputed: by('not computed').length, outside: by('outside the corpus').length, unresolved,
+      sizedOnDefaultBranch: computed.filter(c => c.exposure.via).length };
     print(`\n  exposure (design ${frame.id} from the ${frame.source}` +
           (frame.baselineCount === null ? ', no baseline' : `, baseline ${frame.baselineCount} divergence`) + `):`);
     print(`    landed edits ${ex.length} — ${by('outside the corpus').length} outside the corpus (tests, excluded) · ` +
@@ -610,6 +635,12 @@ function main(argv) {
           (Object.keys(whyNot).length ? ` (${Object.entries(whyNot).map(([w, n]) => `${w} ×${n}`).join('; ')})` : '') +
           ` · ${computed.length} computed (${methods.exact} exactly from the recorded content, ${methods.estimated} estimated from the edit's own text — ` +
           'Claude Code did not record the file before those; the estimate is an upper bound)');
+    // Said every time, zero included, so a reading cannot be mistaken for one sized in place.
+    const stoodIn = computed.filter(c => c.exposure.via);
+    print(`    sized against the default branch: ${stoodIn.length} of the ${computed.length} computed` + (stoodIn.length
+      ? ` — their own checkout could not load the extractor (gone, or never installed), so imports were resolved against ${stoodIn[0].exposure.via}; ` +
+        'a file that exists only on the edit\'s own branch reads as unresolved there'
+      : ''));
     print(`    of the ${computed.length} computed: ${exactMissed.length} added an import across components that is NOT allowed` +
           (possible.length ? ` (and ${possible.length} possibly, estimated from the edit's text)` : '') + ' · ' +
           `${by('allowed crossing').length} crossed only where allowed or baselined · ${by('no crossing').length} crossed nothing`);
