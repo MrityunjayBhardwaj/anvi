@@ -140,6 +140,7 @@ User message
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
+| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, spawned only for a `gh pr merge` subcommand (`"if": "Bash(gh pr merge:*)"`): judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -416,10 +417,11 @@ exits 0. That is correct and non-negotiable *for these*: an optional annotation 
 never cost the user the thing it annotates, so a guard that cannot decide stays quiet
 and the call proceeds.
 
-**Enforcing hooks — a deliberately small second category (anvi #391).** Two exist:
-`tree-lock-guard.js` and `structure-guard-hook.js`, which exits 2 with a deny when an edit
-adds a new divergence from the design's component graph (§Hook Files has its row, and its
-own section describes it). What follows was written for the tree-lock guard. It may refuse a tool call, because the failures it catches are
+**Enforcing hooks — a deliberately small second category (anvi #391).** Three exist:
+`tree-lock-guard.js`; `structure-guard-hook.js`, which exits 2 with a deny when an edit
+adds a new divergence from the design's component graph; and `structure-merge-hook.js`, which
+does the same for a `gh pr merge` whose head carries one (§Hook Files has their rows, and the
+structure guard's own section describes both). What follows was written for the tree-lock guard. It may refuse a tool call, because the failures it catches are
 not recoverable by re-deriving an answer — a destroyed uncommitted change, or a test
 gate that read a tree while it moved and reported a number that looks exactly like a
 real pass. There is no artifact afterwards that distinguishes that number from a true
@@ -571,7 +573,7 @@ Two things it checks that a plain loop would not:
 event and matcher, held to its `REGISTRATIONS` in both directions by `test/hook-table-parity.test.js`):
 - `SessionStart`: ground-truth-session-start.js
 - `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js
-- `PreToolUse:Bash`: tree-lock-guard.js (enforcing), experiment-protocol-guard.js, catalogue-id-leak-guard.js, shell-rewrite-guard.js
+- `PreToolUse:Bash`: tree-lock-guard.js (enforcing), structure-merge-hook.js (enforcing, only for `gh pr merge`), experiment-protocol-guard.js, catalogue-id-leak-guard.js, shell-rewrite-guard.js
 - `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js (enforcing), structure-guard-hook.js (enforcing), catalogue-context-injector.js
 - `PreToolUse:Read`: catalogue-context-injector.js
 - `PostToolUse:Read`: anvi-route-logger.js
@@ -1492,6 +1494,27 @@ loosened until it stops firing guards nothing.
   TypeScript 5, a per-file cache) and judges it with the same rules as the report
   (`hooks/structure-rules.js`). **Only a new violation whose edge starts in the edited file
   is refused**; one it causes in another file's edge is counted, not refused.
+- **At merge: `hooks/structure-merge-hook.js`** (PreToolUse:Bash, ENFORCING, #667). The edit-time
+  hook judges only Write and Edit, and on stave three imports nobody refused reached the default
+  branch through Bash in one trial window — each by `gh pr merge`. So the merge is judged too:
+  the hook is registered with `"if": "Bash(gh pr merge:*)"`, which Claude Code (2.1.299, observed)
+  uses to spawn it only for a command with that subcommand, compound commands included. It finds
+  the pull request and repository in the command (a `cd` earlier in it moves the directory; a
+  value the shell would compute is not guessed), continues only when a registered package's
+  checkout has that repository as `origin`, reads the head with `gh pr view`, fetches
+  `pull/<n>/head` if needed, and runs the guard itself on it (`--ref <head>`, the registry's
+  design, baseline and extractor). When the head has NEW violations, the commit the branch forked
+  from its base is judged the same way, and only what the branch ADDS refuses the merge: an import
+  that reached the default branch unjudged is NEW in every branch cut after it, and refusing each
+  of those merges for it would hold them all hostage to one ruling. What the base carried is said
+  beside the merge as the user's to rule on. Nothing new is silent; could not look (including a
+  fork point it cannot find) is allowed and said on that merge. It works inside a 50 s budget of
+  its 60 s registration (#671): every call it makes gets only what is left, and when too little is,
+  the merge is NOT MEASURED and said — a hook killed at its timeout would pass it with no record. Each judgement is a row in
+  `~/.claude/structure-guard-cache/merges.jsonl`. It cannot see a merge made outside Claude Code
+  (the web page, a person's terminal); the trial report's judgement of the default branch does.
+  It does not judge at commit: most commits are `git add … && git commit …` in one command, and a
+  PreToolUse hook sees the index before the add has run.
 - **Before arming: replay the project's real sessions (`scripts/structure-replay.js`, #540).**
   Every Write/Edit call in a window of the session transcripts is placed on the tree that was on
   disk when it happened (the checkout's own HEAD reflog first) and run through the hook's own
@@ -1538,7 +1561,8 @@ loosened until it stops firing guards nothing.
   door is uncounted. A checkout with no `node_modules` of its own (one only ever branched from)
   borrows them from another worktree of the same repository and the run says whose; that applies
   to every measurement from a ref, a baseline write included. This reports; it refuses nothing.
-  Whether Bash is judged at all, or a merge is checked instead, is still open on #667.
+  Ruled on #667: Bash is not judged at edit time; the merge is (`hooks/structure-merge-hook.js`, below,
+  under "At merge"), and this report still counts what lands by a door no hook sees.
 - **A design changes on evidence, in a fixed order (#536).** Once the guard refuses, a refusal
   means one of three things: the import is wrong (fix it), the design is right and this edge is a
   deliberate exception (record the one-import exception), or the design is wrong (change the

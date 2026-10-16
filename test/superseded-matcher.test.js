@@ -181,7 +181,7 @@ console.log('\nGROUP 6 — registration after the clean does not re-create it');
   pruneSupersededMatchers(s);
   eq(s.hooks.PreToolUse.length, 1, 'after the clean, one group holds the injector');
 
-  for (const [event, matcher, file, timeout] of REGISTRATIONS) ensureHook(s, event, matcher, file, timeout);
+  for (const [event, matcher, file, timeout, cond] of REGISTRATIONS) ensureHook(s, event, matcher, file, timeout, cond);
   const holders = s.hooks.PreToolUse.filter(g => filesIn(g).includes('catalogue-context-injector.js'));
   eq(holders.length, 2, 'a full re-registration leaves the injector in exactly its two declared groups');
   eq(holders.map(g => g.matcher).sort().join(' + '), 'Read + Write|Edit|MultiEdit',

@@ -32,7 +32,8 @@
 //
 // WHAT IT CANNOT SEE. Only Write and Edit tool calls are judged (MultiEdit is said, not judged). A file changed through Bash (a
 // heredoc, `sed -i`, `cp`, `git checkout`), by another program or by hand is never judged here;
-// the report over the package catches those after they land. A stated blind spot, not a bypass:
+// a merge carrying one is refused by structure-merge-hook.js (#667), and the report over the
+// package counts what lands by a door no hook sees. A stated blind spot, not a bypass:
 // the refusal tells the agent a deliberate edge is the user's decision.
 //
 // PAYLOAD, OBSERVED (Claude Code 2.1.270): Edit `tool_input` is `file_path`, `old_string`,
