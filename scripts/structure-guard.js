@@ -105,10 +105,28 @@ function compareGraphs(a, b) {
     modules: side(a.modules, b.modules),
     edges: side(edges(a), edges(b)),
     reexports: side(a.reexports, b.reexports),
+    typeOnly: side(a.typeOnly, b.typeOnly),
     cycles: side(a.circular, b.circular),
   };
   const count = Object.values(diff).reduce((n, d) => n + d.onlyAnalyser.length + d.onlyHook.length, 0);
   return { diff, agree: count === 0, count };
+}
+
+// Why an analyser graph cannot be judged under this design, or null (#605). dependency-cruiser
+// records the option it ran with. `true` reads the source but does not mark which imports
+// compile away — an import whose names are only types reads as one that runs, and a cycle
+// through types as a real one — so it is refused under any design. A design that counts
+// type-only imports needs them marked, which only `"specify"` does; without it they are absent,
+// and a graph missing them would read as a codebase with none.
+function analyserOptionProblem(cruise, design) {
+  const opt = cruise && cruise.summary && cruise.summary.optionsUsed ? cruise.summary.optionsUsed.tsPreCompilationDeps : undefined;
+  if (opt === true)
+    return 'the analyser graph was made with tsPreCompilationDeps: true, which keeps type-only imports without marking them — ' +
+      'rerun dependency-cruiser with tsPreCompilationDeps: "specify" (in its config), or without the option';
+  if (R.countsTypeOnly(design) && opt !== 'specify')
+    return 'the design counts type-only imports, but the analyser graph was made without tsPreCompilationDeps: "specify", ' +
+      'so it holds none of them — rerun dependency-cruiser with that option in its config';
+  return null;
 }
 
 const REGISTRY = () => path.join(os.homedir(), '.claude', 'structure-guard.json');
@@ -365,6 +383,7 @@ function main(argv) {
 
   const problem = designProblem(design);
   if (problem) return stop(problem);
+  if (cruise) { const why = analyserOptionProblem(cruise, design); if (why) return stop(why); }
   let proposed = null;
   if (args.proposed !== undefined) {
     const clash = ['write-baseline', 'allowGrowth', 'arm'].filter(k => args[k] !== undefined);
@@ -374,6 +393,8 @@ function main(argv) {
     try { proposed = readJson(args.proposed, 'proposed design'); } catch (e) { return stop(e.message); }
     const bad = designProblem(proposed);
     if (bad) return stop(`the proposed design cannot be judged against: ${bad}`);
+    const option = cruise && analyserOptionProblem(cruise, proposed);
+    if (option) return stop(`under the proposed design: ${option}`);
   }
   if (baseline && !baseline.rules) return stop(`the baseline ${args.baseline} has no "rules" section — refusing to treat it as empty`);
   // Which design the baseline was measured under, against the one in force (#535).
@@ -426,9 +447,10 @@ function main(argv) {
     const { diff, agree, count } = compareGraphs(analyser, built.graph);
     if (built.at) print(`structure-guard: the package graph is ${built.at.ref} at ${built.at.sha.slice(0, 8)}, through git archive`);
     print(`structure-guard: agreement — analyser ${analyser.modules.size} modules · ${analyser.edges.length} edges · ` +
-          `${analyser.reexports.size} re-exports · ${analyser.circular.size} on a cycle; ` +
+          `${analyser.reexports.size} re-exports · ${analyser.typeOnly.size} type-only · ${analyser.circular.size} on a cycle; ` +
           `package (${built.extractor}) ${built.graph.modules.size} · ${built.graph.edges.length} · ` +
-          `${built.graph.reexports.size} · ${built.graph.circular.size}`);
+          `${built.graph.reexports.size} · ${built.graph.typeOnly.size} · ${built.graph.circular.size}` +
+          ` · type-only imports ${analyser.typeOnlyImports === 'count' ? 'counted' : 'not counted'}`);
     for (const [kind, d] of Object.entries(diff)) {
       print(`  ${kind.padEnd(9)}: ${d.onlyAnalyser.length} only in the analyser, ${d.onlyHook.length} only in the package graph`);
       for (const k of d.onlyAnalyser.slice(0, 5)) print(`      analyser only: ${k}`);
@@ -499,6 +521,11 @@ function main(argv) {
         `${results.divergence.unmapped.length} modules outside every component · ` +
         `${graph.unresolved} of ${graph.relative} relative imports unresolved` +
         (built ? ` · graph built by ${built.extractor}` : ''));
+  // Said on every run, zero included, so "no type-only edges" cannot be read off a design that
+  // does not look for them (#605).
+  print(graph.typeOnlyImports === 'count'
+    ? `  type-only imports: counted — ${graph.typeOnly.size} of ${graph.edges.length} edges name only types (judged as divergences, left out of cycles)`
+    : '  type-only imports: not counted — the design does not set "typeOnlyImports": "count", so an import that only names types is not in this graph');
   if (!baseline) print('  no baseline given — every violation counts as new');
   else if (frame.unstamped) print('  the baseline names no design (written before designs were identified) — ' +
     'it is judged as given; regenerating it stamps the design in force');

@@ -183,6 +183,72 @@ console.log('\nCYCLES AND UNRESOLVED IMPORTS — computed, since no analyser fla
   ok(lost.graph.relative >= 1 && lost.graph.unresolved === 1, `an unresolved relative import is counted (${lost.graph.unresolved} of ${lost.graph.relative})`);
 }
 
+console.log('\nTYPE-ONLY RECORDS — what runs and what compiled away, as the analyser records them (#605):');
+{
+  const P2 = path.join(DIR, 'pkg-types');
+  const put2 = (rel, text) => { const f = path.join(P2, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  for (const f of ['a', 'b', 'c', 'r', 's']) put2(`src/${f}.ts`, '// fixture\n');
+  // [target, the kind that runs, the kind that compiled away] — the TypeScript extractor's shape.
+  const shaped = { id: 'shaped@1', configFiles: [], edges: rel => ({ unresolved: 0, edges: {
+    'src/a.ts': [['src/b.ts', null, 'import'], ['src/c.ts', 'import', null]],
+    // a value re-export beside an `import type` of the same file
+    'src/s.ts': [['src/r.ts', 'export', 'import']],
+  }[rel] || [] }) };
+  const COUNT = { root: 'src', components: { x: { dirs: [''] } }, allowed: [], typeOnlyImports: 'count' };
+  const IGNORE = { root: 'src', components: { x: { dirs: [''] } }, allowed: [] };
+  const g = S.buildGraph({ pkgDir: P2, design: COUNT, extractor: shaped, cachePath: null }).graph;
+  ok(g.edges.length === 3 && g.typeOnly.size === 1 && g.typeOnly.has('src/a.ts -> src/b.ts'),
+     `counted: an edge whose only import compiled away is type-only, one that runs is not (got ${[...g.typeOnly].join(', ')})`);
+  ok(!g.reexports.has('src/s.ts -> src/r.ts') && !g.typeOnly.has('src/s.ts -> src/r.ts'),
+     'counted: a value re-export beside a type import of the same file is a use that runs');
+  const i = S.buildGraph({ pkgDir: P2, design: IGNORE, extractor: shaped, cachePath: null }).graph;
+  ok(i.edges.length === 2 && !i.adj.get('src/a.ts').has('src/b.ts') && i.reexports.has('src/s.ts -> src/r.ts'),
+     `not counted: the compiled-away edge is gone, and the re-export is a re-export again (got ${i.edges.length} edges)`);
+  // An unresolved import that compiles away is counted only when types count (#677).
+  const broken = { id: 'broken@1', configFiles: [], edges: rel => rel === 'src/a.ts' ? { edges: [['src/c.ts', 'import', null]], unresolved: 0, unresolvedTypes: 1 } : { edges: [], unresolved: 0 } };
+  const bi = S.buildGraph({ pkgDir: P2, design: IGNORE, extractor: broken, cachePath: null }).graph;
+  const bc = S.buildGraph({ pkgDir: P2, design: COUNT, extractor: broken, cachePath: null }).graph;
+  ok(bi.unresolved === 0 && bi.relative === 1 && bc.unresolved === 1 && bc.relative === 2,
+     `a broken type-only import is unresolved only when types count (not counted: ${bi.unresolved} of ${bi.relative}; counted: ${bc.unresolved} of ${bc.relative})`);
+}
+
+console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
+{
+  const from = process.env.STRUCTURE_TS_FROM;
+  let tsDir = null;
+  try { tsDir = from && path.dirname(require.resolve('typescript/package.json', { paths: [from] })); } catch { tsDir = null; }
+  if (!tsDir) console.log(`  – NOT MEASURED here: ${from ? `no TypeScript resolvable from ${from}` : 'STRUCTURE_TS_FROM is not set'} (the agreement on a real package is the witness)`);
+  else {
+    const P3 = path.join(DIR, 'pkg-ts');
+    const put3 = (rel, text) => { const f = path.join(P3, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+    fs.mkdirSync(path.join(P3, 'node_modules'), { recursive: true });
+    fs.symlinkSync(tsDir, path.join(P3, 'node_modules', 'typescript'));
+    put3('tsconfig.json', JSON.stringify({ compilerOptions: { target: 'ES2020', module: 'ESNext', moduleResolution: 'bundler', strict: true } }));
+    put3('src/t.ts', 'export interface T { t: number }\n');
+    put3('src/u.ts', 'export interface U { u: number }\nexport const unused = 1;\n');
+    put3('src/v.ts', 'export const v = 1;\n');
+    put3('src/q.ts', 'export const q = 1;\n');
+    put3('src/r.ts', 'export interface S { s: number }\nexport const r = 1;\n');
+    put3('src/a.ts', "import type { T } from './t';\nimport { U } from './u';\nimport { v } from './v';\n" +
+                     "type Q = typeof import('./q');\nexport const x: T = { t: v };\nexport let y: U | Q | undefined;\n");
+    put3('src/s.ts', "import type { S } from './r';\nexport type { S } from './r';\nexport { r } from './r';\nexport let z: S | undefined;\n");
+    const ex = S.tsExtractor(P3);
+    const got = rel => Object.fromEntries(ex.edges(rel, fs.readFileSync(path.join(P3, rel), 'utf8')).edges.map(([t, run, type]) => [t, [run, type]]));
+    const a = got('src/a.ts'), sR = got('src/s.ts');
+    ok(!ex.notMeasured && /\+types$/.test(ex.id), `the extractor runs on TypeScript ${ex.id} and names that edges carry type-only marks`);
+    ok(JSON.stringify(a['src/t.ts']) === '[null,"import"]', `\`import type\` compiled away (got ${JSON.stringify(a['src/t.ts'])})`);
+    ok(JSON.stringify(a['src/u.ts']) === '[null,"import"]', `an import whose names are only used as types compiled away (got ${JSON.stringify(a['src/u.ts'])})`);
+    ok(JSON.stringify(a['src/q.ts']) === '[null,"import"]', `\`typeof import('./q')\` in a type is a compiled-away use (got ${JSON.stringify(a['src/q.ts'])})`);
+    ok(JSON.stringify(a['src/v.ts']) === '["import",null]', `a value import runs, and nothing of it compiled away (got ${JSON.stringify(a['src/v.ts'])})`);
+    ok(JSON.stringify(sR['src/r.ts']) === '["export","import"]',
+       `a value re-export runs, beside a compiled-away use of the same file (got ${JSON.stringify(sR['src/r.ts'])})`);
+    put3('src/w.ts', "import type { Gone } from './gone';\nimport { nope } from './nope';\nexport let w: Gone | undefined;\nexport const n = nope;\n");
+    const w = ex.edges('src/w.ts', fs.readFileSync(path.join(P3, 'src/w.ts'), 'utf8'));
+    ok(w.unresolved === 1 && w.unresolvedTypes === 1,
+       `a broken import that runs and a broken one that compiled away are counted apart (got ${w.unresolved} and ${w.unresolvedTypes})`);
+  }
+}
+
 console.log('\nNOT MEASURED — an extractor that cannot run says so:');
 {
   // Caught, so that a builder which ignored the refusal and went on to call an extractor that

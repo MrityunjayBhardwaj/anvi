@@ -269,7 +269,7 @@ const RULES = loadFromCandidates('structure-rules.js');
 const GRAPH = loadFromCandidates('structure-graph.js');
 
 // Module specifiers written in a piece of source text — lexical, so it works on the fragment an
-// Edit replaces. Type-only imports are included (the guard's compiled view drops them).
+// Edit replaces. Type-only imports are included (the guard drops them unless the design counts them, #605).
 const SPECIFIER = /(?:\bimport|\bexport)\s[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|\brequire\(\s*['"]([^'"]+)['"]\s*\)|^\s*import\s*['"]([^'"]+)['"]/gm;
 const specifiersIn = text => new Set([...String(text || '').matchAll(SPECIFIER)].map(m => m[1] || m[2] || m[3] || m[4]));
 
@@ -292,7 +292,7 @@ function exposureOf(c, frame, extractorFor) {
   // EXACT when the prior content is known: a created file, or an edit whose result recorded
   // `originalFile`. ESTIMATED from the edit's own text when it did not. Every import an Edit
   // adds is in its new text, so "in the new text, not in the old" is an UPPER BOUND: a zero is
-  // firm, a hit is only possible (a type-only import, or one the file already had elsewhere).
+  // firm, a hit is only possible (a type-only import the design does not count, or one the file already had elsewhere).
   let before, after, method;
   try {
     if (c.tool === 'Write' || typeof c.prior === 'string') {
@@ -662,7 +662,7 @@ function main(argv) {
     list(`\n  MISSED CHANCES — ${exactMissed.length}: a not-allowed import landed without a refusal. Each needs a reason ` +
          '(the guard did not judge it, a guard defect, or the design changed inside the window):', exactMissed);
     list(`\n  POSSIBLE CHANCES — ${possible.length}: the edit's text adds a not-allowed import, but the file before it was not recorded, ` +
-         'so whether the guard would see it is not known (a type-only import is invisible to it). Read each edit:', possible);
+         'so whether the guard would see it is not known (a type-only import is invisible to it unless the design counts them). Read each edit:', possible);
     // ── the default branch, judged whole (#667) ──
     branch = onDefaultBranch(pkgDir, frame, args.ref, since, calls);
     if (branch.notLooked) print(`\n  ON THE DEFAULT BRANCH: NOT LOOKED AT — ${branch.notLooked}. Imports written outside the edit tools are not counted anywhere in this report.`);
