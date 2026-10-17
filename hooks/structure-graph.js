@@ -130,11 +130,13 @@ function tsExtractor(pkgDir) {
     // carry a compiled-away use — `import type { T } from './a'` beside `export { v } from './a'`
     // — and that use is what makes the edge a use rather than a re-export once types count.
     const found = new Map();                 // target -> { run: {use, reexport}, type: {use, reexport} }
-    let unresolved = 0;
+    // An unresolved import that compiles away is counted apart (#677): under a design that does not
+    // count type-only imports, a stale `import type` must not push the package toward NOT MEASURED.
+    let unresolved = 0, unresolvedTypes = 0;
     for (const [spec, src] of source) {
       const run = runs.get(spec) || { use: false, reexport: false };
       const res = ts.resolveModuleName(spec, abs, opts, host, cache).resolvedModule;
-      if (!res) { if (/^\.\.?\//.test(spec)) unresolved++; continue; }
+      if (!res) { if (/^\.\.?\//.test(spec)) runs.has(spec) ? unresolved++ : unresolvedTypes++; continue; }
       if (res.isExternalLibraryImport) continue;
       const target = path.relative(pkgDir, res.resolvedFileName).split(path.sep).join('/');
       if (target === rel) continue;
@@ -144,7 +146,7 @@ function tsExtractor(pkgDir) {
       found.set(target, e);
     }
     const kind = m => m.use ? 'import' : m.reexport ? 'export' : null;
-    return { edges: [...found].map(([target, e]) => [target, kind(e.run), kind(e.type)]), unresolved };
+    return { edges: [...found].map(([target, e]) => [target, kind(e.run), kind(e.type)]), unresolved, unresolvedTypes };
   }
 
   // The id names what an edge carries: a cache written before edges carried "type-only" holds
@@ -193,7 +195,7 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
 
   let extracted = 0, dirty = !cacheValid;
   const perFile = {};
-  const NONE = { edges: [], unresolved: 0 };
+  const NONE = { edges: [], unresolved: 0, unresolvedTypes: 0 };
   for (const rel of files) {
     if (proposed && rel === proposed.rel) continue;
     // Decided here, not left to each extractor: a file that compiles to nothing has no
@@ -206,7 +208,7 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
     const got = extractor.edges(rel, fs.readFileSync(path.join(pkgDir, rel), 'utf8'));
     extracted++;
     dirty = true;
-    perFile[rel] = cache.files[rel] = { ...st, edges: got.edges, unresolved: got.unresolved || 0 };
+    perFile[rel] = cache.files[rel] = { ...st, edges: got.edges, unresolved: got.unresolved || 0, unresolvedTypes: got.unresolvedTypes || 0 };
   }
   if (cachePath && dirty) {
     try {
@@ -218,7 +220,7 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
   }
   if (proposed) {
     const got = compiles(proposed.rel) ? extractor.edges(proposed.rel, proposed.content) : NONE;
-    perFile[proposed.rel] = { edges: got.edges, unresolved: got.unresolved || 0 };
+    perFile[proposed.rel] = { edges: got.edges, unresolved: got.unresolved || 0, unresolvedTypes: got.unresolvedTypes || 0 };
   }
 
   // A JSON file is a module only when something imports it (#599). One that code reads with
@@ -243,6 +245,9 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
       }),
       ...Array.from({ length: f.unresolved }, () => ({
         module: './unresolved', resolved: '', coreModule: false, couldNotResolve: true, circular: false, dependencyTypes: ['local', 'unknown'],
+      })),
+      ...Array.from({ length: f.unresolvedTypes || 0 }, () => ({
+        module: './unresolved', resolved: '', coreModule: false, couldNotResolve: true, circular: false, dependencyTypes: ['local', 'unknown', 'type-only'],
       })),
     ],
   })) };

@@ -204,6 +204,12 @@ console.log('\nTYPE-ONLY RECORDS — what runs and what compiled away, as the an
   const i = S.buildGraph({ pkgDir: P2, design: IGNORE, extractor: shaped, cachePath: null }).graph;
   ok(i.edges.length === 2 && !i.adj.get('src/a.ts').has('src/b.ts') && i.reexports.has('src/s.ts -> src/r.ts'),
      `not counted: the compiled-away edge is gone, and the re-export is a re-export again (got ${i.edges.length} edges)`);
+  // An unresolved import that compiles away is counted only when types count (#677).
+  const broken = { id: 'broken@1', configFiles: [], edges: rel => rel === 'src/a.ts' ? { edges: [['src/c.ts', 'import', null]], unresolved: 0, unresolvedTypes: 1 } : { edges: [], unresolved: 0 } };
+  const bi = S.buildGraph({ pkgDir: P2, design: IGNORE, extractor: broken, cachePath: null }).graph;
+  const bc = S.buildGraph({ pkgDir: P2, design: COUNT, extractor: broken, cachePath: null }).graph;
+  ok(bi.unresolved === 0 && bi.relative === 1 && bc.unresolved === 1 && bc.relative === 2,
+     `a broken type-only import is unresolved only when types count (not counted: ${bi.unresolved} of ${bi.relative}; counted: ${bc.unresolved} of ${bc.relative})`);
 }
 
 console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
@@ -236,6 +242,10 @@ console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS
     ok(JSON.stringify(a['src/v.ts']) === '["import",null]', `a value import runs, and nothing of it compiled away (got ${JSON.stringify(a['src/v.ts'])})`);
     ok(JSON.stringify(sR['src/r.ts']) === '["export","import"]',
        `a value re-export runs, beside a compiled-away use of the same file (got ${JSON.stringify(sR['src/r.ts'])})`);
+    put3('src/w.ts', "import type { Gone } from './gone';\nimport { nope } from './nope';\nexport let w: Gone | undefined;\nexport const n = nope;\n");
+    const w = ex.edges('src/w.ts', fs.readFileSync(path.join(P3, 'src/w.ts'), 'utf8'));
+    ok(w.unresolved === 1 && w.unresolvedTypes === 1,
+       `a broken import that runs and a broken one that compiled away are counted apart (got ${w.unresolved} and ${w.unresolvedTypes})`);
   }
 }
 
