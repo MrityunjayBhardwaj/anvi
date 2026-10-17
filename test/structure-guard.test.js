@@ -47,13 +47,14 @@ const REAL = {
 // { 'src/x.ts': ['src/y.ts', ...] } -> the analyser's shape. `circular` lists edge keys the
 // analyser would have flagged; `unresolved` adds relative imports that failed to resolve;
 // `exports` lists edge keys written as re-exports (`export … from`) rather than imports.
-function cruise(spec, { circular = [], unresolved = {}, exports = [] } = {}) {
+function cruise(spec, { circular = [], unresolved = {}, exports = [], types = {}, options } = {}) {
   const dependents = {};
   for (const [s, ds] of Object.entries(spec)) for (const d of ds) (dependents[d] = dependents[d] || []).push(s);
   const rec = (s, d, bad) => ({
     module: bad ? './missing' : './' + path.basename(d, '.ts'), moduleSystem: 'es6', dynamic: false,
     exoticallyRequired: false,
-    dependencyTypes: bad ? ['local', 'import', 'unknown'] : exports.includes(`${s} -> ${d}`) ? ['local', 'export'] : ['local', 'import'],
+    dependencyTypes: bad ? ['local', 'import', 'unknown'] : types[`${s} -> ${d}`] ||
+      (exports.includes(`${s} -> ${d}`) ? ['local', 'export'] : ['local', 'import']),
     resolved: bad ? './missing' : d, coreModule: false, followable: !bad, couldNotResolve: !!bad,
     matchesDoNotFollow: false, circular: circular.includes(`${s} -> ${d}`), valid: true,
   });
@@ -63,6 +64,7 @@ function cruise(spec, { circular = [], unresolved = {}, exports = [] } = {}) {
       dependencies: [...ds.map(d => rec(s, d, false)), ...Array.from({ length: unresolved[s] || 0 }, () => rec(s, 'x', true))],
       dependents: dependents[s] || [], orphan: false, valid: true,
     })),
+    ...(options ? { summary: { optionsUsed: options } } : {}),
   };
 }
 // A component graph: { name: { dirs, files } } and the allowed [from, to] edges between them.
@@ -185,7 +187,7 @@ console.log('\nNO IMPLIED RULE — a direct import of something also reachable a
   ok(keys(up).includes('src/x/index.ts -> src/y/z.ts'), 'a re-export still faces the design — a barrel re-exporting across an undeclared edge diverges');
 }
 
-console.log('\nCYCLE — the analyser\'s own flag is read, not recomputed:');
+console.log('\nCYCLE — computed from the edges that run, never read from the analyser\'s flag (#605):');
 {
   const d = design({ x: { dirs: ['x'] } });
   const g = G.loadGraph(cruise({ 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': ['src/x/p.ts'], 'src/x/s.ts': ['src/x/p.ts'] },
@@ -195,17 +197,81 @@ console.log('\nCYCLE — the analyser\'s own flag is read, not recomputed:');
   ok(r.examined === 3 && !keys(r).includes('src/x/s.ts -> src/x/p.ts'),
      `an edge into a cycle is not itself on it (of ${r.examined} examined)`);
 
-  // A graph built without an analyser has no flag to read, so cycles are COMPUTED — and the
+  // A graph built without an analyser has no flag to read, and the analyser's flag counts a cycle
+  // through types, which nothing runs — so cycles are COMPUTED, whatever the input says, and the
   // computation must agree with the flag it replaces on the same shape.
   const bare = G.loadGraph(cruise({ 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': ['src/x/r.ts'], 'src/x/r.ts': ['src/x/p.ts'],
                                     'src/x/s.ts': ['src/x/p.ts'], 'src/x/t.ts': [] }), d);
-  const computed = [...G.onCycle(bare.adj)].sort();
-  ok(bare.circular.size === 0 && computed.join() === ['src/x/p.ts -> src/x/q.ts', 'src/x/q.ts -> src/x/r.ts', 'src/x/r.ts -> src/x/p.ts'].join(),
+  const computed = [...bare.circular].sort();
+  ok(computed.join() === ['src/x/p.ts -> src/x/q.ts', 'src/x/q.ts -> src/x/r.ts', 'src/x/r.ts -> src/x/p.ts'].join(),
      `with no flag in the input, every edge of a three-module cycle is computed as on it (got ${computed.length})`);
+  const flagOnly = G.loadGraph(cruise({ 'src/x/p.ts': ['src/x/q.ts'], 'src/x/q.ts': [] }, { circular: ['src/x/p.ts -> src/x/q.ts'] }), d);
+  ok(flagOnly.circular.size === 0, 'a cycle flag on an edge that closes no cycle is not read as one');
   ok(bare.edges.length === 4 && !computed.includes('src/x/s.ts -> src/x/p.ts'),
      `and an edge into that cycle is not (of ${bare.edges.length} edges)`);
   ok([...G.onCycle(g.adj)].sort().join() === keys(r).sort().join(),
      'on the flagged graph above, the computed cycle edges are exactly the analyser\'s');
+}
+
+console.log('\nTYPE-ONLY IMPORTS — judged as divergences, left out of cycles, only when the design counts them (#605):');
+{
+  const TYPE = ['local', 'type-only', 'import', 'pre-compilation-only'];
+  const COUNT = { typeOnlyImports: 'count' };
+  const d = design({ low: { dirs: ['low'] }, mid: { dirs: ['mid'] } }, [['mid', 'low']]);
+  const dc = design({ low: { dirs: ['low'] }, mid: { dirs: ['mid'] } }, [['mid', 'low']], COUNT);
+  // low -> mid is undeclared and names only types; mid -> low runs. Together they close a cycle
+  // only through the type import.
+  const spec = { 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': ['src/low/a.ts'] };
+  const marked = cruise(spec, { types: { 'src/low/a.ts -> src/mid/m.ts': TYPE } });
+
+  const ignored = G.loadGraph(marked, d);
+  ok(ignored.edges.length === 1 && G.judge(ignored, d).divergence.found.length === 0 && ignored.typeOnlyImports === 'ignore',
+     `without the key, a type-only import is not in the graph and is not refused (got ${ignored.edges.length} edges)`);
+  for (const t of [['local', 'type-only', 'import'], ['local', 'type-import']]) {
+    const g = G.loadGraph(cruise(spec, { types: { 'src/low/a.ts -> src/mid/m.ts': t } }), d);
+    ok(g.edges.length === 1, `without the key, a record marked ${t.slice(1).join('+')} is dropped too — it never survives compilation`);
+  }
+  const counted = G.loadGraph(marked, dc);
+  const div = G.judge(counted, dc).divergence.found;
+  ok(counted.edges.length === 2 && counted.typeOnly.size === 1 && counted.typeOnly.has('src/low/a.ts -> src/mid/m.ts'),
+     `with "typeOnlyImports": "count", it is an edge, marked type-only (got ${counted.edges.length} edges, ${counted.typeOnly.size} type-only)`);
+  ok(div.length === 1 && div[0].typeOnly && /low imports mid \(types only\), which the design does not declare/.test(div[0].detail),
+     `and it is a divergence, said to name only types (got ${JSON.stringify(div.map(f => f.detail))})`);
+  ok(counted.circular.size === 0, `a cycle closed only through a type import is no cycle (got ${counted.circular.size})`);
+  const both = G.loadGraph(cruise(spec), dc);
+  ok(both.circular.size === 2 && both.typeOnly.size === 0, 'the same two edges, both running, are a cycle — the control');
+  // One import that runs beside one that does not: the edge runs.
+  const mixed = cruise({ 'src/low/a.ts': ['src/mid/m.ts', 'src/mid/m.ts'], 'src/mid/m.ts': [] });
+  mixed.modules[0].dependencies[0].dependencyTypes = TYPE;
+  ok(G.loadGraph(mixed, dc).typeOnly.size === 0, 'an edge with one import that runs and one that only names types is not type-only');
+
+  // The key is part of the design's id only when on, so a design written before it keeps its id.
+  ok(G.designId(d) === G.designId({ ...d, typeOnlyImports: 'ignore' }) && G.designId(d) !== G.designId(dc),
+     '"ignore" keeps the design id, "count" changes it — a baseline must be re-taken to count types');
+  ok(/"typeOnlyImports" is "yes"/.test(G.designProblem({ ...d, typeOnlyImports: 'yes' }) || ''), 'any other value is a design problem');
+
+  // The analyser's option, from the graph it wrote.
+  const run = (args) => spawnSync(process.execPath, [GUARD, ...args], { encoding: 'utf8' });
+  const w = (name, obj) => { const f = path.join(DIR, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const dFile = w('t-design.json', d), dcFile = w('t-design-count.json', dc);
+  const asTrue = w('t-dc-true.json', cruise(spec, { options: { tsPreCompilationDeps: true } }));
+  const asOff = w('t-dc-off.json', cruise({ 'src/low/a.ts': [], 'src/mid/m.ts': ['src/low/a.ts'] }, { options: {} }));
+  const asSpec = w('t-dc-spec.json', cruise(spec, { types: { 'src/low/a.ts -> src/mid/m.ts': TYPE }, options: { tsPreCompilationDeps: 'specify' } }));
+  const t = run(['--design', dFile, '--graph', asTrue]);
+  ok(t.status === 2 && /tsPreCompilationDeps: true, which keeps type-only imports without marking them/.test(t.stdout),
+     `a graph made with tsPreCompilationDeps: true is NOT MEASURED under any design (got ${t.status})`);
+  const o = run(['--design', dcFile, '--graph', asOff]);
+  ok(o.status === 2 && /the design counts type-only imports, but the analyser graph was made without tsPreCompilationDeps: "specify"/.test(o.stdout),
+     `a counting design with a graph that holds no type-only imports is NOT MEASURED (got ${o.status})`);
+  const p = run(['--design', dFile, '--proposed', dcFile, '--graph', asOff]);
+  ok(p.status === 2 && /under the proposed design: the design counts type-only imports/.test(p.stdout),
+     `and so is a proposed counting design judged on that graph (got ${p.status})`);
+  const ok1 = run(['--design', dcFile, '--graph', asSpec]);
+  ok(ok1.status === 1 && /type-only imports: counted — 1 of 2 edges name only types/.test(ok1.stdout) && /cycle     : 0 of 2/.test(ok1.stdout),
+     `a "specify" graph under a counting design is judged, and says how many edges name only types (got ${ok1.status})`);
+  const ok0 = run(['--design', dFile, '--graph', asSpec]);
+  ok(ok0.status === 0 && /type-only imports: not counted — the design does not set "typeOnlyImports": "count"/.test(ok0.stdout),
+     `the same graph under a design that does not count them drops them, and says so (got ${ok0.status})`);
 }
 
 console.log('\nTHE RATCHET — only what the baseline does not already hold is refused:');
@@ -560,9 +626,20 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   const reexported = write('pkg-dc-reexport.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }, { exports: [EDGE] }));
   ok(/reexports: 1 only in the analyser/.test(run(['--design', d, '--graph', reexported, '--package', PK, '--extractor', EX]).stdout),
      'the same edge read as a re-export by only one side is a disagreement on RE-EXPORTS alone');
+  // Cycles are computed from each side's edges, so a flag alone cannot make the sides disagree;
+  // a cycle the edges do not close is no cycle on either side (#605).
   const flagged = write('pkg-dc-cycle.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] }, { circular: [EDGE] }));
-  ok(/cycles   : 1 only in the analyser/.test(run(['--design', d, '--graph', flagged, '--package', PK, '--extractor', EX]).stdout),
-     'an edge flagged as on a cycle by only one side is a disagreement on CYCLES alone');
+  ok(/cycles   : 0 only in the analyser, 0 only in the package graph/.test(run(['--design', d, '--graph', flagged, '--package', PK, '--extractor', EX]).stdout),
+     'an analyser\'s cycle flag that the edges do not close is not a disagreement on CYCLES');
+  // Under a design that counts them, an edge one side marks type-only and the other does not is a
+  // disagreement on TYPE-ONLY alone (#605): the edge is in both graphs, and only its mark differs.
+  const dCount = write('pkg-design-count.json', { ...LOWMID(), typeOnlyImports: 'count' });
+  const typed = write('pkg-dc-typed.json', cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/mid/m.ts': [] },
+    { types: { [EDGE]: ['local', 'type-only', 'import', 'pre-compilation-only'] }, options: { tsPreCompilationDeps: 'specify' } }));
+  const typedRun = run(['--design', dCount, '--graph', typed, '--package', PK, '--extractor', EX]);
+  ok(typedRun.status === 1 && /typeOnly : 1 only in the analyser, 0 only in the package graph/.test(typedRun.stdout) &&
+     /edges    : 0 only in the analyser, 0 only in the package graph/.test(typedRun.stdout),
+     `an edge only one side marks type-only is a disagreement on TYPE-ONLY alone (got ${typedRun.status})`);
 
   const refusedArm = run(['--design', d, '--graph', extra, '--package', PK, '--extractor', EX, '--arm', '--baseline', base]);
   ok(refusedArm.status === 1 && /NOT armed/.test(refusedArm.stdout) && !fs.existsSync(REG),

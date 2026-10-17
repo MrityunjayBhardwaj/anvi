@@ -1476,12 +1476,33 @@ loosened until it stops firing guards nothing.
   the section as ignored; regenerating the baseline drops it and says so.
 - **A re-export still faces the divergence and cycle rules**, and is still told apart from a
   use — the graph agreement check below compares re-exports edge for edge.
-- **Only imports that survive compilation are judged.** Without `tsPreCompilationDeps`,
-  dependency-cruiser drops type-only imports, so they are absent from the graph, not passed.
+- **Type-only imports are judged only when the design counts them (#605).** Compiled output
+  drops an import that only names types, so by default such a dependency is absent from the
+  graph — never refused, and an edge carried only by types reads as unused. A design with
+  `"typeOnlyImports": "count"` judges them: an edge whose every import compiles away is marked
+  type-only, counts as a **divergence** like any other (a type dependency still ties a component
+  to another's shape; refusals say "(types only)"), and is left out of the **cycle** rule, since
+  a cycle through types alone is erased before anything runs. Cycles are always computed from the
+  edges that run, never read from the analyser's flag, which counts type cycles. The key is part
+  of the design id, so turning it on asks for a new baseline and a re-arm instead of reading the
+  newly visible edges as new violations; a design without it keeps its id and its verdicts. Every
+  report says which mode it ran in and how many edges name only types.
+  - The analyser graph must say which imports compile away: run dependency-cruiser with
+    `"tsPreCompilationDeps": "specify"` in its config (the CLI flag gives `true`). A graph made
+    with `true` keeps type-only imports UNMARKED, so it is NOT MEASURED under any design; a
+    counting design with a graph made without `"specify"` holds none of them, and is NOT
+    MEASURED too. The edit-time builder reads each file's source beside its compiled output and
+    marks what only the source names; the agreement check compares those marks edge for edge.
+  - Measured on stave `main` `57f9c1bf` (dependency-cruiser 17.4.3, TypeScript 5.9.3, design
+    `cffdf7d00026`, 2026-10-17): counting adds 274 edges to 881, 95 of them between components;
+    9 are undeclared imports the baseline does not hold, and each of the 22 cycle edges
+    dependency-cruiser flags with its option on closes only through a type-only import, so the
+    computed cycles stay at 0. Both builders
+    agree, 881/881 not counting and 1155/1155 with 274 type-only marks counting.
 - **Two sources for the graph, and a check that they agree.** `--package <dir>` judges the
   graph the edit-time hook builds (the project's own TypeScript) instead of an analyser's.
   Given `--graph` AND `--package`, it judges nothing: it compares the two — modules, edges,
-  re-exports, cycle edges — and exits 0 only if they agree. **`--arm --baseline <b>`
+  re-exports, type-only marks, cycle edges — and exits 0 only if they agree. **`--arm --baseline <b>`
   registers the package for the hook only when they do**, merging into
   `~/.claude/structure-guard.json` by the package's real path, and refusing to overwrite a
   registry of any other shape. Agreement was measured on one package before the hook was

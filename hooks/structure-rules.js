@@ -38,6 +38,19 @@
 // refusals were legitimate direct use; at the 13 Sep baseline it counted 27% of the package's
 // imports. Do not reintroduce reachability as a refusal without a predicate that can see use.
 //
+// TYPE-ONLY IMPORTS, WHEN THE DESIGN COUNTS THEM (#605). Compiled output drops an import that
+// only names types, so a graph read from it cannot see a component that depends on another's
+// TYPES: such a dependency is never refused, and reads as an edge nobody uses (a design was once
+// revised on that belief). A design that says `"typeOnlyImports": "count"` judges them: an edge
+// whose every import is type-only is marked so, it counts as a DIVERGENCE like any other — a type
+// dependency still ties a component to another's shape — and it is left out of the CYCLE rule,
+// because a cycle through types alone is erased before anything runs. Without the key, type-only
+// edges are dropped and verdicts are what they were. The key is part of the design's id, so
+// turning it on asks for a new baseline instead of reading the newly visible edges as new
+// violations. Both graph producers mark the same edges: dependency-cruiser with
+// `tsPreCompilationDeps: "specify"` (its `pre-compilation-only` marker), and the edit-time
+// builder by comparing an edit's source with its compiled output.
+//
 // WHY THE BASELINE IS A STORED FILE AND NOT A DIFF AGAINST THE LAST GRAPH. A diff
 // grandfathers whatever landed without passing through the guard — a pull, a hand edit, a
 // branch switch — so the ratchet would loosen every time the guard was bypassed, silently.
@@ -96,6 +109,10 @@ const crypto = require('crypto');
 const stripSlash = s => String(s).replace(/\/+$/, '');
 const sortedSet = xs => [...new Set((Array.isArray(xs) ? xs : []).map(String))].sort();
 const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
+const TYPE_ONLY_MODES = ['count', 'ignore'];
+const countsTypeOnly = design => !!design && design.typeOnlyImports === 'count';
+// The analyser's marks for a dependency that does not survive compilation.
+const COMPILED_AWAY = ['pre-compilation-only', 'type-only', 'type-import'];
 function designId(design) {
   const d = design || {};
   const comps = isObject(d.components) ? d.components : {};
@@ -106,6 +123,8 @@ function designId(design) {
   }));
   const allowed = sortedSet((Array.isArray(d.allowed) ? d.allowed : []).map(e => Array.isArray(e) ? edgeKey(e[0], e[1]) : String(e)));
   const canonical = { root: stripSlash(d.root || ''), excludes: sortedSet(d.excludes), components, allowed };
+  // Only when on, so every design written before the key keeps the id its baselines carry.
+  if (countsTypeOnly(d)) canonical.typeOnlyImports = 'count';
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
 }
 
@@ -119,6 +138,8 @@ function designProblem(design) {
   if (Array.isArray(d.layers))
     return 'the design is in the retired layer format (#554) — a design now names "components" and the "allowed" edges between them';
   if (!isObject(d.components) || !Object.keys(d.components).length) return 'the design declares no components';
+  if (d.typeOnlyImports !== undefined && !TYPE_ONLY_MODES.includes(d.typeOnlyImports))
+    return `"typeOnlyImports" is ${JSON.stringify(d.typeOnlyImports)} — it is "count" (judge imports that only name types) or "ignore"`;
   const names = new Set(Object.keys(d.components));
   const claimed = new Map();
   for (const [name, c] of Object.entries(d.components)) {
@@ -193,14 +214,22 @@ function loadGraph(cruise, design) {
 
   const listed = Array.isArray(cruise && cruise.modules) ? cruise.modules : [];
   const modules = new Set(listed.filter(m => !m.coreModule && inCorpus(m.source)).map(m => m.source));
+  const counting = countsTypeOnly(design);
   const adj = new Map([...modules].map(s => [s, new Set()]));
-  const circular = new Set();
+  const runtime = new Map([...modules].map(s => [s, new Set()]));   // the edges that survive compilation
   const used = new Set();                   // edges at least one record USES, rather than only re-exports
   let relative = 0, unresolved = 0;
 
   for (const m of listed) {
     if (!modules.has(m.source)) continue;
     for (const d of m.dependencies || []) {
+      // A record that compiles away, under a design that does not count one, is not in the graph.
+      // The analyser marks a specifier nothing of which survives `pre-compilation-only`, but an
+      // `import type` beside a value import of the same file carries only `type-only` — and
+      // left in, it would turn a re-export into a use.
+      const types = d.dependencyTypes || [];
+      const typeOnly = COMPILED_AWAY.some(t => types.includes(t));
+      if (typeOnly && !counting) continue;
       // Relative specifiers are the ones that MUST resolve inside the corpus; a bare
       // package that fails to resolve says nothing about whether imports were parsed.
       if (/^\.\.?\//.test(d.module || '')) {
@@ -209,13 +238,18 @@ function loadGraph(cruise, design) {
       }
       if (!modules.has(d.resolved) || d.resolved === m.source) continue;
       adj.get(m.source).add(d.resolved);
-      if (d.circular) circular.add(edgeKey(m.source, d.resolved));
+      if (!typeOnly) runtime.get(m.source).add(d.resolved);
       if (!(d.dependencyTypes || []).includes('export')) used.add(edgeKey(m.source, d.resolved));
     }
   }
   const edges = [...adj].flatMap(([a, bs]) => [...bs].map(b => [a, b]));
   const reexports = new Set(edges.map(([a, b]) => edgeKey(a, b)).filter(k => !used.has(k)));
-  return { root, modules, adj, edges, circular, reexports, relative, unresolved };
+  // An edge is type-only when NO import behind it survives compilation.
+  const typeOnly = new Set(edges.filter(([a, b]) => !runtime.get(a).has(b)).map(([a, b]) => edgeKey(a, b)));
+  // Cycles are computed, never read from an analyser's flag: dependency-cruiser's flag counts a
+  // cycle through types, which nothing runs, and a graph built without the analyser has no flag.
+  const circular = onCycle(runtime);
+  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved };
 }
 
 // Why the input cannot support a verdict, or null when it can. A CLEAN ZERO IS NOT A PASS:
@@ -290,7 +324,9 @@ function divergences(graph, design) {
     examined++;
     const pair = edgeKey(ca, cb);
     used.set(pair, (used.get(pair) || 0) + 1);
-    if (!allowed.has(pair)) found.push({ key: edgeKey(a, b), pair, detail: `${ca} imports ${cb}, which the design does not declare` });
+    const key = edgeKey(a, b);
+    if (!allowed.has(pair)) found.push({ key, pair, typeOnly: !!(graph.typeOnly && graph.typeOnly.has(key)),
+      detail: `${ca} imports ${cb}${graph.typeOnly && graph.typeOnly.has(key) ? ' (types only)' : ''}, which the design does not declare` });
   }
   const absences = [...allowed].filter(p => !used.has(p)).sort();
   return { found, examined, unmapped, absences };
@@ -360,6 +396,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 }
 
 module.exports = {
-  RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
+  RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, judge, ratchet, planBaseline,
 };
