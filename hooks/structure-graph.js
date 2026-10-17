@@ -7,9 +7,11 @@
 //
 // THE EXTRACTOR IS THE PROJECT'S OWN TYPESCRIPT, used three ways, and each was measured
 // against dependency-cruiser on a 297-module package before this was written (issue #443):
-//   · `transpileModule` first, then read imports from the OUTPUT — so only imports that
-//     survive compilation count, which is dependency-cruiser's default (type-only imports
-//     are dropped). Reading the source instead would add edges the analyser never had.
+//   · `transpileModule` first, then read imports from the OUTPUT — the imports that survive
+//     compilation, dependency-cruiser's default. The SOURCE is read too (#605): an import it
+//     names that the output does not compiled away, and is marked type-only, as the analyser
+//     marks it `pre-compilation-only` under `tsPreCompilationDeps: "specify"`. The rules drop
+//     those edges unless the design counts type-only imports.
 //   · `export … from` in that output marks a re-export; anything else that names a module
 //     is a use. 0 classification mismatches against the analyser.
 //   · `resolveModuleName` against the project's own tsconfig. 742 of 742 edges agreed.
@@ -94,14 +96,12 @@ function tsExtractor(pkgDir) {
   // Emit-only options make transpileModule fail or do needless work; none affect imports.
   const { declaration, declarationMap, sourceMap, outDir, rootDir, ...emitFree } = opts;
 
-  function edges(rel, content) {
-    if (!compiles(rel)) return { edges: [], unresolved: 0 };
-    const abs = path.join(pkgDir, rel);
-    const out = ts.transpileModule(content, {
-      compilerOptions: { ...emitFree, module: ts.ModuleKind.ESNext, noEmit: false }, fileName: abs,
-    }).outputText;
-    const sf = ts.createSourceFile(abs + '.js', out, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
-    const named = new Map();                 // specifier -> { use, reexport }
+  // The specifiers a file names, each marked as a use or a re-export. Read from the compiled
+  // output, they are the imports that run; read from the source, they include those that only
+  // name types (`import type`, an import whose names are used as types alone, `import('…')` in a
+  // type) — which is what dependency-cruiser marks `pre-compilation-only` (#605).
+  function specifiers(sf) {
+    const named = new Map();               // specifier -> { use, reexport }
     const mark = (spec, kind) => { const r = named.get(spec) || { use: false, reexport: false }; r[kind] = true; named.set(spec, r); };
     const visit = n => {
       if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)) mark(n.moduleSpecifier.text, 'use');
@@ -109,29 +109,61 @@ function tsExtractor(pkgDir) {
       else if (ts.isCallExpression(n) && n.arguments.length === 1 && ts.isStringLiteral(n.arguments[0]) &&
                (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require')))
         mark(n.arguments[0].text, 'use');
+      else if (ts.isImportTypeNode(n) && ts.isLiteralTypeNode(n.argument) && ts.isStringLiteral(n.argument.literal))
+        mark(n.argument.literal.text, 'use');
       ts.forEachChild(n, visit);
     };
     visit(sf);
-    const found = new Map();
+    return named;
+  }
+
+  function edges(rel, content) {
+    if (!compiles(rel)) return { edges: [], unresolved: 0 };
+    const abs = path.join(pkgDir, rel);
+    const out = ts.transpileModule(content, {
+      compilerOptions: { ...emitFree, module: ts.ModuleKind.ESNext, noEmit: false }, fileName: abs,
+    }).outputText;
+    const runs = specifiers(ts.createSourceFile(abs + '.js', out, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS));
+    const source = specifiers(ts.createSourceFile(abs, content, ts.ScriptTarget.Latest, false));
+    // Two records per target, as the analyser keeps them: what the output still names (it runs),
+    // and what only the source names (it compiled away). A specifier the output keeps can still
+    // carry a compiled-away use — `import type { T } from './a'` beside `export { v } from './a'`
+    // — and that use is what makes the edge a use rather than a re-export once types count.
+    const found = new Map();                 // target -> { run: {use, reexport}, type: {use, reexport} }
     let unresolved = 0;
-    for (const [spec, r] of named) {
+    for (const [spec, src] of source) {
+      const run = runs.get(spec) || { use: false, reexport: false };
       const res = ts.resolveModuleName(spec, abs, opts, host, cache).resolvedModule;
       if (!res) { if (/^\.\.?\//.test(spec)) unresolved++; continue; }
       if (res.isExternalLibraryImport) continue;
       const target = path.relative(pkgDir, res.resolvedFileName).split(path.sep).join('/');
       if (target === rel) continue;
-      const prev = found.get(target);
-      found.set(target, prev === undefined ? !r.use : prev && !r.use);
+      const e = found.get(target) || { run: { use: false, reexport: false }, type: { use: false, reexport: false } };
+      e.run.use ||= run.use; e.run.reexport ||= run.reexport;
+      e.type.use ||= src.use && !run.use; e.type.reexport ||= src.reexport && !run.reexport;
+      found.set(target, e);
     }
-    return { edges: [...found], unresolved };
+    const kind = m => m.use ? 'import' : m.reexport ? 'export' : null;
+    return { edges: [...found].map(([target, e]) => [target, kind(e.run), kind(e.type)]), unresolved };
   }
 
-  return { id: `typescript@${ts.version}`, configFiles: [...new Set(configFiles)], edges };
+  // The id names what an edge carries: a cache written before edges carried "type-only" holds
+  // none of them, and must be rebuilt rather than read as a graph with no type imports.
+  return { id: `typescript@${ts.version}+types`, configFiles: [...new Set(configFiles)], edges };
 }
 
 function loadExtractor(entry, pkgDir) {
   if (entry && entry.extractor) return require(path.resolve(entry.extractor)).create(pkgDir, entry);
   return tsExtractor(pkgDir);
+}
+
+// An extractor's edge as [target, the kind of import that runs, the kind that compiled away],
+// each 'import', 'export' or null. A named extractor may still give [target, reexportOnly]: an
+// edge it found in output alone, with nothing known to have compiled away.
+function edgeKinds(edge) {
+  const [target, a, b] = edge;
+  if (typeof a === 'boolean') return [target, a ? 'export' : 'import', null];
+  return [target, a || null, b || null];
 }
 
 const statOf = p => { try { const s = fs.statSync(p); return { mtimeMs: s.mtimeMs, size: s.size }; } catch { return null; } };
@@ -198,17 +230,23 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
   const cruise = { modules: Object.entries(perFile).filter(([source]) => isModule(source)).map(([source, f]) => ({
     source,
     dependencies: [
-      ...f.edges.map(([target, reexportOnly]) => ({
-        module: './' + target, resolved: target, coreModule: false, couldNotResolve: false, circular: false,
-        dependencyTypes: reexportOnly ? ['local', 'export'] : ['local', 'import'],
-      })),
+      ...f.edges.flatMap(edge => {
+        const [target, runs, types] = edgeKinds(edge);
+        const record = dependencyTypes => ({
+          module: './' + target, resolved: target, coreModule: false, couldNotResolve: false, circular: false, dependencyTypes,
+        });
+        return [
+          ...(runs ? [record(['local', runs])] : []),
+          // `type-only` is one of the marks the rules read as "compiled away" (COMPILED_AWAY).
+          ...(types ? [record(['local', 'type-only', types])] : []),
+        ];
+      }),
       ...Array.from({ length: f.unresolved }, () => ({
         module: './unresolved', resolved: '', coreModule: false, couldNotResolve: true, circular: false, dependencyTypes: ['local', 'unknown'],
       })),
     ],
   })) };
   const graph = R.loadGraph(cruise, design);
-  graph.circular = R.onCycle(graph.adj);
   return { graph, stats: { files: files.length, extracted, cacheValid, isNew: !!isNew, extractor: extractor.id } };
 }
 
