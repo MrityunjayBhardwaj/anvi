@@ -28,3 +28,11 @@ if (!process.env.ANVI_METER_DIR) {
   process.env.ANVI_METER_DIR = dir;
   process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* a leftover temp dir is harmless */ } });
 }
+
+// The session-start hook starts a drift reading and writes it under `$ANVI_DRIFT_DIR`, else
+// `$CLAUDE_DIR/anvi-drift`, else `~/.claude/anvi-drift` (#530). Same rule as the meter.
+if (!process.env.ANVI_DRIFT_DIR) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-test-drift-'));
+  process.env.ANVI_DRIFT_DIR = dir;
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* a leftover temp dir is harmless */ } });
+}

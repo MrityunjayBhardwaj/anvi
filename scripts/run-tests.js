@@ -37,6 +37,11 @@ const TEST_DIR = path.join(ROOT, 'test');
 if (!process.env.ANVI_METER_DIR) {
   process.env.ANVI_METER_DIR = require('fs').mkdtempSync(path.join(require('os').tmpdir(), 'anvi-suite-meter-'));
 }
+// The same for the session-start drift readings (#530): a suite's hooks must not write
+// start readings into the real directory under invented session ids.
+if (!process.env.ANVI_DRIFT_DIR) {
+  process.env.ANVI_DRIFT_DIR = require('fs').mkdtempSync(path.join(require('os').tmpdir(), 'anvi-suite-drift-'));
+}
 
 // The per-file cap, named rather than inlined so the report can PRINT it. In the run
 // that produced #316 the cap was 300s and the five files ran ~901s — the timeout was

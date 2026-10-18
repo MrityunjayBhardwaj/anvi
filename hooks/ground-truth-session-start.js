@@ -27,6 +27,9 @@ const { formatPct } = require('./rate.js');
 // segment. A symlinked (dev) install resolves it out of the repo and is unaffected.
 let readCheckpointFailure = null;
 try { ({ readCheckpointFailure } = require('./anvi-harvest-lease.js')); } catch { /* older install: segment off */ }
+// Where a session's start-of-session drift reading lives (#530). Guarded the same way.
+let driftMarks = null;
+try { driftMarks = require('./drift-mark.js'); } catch { /* older install: segment off */ }
 
 // A REF field DECLARING that the entry is knowingly unanchored, as opposed to a body
 // that MENTIONS the word. Case-sensitive and word-bounded; see the note at its use.
@@ -224,6 +227,41 @@ function checkpointFailureText() {
   const ago = mins >= 1440 ? `${Math.floor(mins / 1440)}d ago` : mins >= 60 ? `${Math.floor(mins / 60)}h ago` : `${mins}m ago`;
   return `⛔ STORE CHECKPOINT FAILING: ${f.count}× since ${new Date(f.firstAt).toISOString().slice(0, 16).replace('T', ' ')}Z, last ${ago}` +
          ` — the durability backstop is not committing${f.detail ? `: ${f.detail}` : ''}`;
+}
+
+// The drift reading the wrap compares against (#530): each session ends with fewer drifted
+// entries than it started with. The report takes about a minute on a large catalogue, so it
+// is STARTED here, detached, and this hook only says which state the reading is in. A
+// resumed or compacted session already has one, and keeps the reading it started with.
+function driftGateScript() {
+  for (const c of [path.join(__dirname, '..', 'scripts', 'drift-gate.js'),
+                   path.join(os.homedir(), '.claude', 'anvi', 'scripts', 'drift-gate.js')])
+    if (fs.existsSync(c)) return c;
+  return null;
+}
+function driftStartText(session, cwd) {
+  if (!driftMarks) return null;
+  const got = driftMarks.readMark(session);
+  if (got.error) return `DRIFT at start: NOT RECORDED — ${got.error}`;
+  if (got.mark) {
+    const m = got.mark;
+    if (m.state === 'measured') return `DRIFT at start: ${m.drifted} of ${m.primaries} primary entries drifted — the wrap must end below it`;
+    if (m.state === 'unmeasured') return `DRIFT at start: NOT MEASURED — ${m.reason}`;
+    return `DRIFT at start: still being read (since ${String(m.started).slice(11, 16)}Z)`;
+  }
+  const gate = driftGateScript();
+  if (!gate) return 'DRIFT at start: NOT RECORDED — drift-gate.js not found beside this hook or in ~/.claude/anvi/scripts';
+  try {
+    const { spawn } = require('child_process');
+    const child = spawn(process.execPath, [gate, '--mark', session, cwd], { cwd, detached: true, stdio: 'ignore' });
+    // A spawn that fails does so as an EVENT, after this returns; unheard, it throws and takes
+    // the whole banner down. The wrap then finds no reading and says so.
+    child.on('error', () => {});
+    child.unref();
+  } catch (e) {
+    return `DRIFT at start: NOT RECORDED — the reading could not be started (${e.message})`;
+  }
+  return 'DRIFT at start: being read in the background — the wrap compares against it';
 }
 
 // What this run costs, one row per run (#527). Guarded like any shared module: a
@@ -424,6 +462,9 @@ process.stdin.on('end', () => {
       message += ` | 🗜️ COMPACT: ${oversized.join(', ')} past ${COMPACTION_THRESHOLD_BYTES / 1024}KB` +
         ` — run /anvi:currency first (every recorded pass so far found drift, not bloat); removal stays human-invoked`;
     }
+
+    const drift = driftStartText(data.session_id, cwd);
+    if (drift) message += ` | ${drift}`;
 
     if (health) message += ` | ${health}`;
 
