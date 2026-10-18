@@ -106,21 +106,28 @@ Rules:
   the store has no remote, the entries you just harvested exist on this machine
   only — state that plainly.
 
-CHECK THE DRIFT CEILING before you commit — a batch it asks for is more catalogue
-writes, so it belongs under this lease and in this commit, not after it (#530):
+CHECK THE DRIFT DIRECTION before you commit — a batch it asks for is more catalogue
+writes, so it belongs under this lease and in this commit, not after it (#530). The
+ruling: each session ends with FEWER drifted entries than it started with. The
+session-start hook took the start reading in the background (its banner says so);
+this compares against it:
 
-    node ~/.claude/anvi/scripts/drift-gate.js [project-dir]    # default: cwd
+    node ~/.claude/anvi/scripts/drift-gate.js --since-start "${CLAUDE_CODE_SESSION_ID:-}"
 
-`0` within the ceiling · `1` over it: one batch is owed · `2` NOT MEASURED, with the
-reason. It reads the currency report, so on a large catalogue it takes minutes;
-re-acquire the lease afterwards if the harvest is running long. On `1`, the output
-ranks the files the drifted entries cite. Pick ONE, list its entries with the
-`--batch` command it prints, and re-validate that batch with steps `4_reconfirm`,
-`5_stamp` and `6_verify` of `~/.claude/anvi/workflows/currency.md` — the listed
-entries only, never a sweep. Skip its `7_persist`: this step's commit below carries
-the new stamps. Being over asks for one batch per wrap, not for the whole backlog:
-the ceiling sets a direction. Say which batch you took and how many entries it re-stamped.
-On `2`, quote the reason and say drift was not measured — never report it as within.
+`0` fewer than at session start · `1` not fewer (the same count is not fewer): one
+batch is owed · `2` NOT MEASURED, with the reason — including "no start reading", when
+the shell has no session id or the hook took none. It reads the currency report, so on a
+large catalogue it takes about a minute; re-acquire the lease afterwards if the harvest is
+running long. On `1`, the output ranks the files the drifted entries cite. Pick ONE, list
+its entries with the `--batch` command it prints, and re-validate that batch with steps
+`4_reconfirm`, `5_stamp` and `6_verify` of `~/.claude/anvi/workflows/currency.md` — the
+listed entries only, never a sweep. Skip its `7_persist`: this step's commit below carries
+the new stamps. Then run the check ONCE more and quote that line: it is the session's
+answer. One batch per wrap, not the whole backlog, and a second `1` after the batch is
+reported as it stands, not chased. Say which batch you took and how many entries it
+re-stamped. On `2`, quote the reason and say drift was not measured — never report it as
+fewer. (The 25% ceiling, `drift-gate.js` with no flag, still reads; the wrap no longer
+gates on it.)
 
 COMMIT AS SOON AS THE WRITES ARE DONE — here, not in step 3. The commit used to
 sit two steps away, with the whole memory update in between, and that gap is the

@@ -285,7 +285,7 @@ Take binding from the conformance run in step 5b, durability from
 `ensure-store-durable.sh`, and freshness from step 5c. Do not soften any of them. For
 freshness, add one sentence per project: drifted and never-confirmed entries are
 still delivered, each edit now says how many, and `/anvi:currency` re-validates them
-— one cited file's batch at a time while the project is over its drift ceiling. `NO_REMOTE` means the store is
+— one cited file's batch at a time, at any wrap that has not ended with fewer drifted entries than its session started with. `NO_REMOTE` means the store is
 versioned on this machine and pushed NOWHERE — say that, and give the one-line
 remedy; the checkpoint hook commits the store, which is not the same as backing
 it up. If the store has no remote, offer to create the backup repo ONCE here
