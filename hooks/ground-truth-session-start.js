@@ -253,7 +253,11 @@ function driftStartText(session, cwd) {
   if (!gate) return 'DRIFT at start: NOT RECORDED — drift-gate.js not found beside this hook or in ~/.claude/anvi/scripts';
   try {
     const { spawn } = require('child_process');
-    spawn(process.execPath, [gate, '--mark', session, cwd], { cwd, detached: true, stdio: 'ignore' }).unref();
+    const child = spawn(process.execPath, [gate, '--mark', session, cwd], { cwd, detached: true, stdio: 'ignore' });
+    // A spawn that fails does so as an EVENT, after this returns; unheard, it throws and takes
+    // the whole banner down. The wrap then finds no reading and says so.
+    child.on('error', () => {});
+    child.unref();
   } catch (e) {
     return `DRIFT at start: NOT RECORDED — the reading could not be started (${e.message})`;
   }
