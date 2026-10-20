@@ -71,15 +71,53 @@ const guardDir = (dir = lockDir()) => dir && path.join(dir, 'guard');
 function installedGuard(dir = lockDir()) {
   try { return JSON.parse(fs.readFileSync(path.join(guardDir(dir), 'VERSION.json'), 'utf8')); } catch { return null; }
 }
-// The installed copy of one of the owner's scripts, or null. A command printed for the owner to run
-// with sudo names this copy when there is one: the checkout's copy is code the agent can edit.
-function ownerScript(name, dir = lockDir()) {
-  const f = dir && path.join(guardDir(dir), 'scripts', name);
-  return f && fs.existsSync(f) ? f : null;
+
+// THE LOCK IS ONLY AS STRONG AS THE NODE THAT RUNS IT (#685). The user's node — Homebrew's, nvm's
+// — is a file the agent can replace, and a replaced node would run the owner's sudo as the agent's
+// code. So the lock carries its own: one pinned Node release (scripts/guard-node.json), installed
+// root-owned in <lock>/node by the shell commands install-guard prints, checked against the pinned
+// checksum. Every command printed for the owner names it, and run as root the owner's scripts
+// refuse any other.
+const lockedNode = (dir = lockDir()) => dir && path.join(dir, 'node', 'bin', 'node');
+function lockedNodeVersion(dir = lockDir()) {
+  try { return fs.readFileSync(path.join(dir, 'node', 'VERSION'), 'utf8').trim() || null; } catch { return null; }
+}
+
+// Why `p` could be changed by someone other than root, or null when it cannot. The file and every
+// directory above it — along the path as named and as resolved — must be root-owned and writable by
+// no group or other: on macOS the owner's own account is in "admin", so a root-owned directory that
+// admin can write is the agent's to write.
+function notRootOwned(p, { lstat = fs.lstatSync, realpath = fs.realpathSync } = {}) {
+  if (!p) return 'no path';
+  let resolved;
+  try { resolved = realpath(p); } catch { return `${p} does not exist`; }
+  const chain = q => { const out = []; for (let c = path.resolve(q); ; c = path.dirname(c)) { out.push(c); if (path.dirname(c) === c) return out; } };
+  for (const q of new Set([...chain(p), ...chain(resolved)])) {
+    let st;
+    try { st = lstat(q); } catch { return `cannot read ${q}`; }
+    if (st.uid !== 0) return `${q} is owned by uid ${st.uid}, not root`;
+    if (!st.isSymbolicLink() && (st.mode & 0o022)) return `${q} is writable by its group or by others`;
+  }
+  return null;
+}
+
+// The start of every command printed for the owner: sudo, the locked node, and the installed copy of
+// `name`. When either is missing or could be replaced, `why` says what — and no command is offered:
+// one naming the user's node or the checkout's script would hand the password to the agent.
+const shellWord = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
+function ownerCommand(name, dir = lockDir(), check = notRootOwned) {
+  if (!dir) return { why: `no lock directory is defined for ${process.platform}` };
+  const node = lockedNode(dir), script = path.join(guardDir(dir), 'scripts', name);
+  const n = check(node);
+  if (n) return { why: `anvi's own node is not installed root-owned (${n}) — review an install with: node ~/.claude/anvi/scripts/install-guard.js <merged commit>` };
+  const s = check(script);
+  if (s) return { why: `the guard is not installed root-owned (${s}) — review an install with: node ~/.claude/anvi/scripts/install-guard.js <merged commit>` };
+  return { cmd: `sudo ${shellWord(node)} ${shellWord(script)}` };
 }
 
 // Where a go for this entry's check files is kept: the lock directory for a locked entry, the
 // user's state directory otherwise.
 const goBase = (entry, stateDir) => (entry && entry[LOCKED]) || stateDir;
 
-module.exports = { LOCK_DIRS, LOCKED, lockDir, userRegistry, lockedRegistry, registryInForce, goBase, guardDir, installedGuard, ownerScript };
+module.exports = { LOCK_DIRS, LOCKED, lockDir, userRegistry, lockedRegistry, registryInForce, goBase, guardDir, installedGuard,
+  lockedNode, lockedNodeVersion, notRootOwned, ownerCommand };

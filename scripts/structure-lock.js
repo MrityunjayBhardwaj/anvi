@@ -20,9 +20,11 @@
 // Exit: 0 done (or status) · 1 refused, with the reason · 2 usage · 3 needs the owner — the
 // command to run with sudo is printed.
 //
-// The sudo commands it prints name the installed, root-owned copy (scripts/install-guard.js,
-// #682) when there is one. Until then they name the checkout's — code the agent can edit, so read
-// the review it prints.
+// RUN AS ROOT, ONLY THE LOCK'S OWN FILES RUN (#685). The sudo commands it prints name anvi's own
+// node and the installed copy of this script, both root-owned (hooks/structure-lock.js
+// ownerCommand); until both are installed it prints what is missing instead of a command. Run as
+// root any other way — the user's node, the checkout's copy — it refuses before it loads a module:
+// those are files the agent can replace, and they would run with the owner's password.
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -105,7 +107,19 @@ function writeAtomic(file, bytes) {
   fs.renameSync(tmp, file);
 }
 
-function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, dir, out = console.log } = {}) {
+// Decided by path alone, before this script loads any module: the lock's parent directory is
+// root's, so nothing but root can put a file at these paths. Ownership is read after loading.
+const OWN_LOCK = { darwin: '/Library/Application Support/anvi', linux: '/etc/anvi' };
+function lockedPaths({ platform = process.platform, execPath = process.execPath, self = __filename } = {}) {
+  const lock = OWN_LOCK[platform];
+  if (!lock) return `no lock directory is defined for ${platform}`;
+  const node = path.join(lock, 'node', 'bin', 'node'), script = path.join(lock, 'guard', 'scripts', 'structure-lock.js');
+  if (real(execPath) !== real(node) || !real(node)) return `node is ${execPath}, not anvi's own ${node}`;
+  if (real(self) !== real(script)) return `the script is ${self}, not the installed copy ${script}`;
+  return null;
+}
+
+function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, dir, out = console.log, lockedOnly = true, ownership } = {}) {
   const [cmd, ...rest] = argv;
   const a = {};
   for (let i = 0; i < rest.length; i++) {
@@ -115,9 +129,12 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
     if (v === undefined || v.startsWith('--')) { out(`structure-lock: ${k} needs a value`); return 2; }
     a[k.slice(2)] = v; i++;
   }
+  const root = isRoot();
+  const asRoot = why => { out(`structure-lock: REFUSED — run as root, this runs only as the installed copy on anvi's own node, and ${why}. Nothing was changed.`); return 1; };
+  if (root && lockedOnly && cmd !== 'status') { const why = lockedPaths(); if (why) return asRoot(why); }
   const L = loadFromCandidates('structure-lock.js');
   const H = loadFromCandidates('structure-guard-hook.js');
-  const root = isRoot();
+  if (root && lockedOnly && cmd !== 'status') { const why = L.notRootOwned(process.execPath) || L.notRootOwned(__filename); if (why) return asRoot(why); }
   // Root writes only the real lock directory: an override is for tests, and sudo's caller chose it.
   const lockDir = dir || (root ? L.LOCK_DIRS[process.platform] : L.lockDir());
   if (!lockDir) { out(`structure-lock: no lock directory is defined for ${process.platform}`); return 1; }
@@ -126,8 +143,8 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   const lockedReg = () => fs.existsSync(regFile) ? readJson(regFile) : { packages: [] };
   const findIn = (reg, pkg) => (Array.isArray(reg.packages) ? reg.packages : []).find(e => e && real(e.dir) === pkg) || null;
   const q = loadFromCandidates('structure-rules.js').shellWord;
-  // The installed copy when there is one (#682): run as root, the checkout's is code the agent can edit.
-  const sudo = args => `  sudo ${q(process.execPath)} ${q(L.ownerScript('structure-lock.js', lockDir) || path.resolve(__filename))} ${args}`;
+  const owner = L.ownerCommand('structure-lock.js', lockDir, ownership || L.notRootOwned);
+  const sudo = args => owner.cmd ? `  ${owner.cmd} ${args}` : `  (no command can be given yet: ${owner.why})`;
 
   if (cmd === 'status') {
     if (!fs.existsSync(lockDir)) { out(`structure-lock: nothing is locked — ${lockDir} does not exist`); return 0; }
@@ -202,6 +219,6 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   return 0;
 }
 
-module.exports = { main, plan };
+module.exports = { main, plan, OWN_LOCK };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

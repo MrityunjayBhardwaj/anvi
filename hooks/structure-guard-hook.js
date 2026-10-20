@@ -468,14 +468,14 @@ function recordGo(stateDir, entryDir, rel) {
 }
 
 // A locked package's go is written into the lock directory, which only root can write: the
-// command is the owner's to run, with their password. node by its full path — sudo's PATH
-// need not hold the one this hook runs on — and the installed copy of the script when there is
-// one (#682): the checkout's is code the agent can edit.
+// command is the owner's to run, with their password — on the lock's own node and the installed
+// copy of the script (#682, #685). The user's node and the checkout's script are files the agent
+// can replace, so when either locked one is missing no command is offered, only what is missing.
 const goCommand = (entryDir, rel, locked) => {
   const q = require('./structure-rules.js').shellWord;
-  return locked
-    ? `  sudo ${q(process.execPath)} ${(s => s ? q(s) : '~/.claude/anvi/scripts/structure-lock.js')(LOCK.ownerScript('structure-lock.js', locked))} go --package ${q(entryDir)} --file ${q(rel)}`
-    : `  node ~/.claude/anvi/scripts/structure-guard.js --package ${q(entryDir)} --allow-check-edit ${q(rel)}`;
+  if (!locked) return `  node ~/.claude/anvi/scripts/structure-guard.js --package ${q(entryDir)} --allow-check-edit ${q(rel)}`;
+  const o = LOCK.ownerCommand('structure-lock.js', locked);
+  return o.cmd ? `  ${o.cmd} go --package ${q(entryDir)} --file ${q(rel)}` : `  (no command can be given yet: ${o.why})`;
 };
 
 function checkFileRefusal(pkgName, rel, files, entryDir, locked) {

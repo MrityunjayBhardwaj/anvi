@@ -253,7 +253,9 @@ function guardText() {
     const st = fs.statSync(L.guardDir());
     if (st.uid !== 0) note = ' — NOT root-owned, so it holds nothing';
   } catch { /* read above; gone since */ }
-  return `🔒 GUARD: installed copy ${v.commit.slice(0, 12)} (${String(v.installed).slice(0, 10)})${note}`;
+  // The node it runs on (#685): a guard on a node the user can replace holds nothing either.
+  const node = L.notRootOwned(L.lockedNode()) ? 'NO root-owned node of its own, so the owner\'s commands cannot run' : `on node ${L.lockedNodeVersion() || '(version unrecorded)'}`;
+  return `🔒 GUARD: installed copy ${v.commit.slice(0, 12)} (${String(v.installed).slice(0, 10)})${note} · ${node}`;
 }
 
 function driftStartText(session, cwd) {
