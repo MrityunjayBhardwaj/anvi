@@ -73,11 +73,11 @@ console.log('\nREVIEW FIRST — without root nothing is written:');
      `the review names the version, counts the files under hooks/ and scripts/ only, its digest and the Node it pins (exit ${r.code})`);
   const LN = path.join(LOCK, 'node', 'bin', 'node'), qLN = /^[A-Za-z0-9_\/.,:=+@%-]+$/.test(LN) ? LN : `'${LN}'`;
   ok(/Step 1 — install Node v24\.21\.0 root-owned/.test(r.out) && r.out.includes(PINNED.tarballs[KEY].sha256) &&
-     r.out.includes(`Step 2 — install the guard, on that node:\n  sudo ${qLN} `) && !r.out.includes(`sudo ${process.execPath}`) && !r.out.includes(`sudo '${process.execPath}'`),
+     r.out.includes(`Step 2 — install the guard, on that node:\n  sudo ${I.CLEAN_ENV} ${qLN} `) && !r.out.includes(`sudo ${process.execPath}`) && !r.out.includes(`sudo '${process.execPath}'`),
      'with no node of its own yet, it prints the steps that install the pinned one, then the install on it — never on the user\'s node');
   fs.mkdirSync(path.dirname(LN), { recursive: true }); fs.writeFileSync(path.join(LOCK, 'node', 'VERSION'), 'v24.21.0\n');
   const ready = run([C1, '--repo', REPO], false, { ownership: () => null });
-  ok(ready.code === 3 && !/Step 1/.test(ready.out) && ready.out.includes(`To install it, the owner runs:\n  sudo ${qLN} `),
+  ok(ready.code === 3 && !/Step 1/.test(ready.out) && ready.out.includes(`To install it, the owner runs:\n  sudo ${I.CLEAN_ENV} ${qLN} `),
      'with a root-owned node of the pinned version in place, only the install command');
   fs.writeFileSync(path.join(LOCK, 'node', 'VERSION'), 'v22.0.0\n');
   ok(/Step 1/.test(run([C1, '--repo', REPO], false, { ownership: () => null }).out), 'and with another version there, the steps again');
@@ -268,7 +268,8 @@ console.log('\nANVI\'S OWN NODE (#685) — the pin, the steps, and nothing else 
       spawnSync('tar', ['-czf', path.join(SRV, `${TOP}.tar.gz`), '-C', SRV, TOP]); return require('crypto').createHash('sha256').update(fs.readFileSync(path.join(SRV, `${TOP}.tar.gz`))).digest('hex'); };
     const steps = (sha) => I.nodeSteps(NL, { version: 'v24.21.0', file: `${TOP}.tar.gz`, sha256: sha, url: `file://${SRV}/${TOP}.tar.gz` }, { owner: `${process.getuid()}:${process.getgid()}` })
       .replace(/^sudo /, '').replace('--proto =https', '--proto =file');
-    const sh = text => spawnSync('/bin/sh', ['-c', text.replace(/^\/bin\/sh -c '/, '').replace(/'$/, '')], { encoding: 'utf8' });
+    // The text as printed, less sudo, parsed by a shell — env -i and all.
+    const sh = (text, env = process.env) => spawnSync('/bin/sh', ['-c', text], { encoding: 'utf8', env });
     const good1 = tarball('v24.21.0');
     const r1 = sh(steps(good1));
     const nodeAt = path.join(NL, 'node', 'bin', 'node');
@@ -283,6 +284,26 @@ console.log('\nANVI\'S OWN NODE (#685) — the pin, the steps, and nothing else 
     ok(r3.status !== 0 && fs.readFileSync(nodeAt, 'utf8') === before, `so does a node that does not say the pinned version (exit ${r3.status})`);
     ok(/PATH=\/usr\/bin:\/bin:\/usr\/sbin:\/sbin/.test(steps(good1)) && /--no-same-owner/.test(I.nodeSteps(NL, I.pinOf(pinWith(good)))) && /--proto =https/.test(I.nodeSteps(NL, I.pinOf(pinWith(good)))),
        'as printed they fetch over https only, unpack owned by root, and run the system\'s tools by a fixed PATH');
+    // #689: what the caller's environment plants is not read. A .curlrc naming a second download, and
+    // a Perl module loaded into shasum through PERL5OPT, each leaving a marker if read.
+    const PLANT = path.join(DIR, 'plant'), MARKS = path.join(DIR, 'plant-marks');
+    fs.mkdirSync(PLANT, { recursive: true }); fs.mkdirSync(MARKS, { recursive: true });
+    fs.writeFileSync(path.join(SRV, 'second'), 'planted\n');
+    fs.writeFileSync(path.join(PLANT, '.curlrc'), `url = "file://${SRV}/second"\noutput = "${MARKS}/curlrc"\n`);
+    fs.writeFileSync(path.join(PLANT, 'Planted.pm'), `package Planted; open(my $f, '>', '${MARKS}/perl'); close $f; 1;\n`);
+    const planted = { ...process.env, HOME: PLANT, PERL5LIB: PLANT, PERL5OPT: '-MPlanted' };
+    const good2 = tarball('v24.21.0');
+    const bare = steps(good2).replace('/usr/bin/env -i ', '').replace('curl -q ', 'curl ');
+    const ctl = sh(bare, planted);
+    const fireCtl = fs.readdirSync(MARKS).sort();
+    const want = process.platform === 'darwin' ? ['curlrc', 'perl'] : ['curlrc'];
+    ok(ctl.status === 0 && JSON.stringify(fireCtl) === JSON.stringify(want), `control: without env -i and curl -q, the plants are read (${fireCtl.join(', ') || 'none'}; exit ${ctl.status})`);
+    for (const m of fs.readdirSync(MARKS)) fs.rmSync(path.join(MARKS, m));
+    const real = sh(steps(good2), planted);
+    ok(real.status === 0 && fs.readdirSync(MARKS).length === 0, `as printed, none is read, and the steps still install (${fs.readdirSync(MARKS).join(', ') || 'none read'}; exit ${real.status})`);
+    const printed = I.nodeSteps(NL, I.pinOf(pinWith(good)));
+    ok(printed.startsWith("sudo /usr/bin/env -i /bin/sh -c '") && /\ncurl -q -fsSL --proto =https --proto-redir =https /.test(printed),
+       'as printed the steps start from an empty environment, and curl reads no config and follows no redirect off https');
     let threw = null;
     try { I.nodeSteps("/tmp/it's", I.pinOf(pinWith(good))); } catch (e) { threw = e; }
     ok(threw && /will not quote/.test(threw.message), 'a lock directory holding a quote gets no steps');

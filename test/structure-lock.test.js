@@ -185,7 +185,7 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
      `without root, promote prints what would change and its digest — and, with no locked node, no command but what is missing (exit ${review.code})`);
   const LN = L.lockedNode(LOCK2), LS = path.join(L.guardDir(LOCK2), 'scripts', 'structure-lock.js');
   const named = run(['promote', '--package', PKG, '--from', FROM], false, { ownership: () => null }).out;
-  ok(named.includes(`  sudo '${LN}' '${LS}' promote --package '${fs.realpathSync(PKG)}' --from '${FROM}' --expect ${digest}`),
+  ok(named.includes(`  sudo ${L.CLEAN_ENV} '${LN}' '${LS}' promote --package '${fs.realpathSync(PKG)}' --from '${FROM}' --expect ${digest}`),
      'with a root-owned node and installed copy, the command runs that node and that copy, carrying the digest');
   ok(!fs.existsSync(LOCK2), 'and writes nothing');
   ok(run(['promote', '--package', PKG, '--from', FROM], true).code === 1 && !fs.existsSync(L.lockedRegistry(LOCK2)), 'as root without --expect: refused, nothing written');
@@ -239,7 +239,7 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
 
   const goAsk = run(['go', '--package', PKG, '--file', FILES[0]], false);
   ok(goAsk.code === 3 && /no command can be given yet/.test(goAsk.out) &&
-     run(['go', '--package', PKG, '--file', FILES[0]], false, { ownership: () => null }).out.includes(`sudo '${LN}' '${LS}' go --package`),
+     run(['go', '--package', PKG, '--file', FILES[0]], false, { ownership: () => null }).out.includes(`sudo ${L.CLEAN_ENV} '${LN}' '${LS}' go --package`),
      'a go without root prints the owner\'s command — once the locked node and copy are there');
   ok(run(['go', '--package', PKG, '--file', 'pkg/src/low/a.ts'], true).code === 1, 'a go for a file that is not the check\'s is refused');
   const go = run(['go', '--package', PKG, '--file', FILES[0]], true);
@@ -275,7 +275,7 @@ console.log('\nTHE LOCK\'S OWN NODE (#685) — what root runs must be root\'s:')
   ok(/\/u\/node is owned by uid 501/.test(L.notRootOwned('/l/node', fake({ ...base, '/l/node': { ...st(0, 0o120755, true), to: '/u/node' }, '/u': st(0, 0o40755), '/u/node': st(501, 0o100755) })) || ''),
      'a root-owned link to a file the user owns does not — the resolved path is walked too');
   const c = L.ownerCommand('structure-lock.js', '/l', () => null);
-  ok(c.cmd === `sudo '/l/node/bin/node' '/l/guard/scripts/structure-lock.js'`, `the owner's command names the lock's node and installed copy (${c.cmd})`);
+  ok(c.cmd === `sudo /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin '/l/node/bin/node' '/l/guard/scripts/structure-lock.js'`, `the owner's command runs in an empty environment on the lock's node and installed copy (${c.cmd})`);
   ok(!L.ownerCommand('structure-lock.js', DIR).cmd, 'and is withheld when they are missing');
 
   ok(JSON.stringify(LOCKCLI.OWN_LOCK) === JSON.stringify(L.LOCK_DIRS), 'the command\'s own copy of where the lock lives equals hooks/structure-lock.js\'s');

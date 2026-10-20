@@ -1555,11 +1555,16 @@ loosened until it stops firing guards nothing.
   installed node made to say the pinned version. Every printed `sudo` command names
   `<lock dir>/node/bin/node` and the installed copy (`hooks/structure-lock.js` `ownerCommand`);
   when either is missing or could be replaced it prints what is missing, never a command on the
-  user's node. "Could be replaced" is read along the path, named and resolved: every directory up
+  user's node. **Each starts from an empty environment (#689)** — `sudo /usr/bin/env -i …`, and
+  curl with `-q` — because the caller's environment and config are the agent's to write: a planted
+  `.curlrc` was observed to make the step's own curl fetch a second file to a path of its choosing,
+  and `PERL5OPT` loads a module into `shasum`; run as printed, neither is read. "Could be replaced" is read along the path, named and resolved: every directory up
   to `/` root-owned and writable by no group or other (on macOS the owner's own account is in
   `admin`). Run as root, `install-guard.js` refuses unless it runs on that node at the pinned
   version, and `structure-lock.js` refuses unless it is the installed copy on that node — decided
-  by path before it loads any module. `install-guard.js --status` and the session banner name the
+  by path before it loads any module. **What protects is the printed command, not these refusals:**
+  a replaced node or an edited checkout script would simply skip them. They catch the owner running
+  some other command by mistake (an old one from shell history, say). `install-guard.js --status` and the session banner name the
   node, or say there is none.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —

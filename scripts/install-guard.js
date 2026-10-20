@@ -77,6 +77,7 @@ const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
 // git's own id for an object, computed here so no git output has to be believed.
 const objectId = (type, b) => crypto.createHash('sha1').update(Buffer.concat([Buffer.from(`${type} ${b.length}\0`), b])).digest('hex');
 const blobId = b => objectId('blob', b);
+const CLEAN_ENV = '/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin';
 const shellWord = s => /^[A-Za-z0-9_\/.,:=+@%-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 // `as` = { uid, gid }: run git as that user (root drops to the repository's owner), with no global
@@ -166,17 +167,19 @@ function pinOf(text, platform = process.platform, arch = process.arch) {
 }
 
 // The shell steps that install the pinned Node root-owned in <lock>/node. Only the system's own
-// tools, by a fixed PATH, so nothing the user owns runs as root; the tarball is checked against the
-// pinned sha256 before anything is unpacked, and the installed node must say the pinned version.
+// tools, by a fixed PATH, in an empty environment and with curl reading no config (#689: a planted
+// .curlrc was observed to fetch a second file to a path of its choosing), so nothing the user owns
+// steers what runs as root; the tarball is checked against the pinned sha256 before anything is
+// unpacked, and the installed node must say the pinned version.
 function nodeSteps(lockDir, pin, { platform = process.platform, owner = '0:0' } = {}) {
   if (/['"$`\\\n]/.test(lockDir)) throw new Error(`the lock directory ${lockDir} holds a character these steps will not quote`);
   const check = platform === 'darwin' ? 'shasum -a 256 -c -' : 'sha256sum -c -';
   const top = pin.file.replace(/\.tar\.gz$/, '');
-  return `sudo /bin/sh -c 'set -eu; umask 022; PATH=/usr/bin:/bin:/usr/sbin:/sbin
+  return `sudo /usr/bin/env -i /bin/sh -c 'set -eu; umask 022; PATH=/usr/bin:/bin:/usr/sbin:/sbin
 L="${lockDir}"; T="$L/node.new"
 mkdir -p "$L"; chown ${owner} "$L"; chmod 755 "$L"
 rm -rf "$T"; mkdir -m 700 "$T"
-curl -fsSL --proto =https -o "$T/node.tar.gz" ${pin.url}
+curl -q -fsSL --proto =https --proto-redir =https -o "$T/node.tar.gz" ${pin.url}
 echo "${pin.sha256}  $T/node.tar.gz" | ${check}
 tar -xzf "$T/node.tar.gz" -C "$T" --no-same-owner ${top}/bin/node
 mkdir -p "$T/node/bin"; mv "$T/${top}/bin/node" "$T/node/bin/node"; echo ${pin.version} > "$T/node/VERSION"
@@ -291,7 +294,7 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   const runner = fs.existsSync(installedRunner) ? installedRunner : null;
   if (!root) {
     const missing = nodeState(lockDir, pin, ownership);
-    const cmd = `sudo ${shellWord(nodeOf(lockDir))} ${shellWord(runner || path.resolve(self))} ${commit} --repo ${shellWord(repo)} --expect ${digest}`;
+    const cmd = `sudo ${CLEAN_ENV} ${shellWord(nodeOf(lockDir))} ${shellWord(runner || path.resolve(self))} ${commit} --repo ${shellWord(repo)} --expect ${digest}`;
     if (missing) {
       let steps;
       try { steps = nodeSteps(lockDir, pin); } catch (e) { return stop(e.message); }
@@ -337,6 +340,6 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   return 0;
 }
 
-module.exports = { main, blobId, gitRunner, commitFiles, readObjects, pinOf, nodeSteps, notRootOwned, READ_ONLY, LOCK_DIRS };
+module.exports = { main, CLEAN_ENV, blobId, gitRunner, commitFiles, readObjects, pinOf, nodeSteps, notRootOwned, READ_ONLY, LOCK_DIRS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

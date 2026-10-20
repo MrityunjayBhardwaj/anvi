@@ -101,9 +101,12 @@ function notRootOwned(p, { lstat = fs.lstatSync, realpath = fs.realpathSync } = 
   return null;
 }
 
-// The start of every command printed for the owner: sudo, the locked node, and the installed copy of
-// `name`. When either is missing or could be replaced, `why` says what — and no command is offered:
-// one naming the user's node or the checkout's script would hand the password to the agent.
+// The start of every command printed for the owner: sudo, an empty environment (#689 — sudo may keep
+// variables a node obeys, such as NODE_OPTIONS, and the caller's are the agent's to set), the locked
+// node, and the installed copy of `name`. When either is missing or could be replaced, `why` says
+// what — and no command is offered: one naming the user's node or the checkout's script would hand
+// the password to the agent.
+const CLEAN_ENV = '/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin';
 const shellWord = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 function ownerCommand(name, dir = lockDir(), check = notRootOwned) {
   if (!dir) return { why: `no lock directory is defined for ${process.platform}` };
@@ -112,7 +115,7 @@ function ownerCommand(name, dir = lockDir(), check = notRootOwned) {
   if (n) return { why: `anvi's own node is not installed root-owned (${n}) — review an install with: node ~/.claude/anvi/scripts/install-guard.js <merged commit>` };
   const s = check(script);
   if (s) return { why: `the guard is not installed root-owned (${s}) — review an install with: node ~/.claude/anvi/scripts/install-guard.js <merged commit>` };
-  return { cmd: `sudo ${shellWord(node)} ${shellWord(script)}` };
+  return { cmd: `sudo ${CLEAN_ENV} ${shellWord(node)} ${shellWord(script)}` };
 }
 
 // Where a go for this entry's check files is kept: the lock directory for a locked entry, the
@@ -120,4 +123,4 @@ function ownerCommand(name, dir = lockDir(), check = notRootOwned) {
 const goBase = (entry, stateDir) => (entry && entry[LOCKED]) || stateDir;
 
 module.exports = { LOCK_DIRS, LOCKED, lockDir, userRegistry, lockedRegistry, registryInForce, goBase, guardDir, installedGuard,
-  lockedNode, lockedNodeVersion, notRootOwned, ownerCommand };
+  lockedNode, lockedNodeVersion, notRootOwned, ownerCommand, CLEAN_ENV };
