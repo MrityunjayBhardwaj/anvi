@@ -1514,7 +1514,7 @@ loosened until it stops firing guards nothing.
   --package <dir>` copies the user-registry entry, with its design, baseline and adapter, into the
   root-owned lock directory (`/Library/Application Support/anvi` on macOS, `/etc/anvi` on Linux).
   Run without root it changes nothing: it prints what would change — mode, design id, each file's
-  hash — every field of the entry, flattened, so nothing changes without a line (#684) — and the `sudo` command carrying the digest of what it showed; run as root it installs
+  hash — every field of the entry, flattened, so nothing changes without a line (#684) — and the `sudo` command carrying the digest of what it showed (on the lock's own node and installed copy, below; until both exist it prints what is missing instead); run as root it installs
   only on that digest, so anything changed after the review is refused. `remove` works the same
   way; `go` records a go for a locked check's file in the lock directory; `status` reads it. The
   hooks (`hooks/structure-lock.js`) judge a locked package by its locked entry alone: a user entry
@@ -1530,17 +1530,42 @@ loosened until it stops firing guards nothing.
   the installed version, the requested one, the commits and files between them (and says when the
   request goes back or sideways), and the `sudo` command carrying a digest of the file set; as root
   it installs only on that digest. Only a commit on the default branch installs. The files come
-  from `git archive` of the commit — never the working tree — and each is checked against the
-  commit's blob id before the copy replaces the old one; group and others cannot write any of it.
-  As root git is only read (`rev-parse`, `merge-base`, `ls-tree`, `archive`, `cat-file`, `log`,
-  `diff`, with `safe.directory` for that repository): a git write as root would leave root-owned
-  files in the user's `.git`. The first install has no copy to run, so it trusts the checkout's
+  from the commit — never the working tree — read object by object with `git cat-file --batch`
+  and each hashed back to the commit id the owner approved (the commit, every tree down to
+  `hooks/` and `scripts/`, every file), so a wrong byte anywhere is refused; the installer writes
+  them itself, and group and others cannot write any of it. **Root never runs git (#687):** git
+  obeys the repository's own config, which the agent can write, and `git archive` was observed
+  running a planted smudge filter — so as root every git call drops to the repository's owner,
+  with no global or system config, and is read-only besides (`rev-parse`, `merge-base`,
+  `cat-file`, `log`, `diff`). A planted smudge, clean, textconv, external diff and fsmonitor
+  ran none of their commands through a whole review and install. The first install has no copy to run, so it trusts the checkout's
   installer, which refuses unless its own bytes are the requested commit's — and which loads no
   module but Node's own, since a module it required would already have run as root, unchecked.
   Only plain files install: a symbolic link (a blob to git) is refused by name. Every later `sudo`
   command — this one's, `structure-lock.js`'s, and the hook's go — names the installed copy. The
   session banner names the installed commit (`🔒 GUARD: installed copy …`), and says when the copy
   is not root-owned. Nothing runs from the copy until #681 registers it.
+- **The lock runs on its own node (#685).** The user's node (Homebrew's, nvm's) is a file the agent
+  can replace, and a replaced node would run the owner's password as the agent's code. Each
+  version pins one Node release in `scripts/guard-node.json` (version and sha256 per platform,
+  checked against the release's signed `SHASUMS256.txt`). The review prints, when `<lock
+  dir>/node` is missing, not root-owned or not that version, the shell steps that install it: the
+  system's own `curl`, `shasum`/`sha256sum` and `tar` by a fixed PATH, https only, the tarball
+  checked against the pinned sha256 before anything is unpacked, unpacked owned by root, and the
+  installed node made to say the pinned version. Every printed `sudo` command names
+  `<lock dir>/node/bin/node` and the installed copy (`hooks/structure-lock.js` `ownerCommand`);
+  when either is missing or could be replaced it prints what is missing, never a command on the
+  user's node. **Each starts from an empty environment (#689)** — `sudo /usr/bin/env -i …`, and
+  curl with `-q` — because the caller's environment and config are the agent's to write: a planted
+  `.curlrc` was observed to make the step's own curl fetch a second file to a path of its choosing,
+  and `PERL5OPT` loads a module into `shasum`; run as printed, neither is read. "Could be replaced" is read along the path, named and resolved: every directory up
+  to `/` root-owned and writable by no group or other (on macOS the owner's own account is in
+  `admin`). Run as root, `install-guard.js` refuses unless it runs on that node at the pinned
+  version, and `structure-lock.js` refuses unless it is the installed copy on that node — decided
+  by path before it loads any module. **What protects is the printed command, not these refusals:**
+  a replaced node or an edited checkout script would simply skip them. They catch the owner running
+  some other command by mistake (an old one from shell history, say). `install-guard.js --status` and the session banner name the
+  node, or say there is none.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —
   `{ "packages": [ { "dir", "design", "baseline", "designId"?, "cache"?, "extractor"? } ] }` — and with no

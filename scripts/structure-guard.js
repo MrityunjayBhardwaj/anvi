@@ -332,7 +332,7 @@ function allowCheckEdit(args, print, stop) {
   if (!entry || !entry.check) return stop(`${H.REGISTRY} registers no check for ${pkg}, so it has no files of its own to allow an edit to`);
   // A locked package's go lives where only root writes (#680): this command cannot give it.
   if (entry[H.LOCKED]) return stop(`${pkg} is locked (${entry[H.LOCKED]}): only the owner can give a go for its check's files, with their password —\n` +
-    `  sudo ${shellWord(process.execPath)} ${(s => s ? shellWord(s) : '~/.claude/anvi/scripts/structure-lock.js')(loadFromCandidates('structure-lock.js').ownerScript('structure-lock.js', entry[H.LOCKED]))} go --package ${shellWord(pkg)} --file ${shellWord(args['allow-check-edit'])}`);
+    (o => o.cmd ? `  ${o.cmd} go --package ${shellWord(pkg)} --file ${shellWord(args['allow-check-edit'])}` : `  (no command can be given yet: ${o.why})`)(loadFromCandidates('structure-lock.js').ownerCommand('structure-lock.js', entry[H.LOCKED])));
   if (entry.check.mode !== 'refuse') return stop(`the check registered for ${pkg} is in mode ${JSON.stringify(entry.check.mode)}, not "refuse" — it refuses no edit, so there is no go to give`);
   const files = Array.isArray(entry.check.files) ? entry.check.files : [];
   const rel = args['allow-check-edit'];

@@ -140,17 +140,19 @@ if (machineLocked) {
   const why = (no.said && no.said.permissionDecisionReason) || '';
   ok(no.exit === 2 && /changes the check itself/.test(why),
      `an edit to the check's own file is refused by the locked entry, though the user entry says shadow (exit ${no.exit})`);
-  ok(/only the owner can give it, with their password/.test(why) &&
-     /sudo '.*' ~\/\.claude\/anvi\/scripts\/structure-lock\.js go --package '.*pkg' --file 'pkg\/src\/check\/boundary\.ts'/.test(why),
-     'the refusal names the owner\'s sudo command, not the go the agent could run itself');
-  // With the guard's code installed in the lock (#682), the owner's command names that copy.
+  // No locked node, no installed copy (#685): no command is offered — one naming the user's node or
+  // the checkout's script would run the owner's password as code the agent can replace.
+  ok(/only the owner can give it, with their password/.test(why) && !/sudo /.test(why) && !/allow-check-edit/.test(why) &&
+     /no command can be given yet: anvi's own node is not installed root-owned \(.*node\/bin\/node does not exist\)/.test(why),
+     'the refusal says the owner\'s command cannot be given yet, and why — no sudo naming the user\'s node, and not the go the agent could run itself');
+  // Both present but owned by the user, as anything this test can make is: still no command.
   const owned = path.join(LOCK, 'guard', 'scripts', 'structure-lock.js');
-  fs.mkdirSync(path.dirname(owned), { recursive: true });
-  fs.writeFileSync(owned, '// installed copy\n');
+  for (const p of [owned, L.lockedNode(LOCK)]) { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, '// a copy\n'); }
   const named = ((hook(editCheck('l1')).said || {}).permissionDecisionReason) || '';
-  ok(named.includes(`sudo '${process.execPath}' '${owned}' go --package`) || named.includes(`sudo ${process.execPath} '${owned}' go --package`),
-     'with an installed copy, the refusal\'s sudo command names the root-owned copy, not the checkout\'s');
+  ok(!/sudo /.test(named) && /no command can be given yet: anvi's own node is not installed root-owned \(.* is owned by uid \d+, not root\)/.test(named),
+     `a node and an installed copy the user owns are not enough: still no command (${(named.match(/no command[^\n]*/) || [''])[0].slice(0, 140)})`);
   fs.rmSync(path.join(LOCK, 'guard'), { recursive: true, force: true });
+  fs.rmSync(path.join(LOCK, 'node'), { recursive: true, force: true });
   H.recordGo(STATE, PKG, FILES[0]);
   ok(hook(editCheck('l1')).exit === 2, 'a go left in the user\'s state directory is not honoured for a locked package');
   H.recordGo(LOCK, PKG, FILES[0]);
@@ -172,13 +174,19 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
   const FROM = path.join(DIR, 'proposals.json');
   const proposal = (more = {}) => ({ dir: PKG, design: DESIGN, baseline: BASELINE, designId: 'abc', check: check('refuse'), ...more });
   writeJson(FROM, { packages: [proposal()] });
-  const run = (argv, root) => { const lines = []; const code = LOCKCLI.main(argv, { isRoot: () => root, dir: LOCK2, out: l => lines.push(l) }); return { code, out: lines.join('\n') }; };
+  // Root is simulated in-process, so lockedOnly is off: these runs are not on the lock's own node.
+  const run = (argv, root, opts = {}) => { const lines = []; const code = LOCKCLI.main(argv, { isRoot: () => root, dir: LOCK2, out: l => lines.push(l), lockedOnly: false, ...opts }); return { code, out: lines.join('\n') }; };
   const reg2 = () => JSON.parse(fs.readFileSync(L.lockedRegistry(LOCK2), 'utf8'));
 
   const review = run(['promote', '--package', PKG, '--from', FROM], false);
-  const digest = (review.out.match(/--expect ([0-9a-f]{16})/) || [])[1];
-  ok(review.code === 3 && digest && /check\.mode +— +→ +"refuse"/.test(review.out) && /^  sudo /m.test(review.out),
-     `without root, promote prints what would change and the sudo command with its digest (exit ${review.code})`);
+  const digest = (review.out.match(/digest: ([0-9a-f]{16})/) || [])[1];
+  ok(review.code === 3 && digest && /check\.mode +— +→ +"refuse"/.test(review.out) && !/sudo /.test(review.out) &&
+     /no command can be given yet: anvi's own node is not installed root-owned/.test(review.out),
+     `without root, promote prints what would change and its digest — and, with no locked node, no command but what is missing (exit ${review.code})`);
+  const LN = L.lockedNode(LOCK2), LS = path.join(L.guardDir(LOCK2), 'scripts', 'structure-lock.js');
+  const named = run(['promote', '--package', PKG, '--from', FROM], false, { ownership: () => null }).out;
+  ok(named.includes(`  sudo ${L.CLEAN_ENV} '${LN}' '${LS}' promote --package '${fs.realpathSync(PKG)}' --from '${FROM}' --expect ${digest}`),
+     'with a root-owned node and installed copy, the command runs that node and that copy, carrying the digest');
   ok(!fs.existsSync(LOCK2), 'and writes nothing');
   ok(run(['promote', '--package', PKG, '--from', FROM], true).code === 1 && !fs.existsSync(L.lockedRegistry(LOCK2)), 'as root without --expect: refused, nothing written');
   ok(run(['promote', '--package', PKG, '--from', FROM, '--expect', '0000000000000000'], true).code === 1 && !fs.existsSync(L.lockedRegistry(LOCK2)),
@@ -230,19 +238,59 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
   ok(/imports a file beside it/.test(run(['promote', '--package', PKG, '--from', FROM], false).out), 'so is an adapter that imports a file beside it');
 
   const goAsk = run(['go', '--package', PKG, '--file', FILES[0]], false);
-  ok(goAsk.code === 3 && /sudo .* go --package/.test(goAsk.out), 'a go without root prints the owner\'s command');
+  ok(goAsk.code === 3 && /no command can be given yet/.test(goAsk.out) &&
+     run(['go', '--package', PKG, '--file', FILES[0]], false, { ownership: () => null }).out.includes(`sudo ${L.CLEAN_ENV} '${LN}' '${LS}' go --package`),
+     'a go without root prints the owner\'s command — once the locked node and copy are there');
   ok(run(['go', '--package', PKG, '--file', 'pkg/src/low/a.ts'], true).code === 1, 'a go for a file that is not the check\'s is refused');
   const go = run(['go', '--package', PKG, '--file', FILES[0]], true);
   ok(go.code === 0 && H.liveGo(L.goBase({ [L.LOCKED]: LOCK2 }, STATE), PKG, FILES[0]) !== null,
      'as root the go lands where the hook reads a locked package\'s go');
 
   const rm = run(['remove', '--package', PKG], false);
-  const rmDigest = (rm.out.match(/--expect ([0-9a-f]{16})/) || [])[1];
+  const rmDigest = (rm.out.match(/digest: ([0-9a-f]{16})/) || [])[1];
   ok(rm.code === 3 && rmDigest && reg2().packages.length === 1, 'remove without root only reviews');
   const removed = run(['remove', '--package', PKG, '--expect', rmDigest], true);
   ok(removed.code === 0 && reg2().packages.length === 0 && !fs.existsSync(path.dirname(fs.realpathSync(DESIGN)) + '/lock2/packages/x'),
      `as root with its digest the package leaves the lock (exit ${removed.code})`);
   ok(run(['promote', '--bogus', 'x'], false).code === 2 && run(['promote', '--package'], false).code === 2, 'an unknown flag or a flag with no value is a usage error');
+}
+
+console.log('\nTHE LOCK\'S OWN NODE (#685) — what root runs must be root\'s:');
+{
+  // Real files, both directions: the system's own binary passes, this test's node does not (unless
+  // the suite runs on a root-owned node, as a CI image may).
+  const sys = process.platform === 'win32' ? null : ['/usr/bin/true', '/bin/sh'].find(p => fs.existsSync(p));
+  ok(sys && L.notRootOwned(sys) === null, `a system binary, root-owned all the way up, passes (${sys}: ${sys && L.notRootOwned(sys)})`);
+  const mine = L.notRootOwned(process.execPath);
+  const userNode = fs.statSync(fs.realpathSync(process.execPath)).uid !== 0;
+  ok(!userNode || /owned by uid \d+, not root/.test(mine || ''), `the user's node does not (${mine})`);
+  ok(/does not exist/.test(L.notRootOwned(path.join(DIR, 'nope'))), 'a missing file does not');
+  // Shapes no test can make for real: a root-owned directory its group can write (macOS's "admin"
+  // holds the owner's own account), and a root-owned link to a file the user owns.
+  const st = (uid, mode, link = false) => ({ uid, mode, isSymbolicLink: () => link });
+  const fake = tbl => ({ lstat: p => { if (!tbl[p]) throw new Error('none'); return tbl[p]; }, realpath: p => tbl[p] && tbl[p].to || p });
+  const base = { '/': st(0, 0o40755), '/l': st(0, 0o40755), '/l/node': st(0, 0o100755) };
+  ok(L.notRootOwned('/l/node', fake(base)) === null, 'control: root-owned all the way up passes');
+  ok(/\/l is writable by its group/.test(L.notRootOwned('/l/node', fake({ ...base, '/l': st(0, 0o40775) })) || ''), 'a root-owned directory its group can write does not');
+  ok(/\/u\/node is owned by uid 501/.test(L.notRootOwned('/l/node', fake({ ...base, '/l/node': { ...st(0, 0o120755, true), to: '/u/node' }, '/u': st(0, 0o40755), '/u/node': st(501, 0o100755) })) || ''),
+     'a root-owned link to a file the user owns does not — the resolved path is walked too');
+  const c = L.ownerCommand('structure-lock.js', '/l', () => null);
+  ok(c.cmd === `sudo /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin '/l/node/bin/node' '/l/guard/scripts/structure-lock.js'`, `the owner's command runs in an empty environment on the lock's node and installed copy (${c.cmd})`);
+  ok(!L.ownerCommand('structure-lock.js', DIR).cmd, 'and is withheld when they are missing');
+
+  ok(JSON.stringify(LOCKCLI.OWN_LOCK) === JSON.stringify(L.LOCK_DIRS), 'the command\'s own copy of where the lock lives equals hooks/structure-lock.js\'s');
+  // Run as root on this node, from the checkout: refused before any module of anvi's loads.
+  const probe = `const M = require('module'); const seen = []; const o = M._load;
+    M._load = function (r, ...a) { if (!M.isBuiltin(r)) seen.push(r); return o.call(this, r, ...a); };
+    const C = require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'structure-lock.js'))});
+    const lines = []; const code = C.main(['promote', '--package', ${JSON.stringify(PKG)}], { isRoot: () => true, dir: ${JSON.stringify(path.join(DIR, 'lock3'))}, out: l => lines.push(l) });
+    process.stdout.write(JSON.stringify({ code, out: lines.join('\\n'), seen: seen.slice(1) }));`;
+  const r = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8' });
+  let got = {};
+  try { got = JSON.parse(r.stdout); } catch { /* reported below */ }
+  ok(got.code === 1 && /run as root, this runs only as the installed copy on anvi's own node, and node is /.test(got.out || '') && !fs.existsSync(path.join(DIR, 'lock3')),
+     `as root on the user's node it refuses and writes nothing (exit ${got.code}: ${(got.out || r.stderr || '').slice(0, 160)})`);
+  ok(Array.isArray(got.seen) && got.seen.length === 0, `and loads no module but Node's own before refusing (${JSON.stringify(got.seen)})`);
 }
 
 fs.rmSync(DIR, { recursive: true, force: true });
