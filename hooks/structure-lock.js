@@ -14,8 +14,8 @@
 // registry, exactly as before — so a project nobody armed, and every test that registers a
 // temporary package, never meets the lock.
 //
-// What the lock does NOT cover: the hook's own code and its registration (the locked copy and
-// install step, #681/#682), the graph cache and shadow log (records the hook writes as the user),
+// What the lock does NOT cover: the hook's registration (#681) — its code has a root-owned copy
+// (#682, guardDir) that runs once #681 registers it — the graph cache and shadow log (records the hook writes as the user),
 // and files written through the shell, which the edit check never sees.
 'use strict';
 const fs = require('fs');
@@ -65,8 +65,21 @@ function registryInForce({ home, dir = lockDir(), readFile = f => fs.readFileSyn
   return { packages: [...locked, ...user.filter(e => !taken.has(real(e.dir)))], lockedPath: hasLocked ? lockedPath : null, userPath };
 }
 
+// The guard's own code, installed root-owned by scripts/install-guard.js (#682): one reviewed
+// commit's hooks/ and scripts/, and VERSION.json naming it.
+const guardDir = (dir = lockDir()) => dir && path.join(dir, 'guard');
+function installedGuard(dir = lockDir()) {
+  try { return JSON.parse(fs.readFileSync(path.join(guardDir(dir), 'VERSION.json'), 'utf8')); } catch { return null; }
+}
+// The installed copy of one of the owner's scripts, or null. A command printed for the owner to run
+// with sudo names this copy when there is one: the checkout's copy is code the agent can edit.
+function ownerScript(name, dir = lockDir()) {
+  const f = dir && path.join(guardDir(dir), 'scripts', name);
+  return f && fs.existsSync(f) ? f : null;
+}
+
 // Where a go for this entry's check files is kept: the lock directory for a locked entry, the
 // user's state directory otherwise.
 const goBase = (entry, stateDir) => (entry && entry[LOCKED]) || stateDir;
 
-module.exports = { LOCK_DIRS, LOCKED, lockDir, userRegistry, lockedRegistry, registryInForce, goBase };
+module.exports = { LOCK_DIRS, LOCKED, lockDir, userRegistry, lockedRegistry, registryInForce, goBase, guardDir, installedGuard, ownerScript };

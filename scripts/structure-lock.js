@@ -20,8 +20,9 @@
 // Exit: 0 done (or status) · 1 refused, with the reason · 2 usage · 3 needs the owner — the
 // command to run with sudo is printed.
 //
-// Known limit until the install step (#682): run under sudo, this is the checkout's copy of the
-// script — code the agent can edit. Read the review it prints; #682 installs a root-owned copy.
+// The sudo commands it prints name the installed, root-owned copy (scripts/install-guard.js,
+// #682) when there is one. Until then they name the checkout's — code the agent can edit, so read
+// the review it prints.
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -125,7 +126,8 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   const lockedReg = () => fs.existsSync(regFile) ? readJson(regFile) : { packages: [] };
   const findIn = (reg, pkg) => (Array.isArray(reg.packages) ? reg.packages : []).find(e => e && real(e.dir) === pkg) || null;
   const q = loadFromCandidates('structure-rules.js').shellWord;
-  const sudo = args => `  sudo ${q(process.execPath)} ${q(path.resolve(__filename))} ${args}`;
+  // The installed copy when there is one (#682): run as root, the checkout's is code the agent can edit.
+  const sudo = args => `  sudo ${q(process.execPath)} ${q(L.ownerScript('structure-lock.js', lockDir) || path.resolve(__filename))} ${args}`;
 
   if (cmd === 'status') {
     if (!fs.existsSync(lockDir)) { out(`structure-lock: nothing is locked — ${lockDir} does not exist`); return 0; }

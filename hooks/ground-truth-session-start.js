@@ -239,6 +239,23 @@ function driftGateScript() {
     if (fs.existsSync(c)) return c;
   return null;
 }
+// The guard's installed copy (#682), named once per session so "what is running" is one read
+// away. Silent where none is installed — every machine that never opted in — and machine-wide,
+// like the health line, so it is said in every project. A copy anyone but root can write is
+// said as such: it holds nothing against the agent.
+function guardText() {
+  let L;
+  try { L = require('./structure-lock.js'); } catch { return ''; }
+  const v = L.installedGuard();
+  if (!v || typeof v.commit !== 'string') return '';
+  let note = '';
+  try {
+    const st = fs.statSync(L.guardDir());
+    if (st.uid !== 0) note = ' — NOT root-owned, so it holds nothing';
+  } catch { /* read above; gone since */ }
+  return `🔒 GUARD: installed copy ${v.commit.slice(0, 12)} (${String(v.installed).slice(0, 10)})${note}`;
+}
+
 function driftStartText(session, cwd) {
   if (!driftMarks) return null;
   const got = driftMarks.readMark(session);
@@ -288,7 +305,7 @@ process.stdin.on('end', () => {
     // Before any exit below — see checkpointFailureText. The health series is
     // machine-wide for the same reason, so it is read here too (anvi #516, #522).
     const failing = checkpointFailureText();
-    const health = healthSnapshotText();
+    const health = [healthSnapshotText(), guardText()].filter(Boolean).join(' | ');
 
     // Find .anvi/ directory — shared resolver spans both layouts
     const anvi = resolveDirForRead(cwd, '.anvi');

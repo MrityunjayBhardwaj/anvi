@@ -469,11 +469,12 @@ function recordGo(stateDir, entryDir, rel) {
 
 // A locked package's go is written into the lock directory, which only root can write: the
 // command is the owner's to run, with their password. node by its full path — sudo's PATH
-// need not hold the one this hook runs on.
+// need not hold the one this hook runs on — and the installed copy of the script when there is
+// one (#682): the checkout's is code the agent can edit.
 const goCommand = (entryDir, rel, locked) => {
   const q = require('./structure-rules.js').shellWord;
   return locked
-    ? `  sudo ${q(process.execPath)} ~/.claude/anvi/scripts/structure-lock.js go --package ${q(entryDir)} --file ${q(rel)}`
+    ? `  sudo ${q(process.execPath)} ${(s => s ? q(s) : '~/.claude/anvi/scripts/structure-lock.js')(LOCK.ownerScript('structure-lock.js', locked))} go --package ${q(entryDir)} --file ${q(rel)}`
     : `  node ~/.claude/anvi/scripts/structure-guard.js --package ${q(entryDir)} --allow-check-edit ${q(rel)}`;
 };
 
@@ -562,7 +563,7 @@ function judgeWithCheck(owner, abs, tool, input, row, plainUnmeasured, { readFil
     if (!refusing) return { ...row, outcome: 'check-file' };
     const go = liveGo(LOCK.goBase(owner.entry, stateDir), owner.entry.dir, row.rel, now);
     return go ? { ...row, outcome: 'check-file', go }
-      : { ...row, outcome: 'check-file', refused: true, reason: checkFileRefusal(pkgName, row.rel, files, owner.entry.dir, !!owner.entry[LOCK.LOCKED]) };
+      : { ...row, outcome: 'check-file', refused: true, reason: checkFileRefusal(pkgName, row.rel, files, owner.entry.dir, owner.entry[LOCK.LOCKED] || null) };
   }
   if (!JUDGED_TOOLS.includes(tool)) return unmeasured(UNJUDGED_TOOLS[tool]);
   // The lowest Node is the CHECK's property, not this hook's: stave's is TypeScript loaded through
