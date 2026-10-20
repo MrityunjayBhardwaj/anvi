@@ -40,7 +40,8 @@
 //
 // A GO FOR ONE OF A PROJECT CHECK'S OWN FILES (#600). A package whose registered check is set to
 // refuse has edits to the check's own files refused at edit time: they are a design change, the
-// user's to decide. `--allow-check-edit` records that decision as a dated marker for that one
+// user's to decide. For a LOCKED package (#680) this command refuses: its go is written where only
+// root can write, by `sudo scripts/structure-lock.js go`. Otherwise `--allow-check-edit` records that decision as a dated marker for that one
 // file; the hook lets edits to it through for 15 minutes, in any checkout of the repository, and
 // its log row carries the go. It judges nothing and needs no design. A file the registry does not
 // name as the check's own, or a check that is not refusing, is NOT MEASURED: there is no go to give.
@@ -325,10 +326,13 @@ function allowCheckEdit(args, print, stop) {
   if (!args.package) return stop('--allow-check-edit needs --package <the registered package dir>');
   let H, registry, pkg;
   try { H = loadFromCandidates('structure-guard-hook.js'); } catch (e) { return stop(e.message); }
-  try { registry = JSON.parse(fs.readFileSync(H.REGISTRY, 'utf8')); } catch (e) { return stop(`cannot read the registry ${H.REGISTRY}: ${e.message}`); }
+  try { registry = H.registryInForce(); if (!registry) throw new Error('it does not exist'); } catch (e) { return stop(`cannot read the registry ${H.REGISTRY}: ${e.message}`); }
   try { pkg = fs.realpathSync(args.package); } catch { return stop(`no such package ${args.package}`); }
   const entry = (Array.isArray(registry.packages) ? registry.packages : []).find(e => { try { return fs.realpathSync(e.dir) === pkg; } catch { return false; } });
   if (!entry || !entry.check) return stop(`${H.REGISTRY} registers no check for ${pkg}, so it has no files of its own to allow an edit to`);
+  // A locked package's go lives where only root writes (#680): this command cannot give it.
+  if (entry[H.LOCKED]) return stop(`${pkg} is locked (${entry[H.LOCKED]}): only the owner can give a go for its check's files, with their password —\n` +
+    `  sudo ${shellWord(process.execPath)} ~/.claude/anvi/scripts/structure-lock.js go --package ${shellWord(pkg)} --file ${shellWord(args['allow-check-edit'])}`);
   if (entry.check.mode !== 'refuse') return stop(`the check registered for ${pkg} is in mode ${JSON.stringify(entry.check.mode)}, not "refuse" — it refuses no edit, so there is no go to give`);
   const files = Array.isArray(entry.check.files) ? entry.check.files : [];
   const rel = args['allow-check-edit'];
@@ -477,6 +481,14 @@ function main(argv) {
                      ...(args.extractor ? { extractor: path.resolve(args.extractor) } : {}) });
       } catch (e) { return stop(e.message); }
       print(`  armed: ${built.pkgDir} → ${file} (design ${frame.id})`);
+      // A locked package is judged by its locked entry alone (#680): this one waits for the owner.
+      let L = null;
+      try { L = loadFromCandidates('structure-lock.js'); } catch { /* no lock module: nothing is locked */ }
+      const inForce = L && (() => { try { return L.registryInForce(); } catch { return null; } })();
+      const lockedHere = inForce && inForce.packages.find(e => e[L.LOCKED] && fs.realpathSync(e.dir) === built.pkgDir);
+      if (lockedHere)
+        print(`  NOT IN FORCE: ${built.pkgDir} is locked (${lockedHere[L.LOCKED]}), and the hook judges it by the locked entry. ` +
+              `This entry is a proposal until the owner reviews and promotes it:\n    node ~/.claude/anvi/scripts/structure-lock.js promote --package ${shellWord(built.pkgDir)}`);
     }
     return 0;
   }

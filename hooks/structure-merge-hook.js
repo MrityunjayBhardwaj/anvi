@@ -42,7 +42,6 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const REGISTRY = path.join(os.homedir(), '.claude', 'structure-guard.json');
 const STATE_DIR = path.join(os.homedir(), '.claude', 'structure-guard-cache');
 const LOG = path.join(STATE_DIR, 'errors.log');
 const MERGE_LOG = path.join(STATE_DIR, 'merges.jsonl');
@@ -342,7 +341,8 @@ if (require.main === module) {
     try {
       if (payload.tool_name !== 'Bash' || !/\bgh\b[\s\S]*\bmerge\b/.test(String((payload.tool_input || {}).command || ''))) process.exit(0);
       const result = evaluate(payload, {
-        registry: () => fs.existsSync(REGISTRY) ? JSON.parse(fs.readFileSync(REGISTRY, 'utf8')) : null,
+        // The user's registry plus every package locked where only the owner can change it (#680).
+        registry: () => require('./structure-lock.js').registryInForce(),
         run: runSync,
         rules: require('./structure-rules.js'),
         readFile: f => fs.readFileSync(f, 'utf8'),

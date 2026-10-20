@@ -334,7 +334,7 @@ function exposureOf(c, frame, extractorFor) {
 function frameFor(pkgDir, args) {
   let entry = null;
   try {
-    const registry = JSON.parse(fs.readFileSync(HOOK.REGISTRY, 'utf8'));
+    const registry = HOOK.registryInForce();
     entry = (registry.packages || []).find(p => { try { return fs.realpathSync(p.dir) === pkgDir; } catch { return false; } }) || null;
   } catch { /* no registry: flags only */ }
   const designPath = args.design || (entry && entry.design);

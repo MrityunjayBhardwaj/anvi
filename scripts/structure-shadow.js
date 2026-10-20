@@ -138,9 +138,10 @@ function main() {
   let a;
   try { a = parseArgs(process.argv.slice(2)); } catch (e) { console.log(`structure-shadow: NOT MEASURED — ${e.message}`); process.exit(2); }
   const H = loadHook();
+  // Without --registry, the registry the hook judges by: the user's plus any locked package (#680).
   const regPath = a.registry || H.REGISTRY;
   let registry;
-  try { registry = JSON.parse(fs.readFileSync(regPath, 'utf8')); }
+  try { registry = a.registry ? JSON.parse(fs.readFileSync(regPath, 'utf8')) : H.registryInForce(); if (!registry) throw new Error('no registry'); }
   catch (e) { console.log(`structure-shadow: NOT MEASURED — cannot read the registry ${regPath}: ${e.message}`); process.exit(2); }
   let pkg;
   try { pkg = fs.realpathSync(a.package); } catch { console.log(`structure-shadow: NOT MEASURED — no such package ${a.package}`); process.exit(2); }
