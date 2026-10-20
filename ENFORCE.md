@@ -1506,7 +1506,24 @@ loosened until it stops firing guards nothing.
   registers the package for the hook only when they do**, merging into
   `~/.claude/structure-guard.json` by the package's real path, and refusing to overwrite a
   registry of any other shape. Agreement was measured on one package before the hook was
-  built; arming is how every other package earns that trust instead of inheriting it.
+  built; arming is how every other package earns that trust instead of inheriting it. For a
+  package that is LOCKED (below), the entry `--arm` writes is only a proposal, and it says so.
+- **A package can be LOCKED where only the owner can change it (#680).** Everything that decides
+  a refusal — the registry entry (mode, design, baseline, check adapter) and a go for the check's
+  own files — is otherwise a file the agent's tools can write. `scripts/structure-lock.js promote
+  --package <dir>` copies the user-registry entry, with its design, baseline and adapter, into the
+  root-owned lock directory (`/Library/Application Support/anvi` on macOS, `/etc/anvi` on Linux).
+  Run without root it changes nothing: it prints what would change — mode, design id, each file's
+  hash — and the `sudo` command carrying the digest of what it showed; run as root it installs
+  only on that digest, so anything changed after the review is refused. `remove` works the same
+  way; `go` records a go for a locked check's file in the lock directory; `status` reads it. The
+  hooks (`hooks/structure-lock.js`) judge a locked package by its locked entry alone: a user entry
+  for it, a deeper user entry, or a go in the user's state directory changes nothing. Every other
+  package keeps the user registry. Not covered: the hooks' own code and registration (#681,
+  #682), the graph cache and shadow log, and files written through the shell. Observed on stave's
+  real files in a sandbox lock: the check file refused with the `sudo` go, an ordinary file judged
+  by the locked adapter copy (version `23da96fd2f1d`, 237 ms), the same edit allowed with the lock
+  taken away, and a go in the user's state directory ignored.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —
   `{ "packages": [ { "dir", "design", "baseline", "designId"?, "cache"?, "extractor"? } ] }` — and with no
@@ -1711,7 +1728,8 @@ loosened until it stops firing guards nothing.
   files is denied with every file named** — whatever the tool, MultiEdit included, since naming the
   file needs no reading of the edit — until the user gives a go:
   `structure-guard.js --package <registered dir> --allow-check-edit <repo-relative file>` writes a
-  dated marker (`structure-guard-cache/check-go/`) for that one file, good for 15 minutes in any
+  dated marker (`structure-guard-cache/check-go/`) — for a locked package, only
+  `sudo structure-lock.js go` can, into the lock directory — for that one file, good for 15 minutes in any
   checkout of the repository; the row then carries `go`. A go cannot be spent by use, because a
   hook cannot know whether the edit it allowed landed; it runs out instead. A refusing check with
   no `files` is not measured: it would judge edits to itself. **Every way a refusing check cannot

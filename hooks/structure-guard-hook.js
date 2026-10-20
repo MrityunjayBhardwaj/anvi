@@ -5,8 +5,9 @@
 // ENFORCING: it may refuse a tool call. Everything below is shaped by what that costs.
 //
 // INERT UNLESS ASKED. Hooks on this machine are global — they run in every session, in every
-// project. This one does nothing unless `~/.claude/structure-guard.json` names the package the
-// edited file belongs to, and with no registry at all it exits before loading anything else.
+// project. This one does nothing unless `~/.claude/structure-guard.json` — or the root-owned lock
+// directory (#680, hooks/structure-lock.js) — names the package the edited file belongs to, and
+// with no registry at all it exits before loading anything else.
 // "Belongs to" includes the same package in any git worktree of the registered repository (#546):
 // judged against the same design and baseline, with a graph cache of its own.
 //
@@ -55,7 +56,10 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-const REGISTRY = path.join(os.homedir(), '.claude', 'structure-guard.json');
+const LOCK = require('./structure-lock.js');
+// The user's registry. What the hook judges by is LOCK.registryInForce(): this, plus any package
+// locked where only the owner can change it (#680).
+const REGISTRY = LOCK.userRegistry();
 const STATE_DIR = path.join(os.homedir(), '.claude', 'structure-guard-cache');
 const LOG = path.join(STATE_DIR, 'errors.log');
 
@@ -154,11 +158,18 @@ function checkoutMatch(target, dir, opts = {}) {
 }
 
 // Which registered package owns this file? The deepest registered directory containing it — in
-// the checkout it was registered from, or in another worktree of the same repository.
+// the checkout it was registered from, or in another worktree of the same repository. A LOCKED
+// entry that owns it wins over any user entry (#680): otherwise a user entry for a deeper
+// directory, or for a worktree's copy, would take a locked package back out of the lock.
 function packageFor(filePath, registry) {
   const target = realNear(filePath);
+  const all = registry && Array.isArray(registry.packages) ? registry.packages : [];
+  return deepest(target, all.filter(e => e && e[LOCK.LOCKED])) || deepest(target, all.filter(e => !(e && e[LOCK.LOCKED])));
+}
+
+function deepest(target, entries) {
   let best = null;
-  for (const entry of (registry && Array.isArray(registry.packages) ? registry.packages : [])) {
+  for (const entry of entries) {
     if (!entry || typeof entry.dir !== 'string') continue;
     let dir;
     try { dir = stored(entry.dir); } catch { continue; }
@@ -401,7 +412,7 @@ function evaluate(payload, deps) {
 // instead of inventing one. An edit to one of the check's own files is refused with the files
 // named: it is a design change, never judged by the check it changes, and it goes through only on
 // a go the user gave (`structure-guard.js --allow-check-edit`), which is a dated marker for that
-// one file. Every way the check cannot look — missing, crashing, too slow, a Node too old for it,
+// one file — or, for a LOCKED package, a marker only root can write (`sudo structure-lock.js go`). Every way the check cannot look — missing, crashing, too slow, a Node too old for it,
 // an exception list it cannot read — is NOT MEASURED and SAID to the session: an edit a refusing
 // check did not judge must never read as one it passed. A mode that is neither is not measured.
 // ANVI_STRUCTURE_CHECK_TIMEOUT_MS raises it for a run that needs more — the suite on a heavily
@@ -456,17 +467,23 @@ function recordGo(stateDir, entryDir, rel) {
   return f;
 }
 
-const goCommand = (entryDir, rel) => {
+// A locked package's go is written into the lock directory, which only root can write: the
+// command is the owner's to run, with their password. node by its full path — sudo's PATH
+// need not hold the one this hook runs on.
+const goCommand = (entryDir, rel, locked) => {
   const q = require('./structure-rules.js').shellWord;
-  return `  node ~/.claude/anvi/scripts/structure-guard.js --package ${q(entryDir)} --allow-check-edit ${q(rel)}`;
+  return locked
+    ? `  sudo ${q(process.execPath)} ~/.claude/anvi/scripts/structure-lock.js go --package ${q(entryDir)} --file ${q(rel)}`
+    : `  node ~/.claude/anvi/scripts/structure-guard.js --package ${q(entryDir)} --allow-check-edit ${q(rel)}`;
 };
 
-function checkFileRefusal(pkgName, rel, files, entryDir) {
+function checkFileRefusal(pkgName, rel, files, entryDir, locked) {
   return `BLOCKED by ${pkgName}'s own check: this edit to ${rel} changes the check itself. Its files are:\n` +
     files.map(f => `  · ${f}`).join('\n') + '\n' +
     'An edit to any of them is a design change, so it is never judged by the check it changes. That is the user\'s ' +
     `decision — ask them. With their explicit go, this allows edits to ${rel} for the next ${GO_TTL_MS / 60000} minutes, in any ` +
-    'checkout of the repository, and records the go:\n' + goCommand(entryDir, rel);
+    'checkout of the repository, and records the go' +
+    (locked ? ' — this package is locked, so only the owner can give it, with their password:\n' : ':\n') + goCommand(entryDir, rel, locked);
 }
 
 // The project's words, not this hook's: each reach carries the sentence the project's own check
@@ -543,9 +560,9 @@ function judgeWithCheck(owner, abs, tool, input, row, plainUnmeasured, { readFil
   // shape is not judged is still refused here.
   if (files.includes(row.rel)) {
     if (!refusing) return { ...row, outcome: 'check-file' };
-    const go = liveGo(stateDir, owner.entry.dir, row.rel, now);
+    const go = liveGo(LOCK.goBase(owner.entry, stateDir), owner.entry.dir, row.rel, now);
     return go ? { ...row, outcome: 'check-file', go }
-      : { ...row, outcome: 'check-file', refused: true, reason: checkFileRefusal(pkgName, row.rel, files, owner.entry.dir) };
+      : { ...row, outcome: 'check-file', refused: true, reason: checkFileRefusal(pkgName, row.rel, files, owner.entry.dir, !!owner.entry[LOCK.LOCKED]) };
   }
   if (!JUDGED_TOOLS.includes(tool)) return unmeasured(UNJUDGED_TOOLS[tool]);
   // The lowest Node is the CHECK's property, not this hook's: stave's is TypeScript loaded through
@@ -700,7 +717,8 @@ function noticesOnce(sessionId, notices, stateDir) {
 }
 
 module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
-  shadowCheck, shadowLogPath, recordShadow, checkVersion, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
+  shadowCheck, shadowLogPath, recordShadow, checkVersion, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR,
+  registryInForce: LOCK.registryInForce, LOCKED: LOCK.LOCKED, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
 if (require.main === module) {
   // What this run costs, one row per run (#527). Guarded like any shared module: a
@@ -721,8 +739,8 @@ if (require.main === module) {
     if (meter) meter.session(payload.session_id);
     try {
       // The fast path: no registry, nothing to guard, nothing else loaded.
-      if (!fs.existsSync(REGISTRY)) process.exit(0);
-      const registry = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'));
+      const registry = LOCK.registryInForce();
+      if (!registry) process.exit(0);
       // The graph rule's own failure is caught apart (fail open, recorded, said): the project's
       // check is a second judge, and one judge crashing must not send the other home.
       let result;
