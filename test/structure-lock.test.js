@@ -169,7 +169,7 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
 
   const review = run(['promote', '--package', PKG, '--from', FROM], false);
   const digest = (review.out.match(/--expect ([0-9a-f]{16})/) || [])[1];
-  ok(review.code === 3 && digest && /mode +— +→ +refuse/.test(review.out) && /^  sudo /m.test(review.out),
+  ok(review.code === 3 && digest && /check\.mode +— +→ +"refuse"/.test(review.out) && /^  sudo /m.test(review.out),
      `without root, promote prints what would change and the sudo command with its digest (exit ${review.code})`);
   ok(!fs.existsSync(LOCK2), 'and writes nothing');
   ok(run(['promote', '--package', PKG, '--from', FROM], true).code === 1 && !fs.existsSync(L.lockedRegistry(LOCK2)), 'as root without --expect: refused, nothing written');
@@ -187,11 +187,32 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
   fs.writeFileSync(loosened, JSON.stringify({ root: 'src', components: { low: { dirs: ['low'] } }, allowed: [] }));
   writeJson(FROM, { packages: [proposal({ design: loosened })] });
   const second = run(['promote', '--package', PKG, '--from', FROM], false);
-  ok(second.code === 3 && /design +[0-9a-f]{12} +→ +[0-9a-f]{12}/.test(second.out) && !second.out.includes(digest),
+  ok(second.code === 3 && /design +content [0-9a-f]{12} +→ +content [0-9a-f]{12}/.test(second.out) && !second.out.includes(digest),
      'a changed design shows in the review, under a new digest');
   ok(run(['promote', '--package', PKG, '--from', FROM, '--expect', digest], true).code === 1 &&
      fs.readFileSync(reg2().packages[0].design, 'utf8') === fs.readFileSync(DESIGN, 'utf8'),
      'the old digest no longer installs anything: a change after the review is refused, and the locked design is untouched');
+
+  // EVERY FIELD SHOWS (#684): change each leaf of the locked entry's proposal in turn — including
+  // one this code has never heard of — and the review must print that field as changing.
+  writeJson(FROM, { packages: [proposal({ someday: 'x' })] });
+  const leaves = [];
+  const walk = (v, key) => (v && typeof v === 'object' && !Array.isArray(v)) ? Object.keys(v).forEach(k => walk(v[k], key ? `${key}.${k}` : k)) : leaves.push(key);
+  walk(proposal({ someday: 'x' }), '');
+  const silent = [];
+  for (const leaf of leaves.filter(k => k !== 'dir')) {
+    const p = proposal({ someday: 'x' });
+    const parts = leaf.split('.'); let o = p;
+    for (const k of parts.slice(0, -1)) o = o[k];
+    const k = parts[parts.length - 1];
+    if (['design', 'baseline', 'adapter'].includes(k)) { const f = path.join(DIR, `alt-${k}`); fs.writeFileSync(f, fs.readFileSync(o[k], 'utf8') + ' '); o[k] = f; }
+    else o[k] = Array.isArray(o[k]) ? [...o[k], 'extra'] : typeof o[k] === 'number' ? o[k] + 1 : String(o[k]) + '-changed';
+    writeJson(FROM, { packages: [p] });
+    const out = run(['promote', '--package', PKG, '--from', FROM], false).out;
+    const line = out.split('\n').find(l => l.trim().startsWith(leaf + ' '));
+    if (!line || !line.includes('→')) silent.push(leaf);
+  }
+  ok(leaves.length >= 9 && silent.length === 0, `each of ${leaves.length - 1} fields, changed alone, prints as changing${silent.length ? ` — silent: ${silent.join(', ')}` : ''}`);
 
   writeJson(FROM, { packages: [proposal({ extractor: EXTRACTOR })] });
   ok(run(['promote', '--package', PKG, '--from', FROM], false).code === 1, 'an entry with an extractor is refused — one copied file cannot stand for it');

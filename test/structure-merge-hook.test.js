@@ -175,6 +175,23 @@ console.log('\nREFUSED, ALLOWED, AND WHAT EACH LEAVES BEHIND:');
   ok(byUrl.exit === 2 && byUrl.denied, 'a pull request given as its URL names its repository');
 }
 
+console.log('\nA LOCKED PACKAGE IS JUDGED BY ITS LOCKED ENTRY (#680):');
+{
+  const REAL = require(path.join(ROOT, 'hooks', 'structure-lock.js')).LOCK_DIRS[process.platform];
+  if (REAL && fs.existsSync(REAL)) console.log(`  ⚠ SKIPPED 2 checks: ${REAL} exists, so this machine is locked and the hook cannot be pointed at a sandbox lock`);
+  else {
+    const LOCKDIR = path.join(DIR, 'lock');
+    fs.mkdirSync(LOCKDIR, { recursive: true });
+    fs.writeFileSync(path.join(LOCKDIR, 'structure-guard.json'), JSON.stringify({ packages: [{ dir: PKG, design: DESIGN, baseline: BASE, designId: ID, extractor: EX }] }));
+    register({ baseline: HELD });
+    const locked = fire('gh pr merge 7 --repo Acme/Widget --squash', { env: { ANVI_LOCK_DIR: LOCKDIR } });
+    ok(locked.exit === 2 && locked.denied, `the user entry's baseline holds the import, but the locked entry's does not: REFUSED (exit ${locked.exit})`);
+    const open = fire('gh pr merge 7 --repo Acme/Widget --squash');
+    ok(open.exit === 0 && !open.denied, 'control: without the lock the user entry is in force and the same merge is allowed');
+    register();
+  }
+}
+
 console.log('\nONLY WHAT THE BRANCH ADDS IS REFUSED:');
 {
   register();

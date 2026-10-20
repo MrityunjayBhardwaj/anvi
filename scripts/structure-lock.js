@@ -36,7 +36,7 @@ function loadFromCandidates(name) {
 
 const sha = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const real = p => { try { return fs.realpathSync(p); } catch { return null; } };
-const short = h => (h ? h.slice(0, 12) : null);
+const short = h => h.slice(0, 12);
 
 // The files that decide a refusal, by role: each is copied into the lock, and the locked entry
 // points at the copy, never at the store.
@@ -66,20 +66,34 @@ function plan(entry, pkgDir) {
   return { locked, files, digest };
 }
 
-// One line per thing a person would weigh: the mode, the design id, and each file's content.
-function changes(current, proposed, proposedFiles) {
-  const fileHash = f => { try { return sha(fs.readFileSync(f)); } catch { return null; } };
-  const roleHash = (entry, role, files) => {
-    const p = role === 'adapter' ? entry && entry.check && entry.check.adapter : entry && entry[role];
-    return p ? (files && files[p] ? sha(files[p]) : fileHash(p)) : null;
+// Every field of an entry, flattened (`check.root`), each copied file shown by its content's hash
+// — the path is the lock's to choose, the content is the decision. Every field, not chosen ones
+// (#684): a field this code has never heard of is shown like any other, so nothing in an entry
+// can change without a line saying so.
+function fields(entry, files) {
+  const out = {};
+  if (!entry) return out;
+  const copied = new Map(rolesOf(entry).map(([role, p]) => [role === 'adapter' ? 'check.adapter' : role, p]));
+  const walk = (v, key) => {
+    if (copied.has(key) && typeof v === 'string') {
+      let h = files && files[v] ? sha(files[v]) : null;
+      if (!h) try { h = sha(fs.readFileSync(v)); } catch { h = null; }
+      out[key] = h ? `content ${short(h)}` : '(unreadable)';
+    } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const k of Object.keys(v).sort()) walk(v[k], key ? `${key}.${k}` : k);
+    } else out[key] = JSON.stringify(v);
   };
-  const rows = [
-    ['mode', current && current.check ? current.check.mode : null, proposed && proposed.check ? proposed.check.mode : null],
-    ['design id', current && current.designId, proposed && proposed.designId],
-    ...['design', 'baseline', 'adapter'].map(r => [r, short(roleHash(current, r)), short(roleHash(proposed, r, proposedFiles))]),
-    ['check files', current && current.check ? JSON.stringify(current.check.files) : null, proposed && proposed.check ? JSON.stringify(proposed.check.files) : null],
-  ];
-  return rows.map(([k, a, b]) => `    ${k.padEnd(12)} ${a == null ? '—' : a}${String(a) === String(b) ? '  (unchanged)' : `  →  ${b == null ? '—' : b}`}`);
+  walk(entry, '');
+  return out;
+}
+
+function changes(current, proposed, proposedFiles) {
+  const a = fields(current), b = fields(proposed, proposedFiles);
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+  const width = Math.max(0, ...keys.map(k => k.length));
+  const changed = keys.filter(k => a[k] !== b[k]);
+  return [`  ${changed.length} of ${keys.length} field${keys.length === 1 ? '' : 's'} change:`,
+    ...keys.map(k => `    ${k.padEnd(width)}  ${a[k] === undefined ? '—' : a[k]}${a[k] === b[k] ? '  (unchanged)' : `  →  ${b[k] === undefined ? '—' : b[k]}`}`)];
 }
 
 const readJson = f => JSON.parse(fs.readFileSync(f, 'utf8'));

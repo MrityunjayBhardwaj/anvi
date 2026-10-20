@@ -139,7 +139,7 @@ User message
 | Hook | Trigger | File |
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
-| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` | `~/.claude/hooks/structure-guard-hook.js` |
+| Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` or the root-owned lock directory (#680) | `~/.claude/hooks/structure-guard-hook.js` |
 | Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, spawned only for a `gh pr merge` subcommand (`"if": "Bash(gh pr merge:*)"`): judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
@@ -1514,7 +1514,7 @@ loosened until it stops firing guards nothing.
   --package <dir>` copies the user-registry entry, with its design, baseline and adapter, into the
   root-owned lock directory (`/Library/Application Support/anvi` on macOS, `/etc/anvi` on Linux).
   Run without root it changes nothing: it prints what would change — mode, design id, each file's
-  hash — and the `sudo` command carrying the digest of what it showed; run as root it installs
+  hash — every field of the entry, flattened, so nothing changes without a line (#684) — and the `sudo` command carrying the digest of what it showed; run as root it installs
   only on that digest, so anything changed after the review is refused. `remove` works the same
   way; `go` records a go for a locked check's file in the lock directory; `status` reads it. The
   hooks (`hooks/structure-lock.js`) judge a locked package by its locked entry alone: a user entry
