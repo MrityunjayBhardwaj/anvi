@@ -143,6 +143,14 @@ if (machineLocked) {
   ok(/only the owner can give it, with their password/.test(why) &&
      /sudo '.*' ~\/\.claude\/anvi\/scripts\/structure-lock\.js go --package '.*pkg' --file 'pkg\/src\/check\/boundary\.ts'/.test(why),
      'the refusal names the owner\'s sudo command, not the go the agent could run itself');
+  // With the guard's code installed in the lock (#682), the owner's command names that copy.
+  const owned = path.join(LOCK, 'guard', 'scripts', 'structure-lock.js');
+  fs.mkdirSync(path.dirname(owned), { recursive: true });
+  fs.writeFileSync(owned, '// installed copy\n');
+  const named = ((hook(editCheck('l1')).said || {}).permissionDecisionReason) || '';
+  ok(named.includes(`sudo '${process.execPath}' '${owned}' go --package`) || named.includes(`sudo ${process.execPath} '${owned}' go --package`),
+     'with an installed copy, the refusal\'s sudo command names the root-owned copy, not the checkout\'s');
+  fs.rmSync(path.join(LOCK, 'guard'), { recursive: true, force: true });
   H.recordGo(STATE, PKG, FILES[0]);
   ok(hook(editCheck('l1')).exit === 2, 'a go left in the user\'s state directory is not honoured for a locked package');
   H.recordGo(LOCK, PKG, FILES[0]);

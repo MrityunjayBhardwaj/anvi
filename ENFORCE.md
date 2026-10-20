@@ -1519,11 +1519,28 @@ loosened until it stops firing guards nothing.
   way; `go` records a go for a locked check's file in the lock directory; `status` reads it. The
   hooks (`hooks/structure-lock.js`) judge a locked package by its locked entry alone: a user entry
   for it, a deeper user entry, or a go in the user's state directory changes nothing. Every other
-  package keeps the user registry. Not covered: the hooks' own code and registration (#681,
-  #682), the graph cache and shadow log, and files written through the shell. Observed on stave's
+  package keeps the user registry. Not covered: the hooks' registration (#681) — their code has an
+  installed copy (below) that runs only once registered — the graph cache and shadow log, and files written through the shell. Observed on stave's
   real files in a sandbox lock: the check file refused with the `sudo` go, an ordinary file judged
   by the locked adapter copy (version `23da96fd2f1d`, 237 ms), the same edit allowed with the lock
   taken away, and a go in the user's state directory ignored.
+- **One reviewed version of the guard's code is installed where only the owner can change it
+  (#682).** `scripts/install-guard.js <commit>` copies that commit's `hooks/` and `scripts/` into
+  `<lock dir>/guard`, root-owned, with `VERSION.json` naming the commit. Run without root it prints
+  the installed version, the requested one, the commits and files between them (and says when the
+  request goes back or sideways), and the `sudo` command carrying a digest of the file set; as root
+  it installs only on that digest. Only a commit on the default branch installs. The files come
+  from `git archive` of the commit — never the working tree — and each is checked against the
+  commit's blob id before the copy replaces the old one; group and others cannot write any of it.
+  As root git is only read (`rev-parse`, `merge-base`, `ls-tree`, `archive`, `cat-file`, `log`,
+  `diff`, with `safe.directory` for that repository): a git write as root would leave root-owned
+  files in the user's `.git`. The first install has no copy to run, so it trusts the checkout's
+  installer, which refuses unless its own bytes are the requested commit's — and which loads no
+  module but Node's own, since a module it required would already have run as root, unchecked.
+  Only plain files install: a symbolic link (a blob to git) is refused by name. Every later `sudo`
+  command — this one's, `structure-lock.js`'s, and the hook's go — names the installed copy. The
+  session banner names the installed commit (`🔒 GUARD: installed copy …`), and says when the copy
+  is not root-owned. Nothing runs from the copy until #681 registers it.
 - **At edit time: `hooks/structure-guard-hook.js`** (PreToolUse:Write|Edit, ENFORCING).
   Inert unless `~/.claude/structure-guard.json` registers the package —
   `{ "packages": [ { "dir", "design", "baseline", "designId"?, "cache"?, "extractor"? } ] }` — and with no
