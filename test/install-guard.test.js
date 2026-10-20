@@ -121,6 +121,28 @@ console.log('\nWHAT DOES NOT INSTALL:');
      'run as the installed copy, the same version installs');
 }
 
+console.log('\nAS ROOT FROM A CHECKOUT, NOTHING UNCHECKED RUNS:');
+{
+  ok(JSON.stringify(I.LOCK_DIRS) === JSON.stringify(L.LOCK_DIRS), 'the installer\'s own copy of where the lock lives equals hooks/structure-lock.js\'s');
+  // Loaded in a fresh process with every module load recorded: before its self-check, a root run
+  // from a checkout must have executed no file but itself.
+  const probe = `const M = require('module'); const seen = []; const o = M._load;
+    M._load = function (r, ...a) { if (!M.isBuiltin(r)) seen.push(r); return o.call(this, r, ...a); };
+    const I = require(${JSON.stringify(SCRIPT)});
+    I.main([${JSON.stringify(C1)}, '--repo', ${JSON.stringify(REPO)}], { isRoot: () => false, dir: ${JSON.stringify(path.join(DIR, 'probe-lock'))}, out: () => {} });
+    process.stdout.write(JSON.stringify(seen.filter(r => r !== ${JSON.stringify(SCRIPT)})));`;
+  const r = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8' });
+  ok(r.status === 0 && r.stdout === '[]', `a whole review loads no module but Node's own (${r.stdout || r.stderr.slice(0, 160)})`);
+  // A symbolic link is a blob to git; as root, tar would make it in the locked copy.
+  git('checkout', '-q', '-b', 'linked');
+  fs.symlinkSync('/tmp/anywhere.js', path.join(REPO, 'hooks', 'link.js'));
+  const LINKED = commit('a link under hooks/');
+  git('push', '-q', 'origin', 'linked:main'); git('fetch', '-q', 'origin');
+  const linked = run([LINKED, '--repo', REPO], false);
+  ok(linked.code === 1 && /hooks\/link\.js \(mode 120000\)/.test(linked.out), `a commit with a symbolic link under hooks/ is refused, by name (exit ${linked.code})`);
+  git('checkout', '-q', 'main'); git('push', '-q', '-f', 'origin', 'main'); git('fetch', '-q', 'origin');
+}
+
 console.log('\nGIT IS ONLY READ, AND THE UNPACKED FILES ARE CHECKED:');
 {
   let threw = null;

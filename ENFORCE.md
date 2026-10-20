@@ -1535,7 +1535,9 @@ loosened until it stops firing guards nothing.
   As root git is only read (`rev-parse`, `merge-base`, `ls-tree`, `archive`, `cat-file`, `log`,
   `diff`, with `safe.directory` for that repository): a git write as root would leave root-owned
   files in the user's `.git`. The first install has no copy to run, so it trusts the checkout's
-  installer, which refuses unless its own bytes are the requested commit's; every later `sudo`
+  installer, which refuses unless its own bytes are the requested commit's — and which loads no
+  module but Node's own, since a module it required would already have run as root, unchecked.
+  Only plain files install: a symbolic link (a blob to git) is refused by name. Every later `sudo`
   command — this one's, `structure-lock.js`'s, and the hook's go — names the installed copy. The
   session banner names the installed commit (`🔒 GUARD: installed copy …`), and says when the copy
   is not root-owned. Nothing runs from the copy until #681 registers it.

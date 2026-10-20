@@ -28,7 +28,6 @@
 // Exit: 0 installed (or status) · 1 refused, with the reason · 2 usage · 3 needs the owner.
 'use strict';
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
@@ -36,10 +35,19 @@ const { spawnSync } = require('child_process');
 const PARTS = ['hooks', 'scripts'];
 const READ_ONLY = new Set(['rev-parse', 'merge-base', 'ls-tree', 'archive', 'cat-file', 'log', 'diff', 'show']);
 
-function loadLock() {
-  for (const c of [path.join(__dirname, '..', 'hooks', 'structure-lock.js'), path.join(os.homedir(), '.claude', 'hooks', 'structure-lock.js')])
-    if (fs.existsSync(c)) return require(c);
-  throw new Error('cannot find structure-lock.js beside this script or in ~/.claude/hooks');
+// SELF-CONTAINED: run as root from a checkout, this file is checked against the commit before it
+// installs anything — but a module it required would already have RUN, as root, unchecked. So it
+// loads nothing but Node's own modules, and keeps its own copy of where the lock lives; a test
+// holds it equal to hooks/structure-lock.js.
+const LOCK_DIRS = { darwin: '/Library/Application Support/anvi', linux: '/etc/anvi' };
+function lockDirFor(root, env = process.env, platform = process.platform) {
+  const real = LOCK_DIRS[platform] || null;
+  if (root || (real && fs.existsSync(real))) return real;
+  return env.ANVI_LOCK_DIR || real;
+}
+const guardDirOf = dir => path.join(dir, 'guard');
+function installedIn(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(guardDirOf(dir), 'VERSION.json'), 'utf8')); } catch { return null; }
 }
 
 const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
@@ -56,12 +64,11 @@ function gitRunner(repo) {
 }
 
 function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, dir, out = console.log, git: makeGit = gitRunner, self = __filename } = {}) {
-  const L = loadLock();
   const root = isRoot();
-  const lockDir = dir || (root ? L.LOCK_DIRS[process.platform] : L.lockDir());
+  const lockDir = dir || lockDirFor(root);
   if (!lockDir) { out(`install-guard: no lock directory is defined for ${process.platform}`); return 1; }
-  const guard = L.guardDir(lockDir);
-  const installed = L.installedGuard(lockDir);
+  const guard = guardDirOf(lockDir);
+  const installed = installedIn(lockDir);
   const stop = why => { out(`install-guard: REFUSED — ${why}`); return 1; };
 
   const a = { rest: [] };
@@ -106,7 +113,10 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
     const [mode, type, id] = meta.split(' ');
     return { mode, type, id, file };
   });
-  if (files.some(f => f.type !== 'blob')) return stop('the commit holds something other than plain files under hooks/ or scripts/ (a submodule or link) — not installable');
+  // A symbolic link is a blob to git, and tar run as root would make it — pointing anywhere — in the
+  // root-owned copy. Only plain files install.
+  const odd = files.filter(f => f.type !== 'blob' || !['100644', '100755'].includes(f.mode));
+  if (odd.length) return stop(`the commit holds something other than plain files under hooks/ or scripts/ — ${odd.slice(0, 3).map(f => `${f.file} (mode ${f.mode})`).join(', ')} — not installable`);
   if (!files.some(f => f.file === 'hooks/structure-guard-hook.js')) return stop(`${commit.slice(0, 12)} has no hooks/structure-guard-hook.js — not a version of the guard`);
   const digest = sha256(commit + '\n' + files.map(f => `${f.mode} ${f.id} ${f.file}`).join('\n')).slice(0, 16);
 
@@ -129,7 +139,8 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   } else out(`  first install: ${files.length} files under ${PARTS.join('/ and ')}/`);
   out(`  digest: ${digest}`);
 
-  const runner = L.ownerScript('install-guard.js', lockDir);
+  const installedRunner = path.join(guard, 'scripts', 'install-guard.js');
+  const runner = fs.existsSync(installedRunner) ? installedRunner : null;
   if (!root) {
     out(`To install it, the owner runs:\n  sudo ${shellWord(process.execPath)} ${shellWord(runner || path.resolve(self))} ${commit} --repo ${shellWord(repo)} --expect ${digest}`);
     if (!runner) out('  (this is the checkout\'s installer: the first install trusts it, and it checks itself against the commit. Later installs run the installed copy.)');
@@ -180,6 +191,6 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   return 0;
 }
 
-module.exports = { main, blobId, gitRunner, READ_ONLY };
+module.exports = { main, blobId, gitRunner, READ_ONLY, LOCK_DIRS };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
