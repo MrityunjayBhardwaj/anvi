@@ -106,20 +106,29 @@ ok '! echo "$OUT" | grep -qi "refusing to downgrade"' \
 # Versions are matched with grep -qxF, an exact string compare, so zero-padding is
 # part of the identity rather than cosmetic. The unpadded form must be rejected —
 # if it silently resolved, --version would install something other than what was named.
+# Pinned to 2026.08.0, not the clone's current version: only a one-digit month HAS an
+# unpadded form, and a current release cut in October (2026.10.0) has none (#702).
+PADDED_REL="2026.08.0"
 H="$(mkhome 1.0.0)"
-UNPADDED="$(echo "$CLONE_VER" | sed 's/\.0\([1-9]\)\./.\1./')"
+ok 'grep -qF "## [$PADDED_REL] — " "$REPO/CHANGELOG.md"' "the padded release $PADDED_REL is in the CHANGELOG to test against"
+UNPADDED="$(echo "$PADDED_REL" | sed 's/\.0\([1-9]\)\./.\1./')"
 ok '[ "$UNPADDED" != "$CLONE_VER" ]' "an unpadded form exists to test (got '$UNPADDED')"
 ok 'run "$H" --version "$UNPADDED" | grep -qi "unknown version"' \
    'an unpadded month is rejected, not silently matched to the padded release'
 
 echo "migration marker"
+# Pinned to 2026.08.0, a release known to carry MIGRATION REQUIRED. Whether the
+# CURRENT release needs a migration is that release's own fact, not a constant (#702).
+MARKED_REL="2026.08.0"
 OUT="$(run "$H" --version-list)"
 ok 'echo "$OUT" | grep -q "MIGRATE"' 'the table carries a MIGRATE column'
-ok 'echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.} +[0-9-]+ +yes "' \
-   'the current release is flagged as requiring a migration'
+ok 'echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.} +[0-9-]+ "' \
+   'the current release has a row in the list'
+ok 'echo "$OUT" | grep -qE "^  v${MARKED_REL//./\\.} +[0-9-]+ +yes "' \
+   "a release whose changelog says MIGRATION REQUIRED ($MARKED_REL) is flagged"
 # The marker sits where desc is picked up, so a parser that does not consume it
 # reports it AS the summary. That is the defect this field exists to avoid.
-ok '! echo "$OUT" | grep -qE "^  v${CLONE_VER//./\\.}.*MIGRATION REQUIRED"' \
+ok '! echo "$OUT" | grep -qE "^  v${MARKED_REL//./\\.}.*MIGRATION REQUIRED"' \
    'the marker is consumed as a field, not mistaken for the summary'
 ok 'echo "$OUT" | grep -qE "^  v2\.0\.0 +[0-9-]+ +yes "' \
    'a backfilled pre-marker release is flagged too, so the column is not only forward-looking'

@@ -22,6 +22,17 @@
 > [!TIP]
 > **Catalogues make the black box transparent.** Reasoning becomes _deductive_ — from stated principles to conclusions, confirmed by observation — instead of _empirical_ — probing a black box through failure. Anvi is fully standalone: one `./install.sh` and you're running.
 
+## 🎯 Latest release: Armed (`2026.10.0`)
+
+**The framework starts refusing.** Until now, Anvi advised: it put the right notes in front of an agent and hoped they were read. From Armed on, it can also refuse. You declare a project's design (its components, and which may import which), and an edit that breaks it is refused before it lands. What decides a refusal can be locked per package in a root-owned directory, so it changes only with your password and never because an agent edited it.
+
+**Proven on a real project.** stave was armed for a two-week trial. The guard refused 2 edits out of 2 chances, and both refusals were ruled right. Then the list of allowed rule breaks shrank for the first time, from 18 to 17. Moving a misplaced helper to its rightful owner exposed a test that had been quietly forcing the architecture out of shape. The test was fixed instead of the design being bent.
+
+- What changed: [`CHANGELOG.md` → 2026.10.0](CHANGELOG.md)
+- The full story, with proofs: [issue #532](https://github.com/MrityunjayBhardwaj/anvi/issues/532)
+- No migration needed. Run `./install.sh --sync`, or `/anvi:update`. Nothing is armed until you arm a package.
+- **Next:** *Architecture* (`2026.11.0`). Know where every job belongs, and make the part a machine can enforce binding ([#698](https://github.com/MrityunjayBhardwaj/anvi/issues/698)).
+
 ## ✨ What Anvi does
 
 | Capability | How Anvi does it |
@@ -131,7 +142,7 @@ commands filled in.
 
 ### Versions
 
-Releases are numbered **`YYYY.0M.PATCH`** — `2026.08.0`, then `2026.08.1` for a fix in
+Releases are numbered **`YYYY.0M.PATCH`** — `2026.10.0`, then `2026.10.1` for a fix in
 the same month. The number tells you _when_ a release was cut, which is the useful fact
 when the install path is `git clone` and you want to know how far behind you are.
 
@@ -141,9 +152,9 @@ changelog, and `--version-list` shows it in the `MIGRATE` column.
 
 ```
   VERSION     RELEASED     MIGRATE  SUMMARY
-  v2026.08.0  2026-08-01   yes      Two changes require an existing install to...  ◀ installed
+  v2026.10.0  2026-10-30            Armed: the framework starts refusing. An edit tha...  ◀ latest
+  v2026.08.0  2026-08-01   yes      Two changes require an existing install to migrat...  ◀ installed
   v2.0.0      2026-07-23   yes      Major release. Since 1.1.0 the framework...
-  v1.1.0      2026-04-02            Ground Truth — Three-Layer Grounded Abstr...
 ```
 
 A blank means the release does not state one — not that it is safe to skip checking.
