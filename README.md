@@ -49,17 +49,19 @@
 
 ```mermaid
 flowchart TD
-    BASE["🧭 BASE LAYER — always on<br/>7 silent checks: sequence · witness · completion<br/>existence · observation · completeness · reactivity"]
+    BASE["🧭 BASE LAYER — always on<br/>9 silent checks: sequence · witness · completion · existence<br/>grounding · provenance · observation · completeness · reactivity"]
     R(["🌀 RECOVER<br/>meta — watches all three"])
     D1(["🔎 DIAGNOSE<br/>what IS"])
     D2(["🧩 DESIGN<br/>what SHOULD"])
     D3(["⚖️ REVIEW<br/>is it sound?"])
-    KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama"]
+    KNOW["📚 PROJECT KNOWLEDGE — .anvi/<br/>hetvabhasa · vyapti · krama · dharana"]
+    HOOK["🪝 HOOKS — on every tool call<br/>deliver entries with their freshness · refuse what breaks a design · meter their own cost"]
     SURF["⚙️ SURFACE<br/>17 agents → 52 workflows · 56 skills · anvi-tools CLI"]
 
     BASE --> R
     R --> D1 & D2 & D3
     D1 & D2 & D3 --> KNOW
+    KNOW --> HOOK
     KNOW --> SURF
 
     classDef base fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#e2e8f0;
@@ -69,15 +71,17 @@ flowchart TD
     class BASE base;
     class R,D1,D2,D3 lens;
     class KNOW know;
-    class SURF surf;
+    class HOOK,SURF surf;
 ```
 
 </div>
 
 The four lenses **overlap — they don't switch.** `RECOVER` is the parent that watches the other three fire.
 
+Instructions can be forgotten when a context is compressed; hooks can't. They read the catalogues from disk at the moment an edit touches a boundary, and the structure guard can refuse a tool call outright.
+
 > [!NOTE]
-> Full structural map in [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md).
+> Full structural map in [`SYSTEM_ARCHITECTURE.md`](SYSTEM_ARCHITECTURE.md). Every hook, what it may do, and where it is registered: [`ENFORCE.md`](ENFORCE.md).
 
 ## 🔁 How thinking compounds
 
@@ -87,13 +91,15 @@ Every diagnosis feeds the catalogues, so the same class of bug is never re-deriv
 flowchart LR
     S1["🐛 Session 1<br/>debug → discover pattern"] --> E1["📥 catalogue entry"]
     E1 --> S2["⚡ Session 2<br/>match → skip to root cause"]
-    S2 --> SN["🚀 Session N<br/>20 patterns, 12 invariants<br/>most bugs diagnosed instantly"]
+    S2 --> SN["🚀 Session N<br/>a known class is matched,<br/>not re-derived"]
 
     classDef a fill:#0c4a6e,stroke:#38bdf8,color:#e0f2fe;
     classDef b fill:#3f0f40,stroke:#e879f9,color:#fae8ff;
     class S1,S2,SN a;
     class E1 b;
 ```
+
+An entry is only as good as the code it still matches. Every entry delivered to a session comes with its freshness: **verified** (re-checked since its code last changed), **drifted** (a file it cites has changed since), or **never confirmed**. Nothing is withheld; the state is stated next to it. Each session must end with fewer drifted entries than it started with, and `/anvi:currency` re-validates them.
 
 ## 🚀 Installation
 
@@ -103,7 +109,9 @@ cd anvi
 ./install.sh
 ```
 
-The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, and **56 skills** to `~/.claude/skills/` — and optionally creates your project catalogues (`.anvi/`).
+The installer asks which integrations to install: **Claude Code** (deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.claude/agents/`, **56 skills** to `~/.claude/skills/`, and registers the hooks), **Copilot** (the [compatibility layer](copilot-compat/README.md) for VS Code Copilot Chat), or both. `--only=claude`, `--only=copilot` or `--only=all` skips the question. The shared framework always installs, and the installer can create your project catalogues (`.anvi/`).
+
+Already installed? Run `/anvi:update`, which brings the framework, the hook registrations and every project's catalogues up to date in one pass.
 
 <details>
 <summary><b>⚙️ Install modes</b></summary>
@@ -112,7 +120,8 @@ The installer deploys the framework to `~/.claude/anvi/`, **17 agents** to `~/.c
 
 | Command | What it does |
 |---------|-------------|
-| `./install.sh` | Interactive — prompts before overwriting an existing install |
+| `./install.sh` | Interactive — asks which integrations, and prompts before overwriting an existing install |
+| `./install.sh --only=<claude,copilot,all>` | Install only the named integrations, without asking |
 | `./install.sh --dev` | **Dev mode** — symlinks repo → live. Edits to the repo are immediately live. |
 | `./install.sh --no-dev` | Break symlink, switch back to standalone copy mode |
 | `./install.sh --sync` | Silent one-way copy from repo → live (no prompts). On a dev install it copies nothing — it links hooks, skills and agents added since and registers the hooks. |
@@ -152,9 +161,9 @@ changelog, and `--version-list` shows it in the `MIGRATE` column.
 
 ```
   VERSION     RELEASED     MIGRATE  SUMMARY
-  v2026.10.0  2026-10-30            Armed: the framework starts refusing. An edit tha...  ◀ latest
-  v2026.08.0  2026-08-01   yes      Two changes require an existing install to migrat...  ◀ installed
-  v2.0.0      2026-07-23   yes      Major release. Since 1.1.0 the framework...
+  v2026.10.0  2026-10-30            Armed: the framework starts refusing. An edit tha...  ◀ installed
+  v2026.08.0  2026-08-01   yes      Two changes require an existing install to migrat...
+  v2.0.0      2026-07-23   yes      Major release. Since 1.1.0 the framework grew a c...
 ```
 
 A blank means the release does not state one — not that it is safe to skip checking.
@@ -165,6 +174,23 @@ The month is always zero-padded. Versions are matched as exact strings, so `2026
 a different version from `2026.08.0` and will be reported as unknown.
 
 </details>
+
+## 🛡️ Arming a package — the structure guard
+
+The guard refuses an edit that adds an import your design doesn't allow. It does nothing until you arm a package, and it only ever refuses what an edit **adds**: imports that already exist are recorded in a baseline and tolerated, so a real codebase can adopt it without first repairing everything it carries.
+
+| Step | Command (scripts live in `~/.claude/anvi/scripts/`) |
+|------|---------|
+| 1. **Declare the design** | Write a `design.json`: the `components` (each a set of `dirs` and `files`) and the `allowed` imports between them as `[from, to]` pairs. Format: [`ENFORCE.md` → Structure Guard](ENFORCE.md#structure-guard--the-edge-that-erodes-a-design-refused-only-when-it-is-new). |
+| 2. **Measure and take a baseline** | `node structure-guard.js --design design.json --package <dir> --write-baseline baseline.json` |
+| 3. **Replay real sessions first** | `node structure-replay.js --repo <git dir> --package <path> --design design.json --transcripts <dir> --since <commit>` lists what the guard *would* have refused, for you to rule on |
+| 4. **Arm** | `node structure-guard.js --design design.json --graph <depcruise.json> --package <dir> --arm --baseline baseline.json` registers the package, but only if two independent import graphs agree: the hook's own and [dependency-cruiser](https://github.com/sverweij/dependency-cruiser)'s (`depcruise --output-type json <src> > depcruise.json`) |
+| 5. **Read the trial** | `node structure-refusals.js --package <dir> --since <time>` counts every refusal and every chance to refuse, so an untested window can't read as a passed one |
+| 6. **Lock it** (optional) | `node structure-lock.js promote --package <dir>` shows every field that would change and prints a `sudo` command pinned to exactly what you reviewed (or, until the lock's own node and installed copy exist, what is missing). Once locked, what decides a refusal lives in a root-owned directory and changes only with your password. |
+
+A refusal offers two remedies: change the code, or change the design, which is your decision. `structure-guard.js --proposed <design.json>` shows what a design change would reclassify, in both directions, before you make it. A merge through Claude Code (`gh pr merge`) is judged too, so imports written through the shell are caught at merge.
+
+**Known limits:** a merge on the GitHub web page runs no hook, and the code that applies a locked decision still runs from your own install ([#681](https://github.com/MrityunjayBhardwaj/anvi/issues/681)).
 
 ## 🧩 Commands
 
@@ -191,6 +217,7 @@ The everyday loop:
 | `/anvi:rq` | Surface the right questions for the current context |
 | `/anvi:lens` | Map all lenses — active, sister, opposing, parent |
 | `/anvi:orient` | Where am I? What's known / unknown / assumed? |
+| `/anvi:explore` | A friction point — something that should exist and doesn't. The friction becomes the spec |
 | `/anvi:sess-wrap` | Harvest the session's lessons into the catalogues |
 | `/anvi:update-board` | Put an issue on the project board and set its Status, ids derived not pasted |
 | `/anvi:currency` | Which catalogue entries have drifted from the code they cite |
@@ -215,6 +242,15 @@ The everyday loop:
 | `/anvi:resume-work` | Resume with cognitive state restored |
 | `/anvi:pause-work` | Save state with a tattva checkpoint |
 
+**🔧 Keeping the install healthy**
+
+| Command | Description |
+|---------|-------------|
+| `/anvi:update` | Update to the latest (or a named) version: framework, hook registrations and every project's catalogues, in one idempotent pass |
+| `/anvi:settings` | Workflow toggles, model profile, and how long Claude Code keeps sessions |
+| `/anvi:health` | Diagnose the planning directory and optionally repair it |
+| `node ~/.claude/anvi/scripts/meter-report.js` | What each hook costs: runs, bytes injected, milliseconds |
+
 Run `/anvi:help` for the complete list.
 
 </details>
@@ -222,7 +258,7 @@ Run `/anvi:help` for the complete list.
 ## 🧠 The Cognitive OS
 
 <details open>
-<summary><b>Always-on base layer</b> — 7 checks running silently on every action</summary>
+<summary><b>Always-on base layer</b> — 9 checks running silently on every action and every fix</summary>
 
 <br>
 
@@ -230,6 +266,8 @@ Run `/anvi:help` for the complete list.
 - 👁️ **Witness** — am I discriminating or reacting?
 - 🎯 **Completion** — is this good enough to ship?
 - 🧱 **Existence** — do I understand why this code exists?
+- ⚓ **Grounding** — is my claim about this system grounded in source code, or inferred?
+- 🧭 **Provenance** — does this information belong to the project I'm working in?
 - 🔬 **Observation** — did I run it, or just read it?
 - 🧾 **Completeness** — can I state the full argument? (behavioral changes only)
 - ⚡ **Reactivity** — is this fix driven by insight or urgency?
@@ -250,6 +288,9 @@ Run `/anvi:help` for the complete list.
 - `hetvabhasa.md` — error patterns (only from bugs diagnosed in one pass)
 - `vyapti.md` — validated invariants (confirmed by direct observation)
 - `krama.md` — lifecycle sequences (verified execution order)
+- `dharana.md` — where to focus: this project's boundaries, how each one fails silently, and what to observe there (derived from the other three)
+
+Each entry cites the code it describes. The catalogues live in a central store (`~/.anvideck/projects/<project>/.anvi`), and a project's `.anvi` is a link to it, so there is one copy however many checkouts you have ([`STORAGE.md`](STORAGE.md)).
 
 <details>
 <summary><b>🧵 Thinking trace</b> (Ctrl+O) — labeled reasoning phases</summary>
@@ -286,7 +327,7 @@ Projects built with the anvi cognitive OS:
 
 <table>
 <tr>
-<td align="center" width="33%"><img src="assets/stave.png" width="100%" alt="Stave"><br><b>Stave</b><br><sub>Music Studio</sub></td>
+<td align="center" width="33%"><img src="assets/stave.png" width="100%" alt="Stave"><br><b>Stave</b><br><sub>Music Studio · the first armed project</sub></td>
 <td align="center" width="33%"><img src="assets/FlipFace.jpg" width="100%" alt="FlipFace"><br><b>FlipFace</b><br><sub>Game</sub></td>
 <td align="center" width="33%"><img src="assets/DyzenAI.jpg" width="100%" alt="DyzenAI"><br><b>DyzenAI</b><br><sub>Website</sub></td>
 </tr>
