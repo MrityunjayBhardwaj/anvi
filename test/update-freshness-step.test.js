@@ -71,12 +71,14 @@ if (cmd) {
 
 console.log('\nthe changelog');
 const CHANGELOG = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
-const unreleased = (CHANGELOG.split(/^## \[/m)[0].split(/^## Unreleased — Armed$/m)[1]) || '';
-ok(unreleased, 'an unreleased section sits above the first version');
-ok(/state how fresh they are/.test(unreleased), 'it says delivered entries now state their freshness');
-ok(/Nothing is withheld/.test(unreleased) && /No migration is required/.test(unreleased),
+// The freshness change shipped in Armed, cut as 2026.10.0 (#701). Before the cut this
+// read an "Unreleased — Armed" section; the release section is now where it lives.
+const armed = (CHANGELOG.split(/^## \[2026\.10\.0\][^\n]*$/m)[1] || '').split(/^## \[/m)[0];
+ok(armed, 'the 2026.10.0 (Armed) section is in the changelog');
+ok(/state how fresh they are/.test(armed), 'it says delivered entries now state their freshness');
+ok(/Nothing is withheld/.test(armed) && /No migration is required/.test(armed),
   'and that nothing is withheld, so no migration');
-ok(!/\*\*MIGRATION REQUIRED\*\*/.test(unreleased), 'with no migration marker');
+ok(!/\*\*MIGRATION REQUIRED\*\*/.test(armed), 'with no migration marker');
 const list = spawnSync('bash', [path.join(ROOT, 'install.sh'), '--version-list'], { encoding: 'utf8' });
 ok(list.status === 0 && /VERSION\s+RELEASED/.test(list.stdout), 'the installer still lists versions');
 ok(!/Unreleased/i.test(list.stdout), 'and lists no phantom unreleased version');

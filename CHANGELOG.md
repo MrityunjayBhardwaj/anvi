@@ -11,11 +11,59 @@ matched as exact strings and `2026.8.0` would not find `2026.08.0`.
 Releases before `2026.08.0` used [semantic versioning](https://semver.org/) and keep
 the numbers they were published under.
 
-## Unreleased — Armed
+## [2026.10.0] — 2026-10-30
 
-Not yet a version: it gets a number when it is cut. The heading has no brackets on
-purpose, because the installer reads every bracketed heading as an installable
-release.
+Armed: the framework starts refusing. An edit that breaks a project's declared design is refused before it lands, and what decides a refusal can be locked so only the owner can change it.
+
+The release had one irreversible change, and its name was meant to be falsifiable: if
+it shipped and nothing was refused anywhere, the name would be wrong. It held up. On
+stave, the first armed project, the guard refused 2 edits out of 2 chances during the
+trial (2026-10-14 to 10-28), and the owner ruled both refusals right. Then the list of
+allowed rule breaks shrank for the first time, from 18 to 17. Moving a misplaced
+helper to its rightful owner exposed a test with a wrong mock order; the test was
+fixed instead of the design being bent. The full account is in issue #532.
+
+**No migration is required.** Run `./install.sh --sync` (or `/anvi:update`) to pick up
+the new hooks. Nothing is armed until you arm a package yourself.
+
+### The structure guard refuses what breaks a declared design
+
+- **Design as a component graph** (#554). A design names components (directories or
+  files) and which may import which. An import between two components the design
+  doesn't declare is refused at edit time, before the edit lands.
+- **Refuses only what an edit adds** (#545). Imports that already exist are listed in
+  a baseline and tolerated. The baseline names the design it was measured under, and
+  a mismatched pair is refused rather than judged (#535).
+- **Armed per package, and only after its graphs agree** (#450). Before arming, a
+  project's real past sessions can be replayed through the guard (#541). During a
+  trial, refusals are counted (#548), and an untested window can't read as a passed
+  one: the report counts chances to refuse (#604).
+- **Sees git worktrees** (#552). A guard that timed out is counted as not judged,
+  never as an applied edit.
+- **A repair can't be undone in silence** (#460). When a baselined import goes away,
+  you're told, along with the command that locks the repair in.
+- **Type-only imports** can be counted by a design that asks for it (#676).
+- **Imports written through the shell** are judged when a pull request is merged
+  through Claude Code (`gh pr merge`), and only for what the branch adds (#670). The
+  trial report judges the default branch whole, so nothing that landed by another
+  door goes uncounted (#669).
+- **A project's own boundary check can refuse**, not only watch (#606, #661). On
+  stave it has refused since 2026-10-29.
+- **Design changes are decided on evidence**: refusals per component pair per design
+  version, and what a proposed design would reclassify (#668).
+- **Removed: the "implied" rule** (#543). It refused imports a file genuinely needs.
+
+### What decides a refusal can be locked, so only the owner changes it
+
+- **Locked, per package, by the owner's choice** (#683). A locked package's design, baseline, check adapter and mode live in a
+  root-owned directory. The agent prepares a change; the owner reviews it and applies
+  it with their password, pinned to a digest of exactly what was reviewed.
+- **The review shows every field that changes**, not chosen ones (#684).
+- **One reviewed guard version is installed at a time**, with the owner's password
+  (#686).
+- **The lock runs on its own node, root never runs git, and the owner's commands
+  start from an empty environment** (#688), so nothing the agent can edit runs as
+  root.
 
 ### Delivered entries now state how fresh they are
 
@@ -43,6 +91,73 @@ that has not been re-checked is still delivered, with its state stated plainly n
 entries to read *drifted* or *never confirmed* at first. `/anvi:update` now prints
 each project's four counts so the numbers are seen there first, and
 `/anvi:currency` re-validates entries.
+
+### Drift has a direction, and a ceiling
+
+- **Each session must end with fewer drifted entries than it started with** (#679).
+  The start count is taken in the background at session start; the wrap compares
+  against it and says fewer, not fewer, or not measured, with the reason.
+- **A project past its drift ceiling re-validates one batch before the wrap** (#581).
+- **A freshness stamp counts only when its commit is on the trunk** (#643).
+
+### What the framework itself costs
+
+- **Every registered hook records what each run costs**, refusals included: bytes
+  injected and milliseconds (#587, #589).
+- **A report reads that meter** and says what each hook costs (#588). The wrap and the
+  session report state this session's cost (#594).
+- **Which workflows are read** is recorded, as a proxy for which commands run (#592).
+
+### Delivery: the right entries, by boundary, on time
+
+- **Every reader gets catalogue entries by boundary** (planning, debugging, Copilot),
+  and says what it left out (#624, #627, #630).
+- **Entries a prompt already names are delivered** instead of asked for in prose
+  (#387), including every entry inside an id range (#596).
+- **The context injector stops itself before its timeout** and names what it skipped
+  (#572). It had been timing out on about 15% of edits, silently.
+- **84 always-loaded rules for the moment of deciding** (#507), held to a stored
+  per-machine surface limit (#502, #504).
+- **Parsing is linear in the catalogue's size**, not quadratic (#569).
+
+### Copilot
+
+- **A Copilot compatibility layer**, and an installer that asks which integrations
+  to install. A Copilot-only install reads the catalogues by boundary, can run its
+  scripts, and removes retired hook files on `--migrate` (#630, #641, #645).
+
+### Checks that say when they could not look
+
+Many readers used to report "nothing found" when they had not looked. They now say so:
+
+- a git read that never answered is not a verdict, and is not cached (#570, #573, #575);
+- a falsification runner refuses to report a number it can't stand behind (#342);
+- a rate that would round real findings to zero states a bound instead (#493);
+- every live-state read says how much of its source it saw (#369).
+
+Also in this release:
+
+- assertions that wouldn't notice if their rule were deleted are found (#438, #481, #489);
+- a guard for the shell idioms zsh rewrites before a command sees them (#246);
+- closing keywords are read back before a description is published (#347, #362);
+- an issue goes on the board with its Status in one command (#367).
+
+### Removed
+
+- **The new-module rule** (#510). Measured, it flagged 85% of new files.
+- **The structure guard's "implied" rule** (#543).
+- **The GSD interop layer and its upstream sync** (#196, #240), and
+  `execute-plan.md`, whose gates already run in the executor (#337).
+
+### Known limits
+
+- **Shell edits are judged at merge, not at edit.** The edit-time guard judges the
+  Edit and Write tools. A file changed through a shell command is judged when its
+  pull request is merged through Claude Code. A merge on the GitHub web page runs no
+  hook; the default-branch report counts it afterwards.
+- **Shell edits get none of the notes about the files they change** (#697).
+- **The hook Claude Code runs is still the user's copy**, not the locked one (#681).
+  What decides a refusal is locked; the code that applies it is not yet.
 
 ## [2026.08.0] — 2026-08-01
 **MIGRATION REQUIRED** — run `/anvi:update`; until a project is bound, its catalogue reads are declined
