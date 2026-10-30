@@ -184,9 +184,9 @@ The guard refuses an edit that adds an import your design doesn't allow. It does
 | 1. **Declare the design** | Write a `design.json`: the `components` (each a set of `dirs` and `files`) and the `allowed` imports between them as `[from, to]` pairs. Format: [`ENFORCE.md` → Structure Guard](ENFORCE.md#structure-guard--the-edge-that-erodes-a-design-refused-only-when-it-is-new). |
 | 2. **Measure and take a baseline** | `node structure-guard.js --design design.json --package <dir> --write-baseline baseline.json` |
 | 3. **Replay real sessions first** | `node structure-replay.js --repo <git dir> --package <path> --design design.json --transcripts <dir> --since <commit>` lists what the guard *would* have refused, for you to rule on |
-| 4. **Arm** | `node structure-guard.js --design design.json --graph <depcruise.json> --package <dir> --arm --baseline baseline.json` registers the package, but only if two independent import graphs agree |
+| 4. **Arm** | `node structure-guard.js --design design.json --graph <depcruise.json> --package <dir> --arm --baseline baseline.json` registers the package, but only if two independent import graphs agree: the hook's own and [dependency-cruiser](https://github.com/sverweij/dependency-cruiser)'s (`depcruise --output-type json <src> > depcruise.json`) |
 | 5. **Read the trial** | `node structure-refusals.js --package <dir> --since <time>` counts every refusal and every chance to refuse, so an untested window can't read as a passed one |
-| 6. **Lock it** (optional) | `node structure-lock.js promote --package <dir>` shows every field that would change and prints a `sudo` command pinned to exactly what you reviewed. Once locked, what decides a refusal lives in a root-owned directory and changes only with your password. |
+| 6. **Lock it** (optional) | `node structure-lock.js promote --package <dir>` shows every field that would change and prints a `sudo` command pinned to exactly what you reviewed (or, until the lock's own node and installed copy exist, what is missing). Once locked, what decides a refusal lives in a root-owned directory and changes only with your password. |
 
 A refusal offers two remedies: change the code, or change the design, which is your decision. `structure-guard.js --proposed <design.json>` shows what a design change would reclassify, in both directions, before you make it. A merge through Claude Code (`gh pr merge`) is judged too, so imports written through the shell are caught at merge.
 
@@ -249,7 +249,7 @@ The everyday loop:
 | `/anvi:update` | Update to the latest (or a named) version: framework, hook registrations and every project's catalogues, in one idempotent pass |
 | `/anvi:settings` | Workflow toggles, model profile, and how long Claude Code keeps sessions |
 | `/anvi:health` | Diagnose the planning directory and optionally repair it |
-| `node scripts/meter-report.js` | What each hook costs: runs, bytes injected, milliseconds |
+| `node ~/.claude/anvi/scripts/meter-report.js` | What each hook costs: runs, bytes injected, milliseconds |
 
 Run `/anvi:help` for the complete list.
 
