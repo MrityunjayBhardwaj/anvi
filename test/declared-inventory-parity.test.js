@@ -148,5 +148,38 @@ console.log('\n— the workflow layer box lists exactly what is on disk —');
      (missing.length ? ` (on disk but unlisted: ${missing.join(', ')})` : ''));
 }
 
+// ── the base layer the README describes is the one that ships ────────────────
+// Part three (#708): the README said "7 checks" and listed seven for months after
+// Grounding and Provenance joined the base layer — the same hand-typed count of a growing
+// set. The set is the `###` headings under `## On Every Action` and `## On Every Fix` in
+// cognitive-os/base-layer.md; the interaction section is how Claude receives a user, not a
+// check on its own action, and the README never counted it.
+console.log('\n— the base layer the README describes is the one that ships —');
+
+{
+  const base = fs.readFileSync(path.join(ROOT, 'cognitive-os', 'base-layer.md'), 'utf8').split('\n');
+  const checks = [];
+  let inScope = false;
+  for (const l of base) {
+    if (l.startsWith('## ')) inScope = l === '## On Every Action' || l === '## On Every Fix';
+    else if (inScope && l.startsWith('### ')) checks.push(l.slice(4).replace(/ Check$/, ''));
+  }
+  ok(checks.length > 0, `base-layer.md has checks under its action and fix sections (found ${checks.length})`);
+
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const sites = [...readme.matchAll(/(\d+) (?:silent )?checks\b/g)]
+    .map(m => ({ num: Number(m[1]), line: readme.slice(0, m.index).split('\n').length }));
+  ok(sites.length > 0, `README states a base-layer check count this test can see (found ${sites.length})`);
+  const wrong = sites.filter(s => s.num !== checks.length);
+  ok(wrong.length === 0, `every base-layer count in README is ${checks.length}` +
+     (wrong.length ? ` — wrong: ${wrong.map(s => `l.${s.line} says ${s.num}`).join('; ')}` : ''));
+
+  // The names too, not only the count: the README's list could hold the right number of
+  // the wrong checks.
+  const missing = checks.filter(c => !new RegExp(`\\*\\*${c}\\*\\*`).test(readme));
+  ok(missing.length === 0, 'every shipped base-layer check is named in the README list' +
+     (missing.length ? ` (missing: ${missing.join(', ')})` : ''));
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} declared-inventory-parity: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
