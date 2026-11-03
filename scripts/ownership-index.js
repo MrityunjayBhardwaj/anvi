@@ -152,8 +152,10 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
   let identifiers = 0;
   for (const sf of files) {
     const visit = n => {
-      if (ts.isIdentifier(n) && !isDeclName(n) && !isImportSyntax(n) &&
-          !(n.parent && ts.isPropertyAccessExpression(n.parent) && n.parent.name === n)) {
+      // The name after a dot is indexed too: `R.loadGraph(…)` on a CommonJS require or an
+      // `import * as R` is a caller of the export `loadGraph`, and skipping it would read every
+      // such caller as none.
+      if (ts.isIdentifier(n) && !isDeclName(n) && !isImportSyntax(n)) {
         identifiers++;
         let sym = null;
         try { sym = ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n ? checker.getShorthandAssignmentValueSymbol(n.parent) : checker.getSymbolAtLocation(n); } catch { sym = null; }
@@ -204,8 +206,24 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       if (c.namedBindings && ts.isNamedImports(c.namedBindings))
         for (const el of c.namedBindings.elements) if (!el.isTypeOnly) bind(el.name, pkg, (el.propertyName || el.name).text, sf);
     }
-    // Dynamic imports: bound by position, by name, or by a `.then` parameter.
+    // Dynamic imports: bound by position, by name, or by a `.then` parameter. CommonJS `require`
+    // of a package is bound the same way: a name, a destructured name, or a member read in place.
     const visit = n => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'require' && n.arguments.length === 1 &&
+          ts.isStringLiteralLike(n.arguments[0]) && R.packageOf(n.arguments[0].text)) {
+        const rpkg = R.packageOf(n.arguments[0].text);
+        const up = unwrap(n), p = up.parent;
+        if (p && ts.isVariableDeclaration(p) && p.initializer === up && ts.isIdentifier(p.name)) bind(p.name, rpkg, null, sf);
+        else if (p && ts.isVariableDeclaration(p) && p.initializer === up && ts.isObjectBindingPattern(p.name)) {
+          for (const el of p.name.elements) if (ts.isIdentifier(el.name)) bind(el.name, rpkg, (el.propertyName || el.name).getText(), sf);
+        } else if (p && ts.isPropertyAccessExpression(p) && p.expression === up) {
+          const outer = unwrap(p);
+          const call = outer.parent && ts.isCallExpression(outer.parent) && outer.parent.expression === outer;
+          if (!call && outer.parent && ts.isVariableDeclaration(outer.parent) && outer.parent.initializer === outer && ts.isIdentifier(outer.parent.name))
+            bind(outer.parent.name, rpkg, p.name.text, sf);
+          else uses.push({ pkg: rpkg, member: p.name.text, kind: call ? 'call' : 'ref', file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n), fn: enclosing(n) });
+        } else unbound.push({ pkg: rpkg, site: site(sf, n) });
+      }
       const pkg = ts.isCallExpression(n) ? isImportCall(n) : null;
       if (pkg) {
         let bound = false;
@@ -360,22 +378,72 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     return out;
   };
 
+  // A module object of a corpus file (`const R = require('./x')`, `import * as R from './x'`):
+  // `R.name` is already a reference; `const { name } = R` (or `= require('./x')`) is followed by
+  // mapping the local name to the export; anything else that hands the module object on (a
+  // spread, an argument, a re-export through an object) is counted per file, because callers
+  // reached through it cannot be followed.
+  const viaDestructure = new Map();   // "<rel>|<export>" -> [local symbol]
+  const handedOn = new Map();         // rel -> count
+  const opts = program.getCompilerOptions();
+  const host = ts.createCompilerHost(opts);
+  const targetOf = (spec, sf) => { try { const r = ts.resolveModuleName(spec, sf.fileName, opts, host).resolvedModule; return r ? relOf(r.resolvedFileName) : null; } catch { return null; } };
+  const mapPattern = (pat, rel, sf) => {
+    for (const el of pat.elements) {
+      if (!ts.isIdentifier(el.name) || el.dotDotDotToken) { handedOn.set(rel, (handedOn.get(rel) || 0) + 1); continue; }
+      const local = symOfDecl(el.name); const k = `${rel}|${(el.propertyName || el.name).getText()}`;
+      if (local) { if (!viaDestructure.has(k)) viaDestructure.set(k, []); viaDestructure.get(k).push(local); }
+    }
+  };
+  const computedLoads = [];          // require(x) / import(x) with a non-literal argument
+  for (const sf of files) {
+    const visit = n => {
+      if (ts.isCallExpression(n) && n.arguments.length >= 1 && !ts.isStringLiteralLike(n.arguments[0]) &&
+          ((ts.isIdentifier(n.expression) && n.expression.text === 'require') || n.expression.kind === ts.SyntaxKind.ImportKeyword))
+        computedLoads.push({ site: site(sf, n), component: compOf(sf) });
+      let spec = null, holder = null;
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'require' && n.arguments.length === 1 && ts.isStringLiteralLike(n.arguments[0]) && !R.packageOf(n.arguments[0].text)) { spec = n.arguments[0].text; holder = unwrap(n).parent; }
+      if (ts.isImportDeclaration(n) && ts.isStringLiteralLike(n.moduleSpecifier) && !R.packageOf(n.moduleSpecifier.text) && n.importClause && n.importClause.namedBindings && ts.isNamespaceImport(n.importClause.namedBindings)) { spec = n.moduleSpecifier.text; holder = n.importClause.namedBindings; }
+      if (spec) {
+        const rel = targetOf(spec, sf);
+        if (rel) {
+          if (holder && ts.isVariableDeclaration(holder) && ts.isObjectBindingPattern(holder.name)) mapPattern(holder.name, rel, sf);
+          else if (holder && (ts.isVariableDeclaration(holder) || ts.isNamespaceImport(holder)) && ts.isIdentifier(holder.name)) {
+            const msym = symOfDecl(holder.name);
+            for (const { id } of refs.get(msym) || []) {
+              const u = unwrap(id), p = u.parent;
+              if (p && (ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) && p.expression === u) continue;
+              if (p && ts.isVariableDeclaration(p) && p.initializer === u && ts.isObjectBindingPattern(p.name)) { mapPattern(p.name, rel, sf); continue; }
+              handedOn.set(rel, (handedOn.get(rel) || 0) + 1);
+            }
+          } else if (holder && !(ts.isPropertyAccessExpression(holder))) handedOn.set(rel, (handedOn.get(rel) || 0) + 1);
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+
   const callersOf = rel => {
     const sf = program.getSourceFile(path.join(pkgDir, rel));
     if (!sf) return null;
-    const msym = checker.getSymbolAtLocation(sf);
-    if (!msym) return { exports: [] };
-    return { exports: checker.getExportsOfModule(msym).map(e => {
+    // A CommonJS file (`module.exports = …`) has no symbol at its location; its own symbol holds
+    // the exports. With neither, the answer is "could not look", never "no exports".
+    const msym = checker.getSymbolAtLocation(sf) || sf.symbol;
+    if (!msym) return { noModule: true, exports: [] };
+    return { handedOn: handedOn.get(rel) || 0, exports: checker.getExportsOfModule(msym).map(e => {
       const target = resolve(e);
-      const rs = (refs.get(target) || []).filter(r => r.sf !== sf);
+      const locals = viaDestructure.get(`${rel}|${e.name}`) || [];
+      const all = [...(refs.get(target) || []), ...locals.flatMap(l => refs.get(l) || [])];
+      const rs = all.filter(r => r.sf !== sf);
       const by = new Map();
       for (const r of rs) { const c = compOf(r.sf); const k = `${c}|${relOf(r.sf.fileName)}`; by.set(k, (by.get(k) || 0) + 1); }
-      return { name: e.name, refs: rs.length, inFile: (refs.get(target) || []).length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(),
+      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(),
         by: [...by].map(([k, n]) => { const [component, file] = k.split('|'); return { component, file, n }; }).sort((a, b) => a.component < b.component ? -1 : a.component > b.component ? 1 : a.file < b.file ? -1 : 1) };
     }).sort((a, b) => b.refs - a.refs || (a.name < b.name ? -1 : 1)) };
   };
 
-  return { program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf };
+  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf };
 }
 
 // ── the report ───────────────────────────────────────────────────────────────────────────────
@@ -429,6 +497,9 @@ function main(argv) {
   for (const [pkg, es] of groupBy(ix.escapes, e => e.pkg)) print(`    ${pkg}: ${es.length} — ${es.slice(0, 4).map(e => `${e.site} ${e.why}`).join('; ')}${es.length > 4 ? ' …' : ''}`);
   print(`  dynamic imports bound to nothing we follow: ${ix.unbound.length}`);
   for (const u of ix.unbound.slice(0, 10)) print(`    ${u.pkg} at ${u.site}`);
+  print(`  modules loaded by a computed path (require(x) / import(x), x not a literal): ${ix.computedLoads.length}` +
+    (ix.computedLoads.length ? ' — whatever they load, and every caller through it, is not followed' : ''));
+  for (const c of ix.computedLoads.slice(0, 10)) print(`    ${c.site} (${c.component})`);
   const escaped = ix.states.filter(s => s.escapes.length);
   print(`  module states that escape (returned, passed, stored): ${escaped.length} of ${ix.states.length}`);
 
@@ -491,12 +562,16 @@ function main(argv) {
     const r = ix.callersOf(rel);
     print('');
     if (!r) { print(`CALLERS — ${rel}: NOT IN THE PROGRAM (could not look)`); json.callers.push({ file: rel, found: false }); continue; }
+    if (r.noModule) { print(`CALLERS — ${rel}: COULD NOT LOOK — the type checker gives the file no module symbol, so its exports cannot be listed`); json.callers.push({ file: rel, found: true, couldNotLook: true }); continue; }
     const used = r.exports.filter(e => e.refs > 0).length;
     const unusedRe = r.exports.filter(e => !e.refs && e.reexportedBy.length).length;
     const unusedIn = r.exports.filter(e => !e.refs && !e.reexportedBy.length && e.inFile).length;
     const none = r.exports.length - used - unusedRe - unusedIn;
     print(`CALLERS — ${rel}: ${plural(r.exports.length, 'export')} = ${used} used from another corpus file + ${unusedRe} used by no other file but re-exported (public surface) + ` +
-      `${unusedIn} used only inside the file + ${none} referenced nowhere in the corpus`);
+      `${unusedIn} used only inside the file + ${none} referenced nowhere in the corpus` +
+      (r.handedOn ? ` — the module object is handed on at ${r.handedOn} site${r.handedOn === 1 ? '' : 's'} (spread, argument, rest)` : '') +
+      (ix.computedLoads.length ? ` — ${ix.computedLoads.length} module${ix.computedLoads.length === 1 ? ' is' : 's are'} loaded by a computed path` : '') +
+      (r.handedOn || ix.computedLoads.length ? '; callers through those are NOT counted, so every reference count here is AT LEAST' : ''));
     for (const e of r.exports) {
       const comps = [...new Set(e.by.map(b => b.component))];
       print(`    ${e.name}: ${e.refs} reference${e.refs === 1 ? '' : 's'} from ${plural(comps.length, 'component')}${comps.length ? ' — ' + e.by.map(b => `${b.component}:${b.file.split('/').pop()} ${b.n}`).join(', ') : ''}` +
