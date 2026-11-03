@@ -967,6 +967,12 @@ console.log('\nOWNER — a second toucher of an owned library is refused, a fram
   const dN = path.join(DIR, 'owner-design-none.json'); fs.writeFileSync(dN, JSON.stringify(noLedger));
   const rn = spawnSync(process.execPath, [GUARD, '--design', dN, '--graph', gF], { encoding: 'utf8' });
   ok(/ownership : the design has no ledger \("resources"\), so none of 11 package imports is judged/.test(rn.stdout), 'with no ledger, the report says no package import is judged, with the count');
+  const bOld = path.join(DIR, 'owner-baseline-old.json'); fs.writeFileSync(bOld, JSON.stringify({ rules: { divergence: [], cycle: [] } }));
+  const rnb = spawnSync(process.execPath, [GUARD, '--design', dN, '--graph', gF, '--baseline', bOld], { encoding: 'utf8' });
+  ok(/owner\s+: 0 of 0 examined — 0 grandfathered, 0 NEW/.test(rnb.stdout) && !/NOT JUDGED/.test(rnb.stdout),
+     'with no ledger and a baseline from before the rule, the owner line is an ordinary zero, not "not judged" (#725)');
+  const rlb = spawnSync(process.execPath, [GUARD, '--design', dF, '--graph', gF, '--baseline', bOld], { encoding: 'utf8' });
+  ok(/owner\s+: 2 of 8 examined — NOT JUDGED: the baseline has no "owner" section/.test(rlb.stdout), '... while a ledger design with that baseline says the rule was not judged');
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

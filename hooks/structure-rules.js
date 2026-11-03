@@ -510,7 +510,9 @@ function ratchet(results, baseline) {
   const out = {};
   for (const rule of RULES) {
     const found = results[rule].found;
-    if (SINCE[rule] && baseline && isObject(baseline.rules) && !(rule in baseline.rules)) {
+    // Only when the rule examined something: a design with no ledger gives it nothing to judge,
+    // and saying "not judged" there would ask for a regeneration that changes nothing (#725).
+    if (SINCE[rule] && results[rule].examined > 0 && baseline && isObject(baseline.rules) && !(rule in baseline.rules)) {
       out[rule] = { total: found.length, grandfathered: 0, fresh: [], fixed: [],
         unbaselined: `the baseline has no "${rule}" section (written before the rule, ${SINCE[rule]}), so ${found.length} ${rule} finding${found.length === 1 ? ' is' : 's are'} not judged — regenerating the baseline measures them` };
       continue;

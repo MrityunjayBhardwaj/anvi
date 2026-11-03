@@ -729,6 +729,10 @@ module.exports = { create: pkgDir => ({ id: 'owner-lines@1', configFiles: [],
   fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: { divergence: [], cycle: [] } }));
   const old = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), oreg);
   ok(old.decision === 'allow', `a baseline with no owner section does not refuse an owner finding (${old.decision})`);
+  ok(/has no "owner" section[\s\S]*1 owner finding is not judged[\s\S]*--write-baseline/.test(old.unbaselinedNotice || ''),
+     `... and says it did not judge it, with the command that would (#725): ${(old.unbaselinedNotice || 'no notice').split('\n')[0]}`);
+  const quiet = decide(oedit("export const b = a;", "export const b = a + 1;"), oreg);
+  ok(quiet.decision === 'allow' && !quiet.unbaselinedNotice, 'an edit after which the owner rule finds nothing gives no notice: there is nothing unjudged to speak of');
 
   // Through the installed hook's own process, as Claude Code runs it: the deny decision is what lands.
   fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: ORULES }));
@@ -737,6 +741,12 @@ module.exports = { create: pkgDir => ({ id: 'owner-lines@1', configFiles: [],
   ok(h.denied && /owner: src\/b\/b\.ts -> lib/.test(h.reason), `the hook process answers permissionDecision deny for the second toucher (exit ${h.exit})`);
   const hf = hook(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport React from 'fw';"));
   ok(!hf.denied && hf.exit === 0, `and allows the framework import (exit ${hf.exit})`);
+  // With the section missing, the hook process says so once per session, and not again (#725).
+  fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: { divergence: [], cycle: [] } }));
+  const u1 = hook({ ...oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), session_id: 'sess-unbaselined' });
+  const u2 = hook({ ...oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), session_id: 'sess-unbaselined' });
+  ok(!u1.denied && /has no "owner" section/.test(u1.context) && !/has no "owner" section/.test(u2.context),
+     `the hook process allows, says the owner rule was not judged once, then not again (first: ${u1.context ? 'said' : 'silent'}, second: ${u2.context ? 'said' : 'silent'})`);
   register();
 }
 

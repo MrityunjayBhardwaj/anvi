@@ -389,7 +389,14 @@ function evaluate(payload, deps) {
   const examined = { modules: built.graph.modules.size, edges: built.graph.edges.length, extracted: built.stats.extracted };
   // Only an ALLOWED edit reports repairs: a refused one never lands, so its graph is not the disk's.
   const fixed = R.RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key })));
-  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk,
+  // A rule the baseline predates found something it could not judge (#725): allowed, and SAID,
+  // so "not judged" is never read as "nothing found".
+  const unbaselined = R.RULES.filter(rule => ledger[rule].unbaselined && ledger[rule].total > 0).map(rule => ledger[rule].unbaselined);
+  const unbaselinedNotice = unbaselined.length
+    ? `structure guard: ${pkgName}: ${unbaselined.join('; ')}. Regenerating the baseline is the user's decision — ask them. This does it:\n` +
+      baselineCommand(home, owner.entry, false, worktree)
+    : null;
+  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk, unbaselinedNotice,
     notice: fixed.length ? fixedText(pkgName, fixed, home, owner.entry, worktree) : null,
     landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, home, owner.entry, worktree) : null,
     unmappedNotice: unmapped, unmappedKind: unmapped ? unmappedKind(owner.rel) : null };
@@ -800,7 +807,7 @@ if (require.main === module) {
           ? `structure guard: NOT MEASURED — ${result.why}. Edits made with it are not being checked; Write and Edit still are.`
           : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`]);
       if (result.decision === 'allow')
-        notices.push(['fixed', result.notice], ['landed', result.landedNotice], [result.unmappedKind, result.unmappedNotice]);
+        notices.push(['fixed', result.notice], ['landed', result.landedNotice], [result.unmappedKind, result.unmappedNotice], ['unbaselined', result.unbaselinedNotice]);
       if (row && row.notice) notices.push([row.noticeKind, row.notice]);
       noticesOnce(payload.session_id, notices.filter(([, t]) => t), STATE_DIR);
       process.exit(0);
