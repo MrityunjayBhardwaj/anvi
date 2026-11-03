@@ -647,6 +647,6 @@ function main(argv) {
 }
 
 // Re-exported so the report's tests and the rules' tests import one surface.
-module.exports = { ...R, compareGraphs, reclassify, checkoutAtRef, main };
+module.exports = { ...R, compareGraphs, analyserOptionProblem, reclassify, checkoutAtRef, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
