@@ -28,11 +28,19 @@
 // call (a branch switch moves mtimes, so touched files re-extract on their own). But a file
 // whose bytes did not change can still resolve DIFFERENTLY — a tsconfig edit, or a new file
 // shadowing an old target (`./foo` moving from `foo/index.ts` to a new `foo.ts`). So the whole
-// cache is also keyed on the extractor's identity, its config files' mtimes, and the list of
-// files; if any of those moved, everything is rebuilt.
+// cache is also keyed on the extractor's identity, its config files' mtimes, the list of
+// files, and the cache's own FORMAT (what an entry carries); if any of those moved, everything
+// is rebuilt.
 //
 // A PLUGGABLE EXTRACTOR. A registry entry may name a module exporting `create(pkgDir)`, which
-// returns `{ id, configFiles, edges(rel, content) }` or `{ notMeasured }`. The default is the
+// returns `{ id, configFiles, edges(rel, content) }` or `{ notMeasured }`, where `edges` returns
+// `{ edges, externals, unresolved, unresolvedTypes }`. `externals` (#710) holds every BARE
+// specifier — one that names a package, not a file — as `[specifier, runs, types, target]`:
+// runs/types are 'import', 'export' or null as for an edge, and target is the package-relative
+// file it resolved to, or null when it did not resolve or resolved into an external library.
+// The extractor does not know the design, so it does not decide; the rules do, by the same test
+// they apply to the analyser's records: a target inside the corpus is a path alias (an edge),
+// anything else is a package. An extractor may omit `externals`. The default is the
 // TypeScript one below. It is how this repo's tests stay hermetic — anvi ships no dependencies —
 // and the contract is the same one the TypeScript extractor meets.
 
@@ -118,7 +126,7 @@ function tsExtractor(pkgDir) {
   }
 
   function edges(rel, content) {
-    if (!compiles(rel)) return { edges: [], unresolved: 0 };
+    if (!compiles(rel)) return { edges: [], externals: [], unresolved: 0 };
     const abs = path.join(pkgDir, rel);
     const out = ts.transpileModule(content, {
       compilerOptions: { ...emitFree, module: ts.ModuleKind.ESNext, noEmit: false }, fileName: abs,
@@ -130,12 +138,27 @@ function tsExtractor(pkgDir) {
     // carry a compiled-away use — `import type { T } from './a'` beside `export { v } from './a'`
     // — and that use is what makes the edge a use rather than a re-export once types count.
     const found = new Map();                 // target -> { run: {use, reexport}, type: {use, reexport} }
+    const bare = new Map();                  // bare specifier -> { target, run, type } (#710)
     // An unresolved import that compiles away is counted apart (#677): under a design that does not
     // count type-only imports, a stale `import type` must not push the package toward NOT MEASURED.
     let unresolved = 0, unresolvedTypes = 0;
     for (const [spec, src] of source) {
       const run = runs.get(spec) || { use: false, reexport: false };
       const res = ts.resolveModuleName(spec, abs, opts, host, cache).resolvedModule;
+      // A bare specifier is handed on whatever it resolved to: a package when it did not resolve,
+      // resolved into a library, or landed outside the corpus; an edge when a path alias took it
+      // into the corpus. Which is decided by the rules, with the design. A bare specifier that
+      // fails to resolve never counts as unresolved — that count is for relative ones only.
+      if (R.packageOf(spec)) {
+        const target = res && !res.isExternalLibraryImport
+          ? path.relative(pkgDir, res.resolvedFileName).split(path.sep).join('/') : null;
+        if (target === rel) continue;
+        const e = bare.get(spec) || { target, run: { use: false, reexport: false }, type: { use: false, reexport: false } };
+        e.run.use ||= run.use; e.run.reexport ||= run.reexport;
+        e.type.use ||= src.use && !run.use; e.type.reexport ||= src.reexport && !run.reexport;
+        bare.set(spec, e);
+        continue;
+      }
       if (!res) { if (/^\.\.?\//.test(spec)) runs.has(spec) ? unresolved++ : unresolvedTypes++; continue; }
       if (res.isExternalLibraryImport) continue;
       const target = path.relative(pkgDir, res.resolvedFileName).split(path.sep).join('/');
@@ -146,12 +169,14 @@ function tsExtractor(pkgDir) {
       found.set(target, e);
     }
     const kind = m => m.use ? 'import' : m.reexport ? 'export' : null;
-    return { edges: [...found].map(([target, e]) => [target, kind(e.run), kind(e.type)]), unresolved, unresolvedTypes };
+    return { edges: [...found].map(([target, e]) => [target, kind(e.run), kind(e.type)]),
+             externals: [...bare].map(([spec, e]) => [spec, kind(e.run), kind(e.type), e.target]), unresolved, unresolvedTypes };
   }
 
   // The id names what an edge carries: a cache written before edges carried "type-only" holds
-  // none of them, and must be rebuilt rather than read as a graph with no type imports.
-  return { id: `typescript@${ts.version}+types`, configFiles: [...new Set(configFiles)], edges };
+  // none of them, and must be rebuilt rather than read as a graph with no type imports. Likewise
+  // `+externals`: a cache written before packages were recorded must not read as "imports none".
+  return { id: `typescript@${ts.version}+types+externals`, configFiles: [...new Set(configFiles)], edges };
 }
 
 function loadExtractor(entry, pkgDir) {
@@ -168,6 +193,11 @@ function edgeKinds(edge) {
   return [target, a || null, b || null];
 }
 
+// The cache entry's shape. Bumped when an entry starts carrying something an older one lacks
+// (2: `externals`, #710): a named extractor's id need not change when the builder's does, so the
+// format is in the key, and every older cache rebuilds instead of reading as "none of those".
+const CACHE_FORMAT = 2;
+
 const statOf = p => { try { const s = fs.statSync(p); return { mtimeMs: s.mtimeMs, size: s.size }; } catch { return null; } };
 
 // Build the graph. `proposed` is `{ rel, content }` for the file an edit would change, or null.
@@ -181,6 +211,7 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
   // would shadow another import's target is not seen until it lands, and then the file list
   // moves and everything rebuilds.
   const key = crypto.createHash('sha1').update(JSON.stringify({
+    format: CACHE_FORMAT,
     extractor: extractor.id,
     config: (extractor.configFiles || []).map(f => [f, statOf(f)]),
     files,
@@ -195,7 +226,8 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
 
   let extracted = 0, dirty = !cacheValid;
   const perFile = {};
-  const NONE = { edges: [], unresolved: 0, unresolvedTypes: 0 };
+  const NONE = { edges: [], externals: [], unresolved: 0, unresolvedTypes: 0 };
+  const entry = got => ({ edges: got.edges || [], externals: got.externals || [], unresolved: got.unresolved || 0, unresolvedTypes: got.unresolvedTypes || 0 });
   for (const rel of files) {
     if (proposed && rel === proposed.rel) continue;
     // Decided here, not left to each extractor: a file that compiles to nothing has no
@@ -208,7 +240,7 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
     const got = extractor.edges(rel, fs.readFileSync(path.join(pkgDir, rel), 'utf8'));
     extracted++;
     dirty = true;
-    perFile[rel] = cache.files[rel] = { ...st, edges: got.edges, unresolved: got.unresolved || 0, unresolvedTypes: got.unresolvedTypes || 0 };
+    perFile[rel] = cache.files[rel] = { ...st, ...entry(got) };
   }
   if (cachePath && dirty) {
     try {
@@ -220,13 +252,14 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
   }
   if (proposed) {
     const got = compiles(proposed.rel) ? extractor.edges(proposed.rel, proposed.content) : NONE;
-    perFile[proposed.rel] = { edges: got.edges, unresolved: got.unresolved || 0, unresolvedTypes: got.unresolvedTypes || 0 };
+    perFile[proposed.rel] = entry(got);
   }
 
   // A JSON file is a module only when something imports it (#599). One that code reads with
   // `fs` is data: the analyser never lists it, so listing it here made the two graphs disagree
   // on modules alone — 2 of 333 on the package this was found on — and blocked arming.
-  const imported = new Set(Object.values(perFile).flatMap(f => f.edges.map(([target]) => target)));
+  const imported = new Set(Object.values(perFile).flatMap(f => [
+    ...f.edges.map(([target]) => target), ...(f.externals || []).map(x => x[3]).filter(Boolean)]));
   const isModule = rel => !DATA.test(rel) || imported.has(rel);
 
   const cruise = { modules: Object.entries(perFile).filter(([source]) => isModule(source)).map(([source, f]) => ({
@@ -241,6 +274,18 @@ function buildGraph({ pkgDir, design, extractor, cachePath, proposed }) {
           ...(runs ? [record(['local', runs])] : []),
           // `type-only` is one of the marks the rules read as "compiled away" (COMPILED_AWAY).
           ...(types ? [record(['local', 'type-only', types])] : []),
+        ];
+      }),
+      // A bare specifier as the analyser records one: named by the specifier, resolved where the
+      // extractor found it (or not at all). `loadGraph` makes it a package or an alias edge by
+      // the same test it applies to the analyser's records, so the two cannot drift apart here.
+      ...(f.externals || []).flatMap(([spec, runs, types, target]) => {
+        const record = dependencyTypes => ({
+          module: spec, resolved: target || '', coreModule: false, couldNotResolve: !target, circular: false, dependencyTypes,
+        });
+        return [
+          ...(runs ? [record(['unknown', runs])] : []),
+          ...(types ? [record(['unknown', 'type-only', types])] : []),
         ];
       }),
       ...Array.from({ length: f.unresolved }, () => ({
