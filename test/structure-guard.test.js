@@ -868,6 +868,37 @@ module.exports = { create: (pkgDir, entry) => fs.existsSync(path.join(pkgDir, '.
   ok(leftovers() === before, `no temporary copy is left behind (${leftovers() - before} extra)`);
 }
 
+console.log('\nPackages a module imports (#710)');
+{
+  // Shapes as dependency-cruiser 17.4.3 writes them on a git archive (no node_modules): a package
+  // is unresolved with its bare specifier in `module`; a core module is `coreModule`; with
+  // node_modules present it resolves under node_modules. A path alias resolves into the corpus.
+  const dep = (module, extra) => ({ module, resolved: '', coreModule: false, couldNotResolve: false, dependencyTypes: ['local', 'import'], ...extra });
+  const cruise = { modules: [
+    { source: 'src/a.ts', dependencies: [
+      dep('react', { couldNotResolve: true, dependencyTypes: ['unknown'] }),
+      dep('@strudel/core/dist/x.mjs', { couldNotResolve: true, dependencyTypes: ['unknown'] }),
+      dep('node:fs', { coreModule: true, resolved: 'fs', dependencyTypes: ['core'] }),
+      dep('acorn', { resolved: 'node_modules/acorn/dist/acorn.mjs', dependencyTypes: ['npm'] }),
+      dep('@/b', { resolved: 'src/b.ts', dependencyTypes: ['aliased', 'import'] }),
+      dep('./b', { resolved: 'src/b.ts' }),
+      dep('typesonly', { couldNotResolve: true, dependencyTypes: ['unknown', 'pre-compilation-only'] }),
+    ] },
+    { source: 'src/b.ts', dependencies: [] },
+  ] };
+  const design = { root: 'src', components: { a: { files: ['a.ts'] }, b: { files: ['b.ts'] } }, allowed: [['a', 'b']] };
+  const g = G.loadGraph(cruise, design);
+  const pk = [...(g.externals.get('src/a.ts') || [])].sort();
+  ok(JSON.stringify(pk) === JSON.stringify(['@strudel/core', 'acorn', 'fs', 'react']),
+     `unresolved, core and node_modules specifiers are packages, keyed by bare name (${pk.join(', ')})`);
+  ok(g.edges.length === 1 && g.edges[0][1] === 'src/b.ts', `a path alias that resolves into the corpus stays an internal edge, not a package (${g.edges.length} edge)`);
+  ok(!g.externals.has('src/b.ts'), 'a module that imports no package has no entry');
+  ok(g.relative === 1 && g.unresolved === 0, `packages never count toward the relative/unresolved ratio (${g.unresolved} of ${g.relative})`);
+  const counted = G.loadGraph(cruise, { ...design, typeOnlyImports: 'count' });
+  ok(counted.externals.get('src/a.ts').has('typesonly'), 'a package named only by types is recorded when the design counts type-only imports');
+  ok(!g.externals.get('src/a.ts').has('typesonly'), '... and dropped when it does not, like an internal type-only edge');
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);

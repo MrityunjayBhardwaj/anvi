@@ -278,6 +278,18 @@ const DESIGN_OWED_AT = 3;
 
 // ── the graph ────────────────────────────────────────────────────────────────────────
 
+// The package a bare specifier names, as the ledger keys it (#710): `node:` dropped (a core
+// module is one package whichever way it is spelled), a query dropped (`x?worker`), and the
+// sub-path cut — a scoped name keeps two segments (`@strudel/core/x` → `@strudel/core`), any
+// other keeps one (`monaco-editor/esm/vs/…` → `monaco-editor`). Null for a relative or absolute
+// specifier: those name files, not packages.
+function packageOf(spec) {
+  const s = String(spec || '').replace(/^node:/, '').replace(/[?#].*$/, '');
+  if (!s || s.startsWith('.') || s.startsWith('/')) return null;
+  const parts = s.split('/');
+  return s.startsWith('@') ? (parts.length > 1 && parts[1] ? `${parts[0]}/${parts[1]}` : null) : parts[0];
+}
+
 function loadGraph(cruise, design) {
   const root = design.root ? design.root.replace(/\/+$/, '') + '/' : '';
   const excludes = design.excludes || [];
@@ -289,6 +301,9 @@ function loadGraph(cruise, design) {
   const adj = new Map([...modules].map(s => [s, new Set()]));
   const runtime = new Map([...modules].map(s => [s, new Set()]));   // the edges that survive compilation
   const used = new Set();                   // edges at least one record USES, rather than only re-exports
+  // The packages each module imports (#710), by bare specifier: an archive has no node_modules,
+  // so a package is often unresolved, and the specifier is the one fact both producers share.
+  const externals = new Map();
   let relative = 0, unresolved = 0;
 
   for (const m of listed) {
@@ -307,6 +322,15 @@ function loadGraph(cruise, design) {
         relative++;
         if (d.couldNotResolve) unresolved++;
       }
+      // A bare specifier that does not land in the corpus is a package: unresolved, a core
+      // module, anything under node_modules, or a file outside the root. One that resolves into
+      // the corpus (a tsconfig path alias) is an internal edge, below.
+      const pkg = packageOf(d.module);
+      if (pkg && (d.couldNotResolve || d.coreModule || !d.resolved || String(d.resolved).split('/').includes('node_modules') || !inCorpus(d.resolved))) {
+        if (!externals.has(m.source)) externals.set(m.source, new Set());
+        externals.get(m.source).add(pkg);
+        continue;
+      }
       if (!modules.has(d.resolved) || d.resolved === m.source) continue;
       adj.get(m.source).add(d.resolved);
       if (!typeOnly) runtime.get(m.source).add(d.resolved);
@@ -320,7 +344,7 @@ function loadGraph(cruise, design) {
   // Cycles are computed, never read from an analyser's flag: dependency-cruiser's flag counts a
   // cycle through types, which nothing runs, and a graph built without the analyser has no flag.
   const circular = onCycle(runtime);
-  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved };
+  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved, externals };
 }
 
 // Why the input cannot support a verdict, or null when it can. A CLEAN ZERO IS NOT A PASS:
@@ -468,6 +492,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
-  KINDS, REACHES, INSTRUMENTS, gatekeeperOf,
+  KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, judge, ratchet, planBaseline,
 };
