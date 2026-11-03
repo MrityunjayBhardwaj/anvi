@@ -84,13 +84,33 @@ fs.writeFileSync(BASE, JSON.stringify({ designId: ID, rules: { divergence: [], c
 const HELD = path.join(DIR, 'baseline-held.json');
 fs.writeFileSync(HELD, JSON.stringify({ designId: ID, rules: { divergence: ['src/low/a.ts -> src/high/h.ts'], cycle: ['src/low/a.ts -> src/high/h.ts', 'src/high/h.ts -> src/low/a.ts'] } }));
 
-// ── a fake gh: answers `pr view` from env, logs every call ──────────────────────────────────────
+// ── a fake gh: answers `pr view` from env and `api repos/<o>/<n>` from a table, logs every call ──
+// The table is GitHub's id for each spelling: Acme/Widget was renamed Acme/Gadget, so both answer
+// 101, as GitHub's redirect does; Someone/Else is another repository; anything else is a 404.
+// On a locked machine the locked registry's packages are in force in every case here, so their
+// checkouts' spellings are given ids of their own: real repositories that are none of these.
+const LOCKED_MACHINE = (() => { const d = require(path.join(ROOT, 'hooks', 'structure-lock.js')).LOCK_DIRS[process.platform]; return !!(d && fs.existsSync(d)); })();
+const IDS = { 'acme/widget': [101, 'Acme/Gadget'], 'acme/gadget': [101, 'Acme/Gadget'], 'someone/else': [202, 'Someone/Else'] };
+if (LOCKED_MACHINE) {
+  const inForce = require(path.join(ROOT, 'hooks', 'structure-lock.js')).registryInForce({ home: path.join(DIR, 'no-home') });
+  (inForce ? inForce.packages : []).forEach((e, i) => {
+    const key = M.repoKey(git(e.dir, 'config', '--get', 'remote.origin.url').stdout);
+    if (key && !IDS[key]) IDS[key] = [900 + i, key];
+  });
+}
 const BIN = path.join(DIR, 'bin'), CALLS = path.join(DIR, 'gh-calls.log');
 fs.mkdirSync(BIN);
-fs.writeFileSync(path.join(BIN, 'gh'), `#!/bin/sh
-echo "$*" >> "${CALLS}"
-if [ -n "$FAKE_GH_FAIL" ]; then echo "$FAKE_GH_FAIL" >&2; exit 1; fi
-printf '{"number":%s,"headRefOid":"%s","headRefName":"feat","baseRefName":"%s","state":"OPEN"}' "\${FAKE_NUMBER:-7}" "$FAKE_HEAD" "\${FAKE_BASE:-main}"
+fs.writeFileSync(path.join(BIN, 'gh'), `#!${process.execPath}
+const a = process.argv.slice(2), e = process.env;
+require('fs').appendFileSync(${JSON.stringify(CALLS)}, a.join(' ') + '\\n');
+if (a[0] === 'api') {
+  if (e.FAKE_API_FAIL) { process.stderr.write(e.FAKE_API_FAIL + '\\n'); process.exit(1); }
+  const hit = (${JSON.stringify(IDS)})[a[1].replace(/^repos\\//, '').toLowerCase()];
+  if (!hit) { process.stdout.write('{"message":"Not Found","status":"404"}'); process.stderr.write('gh: Not Found (HTTP 404)\\n'); process.exit(1); }
+  process.stdout.write(hit[0] + ' ' + hit[1] + '\\n'); process.exit(0);
+}
+if (e.FAKE_GH_FAIL) { process.stderr.write(e.FAKE_GH_FAIL + '\\n'); process.exit(1); }
+process.stdout.write(JSON.stringify({ number: Number(e.FAKE_NUMBER || 7), headRefOid: e.FAKE_HEAD, headRefName: 'feat', baseRefName: e.FAKE_BASE || 'main', state: 'OPEN' }));
 `);
 fs.chmodSync(path.join(BIN, 'gh'), 0o755);
 
@@ -98,10 +118,12 @@ const HOME = path.join(DIR, 'home');
 fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true });
 const REG = path.join(HOME, '.claude', 'structure-guard.json');
 const ROWS = path.join(HOME, '.claude', 'structure-guard-cache', 'merges.jsonl');
+const IDENTITIES = path.join(HOME, '.claude', 'structure-guard-cache', 'repo-identity.json');
 const register = (over = {}) => fs.writeFileSync(REG, JSON.stringify({ packages: [{
   dir: PKG, design: DESIGN, baseline: BASE, designId: ID, extractor: EX, ...over }] }));
 
 const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
+const prCalls = cs => cs.filter(c => !c.startsWith('api '));
 const rows = () => { try { return fs.readFileSync(ROWS, 'utf8').split('\n').filter(Boolean).map(JSON.parse); } catch { return []; } };
 const REGS_TIMEOUT = () => require(path.join(ROOT, 'scripts', 'register-hooks.cjs')).REGISTRATIONS.find(r => r[2] === 'structure-merge-hook.js')[3];
 function fire(command, { head = ERODING, env = {}, cwd = DIR } = {}) {
@@ -140,10 +162,18 @@ console.log('THE COMMAND IS READ AS THE SHELL WOULD SPLIT IT:');
 console.log('\nINERT UNLESS ASKED:');
 {
   const none = fire('gh pr merge 7 --repo Acme/Widget --squash');
-  ok(none.exit === 0 && none.raw === '' && none.calls.length === 0, `no registry: silent, and gh is never called (exit ${none.exit}, ${none.calls.length} calls)`);
+  if (LOCKED_MACHINE) ok(none.exit === 0 && none.raw === '' && prCalls(none.calls).length === 0 && !rows().length,
+    `no user registry (this machine is locked, so its locked packages are still in force): silent, no row, no pull request read (exit ${none.exit}, calls ${JSON.stringify(none.calls)})`);
+  else ok(none.exit === 0 && none.raw === '' && none.calls.length === 0, `no registry: silent, and gh is never called (exit ${none.exit}, ${none.calls.length} calls)`);
   register();
+  fs.rmSync(IDENTITIES, { force: true });
   const other = fire('gh pr merge 7 --repo Someone/Else --squash');
-  ok(other.exit === 0 && other.raw === '' && other.calls.length === 0, `a repository no registered package lives in: silent, and no network call (${other.calls.length} gh calls)`);
+  ok(other.exit === 0 && other.raw === '' && prCalls(other.calls).length === 0 && other.calls.includes('api repos/someone/else --jq "\\(.id) \\(.full_name)"') && !rows().length,
+     `a repository no registered package lives in: silent, no row, and only GitHub's id for it is asked (calls ${JSON.stringify(other.calls)})`);
+  const again = fire('gh pr merge 7 --repo Someone/Else --squash');
+  ok(again.exit === 0 && again.raw === '' && again.calls.length === 0, `asked once: the same merge again makes no network call (${again.calls.length} gh calls)`);
+  const nowhere = fire('gh pr merge 7 --repo No/Such --squash');
+  ok(nowhere.exit === 0 && nowhere.raw === '' && !rows().length, 'a repository GitHub says does not exist: silent, no row');
   const notMerge = fire('gh pr view 7 --repo Acme/Widget');
   ok(notMerge.exit === 0 && notMerge.raw === '' && notMerge.calls.length === 0, 'a command with no `gh pr merge` in it is not judged');
 }
@@ -229,11 +259,11 @@ console.log('\nCOULD NOT LOOK IS NEVER NOTHING FOUND:');
   ok(absent.exit === 0 && /is not in .*fetching pull\/7\/head did not bring it/.test(absent.notice), 'a head that is not local and cannot be fetched is not measured');
   register({ designId: '000000000000' });
   const moved = fire('gh pr merge 7 --repo Acme/Widget');
-  ok(moved.exit === 0 && new RegExp(`the design on disk is ${ID}, but the package was armed under 000000000000`).test(moved.notice) && moved.calls.length === 0,
+  ok(moved.exit === 0 && new RegExp(`the design on disk is ${ID}, but the package was armed under 000000000000`).test(moved.notice) && prCalls(moved.calls).length === 0,
      'a design edited since arming is not judged, and says which ids differ');
   register();
   const expanded = fire('gh pr merge $(gh pr list -q .[0].number) --repo Acme/Widget');
-  ok(expanded.exit === 0 && /written as `\$\(gh pr list/.test(expanded.notice) && expanded.calls.length === 0,
+  ok(expanded.exit === 0 && /written as `\$\(gh pr list/.test(expanded.notice) && prCalls(expanded.calls).length === 0,
      'a pull request the shell would compute is not guessed at: not measured, and said');
   register({ extractor: path.join(DIR, 'no-such-extractor.js') });
   const blind = fire('gh pr merge 7 --repo Acme/Widget');
@@ -245,6 +275,56 @@ console.log('\nCOULD NOT LOOK IS NEVER NOTHING FOUND:');
   register();
   const garbage = spawnSync(process.execPath, [HOOK], { input: 'not json{{', encoding: 'utf8', env: { ...process.env, HOME } });
   ok(garbage.status === 0 && garbage.stdout === '', 'unreadable input is silent and exits 0');
+}
+
+console.log('\nTHE SAME REPOSITORY, NOT THE SAME SPELLING (#705):');
+{
+  // The checkout's origin still names Acme/Widget; the merge names the repository by its new name.
+  register();
+  fs.rmSync(IDENTITIES, { force: true });
+  fs.rmSync(ROWS, { force: true });
+  const renamed = fire('gh pr merge 7 --repo Acme/Gadget --squash');
+  const row = rows().pop() || {};
+  ok(renamed.exit === 2 && renamed.denied && row.outcome === 'refused' && row.repo === 'acme/gadget' && row.package === PKG,
+     `a merge written with the new name of the checkout's repository is judged — refused, with a row (exit ${renamed.exit}, row ${JSON.stringify(row).slice(0, 120)})`);
+  ok(renamed.calls.includes('api repos/acme/gadget --jq "\\(.id) \\(.full_name)"') && renamed.calls.includes('api repos/acme/widget --jq "\\(.id) \\(.full_name)"'),
+     `both spellings were resolved to GitHub's id (calls ${JSON.stringify(renamed.calls)})`);
+  const warm = fire('gh pr merge 7 --repo Acme/Gadget --squash', { head: CLEAN });
+  ok(warm.exit === 0 && (rows().pop() || {}).outcome === 'clean' && warm.calls.every(c => !c.startsWith('api ')),
+     `remembered: the next merge into it asks GitHub for no id (calls ${JSON.stringify(warm.calls)})`);
+  const cache = JSON.parse(fs.readFileSync(IDENTITIES, 'utf8'));
+  ok(cache['acme/gadget'].id === 101 && cache['acme/widget'].fullName === 'Acme/Gadget', 'the cache records the id and the name GitHub serves it under');
+
+  // The lookup cannot be made: the merge is not judged, and says so — never the silence of "not registered".
+  fs.rmSync(IDENTITIES, { force: true });
+  fs.rmSync(ROWS, { force: true });
+  const offline = fire('gh pr merge 7 --repo Acme/Gadget --squash', { env: { FAKE_API_FAIL: 'error connecting to api.github.com' } });
+  const blindRow = rows().find(r => r.package === PKG) || {};
+  ok(offline.exit === 0 && !offline.denied && new RegExp(`NOT MEASURED — this merge was allowed without being judged: could not tell whether acme/gadget is the repository ${PKG.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} is a checkout of \\(its origin names acme/widget\\): \`gh api repos/acme/gadget\` did not answer: error connecting`).test(offline.notice),
+     `an id that cannot be looked up: NOT MEASURED, said on the merge, exit 0 (${offline.notice.slice(0, 200)})`);
+  ok(blindRow.outcome === 'not-measured' && /could not tell whether acme\/gadget/.test(blindRow.why || ''), `and recorded (${JSON.stringify(blindRow).slice(0, 160)})`);
+  ok(!fs.existsSync(IDENTITIES) || !JSON.parse(fs.readFileSync(IDENTITIES, 'utf8'))['acme/gadget'], 'a failed lookup is not remembered as an answer');
+
+  // A week later a spelling is asked again: it may name another repository by then.
+  let clock = 0;
+  const asked = [];
+  const run = (cmd, args) => {
+    if (cmd === 'git') return { status: 0, stdout: 'git@github.com:Acme/Widget.git\n' };
+    if (cmd === 'gh' && args[0] === 'api') { asked.push(args[1]); return { status: 0, stdout: `${args[1] === 'repos/acme/gadget' ? 101 : 555} x/y\n` }; }
+    return { status: 1, stdout: '', stderr: 'not in this test' };
+  };
+  const store = new Map([['acme/gadget', { id: 202, fullName: 'Someone/Else', at: 0 }], ['acme/widget', { id: 202, fullName: 'Someone/Else', at: 0 }]]);
+  const identityCache = { get: k => store.get(k), set: (k, v) => store.set(k, v) };
+  const deps = { registry: () => ({ packages: [{ dir: PKG, design: DESIGN, baseline: BASE, designId: '000000000000' }] }), run, rules: R,
+    readFile: f => fs.readFileSync(f, 'utf8'), guardScript: HOOK, now: () => clock, started: 0, identityCache };
+  const payload = { cwd: DIR, tool_name: 'Bash', tool_input: { command: 'gh pr merge 7 --repo Acme/Gadget' } };
+  clock = M.IDENTITY_TTL_MS - 1;
+  const fresh = M.evaluate(payload, { ...deps, started: clock });
+  ok(asked.length === 0 && fresh.rows.length === 1 && fresh.rows[0].package === PKG, `inside the week the remembered ids answer (asked ${JSON.stringify(asked)})`);
+  clock = M.IDENTITY_TTL_MS + 1;
+  const stale = M.evaluate(payload, { ...deps, started: clock });
+  ok(asked.includes('repos/acme/gadget') && asked.includes('repos/acme/widget') && stale.rows.length === 0,
+     `past it both are asked again, and the new answer (two repositories) is the one used (asked ${JSON.stringify(asked)}, rows ${stale.rows.length})`);
 }
 
 console.log('\nIT STOPS INSIDE ITS OWN TIMEOUT (#671):');
