@@ -230,6 +230,16 @@ console.log('\nALLOWED — each release paired with what was examined:');
   const od = decide(edit('src/low/a.test.ts', "export const t = 1;\n", "import { up } from '../top/t';\n"), registryNow());
   ok(outside.exit === 0 && od.why === 'outside the package corpus', 'an excluded file is not judged, and says why');
 
+  // A declaration file is judged (#726): what it names is an import, whatever it compiles to.
+  const declUp = decide(write('src/low/types.d.ts', "import { up } from '../top/t';\nexport declare const x: typeof up;\n"), registryNow());
+  ok(declUp.decision === 'deny' && /src\/low\/types\.d\.ts -> src\/top\/t\.ts/.test(JSON.stringify(declUp.fresh)),
+     `a declaration file that imports upward is refused, not passed as "compiles to nothing" (got ${declUp.decision}: ${declUp.why || ''})`);
+  const declDown = decide(write('src/mid/types.d.ts', "import { a } from '../low/a';\nexport declare const x: typeof a;\n"), registryNow());
+  ok(declDown.decision === 'allow' && declDown.examined && declDown.examined.edges >= 1,
+     `one importing along a declared edge is judged and passes (got ${declDown.decision}: ${declDown.why || ''})`);
+  const data = decide(write('src/low/table.json', '{"up":"../top/t"}\n'), registryNow());
+  ok(data.decision === 'allow' && data.why === 'a file that is not a script carries no imports', `a JSON module is not judged, and says why (got ${data.why})`);
+
   const absent = edit('src/low/a.ts', 'NOT IN THE FILE', "import { up } from '../top/t';\n");
   ok(hook(absent).exit === 0 && decide(absent, registryNow()).why === 'edit shape not judged',
      'an Edit whose old_string does not match is allowed, not guessed at');

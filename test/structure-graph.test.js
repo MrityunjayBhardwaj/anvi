@@ -120,6 +120,28 @@ console.log('\nA JSON FILE IS A MODULE ONLY WHEN IMPORTED (#599):');
      `an edit that STARTS importing a JSON file makes it a module in that same build (got ${edgeKeys(starts.graph).join(', ')})`);
 }
 
+console.log('\nA DECLARATION FILE IS READ (#726) — what it names compiles away, but it names packages:');
+{
+  const pkg = path.join(DIR, 'declpkg');
+  const write = (rel, text) => { const f = path.join(pkg, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  write('tsconfig.json', '{}');
+  write('src/a.ts', 'export const a = 1;\n');
+  write('src/env.d.ts', '/// <reference types="vite/client" />\n');
+  write('src/table.json', '{"a":1}\n');
+  const seen = [];
+  const recording = { id: 'recording@1', configFiles: [], edges: rel => {
+    seen.push(rel);
+    return rel === 'src/env.d.ts' ? { edges: [], externals: [['vite/client', null, 'import', null]], unresolved: 0 } : { edges: [], unresolved: 0 };
+  } };
+  const r = S.buildGraph({ pkgDir: pkg, design, extractor: recording, cachePath: null });
+  ok(seen.includes('src/env.d.ts') && !seen.includes('src/table.json'),
+     `a declaration file is handed to the extractor, a JSON module is not (handed ${seen.join(', ')})`);
+  ok([...(r.graph.externals.get('src/env.d.ts') || [])].join() === 'vite',
+     `and the package it references reaches the graph (got ${JSON.stringify([...r.graph.externals].map(([m, p]) => [m, [...p]]))})`);
+  ok(S.extracts('src/env.d.ts') && S.extracts('src/a.tsx') && !S.extracts('src/table.json') && !S.compiles('src/env.d.ts'),
+     'a declaration file is read but not compiled; a JSON module is neither');
+}
+
 console.log('\nTHE CACHE — reused per file, rebuilt when resolution could have moved:');
 {
   const warm = build();
@@ -309,7 +331,7 @@ console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS
     const ex = S.tsExtractor(P3);
     const got = rel => Object.fromEntries(ex.edges(rel, fs.readFileSync(path.join(P3, rel), 'utf8')).edges.map(([t, run, type]) => [t, [run, type]]));
     const a = got('src/a.ts'), sR = got('src/s.ts');
-    ok(!ex.notMeasured && /\+types\+externals$/.test(ex.id), `the extractor runs on TypeScript ${ex.id} and names that edges carry type-only marks and packages`);
+    ok(!ex.notMeasured && /\+types\+externals\+forms$/.test(ex.id), `the extractor runs on TypeScript ${ex.id} and names that edges carry type-only marks, packages, and the forms of #726`);
     ok(JSON.stringify(a['src/t.ts']) === '[null,"import"]', `\`import type\` compiled away (got ${JSON.stringify(a['src/t.ts'])})`);
     ok(JSON.stringify(a['src/u.ts']) === '[null,"import"]', `an import whose names are only used as types compiled away (got ${JSON.stringify(a['src/u.ts'])})`);
     ok(JSON.stringify(a['src/q.ts']) === '[null,"import"]', `\`typeof import('./q')\` in a type is a compiled-away use (got ${JSON.stringify(a['src/q.ts'])})`);
@@ -327,6 +349,67 @@ console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS
     ok(shown === '[["react","import",null,null],["node:fs","import",null,null],["pkg",null,"import",null],["@scope/x/sub","import",null,null]]' &&
        p.unresolved === 0 && p.unresolvedTypes === 0,
        `bare specifiers come out as packages, the type-only one marked compiled away, none counted unresolved (got ${shown})`);
+
+    // THE FORMS OF #726, each read the way dependency-cruiser 17.4.3 records it (observed on a fixture,
+    // 2026-11-03, TypeScript 5.9.3, tsPreCompilationDeps "specify").
+    const all = (ex2, pkg, rel) => ex2.edges(rel, fs.readFileSync(path.join(pkg, rel), 'utf8'));
+    const byTarget = r => Object.fromEntries(r.edges.map(([t, run, type]) => [t, [run, type]]));
+    // `import x = require('…')`: under an ESM module setting the analyser marks every one
+    // pre-compilation-only, value use or not — TypeScript drops the form from ESM output.
+    const EQ = "import fs = require('fs');\nimport rel = require('./v');\nimport T = require('./t');\n" +
+               "export const e = [fs, rel];\nexport let t: T.T | undefined;\n";
+    put3('src/eq.ts', EQ);
+    const eq = all(ex, P3, 'src/eq.ts'), eqE = byTarget(eq);
+    ok(JSON.stringify(eqE['src/v.ts']) === '[null,"import"]' && JSON.stringify(eqE['src/t.ts']) === '[null,"import"]' &&
+       JSON.stringify(eq.externals) === '[["fs",null,"import",null]]',
+       `\`import x = require\` is read, and under module ESNext compiled away, value use or not (got ${JSON.stringify(eqE)} ${JSON.stringify(eq.externals)})`);
+    // Under CommonJS it compiles to a require that runs when its name is a value — and only then.
+    const P4 = path.join(DIR, 'pkg-cjs');
+    fs.mkdirSync(path.join(P4, 'node_modules'), { recursive: true });
+    fs.symlinkSync(tsDir, path.join(P4, 'node_modules', 'typescript'));
+    for (const f of ['src/t.ts', 'src/v.ts']) { fs.mkdirSync(path.join(P4, 'src'), { recursive: true }); fs.copyFileSync(path.join(P3, f), path.join(P4, f)); }
+    fs.writeFileSync(path.join(P4, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2020', module: 'commonjs', moduleResolution: 'node10', strict: true } }));
+    fs.writeFileSync(path.join(P4, 'src/eq.ts'), EQ);
+    const exC = S.tsExtractor(P4);
+    const eqC = all(exC, P4, 'src/eq.ts'), eqCE = byTarget(eqC);
+    ok(JSON.stringify(eqCE['src/v.ts']) === '["import",null]' && JSON.stringify(eqC.externals) === '[["fs","import",null,null]]',
+       `under module commonjs, a value \`import x = require\` runs (got ${JSON.stringify(eqCE['src/v.ts'])} ${JSON.stringify(eqC.externals)})`);
+    ok(JSON.stringify(eqCE['src/t.ts']) === '[null,"import"]',
+       `and one whose name is only a type still compiles away (got ${JSON.stringify(eqCE['src/t.ts'])})`);
+
+    // Triple-slash references: compiled-away uses, though the output keeps them as comments.
+    put3('src/refs.ts', '/// <reference path="./t.ts" />\n/// <reference path="./v" />\n/// <reference types="node" />\n' +
+                        '/// <reference lib="es2020" />\n/// <reference path="./gone.ts" />\nexport { v } from \'./v\';\n');
+    const refs = all(ex, P3, 'src/refs.ts'), refsE = byTarget(refs);
+    ok(JSON.stringify(refsE['src/t.ts']) === '[null,"import"]',
+       `\`/// <reference path>\` is a compiled-away use of the file (got ${JSON.stringify(refsE['src/t.ts'])})`);
+    ok(JSON.stringify(refsE['src/v.ts']) === '["export","import"]',
+       `a path given without its extension resolves, and keeps its own record beside a re-export of the same file (got ${JSON.stringify(refsE['src/v.ts'])})`);
+    ok(JSON.stringify(refs.externals) === '[["node",null,"import",null]]',
+       `\`/// <reference types>\` is a compiled-away package import; \`lib\` records nothing (got ${JSON.stringify(refs.externals)})`);
+    ok(refs.unresolved === 0 && refs.unresolvedTypes === 1 && Object.keys(refsE).length === 2,
+       `a reference to a missing file is a broken compiled-away import (got ${refs.unresolved}/${refs.unresolvedTypes}, ${Object.keys(refsE).join(', ')})`);
+    // A declaration file is read from its source alone, all of it compiled away.
+    put3('src/decl.d.ts', '/// <reference types="node" />\nimport type { T } from \'./t\';\nimport { v } from \'./v\';\nexport declare const d: [T, typeof v];\n');
+    const decl = all(ex, P3, 'src/decl.d.ts'), declE = byTarget(decl);
+    ok(JSON.stringify(declE) === '{"src/t.ts":[null,"import"],"src/v.ts":[null,"import"]}' && JSON.stringify(decl.externals) === '[["node",null,"import",null]]',
+       `a declaration file's imports and references are read, none of them run (got ${JSON.stringify(declE)} ${JSON.stringify(decl.externals)})`);
+
+    // A workspace package linked into node_modules that lands in the corpus is an edge, by its
+    // path, as the analyser judges it; a library installed in node_modules stays a package.
+    put3('src/wspkg/package.json', JSON.stringify({ name: '@ws/pkg', main: 'index.ts', types: 'index.ts' }));
+    put3('src/wspkg/index.ts', 'export const ws = 1;\n');
+    fs.mkdirSync(path.join(P3, 'node_modules', '@ws'), { recursive: true });
+    fs.symlinkSync('../../src/wspkg', path.join(P3, 'node_modules', '@ws', 'pkg'));
+    put3('node_modules/reallib/package.json', JSON.stringify({ name: 'reallib', types: 'index.d.ts' }));
+    put3('node_modules/reallib/index.d.ts', 'export declare const real: number;\n');
+    put3('src/ws.ts', "import { ws } from '@ws/pkg';\nimport { real } from 'reallib';\nexport const w = [ws, real];\n");
+    const wsx = all(ex, P3, 'src/ws.ts');
+    ok(JSON.stringify(wsx.externals) === '[["@ws/pkg","import",null,"src/wspkg/index.ts"],["reallib","import",null,"node_modules/reallib/index.d.ts"]]',
+       `a linked workspace package is handed on with its real path, a library with its node_modules one (got ${JSON.stringify(wsx.externals)})`);
+    const wsG = S.buildGraph({ pkgDir: P3, design, extractor: ex, cachePath: null }).graph;
+    ok(edgeKeys(wsG).includes('src/ws.ts -> src/wspkg/index.ts') && [...(wsG.externals.get('src/ws.ts') || [])].join() === 'reallib',
+       `so the rules make the linked one an edge and the library a package (got ${[...(wsG.externals.get('src/ws.ts') || [])].join()})`);
   }
 }
 

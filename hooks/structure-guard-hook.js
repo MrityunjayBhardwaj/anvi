@@ -342,7 +342,8 @@ function evaluate(payload, deps) {
     `is the user's decision — ask them. This does it${owner.entry.designId ? ', then re-arm with --arm' : ''}:\n${baselineCommand(home, owner.entry, false, worktree)}` };
 
   if (!S.inCorpus(owner.rel, design)) return { decision: 'allow', why: 'outside the package corpus' };
-  if (!S.compiles(owner.rel)) return { decision: 'allow', why: 'a file that compiles to nothing carries no imports' };
+  // A declaration file is judged (#726): `/// <reference types="…" />` in it imports a package.
+  if (!S.extracts(owner.rel)) return { decision: 'allow', why: 'a file that is not a script carries no imports' };
 
   const content = proposedContent(tool, { ...input, file_path: abs }, readFile);
   if (content === null) return { decision: 'allow', why: 'edit shape not judged' };
