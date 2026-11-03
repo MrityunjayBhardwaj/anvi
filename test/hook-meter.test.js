@@ -183,6 +183,29 @@ console.log('\na real refusal is counted as refused');
   eq((got[0] || {}).bytes, Buffer.byteLength(r.stdout), 'bytes = its stdout, the deny it wrote');
 }
 
+console.log('\na hook that says its own test turned the call away is counted as skipped (#706)');
+{
+  // A stand-in hook: calls skip() when asked to, and writes when asked to — so skip-and-silent,
+  // skip-then-output and no-skip are three runs of one program, told apart only by the meter.
+  const stub = path.join(tmp, 'skipper.js');
+  fs.writeFileSync(stub, `const m = require(${JSON.stringify(HOOK('hook-meter.js'))});
+m.start('skipper.js', 'PreToolUse'); m.session(process.env.SID);
+if (process.env.SKIP) m.skip(process.env.SKIP);
+if (process.env.SAY) process.stdout.write(process.env.SAY);
+process.exit(0);
+`);
+  const go = (sid, env) => { spawnSync(process.execPath, [stub], { encoding: 'utf8', env: { ...process.env, ANVI_METER_DIR: METER, SID: sid, ...env } }); return rows(sid)[0] || {}; };
+  const skipped = go('skip-silent', { SKIP: 'not-a-merge' });
+  ok(skipped.outcome === 'skipped' && skipped.why === 'not-a-merge' && skipped.bytes === 0 && !('skip' in skipped),
+    `skip() and nothing written: skipped, with why (${JSON.stringify(skipped)})`);
+  const spoke = go('skip-spoke', { SKIP: 'not-a-merge', SAY: '{"hookSpecificOutput":{"additionalContext":"x"}}' });
+  ok(spoke.outcome === 'informed' && !('why' in spoke) && !('skip' in spoke), `skip() then output: what was written decides — informed (${JSON.stringify(spoke)})`);
+  const plain = go('no-skip', {});
+  ok(plain.outcome === 'silent' && !('why' in plain), `no skip(): silent, as before (${JSON.stringify(plain)})`);
+  const M = require(HOOK('hook-meter.js'));
+  ok(M.OUTCOMES.includes('skipped') && typeof M.skip === 'function', 'skipped is one of the outcomes a report must accept');
+}
+
 console.log('\nthe module is shared, not hook-shaped');
 {
   const src = fs.readFileSync(HOOK('hook-meter.js'), 'utf8');

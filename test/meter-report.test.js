@@ -43,6 +43,12 @@ fs.writeFileSync(path.join(DIR, 'sB.jsonl'), [
   '{"ts": "truncated',
   row('sB', 'gate.js', 500, 60, 'refused', '2026-09-30T09:02:00Z'),
 ].join('\n') + '\n');
+// Session C: a hook whose own test turned two calls away and judged one (#706).
+fs.writeFileSync(path.join(DIR, 'sC.jsonl'), [
+  JSON.stringify({ ts: '2026-09-28T11:00:00Z', sid: 'sC', hook: 'merge.js', event: 'X', bytes: 0, ms: 40, outcome: 'skipped', why: 'not-a-merge' }),
+  JSON.stringify({ ts: '2026-09-28T11:01:00Z', sid: 'sC', hook: 'merge.js', event: 'X', bytes: 0, ms: 42, outcome: 'skipped', why: 'not-a-merge' }),
+  row('sC', 'merge.js', 0, 2400, 'silent', '2026-09-28T11:02:00Z'),
+].join('\n') + '\n');
 
 const run = (...args) => spawnSync(process.execPath, [REPORT, '--dir', DIR, ...args], { encoding: 'utf8' });
 
@@ -51,7 +57,7 @@ console.log('\nthe whole directory');
   const r = run();
   eq(r.status, 0, 'exit 0 when there are rows');
   const out = r.stdout;
-  ok(/7 runs in 2 sessions/.test(out), 'the population: runs and sessions');
+  ok(/10 runs in 3 sessions/.test(out), 'the population: runs and sessions');
   ok(/2026-09-28T10:00:00Z → 2026-09-30T09:02:00Z/.test(out), 'the window, first to last row');
   ok(out.includes(DIR), 'the directory it read');
   ok(/killed from outside/.test(out), 'says what the rows cannot contain');
@@ -60,7 +66,10 @@ console.log('\nthe whole directory');
     'a broken line and an unknown outcome are each counted, with their file named');
   const inj = out.split('\n').find(l => l.startsWith('inj.js')) || '';
   ok(/\b5\b/.test(inj), 'injector: 5 runs');
-  ok(/2 silent · 3 informed · 0 refused/.test(inj), 'the split sums to the runs, zeros printed');
+  ok(/2 silent · 3 informed · 0 refused · 0 skipped/.test(inj), 'the split sums to the runs, zeros printed');
+  const merge = out.split('\n').find(l => l.startsWith('merge.js')) || '';
+  ok(/\b3 runs\b/.test(merge) && /1 silent · 0 informed · 0 refused · 2 skipped/.test(merge),
+    `runs the hook's own test turned away are counted apart from the silent run that did its work (${merge.trim()})`);
   ok(/6000 B/.test(inj), 'total bytes 6000');
   ok(/median informed 2000 B/.test(inj), 'median bytes of an informed run');
   ok(/p50 200 ms/.test(inj), 'p50 time (nearest rank of 50,100,200,300,400)');
@@ -81,9 +90,11 @@ console.log('\nfilters');
   ok(/since 2026-09-29/.test(since.stdout), 'and says it filtered');
   const j = run('--json');
   let d = null; try { d = JSON.parse(j.stdout); } catch { /* below */ }
-  ok(d && d.runs === 7 && d.sessions === 2 && d.unreadable === 2, '--json carries the population');
+  ok(d && d.runs === 10 && d.sessions === 3 && d.unreadable === 2, '--json carries the population');
   const h = d && d.hooks && d.hooks['inj.js'];
-  ok(h && h.runs === 5 && h.bytes === 6000 && h.p95_ms === 400 && h.silent === 2, '--json carries the per-hook figures');
+  ok(h && h.runs === 5 && h.bytes === 6000 && h.p95_ms === 400 && h.silent === 2 && h.skipped === 0, '--json carries the per-hook figures');
+  const mj = d && d.hooks && d.hooks['merge.js'];
+  ok(mj && mj.runs === 3 && mj.silent === 1 && mj.skipped === 2, '--json carries the skipped count');
 }
 
 console.log('\narguments that would filter wrongly are refused');
