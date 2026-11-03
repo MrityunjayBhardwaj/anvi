@@ -30,7 +30,31 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install TypeScript for the gated tests (outside the checkout)
+        # Some cases run only when STRUCTURE_TS_FROM names a directory TypeScript 5
+        # resolves from; without it they print NOT MEASURED / SKIPPED and a change that
+        # breaks them passes here. anvi ships no dependency, so TypeScript goes into a
+        # throwaway directory under the runner's temp, never into the repo: no
+        # package.json, no lockfile, no node_modules in the checkout. Pinned to the
+        # version the extractor's agreement was measured on (5.9.3); bump it on purpose.
+        # Install scripts are off: nothing from the registry runs at install time.
+        run: npm install --prefix "$RUNNER_TEMP/ts" --no-save --no-package-lock --ignore-scripts --no-audit --no-fund typescript@5.9.3
+
+      - name: Check the gated tests will run, not skip
+        # The tests resolve `typescript/package.json` from STRUCTURE_TS_FROM and SKIP
+        # when it is missing, which in a log reads like a pass. So the gate is opened
+        # here and checked here: if the install moved or the version drifted, this step
+        # fails by name instead of the suite going quietly green over skipped cases.
+        env:
+          STRUCTURE_TS_FROM: ${{ runner.temp }}/ts
+        run: >-
+          node -e "const p=require.resolve('typescript/package.json',{paths:[process.env.STRUCTURE_TS_FROM]});
+          const v=require(p).version; console.log('TypeScript '+v+' resolves from '+process.env.STRUCTURE_TS_FROM+' ('+p+')');
+          if(v!=='5.9.3'){console.error('expected TypeScript 5.9.3, got '+v);process.exit(1)}"
+
       - name: Run the suite
         # The runner discovers its own list and fails on an untracked test file, so
         # nothing here needs updating when a test is added.
+        env:
+          STRUCTURE_TS_FROM: ${{ runner.temp }}/ts
         run: node scripts/run-tests.js
