@@ -592,17 +592,16 @@ function main(argv) {
     const abs = path.join(pkgDir, args.refresh);
     if (!fs.existsSync(abs)) return stop(`--refresh names ${args.refresh}, which does not exist`);
     const before = new Map(ix.program.getSourceFiles().map(sf => [sf.fileName, sf]));
-    // The file's content is unchanged: its mtime is moved forward and back, so the measured tree
-    // ends exactly as it began.
-    const st0 = fs.statSync(abs);
-    const later = new Date(st0.mtimeMs + 1000); fs.utimesSync(abs, later, later);
+    // The measured tree is never written to, not even a timestamp: restoring an mtime through a
+    // Date loses its sub-millisecond part, and anything keyed on mtime would then see the file as
+    // changed. The file is made to look changed to this run alone, by dropping it from the cache.
+    for (const k of [...cache.keys()]) if (path.resolve(k) === abs) cache.delete(k);
     const t1 = Date.now();
     const again = build({ ts: T.ts, pkgDir, design, oldProgram: ix.program, cache });
-    fs.utimesSync(abs, st0.atime, st0.mtime);
     const ms = Date.now() - t1;
     const reused = again.program.getSourceFiles().filter(sf => before.get(sf.fileName) === sf).length;
     print('');
-    print(`REFRESH — after ${args.refresh} moved: ${ms} ms (cold was ${buildMs} ms); ${reused} of ${again.program.getSourceFiles().length} parsed files reused, ` +
+    print(`REFRESH — after ${args.refresh} is re-read as if changed: ${ms} ms (cold was ${buildMs} ms); ${reused} of ${again.program.getSourceFiles().length} parsed files reused, ` +
       `${again.program.getSourceFiles().length - reused} re-parsed; every reference re-resolved by the checker`);
     json.instrument.refreshMs = ms;
   }
