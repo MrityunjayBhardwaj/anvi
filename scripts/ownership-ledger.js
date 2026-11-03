@@ -27,8 +27,8 @@
 // violation: C must reach the library through O, which needs the edge C -> O. So a declared pair
 // [C, O] is DERIVABLE FROM LIBRARY OWNERSHIP when some row of kind library, owned by O (a ruled row
 // in the design, or a row proposed here), is imported by at least one examined module of C. A pair
-// that is not derivable but carries at least one examined internal edge is CONSUMPTION — PENDING
-// V1 (it may derive from state, syntax, registry or door ownership, which only the symbol
+// that is not derivable but carries at least one examined internal edge is CONSUMPTION, PENDING
+// LEDGER v1 (it may derive from state, syntax, registry or door ownership, which only the symbol
 // extractor, #647, can see). A pair with no code edge and no derivation is an ABSENCE. The three
 // are taken in that order, so each pair is counted once and the parts sum to the pairs declared.
 //
