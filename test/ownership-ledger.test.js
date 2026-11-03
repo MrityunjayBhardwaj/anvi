@@ -89,7 +89,7 @@ const HEADS = ['INSTRUMENT', 'TOUCHERS', 'PROPOSED ROWS', 'DERIVATION', 'REQUIRE
 let at = -1, inOrder = true;
 for (const h of HEADS) { const i = r.out.search(new RegExp(`^${h.replace(/[,]/g, '\\$&')}`, 'm')); if (i < 0 || i < at) inOrder = false; at = i; ok(i >= 0, `section ${h} printed`); }
 ok(inOrder, 'the sections print in the specified order');
-ok(/type-only\s+ignored/.test(r.out) && r.out.includes(`id ${R.designId(DESIGN)}`), 'INSTRUMENT names the type-only policy and the design id');
+ok(/type-only\s+a package named only by types is a toucher under every design[^\n]*internal type-only edges are not counted/.test(r.out) && r.out.includes(`id ${R.designId(DESIGN)}`), 'INSTRUMENT names the type-only policy and the design id');
 
 const summary = section(r.out, 'SUMMARY', 'PROPOSAL');
 ok(/packages imported by corpus modules: 6 = 1 single-toucher \(owner proposed\) \+ 1 multi-toucher \(couldn't tell\) \+ 1 framework \+ 2 already ruled \+ 1 not examined/.test(summary),

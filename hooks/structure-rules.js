@@ -318,6 +318,20 @@ function loadGraph(cruise, design) {
       // The analyser marks a specifier nothing of which survives `pre-compilation-only`, but an
       // `import type` beside a value import of the same file carries only `type-only` — and
       // left in, it would turn a re-export into a use.
+      // A bare specifier that does not land in the corpus is a package: unresolved, a core
+      // module, anything under node_modules, or a file outside the root. One that resolves into
+      // the corpus (a tsconfig path alias) is an internal edge, below. A package is recorded
+      // WHATEVER the type-only policy: the analyser never marks an unresolved package as compiled
+      // away (0 of 773 bare-specifier records on stave's archive at c26ca5e7, 2026-11-03), so the
+      // policy could only be applied by one producer, and the graphs would disagree on every
+      // `import type` of a package. A type import also ties a component to the library's shape,
+      // which is what ownership is about.
+      const pkg = packageOf(d.module);
+      if (pkg && (d.couldNotResolve || d.coreModule || !d.resolved || String(d.resolved).split('/').includes('node_modules') || !inCorpus(d.resolved))) {
+        if (!externals.has(m.source)) externals.set(m.source, new Set());
+        externals.get(m.source).add(pkg);
+        continue;
+      }
       const types = d.dependencyTypes || [];
       const typeOnly = COMPILED_AWAY.some(t => types.includes(t));
       if (typeOnly && !counting) continue;
@@ -326,15 +340,6 @@ function loadGraph(cruise, design) {
       if (/^\.\.?\//.test(d.module || '')) {
         relative++;
         if (d.couldNotResolve) unresolved++;
-      }
-      // A bare specifier that does not land in the corpus is a package: unresolved, a core
-      // module, anything under node_modules, or a file outside the root. One that resolves into
-      // the corpus (a tsconfig path alias) is an internal edge, below.
-      const pkg = packageOf(d.module);
-      if (pkg && (d.couldNotResolve || d.coreModule || !d.resolved || String(d.resolved).split('/').includes('node_modules') || !inCorpus(d.resolved))) {
-        if (!externals.has(m.source)) externals.set(m.source, new Set());
-        externals.get(m.source).add(pkg);
-        continue;
       }
       if (!modules.has(d.resolved) || d.resolved === m.source) continue;
       adj.get(m.source).add(d.resolved);

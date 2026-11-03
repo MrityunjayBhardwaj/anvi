@@ -8,7 +8,7 @@
 // the design, and a row the design already carries is a ruling it never overwrites.
 //
 // It reads the graph through the shared `loadGraph` (hooks/structure-rules.js), so the touchers it
-// counts are the ones the guard would judge: the same corpus, the same type-only policy, the same
+// counts are the ones the guard would judge: the same corpus, the same rule for type-only imports, the same
 // package keys (`packageOf`).
 //
 // Usage:
@@ -224,7 +224,7 @@ function report(s, ctx, print) {
   print(`  graph         ${ctx.graphPath}${ctx.optionUsed !== undefined ? ` (analyser tsPreCompilationDeps: ${JSON.stringify(ctx.optionUsed)})` : ''}`);
   print(`  design        ${ctx.designPath} — id ${ctx.designId}${ctx.versionNote ? ` (${ctx.versionNote})` : ''}`);
   print(`  date          ${ctx.date}`);
-  print(`  type-only     ${ctx.typeOnly === 'count' ? 'counted: a package named only by types is a toucher' : 'ignored: a package named only by types is not a toucher (the design does not count type-only imports)'}`);
+  print(`  type-only     a package named only by types is a toucher under every design (the analyser cannot mark a package import as compiled away); internal type-only edges are ${ctx.typeOnly === 'count' ? 'counted' : 'not counted'}`);
   print(`  corpus        ${plural(ctx.graph.modules.size, 'module')} under '${ctx.graph.root}'; ${plural(ctx.graph.modules.size - s.div.unmapped.length, 'mapped to a component', 'mapped to a component')}, ${s.div.unmapped.length} unmapped`);
   if (ctx.frameworks.size) print(`  --framework   ${[...ctx.frameworks].sort().join(', ')} (a ruling passed on the command line)`);
 

@@ -891,14 +891,17 @@ console.log('\nPackages a module imports (#710)');
   const design = { root: 'src', components: { a: { files: ['a.ts'] }, b: { files: ['b.ts'] } }, allowed: [['a', 'b']] };
   const g = G.loadGraph(cruise, design);
   const pk = [...(g.externals.get('src/a.ts') || [])].sort();
-  ok(JSON.stringify(pk) === JSON.stringify(['@strudel/core', 'acorn', 'fs', 'react']),
+  ok(JSON.stringify(pk) === JSON.stringify(['@strudel/core', 'acorn', 'fs', 'react', 'typesonly']),
      `unresolved, core and node_modules specifiers are packages, keyed by bare name (${pk.join(', ')})`);
   ok(g.edges.length === 1 && g.edges[0][1] === 'src/b.ts', `a path alias that resolves into the corpus stays an internal edge, not a package (${g.edges.length} edge)`);
   ok(!g.externals.has('src/b.ts'), 'a module that imports no package has no entry');
   ok(g.relative === 1 && g.unresolved === 0, `packages never count toward the relative/unresolved ratio (${g.unresolved} of ${g.relative})`);
   const counted = G.loadGraph(cruise, { ...design, typeOnlyImports: 'count' });
-  ok(counted.externals.get('src/a.ts').has('typesonly'), 'a package named only by types is recorded when the design counts type-only imports');
-  ok(!g.externals.get('src/a.ts').has('typesonly'), '... and dropped when it does not, like an internal type-only edge');
+  // Recorded under either policy (2026-11-03): dependency-cruiser marked 0 of 773 bare-specifier
+  // records on stave's archive as compiled away, so a policy on packages could be applied by one
+  // producer only, and the agreement check would fail on every `import type` of a package.
+  ok(g.externals.get('src/a.ts').has('typesonly'), 'a package named only by types is recorded when the design does not count type-only imports');
+  ok(counted.externals.get('src/a.ts').has('typesonly'), '... and when it does');
 }
 
 console.log('\nOWNER — a second toucher of an owned library is refused, a framework import is not (#710)');

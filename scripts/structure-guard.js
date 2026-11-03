@@ -542,7 +542,7 @@ function main(argv) {
   // does not look for them (#605).
   print(graph.typeOnlyImports === 'count'
     ? `  type-only imports: counted — ${graph.typeOnly.size} of ${graph.edges.length} edges name only types (judged as divergences, left out of cycles)`
-    : '  type-only imports: not counted — the design does not set "typeOnlyImports": "count", so an import that only names types is not in this graph');
+    : '  type-only imports: not counted — the design does not set "typeOnlyImports": "count", so an import between modules that only names types is not in this graph (a package import is recorded either way)');
   if (!baseline) print('  no baseline given — every violation counts as new');
   else if (frame.unstamped) print('  the baseline names no design (written before designs were identified) — ' +
     'it is judged as given; regenerating it stamps the design in force');

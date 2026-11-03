@@ -232,14 +232,16 @@ console.log('\nPACKAGES — the bare specifiers a module imports, as the analyse
   const COUNT = { ...IGNORE, typeOnlyImports: 'count' };
   const pk = g => [...(g.externals.get('src/a.ts') || [])].sort().join();
   const g = S.buildGraph({ pkgDir: P4, design: IGNORE, extractor: ext, cachePath: null }).graph;
-  ok(pk(g) === '@app/outside,@scope/x,fs,monaco-editor,react',
+  ok(pk(g) === '@app/outside,@scope/x,fs,monaco-editor,only-types,react',
      `packages are keyed by package — sub-path cut, node: dropped, a target outside the corpus a package (got ${pk(g)})`);
   const of = x => x.externals.get('src/a.ts') || new Set();
   ok(g.adj.get('src/a.ts').has('src/alias.ts') && of(g).has('react') && !of(g).has('@app/alias'),
      `a bare specifier a path alias resolves INTO the corpus is an edge, not a package (got ${edgeKeys(g).join(', ')})`);
-  ok(of(g).has('react') && !of(g).has('only-types'), `a type-only package import is dropped when type-only imports are not counted, beside one that runs (got ${pk(g)})`);
+  // A package is recorded whatever the type-only policy: the analyser cannot mark an unresolved
+  // package as compiled away, so only a policy both producers can apply keeps them agreeing.
+  ok(of(g).has('only-types'), `a type-only package import is a package import even when type-only imports are not counted (got ${pk(g)})`);
   const gc = S.buildGraph({ pkgDir: P4, design: COUNT, extractor: ext, cachePath: null }).graph;
-  ok(of(gc).has('only-types'), `and is a package import when they are counted (got ${pk(gc)})`);
+  ok(pk(gc) === pk(g), `and the same packages when they are counted (got ${pk(gc)})`);
   ok(g.unresolved === 0 && g.relative === 1, `bare specifiers never count toward unresolved or relative (${g.unresolved} of ${g.relative})`);
 
   const bare = { id: 'bare@1', configFiles: [], edges: rel => ({ edges: rel === 'src/a.ts' ? [['src/b.ts', 'import', null]] : [], unresolved: 0 }) };
