@@ -99,7 +99,7 @@ function makeProgram(ts, pkgDir, rootFiles, oldProgram, cache) {
     const options = { ...parsed.options, noEmit: true };
     return { program: ts.createProgram({ rootNames: names, options, oldProgram, host: cachingHost(ts, options, cache) }), config: cfg };
   }
-  const options = { allowJs: true, checkJs: false, noEmit: true, target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS,
+  const options = { allowJs: true, checkJs: false, noEmit: true, target: ts.ScriptTarget.Latest, module: ts.ModuleKind.CommonJS,
     moduleResolution: ts.ModuleResolutionKind.Node10, esModuleInterop: true };
   return { program: ts.createProgram({ rootNames: rootFiles, options, oldProgram, host: cachingHost(ts, options, cache) }), config: null };
 }

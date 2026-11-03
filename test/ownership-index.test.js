@@ -191,7 +191,7 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
     ok(/CALLERS — src\/absent\.ts: NOT IN THE PROGRAM \(could not look\)/.test(r.out), 'a file not in the program is could-not-look, not "no callers"');
 
     console.log('\n  REFRESH:');
-    const m = r.out.match(/REFRESH — after src\/ws\/registry\.ts moved: \d+ ms \(cold was \d+ ms\); (\d+) of (\d+) parsed files reused, (\d+) re-parsed/);
+    const m = r.out.match(/REFRESH — after src\/ws\/registry\.ts is re-read as if changed: \d+ ms \(cold was \d+ ms\); (\d+) of (\d+) parsed files reused, (\d+) re-parsed/);
     ok(m && Number(m[3]) === 1 && Number(m[1]) === Number(m[2]) - 1, `exactly the one file is re-parsed, the rest reused (${m ? m[0].replace(/^.*\); /, '') : 'no REFRESH line'})`);
     ok(mtimeAfter === mtimeBefore, `the refreshed file's mtime is unchanged afterwards (before ${mtimeBefore}, after ${mtimeAfter})`);
 
