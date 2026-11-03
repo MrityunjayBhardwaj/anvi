@@ -176,7 +176,9 @@ console.log('\nNO IMPLIED RULE — a direct import of something also reachable a
   const d = design({ a: { files: ['x/a.ts'] }, b: { files: ['x/b.ts'] }, c: { files: ['x/c.ts'] } }, [['a', 'b'], ['a', 'c'], ['b', 'c']]);
   const g = G.loadGraph(cruise({ 'src/x/a.ts': ['src/x/b.ts', 'src/x/c.ts'], 'src/x/b.ts': ['src/x/c.ts'], 'src/x/c.ts': [] }), d);
   const j = G.judge(g, d);
-  ok(Object.keys(j).join() === 'divergence,cycle' && G.RULES.join() === 'divergence,cycle', `the rules are divergence and cycle only (${Object.keys(j).join()})`);
+  // The owner rule joined in #710; a design with no ledger gives it nothing to find.
+  ok(Object.keys(j).join() === 'divergence,cycle,owner' && G.RULES.join() === 'divergence,cycle,owner', `the rules are divergence, cycle and owner (${Object.keys(j).join()})`);
+  ok(j.owner.found.length === 0 && j.owner.examined === 0, 'a design with no ledger: the owner rule examines nothing and finds nothing');
   ok(j.divergence.examined === 3 && j.divergence.found.length === 0 && j.cycle.found.length === 0,
      `the diamond is examined and nothing is found (${j.divergence.examined} edges examined)`);
   ok(G.impliedEdges === undefined && G.witness === undefined && G.layerViolations === undefined && G.layerOf === undefined,
@@ -279,7 +281,7 @@ console.log('\nTHE RATCHET — only what the baseline does not already hold is r
   const d = LOWMID();
   const OLD = 'src/low/a.ts -> src/mid/m.ts', NEW = 'src/low/b.ts -> src/mid/m.ts', GONE = 'src/low/c.ts -> src/mid/m.ts';
   const g = G.loadGraph(cruise({ 'src/low/a.ts': ['src/mid/m.ts'], 'src/low/b.ts': ['src/mid/m.ts'], 'src/low/c.ts': [], 'src/mid/m.ts': [] }), d);
-  const results = { divergence: G.divergences(g, d), cycle: G.cycleEdges(g) };
+  const results = { divergence: G.divergences(g, d), cycle: G.cycleEdges(g), owner: G.owners(g, d) };
   const led = G.ratchet(results, { rules: { divergence: [OLD, GONE] } });
   ok(keys(results.divergence).includes(OLD) && led.divergence.grandfathered === 1 && !led.divergence.fresh.some(f => f.key === OLD),
      'a violation the baseline holds is grandfathered — and it IS a violation, so the silence is the ratchet\'s');
@@ -897,6 +899,71 @@ console.log('\nPackages a module imports (#710)');
   const counted = G.loadGraph(cruise, { ...design, typeOnlyImports: 'count' });
   ok(counted.externals.get('src/a.ts').has('typesonly'), 'a package named only by types is recorded when the design counts type-only imports');
   ok(!g.externals.get('src/a.ts').has('typesonly'), '... and dropped when it does not, like an internal type-only edge');
+}
+
+console.log('\nOWNER — a second toucher of an owned library is refused, a framework import is not (#710)');
+{
+  const pk = (module, extra) => ({ module, resolved: '', coreModule: false, couldNotResolve: true, dependencyTypes: ['unknown'], ...extra });
+  const loc = t => ({ module: './x', resolved: t, coreModule: false, couldNotResolve: false, dependencyTypes: ['local', 'import'] });
+  const cruiseO = { modules: [
+    { source: 'src/a/a.ts', dependencies: [pk('lib'), pk('nul'), pk('unv')] },
+    { source: 'src/b/b.ts', dependencies: [pk('lib/sub/path.js'), pk('fw'), pk('nul'), pk('shared-lib'), pk('stray'), pk('unv'), loc('src/a/a.ts')] },
+    { source: 'src/b/b2.ts', dependencies: [pk('fw')] },
+    { source: 'src/loose.ts', dependencies: [pk('lib'), loc('src/a/a.ts')] },
+  ] };
+  const designO = {
+    root: 'src',
+    components: { A: { dirs: ['a'], purpose: 'owns parsing' }, B: { dirs: ['b'], purpose: 'draws the editor' } },
+    allowed: [['B', 'A']],
+    resources: {
+      lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard' },
+      fw: { kind: 'framework', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'none' },
+      nul: { kind: 'library', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'static-guard' },
+      'shared-lib': { kind: 'library', reach: 'shared', owner: 'A', verifiedBy: 'grants', enforcedBy: 'registry-acl' },
+      unv: { kind: 'library', reach: 'process', owner: 'A', enforcedBy: 'static-guard' },
+    },
+  };
+  ok(G.designProblem(designO) === null, `the fixture design is judgeable (${G.designProblem(designO)})`);
+  const g = G.loadGraph(cruiseO, designO);
+  const o = G.owners(g, designO);
+  const keysO = o.found.map(f => f.key).sort();
+  ok(keysO.join() === 'src/b/b.ts -> lib,src/b/b.ts -> unv', `B importing A's libraries is found, a sub-path keyed by its package (${keysO.join(' | ')})`);
+  const libHit = o.found.find(f => f.key === 'src/b/b.ts -> lib');
+  ok(libHit && libHit.pair === 'B -> A' && libHit.owner === 'A' && /B imports lib, which A owns \(verified by imports\)/.test(libHit.detail),
+     `the finding names the pair and the owner (${libHit && libHit.detail})`);
+  ok(/UNVERIFIED/.test((o.found.find(f => f.package === 'unv') || {}).detail || '') && o.unverified.join() === 'unv',
+     'a row with no instrument is judged by the import, and its finding and the report say UNVERIFIED');
+  ok(o.framework === 2 && !o.found.some(f => f.package === 'fw'), `framework imports are judged (b.ts, b2.ts) and never found (${o.framework})`);
+  ok(JSON.stringify(o.couldntTell) === JSON.stringify([{ package: 'nul', touchers: { A: 1, B: 1 } }]), `a row with no owner is "couldn't tell", with its touchers (${JSON.stringify(o.couldntTell)})`);
+  ok(o.elsewhere.join() === 'shared-lib' && !o.found.some(f => f.package === 'shared-lib'), 'a shared row is another gatekeeper\'s: counted apart, not judged');
+  ok(o.unlisted.join() === 'stray', 'a package the ledger does not list is counted apart, not judged');
+  ok(o.unmapped.join() === 'src/loose.ts' && !o.found.some(f => f.key.startsWith('src/loose.ts')), 'a module no component claims is listed, not judged');
+  ok(o.examined === 8, `examined counts every judged import: lib ×2, fw ×2, nul ×2, unv ×2 (${o.examined})`);
+
+  // The ratchet.
+  const res = G.judge(g, designO);
+  const fresh = G.ratchet(res, null);
+  ok(fresh.owner.fresh.length === 2, 'with no baseline, both owner findings are new');
+  const held = G.ratchet(res, { rules: { divergence: [], cycle: [], owner: ['src/b/b.ts -> lib'] } });
+  ok(held.owner.grandfathered === 1 && held.owner.fresh.map(f => f.key).join() === 'src/b/b.ts -> unv', 'a baselined owner finding is grandfathered, the other is new');
+  const old = G.ratchet(res, { rules: { divergence: [], cycle: [] } });
+  ok(old.owner.fresh.length === 0 && /no "owner" section/.test(old.owner.unbaselined || ''), `a baseline written before the rule judges nothing for it, and says so (${old.owner.unbaselined})`);
+  ok(old.divergence.unbaselined === undefined, '... which is only for rules added later: an older rule\'s missing section is still an empty one');
+  const plan = G.planBaseline(res, { rules: { divergence: [], cycle: [] } });
+  ok(plan.refused && plan.grown.owner.length === 2, 'regenerating such a baseline writes the owner section, and the new section is growth (refused without --allow-growth)');
+
+  // The report, end to end.
+  const dF = path.join(DIR, 'owner-design.json'), gF = path.join(DIR, 'owner-graph.json');
+  fs.writeFileSync(dF, JSON.stringify(designO)); fs.writeFileSync(gF, JSON.stringify(cruiseO));
+  const r = spawnSync(process.execPath, [GUARD, '--design', dF, '--graph', gF], { encoding: 'utf8' });
+  ok(r.status === 1 && /owner\s+: 2 of 8 examined — 0 grandfathered, 2 NEW/.test(r.stdout), `the report counts the owner rule and exits 1 on new findings (exit ${r.status})`);
+  ok(/NEW — refused:[\s\S]*owner\s+src\/b\/b\.ts -> lib\s+\(B imports lib, which A owns/.test(r.stdout), 'the new owner finding is listed as refused');
+  ok(/couldn't tell: nul has no owner yet — touched by A \(1\), B \(1\)/.test(r.stdout) && /UNVERIFIED: unv/.test(r.stdout) && /not in the ledger: stray/.test(r.stdout),
+     'the report lists couldn\'t-tell rows, UNVERIFIED rows and unlisted packages');
+  const noLedger = { ...designO }; delete noLedger.resources;
+  const dN = path.join(DIR, 'owner-design-none.json'); fs.writeFileSync(dN, JSON.stringify(noLedger));
+  const rn = spawnSync(process.execPath, [GUARD, '--design', dN, '--graph', gF], { encoding: 'utf8' });
+  ok(/ownership : the design has no ledger \("resources"\), so none of 11 package imports is judged/.test(rn.stdout), 'with no ledger, the report says no package import is judged, with the count');
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

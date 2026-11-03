@@ -60,7 +60,12 @@
 // The rules that REFUSE, and so are ratcheted. The new-module check was never among them (#509).
 // A removed rule that baselines carried a section for is listed in RETIRED, so a baseline still
 // holding one is named, not misread.
-const RULES = ['divergence', 'cycle'];
+const RULES = ['divergence', 'cycle', 'owner'];
+// Rules added after baselines were already being written. A baseline that has no section for one
+// did not measure it: grandfathering nothing would refuse every existing toucher as new, and
+// refusing on a measurement nobody made is not a verdict. So the rule is not judged against that
+// baseline, and the report says so; regenerating the baseline measures it.
+const SINCE = { owner: '#710' };
 const RETIRED = {
   implied: 'the implied rule was removed (#542): it refused imports a file genuinely uses',
   layer: 'the layer order was replaced by the component graph (#554)',
@@ -450,17 +455,62 @@ function cycleEdges(graph) {
   };
 }
 
+// ── rule: owner (#710) ───────────────────────────────────────────────────────────────
+// A library the ledger gives to one component may be imported by that component alone. A second
+// toucher is a NEW violation keyed `module -> package`, so the hook's "starts in the edited
+// file" filter works unchanged, and the refusal names the owner. Judged only where the static
+// guard is the gatekeeper and its predicate is the import (gatekeeperOf): a library of reach
+// `process`. Everything else is COUNTED apart, never folded into "allowed": a framework (judged,
+// never a violation), a row with no owner yet ("couldn't tell", listed with its touchers), a row
+// another gatekeeper holds, a package the ledger does not list, a module no component claims.
+function owners(graph, design) {
+  const res = isObject(design && design.resources) ? design.resources : {};
+  const of = componentOf(design, graph.root);
+  const found = [], couldntTell = new Map(), unlisted = new Set(), elsewhere = new Set(), unmapped = new Set();
+  let examined = 0, framework = 0;
+  for (const [m, pkgs] of graph.externals || []) {
+    const c = of(m);
+    for (const p of pkgs) {
+      const r = res[p];
+      if (!isObject(r)) { unlisted.add(p); continue; }
+      if (c === undefined) { unmapped.add(m); continue; }
+      if (r.kind === 'framework') { examined++; framework++; continue; }
+      const gk = gatekeeperOf(r);
+      if (r.kind !== 'library' || gk.by !== 'static-guard') { elsewhere.add(p); continue; }
+      examined++;
+      if (!r.owner) {
+        if (!couldntTell.has(p)) couldntTell.set(p, new Map());
+        couldntTell.get(p).set(c, (couldntTell.get(p).get(c) || 0) + 1);
+        continue;
+      }
+      if (r.owner !== c) found.push({ key: edgeKey(m, p), pair: edgeKey(c, r.owner), owner: r.owner, package: p,
+        detail: `${c} imports ${p}, which ${r.owner} owns (${r.verifiedBy ? `verified by ${r.verifiedBy}` : 'UNVERIFIED: no instrument named'})` });
+    }
+  }
+  const unverified = Object.keys(res).filter(id => isObject(res[id]) && gatekeeperOf(res[id]).unverified).sort();
+  return {
+    found, examined, framework,
+    couldntTell: [...couldntTell].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([pkg, by]) => ({ package: pkg, touchers: Object.fromEntries([...by].sort()) })),
+    unlisted: [...unlisted].sort(), elsewhere: [...elsewhere].sort(), unmapped: [...unmapped].sort(), unverified,
+  };
+}
+
 // ── the ratchet ──────────────────────────────────────────────────────────────────────
 
 function judge(graph, design) {
-  return { divergence: divergences(graph, design), cycle: cycleEdges(graph) };
+  return { divergence: divergences(graph, design), cycle: cycleEdges(graph), owner: owners(graph, design) };
 }
 
 function ratchet(results, baseline) {
   const out = {};
   for (const rule of RULES) {
-    const base = new Set((baseline && baseline.rules && baseline.rules[rule]) || []);
     const found = results[rule].found;
+    if (SINCE[rule] && baseline && isObject(baseline.rules) && !(rule in baseline.rules)) {
+      out[rule] = { total: found.length, grandfathered: 0, fresh: [], fixed: [],
+        unbaselined: `the baseline has no "${rule}" section (written before the rule, ${SINCE[rule]}), so ${found.length} ${rule} finding${found.length === 1 ? ' is' : 's are'} not judged — regenerating the baseline measures them` };
+      continue;
+    }
+    const base = new Set((baseline && baseline.rules && baseline.rules[rule]) || []);
     const now = new Set(found.map(f => f.key));
     out[rule] = {
       total: found.length,
@@ -493,5 +543,5 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
   KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
-  componentOf, divergences, byPair, allowedFrom, cycleEdges, judge, ratchet, planBaseline,
+  componentOf, divergences, byPair, allowedFrom, cycleEdges, owners, SINCE, judge, ratchet, planBaseline,
 };

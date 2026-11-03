@@ -549,7 +549,24 @@ function main(argv) {
   for (const rule of RULES) {
     const r = ledger[rule];
     print(`  ${rule.padEnd(10)}: ${r.total} of ${results[rule].examined} examined — ` +
-          `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`);
+          (r.unbaselined ? `NOT JUDGED: ${r.unbaselined}`
+            : `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`));
+  }
+  // THE LEDGER'S SIDE (#710), said on every run so "no owner violations" cannot be read off a
+  // design that owns nothing, and each kind of not-judged is counted apart from "allowed".
+  const own = results.owner;
+  const rows = design.resources && typeof design.resources === 'object' ? Object.keys(design.resources).length : 0;
+  const pkgImports = [...(graph.externals || new Map()).values()].reduce((n, s) => n + s.size, 0);
+  if (!rows) print(`  ownership : the design has no ledger ("resources"), so none of ${pkgImports} package imports is judged`);
+  else {
+    print(`  ownership : ${rows} ledger rows · ${pkgImports} package imports — ${own.examined} judged (${own.framework} of a framework, never refused), ` +
+          `${own.couldntTell.reduce((n, c) => n + Object.values(c.touchers).reduce((a, b) => a + b, 0), 0)} of them of a row with no owner yet; ` +
+          `${own.unlisted.length} package${own.unlisted.length === 1 ? '' : 's'} not in the ledger, ${own.elsewhere.length} held by another gatekeeper, ` +
+          `${own.unmapped.length} module${own.unmapped.length === 1 ? '' : 's'} outside every component — none of those judged`);
+    for (const c of own.couldntTell)
+      print(`    couldn't tell: ${c.package} has no owner yet — touched by ${Object.entries(c.touchers).map(([k, v]) => `${k} (${v})`).join(', ')}`);
+    for (const id of own.unverified) print(`    UNVERIFIED: ${id} — no instrument can confirm its owner is the only toucher`);
+    if (own.unlisted.length) print(`    not in the ledger: ${own.unlisted.join(', ')}`);
   }
   for (const r of retiredSections(baseline))
     print(`  the baseline's "${r.rule}" section (${r.keys} keys) is ignored — ${r.why}; regenerating the baseline drops it`);

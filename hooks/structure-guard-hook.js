@@ -252,6 +252,15 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design, workt
         'That is the user\'s decision — ask them. It changes the design id, so the baseline is re-measured under it and the package re-armed.'));
   }
   if (fresh.some(f => f.rule === 'cycle')) remedies.push('  · cycle — break the loop; one of the two modules is doing the other\'s job');
+  // A second toucher of an owned library (#710): the owner is named, and both remedies are given —
+  // reach it through the owner, or the ledger is wrong and the owner changes. A grant is a ruling.
+  for (const f of fresh.filter(x => x.rule === 'owner')) {
+    const [from] = f.pair.split(' -> ');
+    remedies.push(`  · owner ${f.package} — ${f.owner} owns it: either import what you need through ${f.owner}'s door ` +
+      `(${from} ${R.allowedFrom(design, from).includes(f.owner) ? 'may already import' : 'would also need the design to allow it to import'} ${f.owner}), ` +
+      `or revise the ledger: if ${from} should own ${f.package}, or it should have no single owner, change resources["${f.package}"] in ${entry.design}. ` +
+      'That is the user\'s decision — ask them. It changes the design id, so the baseline is re-measured under it and the package re-armed.');
+  }
   return `BLOCKED: this edit to ${rel} adds ${fresh.length} import${fresh.length === 1 ? '' : 's'} that erode ${pkgName}'s declared structure:\n` +
     lines.join('\n') + '\n' +
     // The design id is in the refusal itself (#536): refusals are counted per design version, and
