@@ -1391,8 +1391,9 @@ nominal.
 ## Structure Guard — the edge that erodes a design, refused only when it is new
 
 An agent editing a codebase can erode its structure one import at a time, and the
-tools that already exist catch only part of it. Two rules refuse — divergence from
-the design's component graph, and cycles — under a ratchet, so a real codebase can adopt the guard without first
+tools that already exist catch only part of it. Three rules refuse — divergence from
+the design's component graph, cycles, and (when the design carries an ownership ledger) a second
+toucher of a library another component owns — under a ratchet, so a real codebase can adopt the guard without first
 repairing every violation it carries. A guard that fires on hundreds of old edges is switched off; one that is
 loosened until it stops firing guards nothing.
 
@@ -1476,6 +1477,17 @@ loosened until it stops firing guards nothing.
   the section as ignored; regenerating the baseline drops it and says so.
 - **A re-export still faces the divergence and cycle rules**, and is still told apart from a
   use — the graph agreement check below compares re-exports edge for edge.
+- **An ownership ledger (#710).** A design may carry `resources`: one row per package with
+  `kind`, `reach` (`process` | `shared`), `owner` (or `null` while unruled), `verifiedBy` and
+  `enforcedBy`. The `owner` rule refuses a module importing a library of reach `process` that
+  another component owns; a framework is judged and never refused; an unruled row is listed as
+  "couldn't tell". Who may refuse is a lookup on the row (`gatekeeperOf`). Both graph producers
+  record package imports by bare name, under every type-only policy (the analyser never marks a
+  package import as compiled away), and the agreement check compares them.
+  `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
+  proposes rows from the graph and classifies each declared pair; it never writes in place.
+  A baseline written before the rule has no `owner` section: the rule is not judged against it,
+  and both the report and the hook (once per session) say so.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with

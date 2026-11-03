@@ -212,6 +212,80 @@ console.log('\nTYPE-ONLY RECORDS — what runs and what compiled away, as the an
      `a broken type-only import is unresolved only when types count (not counted: ${bi.unresolved} of ${bi.relative}; counted: ${bc.unresolved} of ${bc.relative})`);
 }
 
+console.log('\nPACKAGES — the bare specifiers a module imports, as the analyser records them (#710):');
+{
+  const P4 = path.join(DIR, 'pkg-ext');
+  const C4 = path.join(DIR, 'cache-ext', 'graph.json');
+  const put4 = (rel, text) => { const f = path.join(P4, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  for (const f of ['a', 'b', 'alias']) put4(`src/${f}.ts`, '// fixture\n');
+  put4('lib/outside.ts', '// outside the root\n');
+  // [specifier, runs, types, target] — target is where it resolved, or null.
+  const EXT = {
+    'src/a.ts': [['react', 'import', null, null], ['node:fs', 'import', null, null], ['@scope/x/sub', 'import', null, null],
+                 ['monaco-editor/esm/vs/x', 'export', null, 'node_modules/monaco-editor/esm/vs/x.js'],
+                 ['only-types', null, 'import', null],
+                 ['@app/alias', 'import', null, 'src/alias.ts'], ['@app/outside', 'import', null, 'lib/outside.ts']],
+  };
+  let extCalls = 0;
+  const ext = { id: 'ext@1', configFiles: [], edges: rel => { extCalls++; return { edges: rel === 'src/a.ts' ? [['src/b.ts', 'import', null]] : [], externals: EXT[rel] || [], unresolved: 0 }; } };
+  const IGNORE = { root: 'src', components: { x: { dirs: [''] } }, allowed: [] };
+  const COUNT = { ...IGNORE, typeOnlyImports: 'count' };
+  const pk = g => [...(g.externals.get('src/a.ts') || [])].sort().join();
+  const g = S.buildGraph({ pkgDir: P4, design: IGNORE, extractor: ext, cachePath: null }).graph;
+  ok(pk(g) === '@app/outside,@scope/x,fs,monaco-editor,only-types,react',
+     `packages are keyed by package — sub-path cut, node: dropped, a target outside the corpus a package (got ${pk(g)})`);
+  const of = x => x.externals.get('src/a.ts') || new Set();
+  ok(g.adj.get('src/a.ts').has('src/alias.ts') && of(g).has('react') && !of(g).has('@app/alias'),
+     `a bare specifier a path alias resolves INTO the corpus is an edge, not a package (got ${edgeKeys(g).join(', ')})`);
+  // A package is recorded whatever the type-only policy: the analyser cannot mark an unresolved
+  // package as compiled away, so only a policy both producers can apply keeps them agreeing.
+  ok(of(g).has('only-types'), `a type-only package import is a package import even when type-only imports are not counted (got ${pk(g)})`);
+  const gc = S.buildGraph({ pkgDir: P4, design: COUNT, extractor: ext, cachePath: null }).graph;
+  ok(pk(gc) === pk(g), `and the same packages when they are counted (got ${pk(gc)})`);
+  ok(g.unresolved === 0 && g.relative === 1, `bare specifiers never count toward unresolved or relative (${g.unresolved} of ${g.relative})`);
+
+  const bare = { id: 'bare@1', configFiles: [], edges: rel => ({ edges: rel === 'src/a.ts' ? [['src/b.ts', 'import', null]] : [], unresolved: 0 }) };
+  let bg;
+  try { bg = S.buildGraph({ pkgDir: P4, design: IGNORE, extractor: bare, cachePath: null }).graph; } catch (e) { bg = { threw: e.message }; }
+  ok(bg.externals && bg.externals.size === 0 && bg.edges.length === 1,
+     `an extractor that omits externals still builds, with no packages (got ${bg.threw || bg.edges.length + ' edges'})`);
+
+  const proposed = S.buildGraph({ pkgDir: P4, design: IGNORE, extractor: ext, cachePath: null,
+    proposed: { rel: 'src/b.ts', content: '// any\n' } }).graph;
+  ok(pk(proposed) === pk(g), 'the proposed file\'s neighbours keep their packages');
+
+  // A cache in the old format: key without a format, entries without externals. It must
+  // rebuild — read as valid, it would say "this package imports nothing".
+  const crypto = require('crypto');
+  const files = S.listCorpus(P4, IGNORE);
+  const oldKey = crypto.createHash('sha1').update(JSON.stringify({ extractor: ext.id, config: [], files })).digest('hex');
+  const st = rel => { const s = fs.statSync(path.join(P4, rel)); return { mtimeMs: s.mtimeMs, size: s.size }; };
+  fs.mkdirSync(path.dirname(C4), { recursive: true });
+  fs.writeFileSync(C4, JSON.stringify({ key: oldKey, files: Object.fromEntries(files.map(f => [f, { ...st(f), edges: f === 'src/a.ts' ? [['src/b.ts', 'import', null]] : [], unresolved: 0, unresolvedTypes: 0 }])) }));
+  extCalls = 0;
+  const old = S.buildGraph({ pkgDir: P4, design: IGNORE, extractor: ext, cachePath: C4 });
+  ok(!old.stats.cacheValid && extCalls === files.length && pk(old.graph) === pk(g),
+     `a cache written before packages were recorded is rebuilt, not read as "no packages" (valid ${old.stats.cacheValid}, ${extCalls} extracted, got ${pk(old.graph)})`);
+  extCalls = 0;
+  const warm = S.buildGraph({ pkgDir: P4, design: IGNORE, extractor: ext, cachePath: C4 });
+  ok(warm.stats.cacheValid && extCalls === 0 && pk(warm.graph) === pk(g),
+     `the rebuilt cache is read back with its packages (valid ${warm.stats.cacheValid}, ${extCalls} extracted, got ${pk(warm.graph)})`);
+}
+
+console.log('\nAGREEMENT — the two graphs compared on packages too (#710):');
+{
+  const G = require(path.join(__dirname, '..', 'scripts', 'structure-guard.js'));
+  const mk = pkgs => ({ modules: new Set(['src/a.ts']), edges: [], reexports: new Set(), typeOnly: new Set(), circular: new Set(),
+                        externals: new Map([['src/a.ts', new Set(pkgs)]]) });
+  const same = G.compareGraphs(mk(['react', 'fs']), mk(['fs', 'react']));
+  ok(same.agree && same.count === 0, `the same packages agree (count ${same.count})`);
+  const differ = G.compareGraphs(mk(['react', 'fs']), mk(['react']));
+  ok(!differ.agree && differ.count === 1 && differ.diff.externals.onlyAnalyser.join() === 'src/a.ts -> fs' && differ.diff.externals.onlyHook.length === 0,
+     `one package missing from the package graph is one disagreement, named (got ${JSON.stringify(differ.diff.externals)})`);
+  const extra = G.compareGraphs(mk([]), mk(['react']));
+  ok(!extra.agree && extra.diff.externals.onlyHook.join() === 'src/a.ts -> react', 'one only the package graph has is named on its side');
+}
+
 console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -235,7 +309,7 @@ console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS
     const ex = S.tsExtractor(P3);
     const got = rel => Object.fromEntries(ex.edges(rel, fs.readFileSync(path.join(P3, rel), 'utf8')).edges.map(([t, run, type]) => [t, [run, type]]));
     const a = got('src/a.ts'), sR = got('src/s.ts');
-    ok(!ex.notMeasured && /\+types$/.test(ex.id), `the extractor runs on TypeScript ${ex.id} and names that edges carry type-only marks`);
+    ok(!ex.notMeasured && /\+types\+externals$/.test(ex.id), `the extractor runs on TypeScript ${ex.id} and names that edges carry type-only marks and packages`);
     ok(JSON.stringify(a['src/t.ts']) === '[null,"import"]', `\`import type\` compiled away (got ${JSON.stringify(a['src/t.ts'])})`);
     ok(JSON.stringify(a['src/u.ts']) === '[null,"import"]', `an import whose names are only used as types compiled away (got ${JSON.stringify(a['src/u.ts'])})`);
     ok(JSON.stringify(a['src/q.ts']) === '[null,"import"]', `\`typeof import('./q')\` in a type is a compiled-away use (got ${JSON.stringify(a['src/q.ts'])})`);
@@ -246,6 +320,13 @@ console.log('\nTHE TYPESCRIPT EXTRACTOR ON REAL SOURCE — run when STRUCTURE_TS
     const w = ex.edges('src/w.ts', fs.readFileSync(path.join(P3, 'src/w.ts'), 'utf8'));
     ok(w.unresolved === 1 && w.unresolvedTypes === 1,
        `a broken import that runs and a broken one that compiled away are counted apart (got ${w.unresolved} and ${w.unresolvedTypes})`);
+    put3('src/p.ts', "import React from 'react';\nimport { readFileSync } from 'node:fs';\nimport type { X } from 'pkg';\n" +
+                     "import { s } from '@scope/x/sub';\nexport const all = [React, readFileSync, s];\nexport let t: X | undefined;\n");
+    const p = ex.edges('src/p.ts', fs.readFileSync(path.join(P3, 'src/p.ts'), 'utf8'));
+    const shown = JSON.stringify(p.externals);
+    ok(shown === '[["react","import",null,null],["node:fs","import",null,null],["pkg",null,"import",null],["@scope/x/sub","import",null,null]]' &&
+       p.unresolved === 0 && p.unresolvedTypes === 0,
+       `bare specifiers come out as packages, the type-only one marked compiled away, none counted unresolved (got ${shown})`);
   }
 }
 

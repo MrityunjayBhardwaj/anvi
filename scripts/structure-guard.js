@@ -102,12 +102,15 @@ function readJson(file, what) {
 function compareGraphs(a, b) {
   const side = (x, y) => ({ onlyAnalyser: [...x].filter(k => !y.has(k)).sort(), onlyHook: [...y].filter(k => !x.has(k)).sort() });
   const edges = g => new Set(g.edges.map(([s, t]) => edgeKey(s, t)));
+  // The packages each module imports (#710), one key per module and package.
+  const externals = g => new Set([...(g.externals || new Map())].flatMap(([m, pkgs]) => [...pkgs].map(p => `${m} -> ${p}`)));
   const diff = {
     modules: side(a.modules, b.modules),
     edges: side(edges(a), edges(b)),
     reexports: side(a.reexports, b.reexports),
     typeOnly: side(a.typeOnly, b.typeOnly),
     cycles: side(a.circular, b.circular),
+    externals: side(externals(a), externals(b)),
   };
   const count = Object.values(diff).reduce((n, d) => n + d.onlyAnalyser.length + d.onlyHook.length, 0);
   return { diff, agree: count === 0, count };
@@ -444,6 +447,7 @@ function main(argv) {
 
   // ── agreement: both graphs given ─────────────────────────────────────────────────────
   if (analyser && built) {
+    const packageImports = g => [...(g.externals || new Map()).values()].reduce((n, s) => n + s.size, 0);
     for (const [name, g] of [['the analyser graph', analyser], ['the package graph', built.graph]]) {
       const why = notMeasured(g);
       if (why) return stop(`${name}: ${why}`);
@@ -451,9 +455,10 @@ function main(argv) {
     const { diff, agree, count } = compareGraphs(analyser, built.graph);
     if (built.at) print(`structure-guard: the package graph is ${built.at.ref} at ${built.at.sha.slice(0, 8)}, through git archive`);
     print(`structure-guard: agreement — analyser ${analyser.modules.size} modules · ${analyser.edges.length} edges · ` +
-          `${analyser.reexports.size} re-exports · ${analyser.typeOnly.size} type-only · ${analyser.circular.size} on a cycle; ` +
+          `${analyser.reexports.size} re-exports · ${analyser.typeOnly.size} type-only · ${analyser.circular.size} on a cycle · ` +
+          `${packageImports(analyser)} package imports; ` +
           `package (${built.extractor}) ${built.graph.modules.size} · ${built.graph.edges.length} · ` +
-          `${built.graph.reexports.size} · ${built.graph.typeOnly.size} · ${built.graph.circular.size}` +
+          `${built.graph.reexports.size} · ${built.graph.typeOnly.size} · ${built.graph.circular.size} · ${packageImports(built.graph)}` +
           ` · type-only imports ${analyser.typeOnlyImports === 'count' ? 'counted' : 'not counted'}`);
     for (const [kind, d] of Object.entries(diff)) {
       print(`  ${kind.padEnd(9)}: ${d.onlyAnalyser.length} only in the analyser, ${d.onlyHook.length} only in the package graph`);
@@ -537,14 +542,31 @@ function main(argv) {
   // does not look for them (#605).
   print(graph.typeOnlyImports === 'count'
     ? `  type-only imports: counted — ${graph.typeOnly.size} of ${graph.edges.length} edges name only types (judged as divergences, left out of cycles)`
-    : '  type-only imports: not counted — the design does not set "typeOnlyImports": "count", so an import that only names types is not in this graph');
+    : '  type-only imports: not counted — the design does not set "typeOnlyImports": "count", so an import between modules that only names types is not in this graph (a package import is recorded either way)');
   if (!baseline) print('  no baseline given — every violation counts as new');
   else if (frame.unstamped) print('  the baseline names no design (written before designs were identified) — ' +
     'it is judged as given; regenerating it stamps the design in force');
   for (const rule of RULES) {
     const r = ledger[rule];
     print(`  ${rule.padEnd(10)}: ${r.total} of ${results[rule].examined} examined — ` +
-          `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`);
+          (r.unbaselined ? `NOT JUDGED: ${r.unbaselined}`
+            : `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`));
+  }
+  // THE LEDGER'S SIDE (#710), said on every run so "no owner violations" cannot be read off a
+  // design that owns nothing, and each kind of not-judged is counted apart from "allowed".
+  const own = results.owner;
+  const rows = design.resources && typeof design.resources === 'object' ? Object.keys(design.resources).length : 0;
+  const pkgImports = [...(graph.externals || new Map()).values()].reduce((n, s) => n + s.size, 0);
+  if (!rows) print(`  ownership : the design has no ledger ("resources"), so none of ${pkgImports} package imports is judged`);
+  else {
+    print(`  ownership : ${rows} ledger rows · ${pkgImports} package imports — ${own.examined} judged (${own.framework} of a framework, never refused), ` +
+          `${own.couldntTell.reduce((n, c) => n + Object.values(c.touchers).reduce((a, b) => a + b, 0), 0)} of them of a row with no owner yet; ` +
+          `${own.unlisted.length} package${own.unlisted.length === 1 ? '' : 's'} not in the ledger, ${own.elsewhere.length} held by another gatekeeper, ` +
+          `${own.unmapped.length} module${own.unmapped.length === 1 ? '' : 's'} outside every component — none of those judged`);
+    for (const c of own.couldntTell)
+      print(`    couldn't tell: ${c.package} has no owner yet — touched by ${Object.entries(c.touchers).map(([k, v]) => `${k} (${v})`).join(', ')}`);
+    for (const id of own.unverified) print(`    UNVERIFIED: ${id} — no instrument can confirm its owner is the only toucher`);
+    if (own.unlisted.length) print(`    not in the ledger: ${own.unlisted.join(', ')}`);
   }
   for (const r of retiredSections(baseline))
     print(`  the baseline's "${r.rule}" section (${r.keys} keys) is ignored — ${r.why}; regenerating the baseline drops it`);
@@ -625,6 +647,6 @@ function main(argv) {
 }
 
 // Re-exported so the report's tests and the rules' tests import one surface.
-module.exports = { ...R, compareGraphs, reclassify, checkoutAtRef, main };
+module.exports = { ...R, compareGraphs, analyserOptionProblem, reclassify, checkoutAtRef, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

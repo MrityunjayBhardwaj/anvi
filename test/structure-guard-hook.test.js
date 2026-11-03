@@ -671,7 +671,87 @@ console.log('\nA GIT WORKTREE of the registered repository is the same package (
   register();
 }
 
+console.log('\nOWNER — the hook refuses a second toucher of an owned library and allows a framework (#710):');
+{
+  const OP = path.join(DIR, 'owner-pkg');
+  const putO = (rel, text) => { const f = path.join(OP, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  putO('src/a/a.ts', "import { parse } from 'lib';\nexport const a = parse;\n");
+  putO('src/b/b.ts', "import { a } from '../a/a';\nexport const b = a;\n");
+  const OX = path.join(DIR, 'owner-extractor.js');
+  // Relative specifiers resolve to files; every bare specifier is a package record, as the TypeScript
+  // extractor hands them on: [specifier, runs, types, target].
+  fs.writeFileSync(OX, `
+const fs = require('fs'), path = require('path');
+module.exports = { create: pkgDir => ({ id: 'owner-lines@1', configFiles: [],
+  edges(rel, content) {
+    const edges = [], externals = []; let unresolved = 0;
+    for (const m of content.matchAll(/^import\\b[^'"]*?from\\s+['"]([^'"]+)['"]/gm)) {
+      if (!m[1].startsWith('.')) { externals.push([m[1], 'import', null, null]); continue; }
+      const t = path.posix.join(path.posix.dirname(rel), m[1]) + '.ts';
+      if (fs.existsSync(path.join(pkgDir, t))) edges.push([t, 'import', null]); else unresolved++;
+    }
+    return { edges, externals, unresolved };
+  } }) };
+`);
+  const OD = path.join(DIR, 'owner-design.json');
+  fs.writeFileSync(OD, JSON.stringify({ root: 'src',
+    components: { A: { dirs: ['a'], purpose: 'parses the language' }, B: { dirs: ['b'], purpose: 'draws what was parsed' } },
+    allowed: [['B', 'A']],
+    resources: {
+      lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard' },
+      fw: { kind: 'framework', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'none' },
+    } }));
+  const OB = path.join(DIR, 'owner-baseline.json');
+  const ORULES = { divergence: [], cycle: [], owner: [] };
+  fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: ORULES }));
+  const oreg = { packages: [{ dir: OP, design: OD, baseline: OB, extractor: OX, cache: path.join(DIR, 'owner-cache.json') }] };
+  const oedit = (from, to) => ({ session_id: 'sess-owner', cwd: OP, tool_name: 'Edit',
+    tool_input: { file_path: path.join(OP, 'src/b/b.ts'), old_string: from, new_string: to, replace_all: false } });
+
+  const lib = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib/sub';"), oreg);
+  ok(lib.decision === 'deny' && lib.fresh.length === 1 && lib.fresh[0].rule === 'owner' && lib.fresh[0].key === 'src/b/b.ts -> lib',
+     `B adding an import of A's library is refused as an owner finding (${lib.decision}: ${(lib.fresh || []).map(f => f.rule + ' ' + f.key).join()})`);
+  ok(/owner: src\/b\/b\.ts -> lib/.test(lib.reason || '') && /owner lib — A owns it: either import what you need through A's door \(B may already import A\)/.test(lib.reason || ''),
+     'the refusal names the owner and offers both remedies: through the owner, or revise the ledger');
+  ok(/revise the ledger: if B should own lib[\s\S]*change resources\["lib"\]/.test(lib.reason || ''), 'the design remedy points at the ledger row');
+
+  const fw = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport React from 'fw';"), oreg);
+  ok(fw.decision === 'allow', `B adding a framework import is allowed (${fw.decision}: ${fw.why})`);
+  const fwJudged = R.owners(S.buildGraph({ pkgDir: OP, design: JSON.parse(fs.readFileSync(OD, 'utf8')), extractor: S.loadExtractor({ extractor: OX }, OP),
+    cachePath: null, proposed: { rel: 'src/b/b.ts', content: "import React from 'fw';\n" } }).graph, JSON.parse(fs.readFileSync(OD, 'utf8')));
+  ok(fwJudged.framework === 1, `... and the framework import was judged, not skipped (${fwJudged.framework} framework import examined)`);
+
+  // A grandfathered toucher passes; the same import, absent from the baseline, does not.
+  fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: { ...ORULES, owner: ['src/b/b.ts -> lib'] } }));
+  const held = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), oreg);
+  ok(held.decision === 'allow', `a toucher the baseline holds is grandfathered (${held.decision})`);
+  // A baseline written before the rule judges nothing for it: allowed, never refused on a measurement nobody made.
+  fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: { divergence: [], cycle: [] } }));
+  const old = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), oreg);
+  ok(old.decision === 'allow', `a baseline with no owner section does not refuse an owner finding (${old.decision})`);
+  ok(/has no "owner" section[\s\S]*1 owner finding is not judged[\s\S]*--write-baseline/.test(old.unbaselinedNotice || ''),
+     `... and says it did not judge it, with the command that would (#725): ${(old.unbaselinedNotice || 'no notice').split('\n')[0]}`);
+  const quiet = decide(oedit("export const b = a;", "export const b = a + 1;"), oreg);
+  ok(quiet.decision === 'allow' && !quiet.unbaselinedNotice, 'an edit after which the owner rule finds nothing gives no notice: there is nothing unjudged to speak of');
+
+  // Through the installed hook's own process, as Claude Code runs it: the deny decision is what lands.
+  fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: ORULES }));
+  fs.writeFileSync(REGISTRY, JSON.stringify(oreg));
+  const h = hook(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"));
+  ok(h.denied && /owner: src\/b\/b\.ts -> lib/.test(h.reason), `the hook process answers permissionDecision deny for the second toucher (exit ${h.exit})`);
+  const hf = hook(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport React from 'fw';"));
+  ok(!hf.denied && hf.exit === 0, `and allows the framework import (exit ${hf.exit})`);
+  // With the section missing, the hook process says so once per session, and not again (#725).
+  fs.writeFileSync(OB, JSON.stringify({ designId: R.designId(JSON.parse(fs.readFileSync(OD, 'utf8'))), rules: { divergence: [], cycle: [] } }));
+  const u1 = hook({ ...oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), session_id: 'sess-unbaselined' });
+  const u2 = hook({ ...oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib';"), session_id: 'sess-unbaselined' });
+  ok(!u1.denied && /has no "owner" section/.test(u1.context) && !/has no "owner" section/.test(u2.context),
+     `the hook process allows, says the owner rule was not judged once, then not again (first: ${u1.context ? 'said' : 'silent'}, second: ${u2.context ? 'said' : 'silent'})`);
+  register();
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -10,9 +10,10 @@
 // THE FAILURE CLASS. An agent can erode structure one import at a time — a shortcut edge
 // here, an upward reach there — and nothing notices until the module graph has knotted.
 // Cycle detection and dependency rules are well served already (dependency-cruiser, ArchUnit,
-// Bazel visibility). Two rules refuse here — divergence from the design's component graph, and
-// cycles — under a RATCHET: existing violations are recorded in a baseline and allowed to
-// stand; only NEW ones are refused.
+// Bazel visibility). Three rules refuse here — divergence from the design's component graph,
+// cycles, and (when the design carries an ownership ledger, #710) a second toucher of a library
+// another component owns — under a RATCHET: existing violations are recorded in a baseline and
+// allowed to stand; only NEW ones are refused.
 //
 // THE DESIGN IS A COMPONENT GRAPH, NOT A LAYER ORDER (#554). A design names components, maps
 // files to them, and DECLARES the edges allowed between them; the code is checked against it
@@ -60,7 +61,12 @@
 // The rules that REFUSE, and so are ratcheted. The new-module check was never among them (#509).
 // A removed rule that baselines carried a section for is listed in RETIRED, so a baseline still
 // holding one is named, not misread.
-const RULES = ['divergence', 'cycle'];
+const RULES = ['divergence', 'cycle', 'owner'];
+// Rules added after baselines were already being written. A baseline that has no section for one
+// did not measure it: grandfathering nothing would refuse every existing toucher as new, and
+// refusing on a measurement nobody made is not a verdict. So the rule is not judged against that
+// baseline, and the report says so; regenerating the baseline measures it.
+const SINCE = { owner: '#710' };
 const RETIRED = {
   implied: 'the implied rule was removed (#542): it refused imports a file genuinely uses',
   layer: 'the layer order was replaced by the component graph (#554)',
@@ -125,6 +131,14 @@ function designId(design) {
   const canonical = { root: stripSlash(d.root || ''), excludes: sortedSet(d.excludes), components, allowed };
   // Only when on, so every design written before the key keeps the id its baselines carry.
   if (countsTypeOnly(d)) canonical.typeOnlyImports = 'count';
+  // The ledger (#710), only when present, for the same reason. Per row only what changes who may
+  // touch it or who refuses: id, kind, reach, owner. Touchers are a measurement, verifiedBy and
+  // enforcedBy follow from the row by lookup, purpose and rule are prose.
+  if (isObject(d.resources)) canonical.resources = Object.keys(d.resources).sort().map(id => {
+    const r = isObject(d.resources[id]) ? d.resources[id] : {};
+    return { id, kind: r.kind === undefined ? null : r.kind, reach: r.reach === undefined ? null : r.reach,
+             owner: r.owner === undefined ? null : r.owner };
+  });
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
 }
 
@@ -165,7 +179,70 @@ function designProblem(design) {
   const cyc = [...onCycle(adj)].sort();
   if (cyc.length) return `the declared edges form a cycle (${cyc.join(', ')}) — a cycle between components is a design ` +
     'question with three answers: invert one direction through a port or registry, extract what both need, or merge them';
+  return ledgerProblem(d, names);
+}
+
+// ── the ledger (#710) ────────────────────────────────────────────────────────────────
+// A design may name who OWNS each resource, beside the edges it allows. A row is
+// `id → { kind, reach, owner, verifiedBy, enforcedBy, touchers?, rule?, ruled? }`, and four of its
+// fields decide a verdict: KIND says what counts as touching (an import for a library, a write for
+// state, a parser entry call for a syntax, a register for a registry); OWNER is the one component
+// that may touch it, or null when nobody has ruled ("couldn't tell"); REACH says whether anything
+// outside the corpus can touch it — `process` when only this package's code can, `shared` when a
+// migration, a second service or a person can too; VERIFIED BY names the instrument that can
+// confirm the owner is the only toucher. Who refuses is then a lookup, not a judgment (gatekeeperOf).
+const KINDS = ['library', 'framework', 'state', 'syntax', 'registry', 'door'];
+const REACHES = ['process', 'shared'];
+const INSTRUMENTS = ['imports', 'symbols', 'grants', 'runtime'];
+// What the static guard would have to see, per kind, for a process row.
+const PREDICATE = { library: 'import', door: 'import', state: 'write', syntax: 'parse-call', registry: 'register' };
+
+// Why the ledger would make verdicts lie, or null. Each is a row the guard could not judge as
+// written: a kind or reach it does not know, an owner that is no component (a typo that owns
+// nothing), a shared resource handed to the static guard (it sees only the sessions it runs in, so
+// its refusal is stale by construction), a framework given an owner (a framework is used
+// everywhere by kind; owning it makes every file a violation nobody acts on). And once a design
+// carries a ledger, each component needs a purpose that is not its own name: a component without
+// one is a folder, and an owner map over folders cannot be ruled on. Whether a purpose is TRUE is a
+// ruling no string check can make; this only refuses the purpose that is visibly absent.
+function ledgerProblem(d, names) {
+  if (d.resources === undefined) return null;
+  if (!isObject(d.resources)) return 'the design\'s "resources" is not an object of rows (id → { kind, reach, owner, verifiedBy, enforcedBy })';
+  for (const [id, r] of Object.entries(d.resources)) {
+    if (!isObject(r)) return `resource "${id}" is not an object with kind, reach and owner`;
+    if (!KINDS.includes(r.kind)) return `resource "${id}" has kind ${JSON.stringify(r.kind)} — it is one of ${KINDS.join(', ')}`;
+    if (!REACHES.includes(r.reach)) return `resource "${id}" has reach ${JSON.stringify(r.reach)} — it is "process" (only this package's code can touch it) or "shared" (something outside the corpus can)`;
+    if (r.owner !== null && r.owner !== undefined && !names.has(r.owner)) return `resource "${id}" is owned by "${r.owner}", which is not a component`;
+    if (r.kind === 'framework' && r.owner) return `resource "${id}" is a framework with an owner ("${r.owner}") — a framework is used everywhere by kind and has no single owner; make it a library to own it`;
+    if (r.reach === 'shared' && r.enforcedBy === 'static-guard')
+      return `resource "${id}" is shared but enforced by the static guard — something outside the corpus can reach it, so only its own access control sees every access; name that control, or "none"`;
+    if (r.verifiedBy !== undefined && r.verifiedBy !== null && !INSTRUMENTS.includes(r.verifiedBy))
+      return `resource "${id}" is verified by ${JSON.stringify(r.verifiedBy)} — it is one of ${INSTRUMENTS.join(', ')}, or null (UNVERIFIED)`;
+  }
+  for (const [name, c] of Object.entries(d.components)) {
+    const purpose = typeof c.purpose === 'string' ? c.purpose.trim() : '';
+    if (!purpose) return `component "${name}" has no "purpose" — a design with a ledger needs one sentence per component saying what it is for`;
+    if (purpose.toLowerCase() === name.toLowerCase()) return `component "${name}" has its own name as its purpose — say what it is for`;
+  }
   return null;
+}
+
+// Who refuses a touch of this row, and with what predicate: the lookup in the design (§5.2).
+// `by` is the gatekeeper ('static-guard', the row's own control, or 'none'); `unverified` is set
+// when nothing can confirm the owner is the only toucher, which the report prints as UNVERIFIED.
+function gatekeeperOf(row) {
+  const r = isObject(row) ? row : {};
+  const noInstrument = !r.verifiedBy;
+  if (r.kind === 'framework') return { by: 'none', predicate: null, why: 'a framework is not owned', unverified: false };
+  if (r.reach === 'process')
+    return { by: 'static-guard', predicate: PREDICATE[r.kind] || null, why: 'every access is inside the corpus the guard graphs', unverified: noInstrument };
+  if (r.reach === 'shared') {
+    const control = typeof r.enforcedBy === 'string' && r.enforcedBy && r.enforcedBy !== 'none' && r.enforcedBy !== 'static-guard' ? r.enforcedBy : null;
+    return control
+      ? { by: control, predicate: null, parity: 'live grants == ledger', why: 'something outside the corpus can reach it; its own control sees every access', unverified: noInstrument }
+      : { by: 'none', predicate: null, why: 'shared, and no control of its own is named', unverified: true };
+  }
+  return { by: 'none', predicate: null, why: 'the row has no reach', unverified: true };
 }
 
 // Withheld only on a POSITIVE mismatch. A baseline with no id (written before designs were
@@ -207,6 +284,18 @@ const DESIGN_OWED_AT = 3;
 
 // ── the graph ────────────────────────────────────────────────────────────────────────
 
+// The package a bare specifier names, as the ledger keys it (#710): `node:` dropped (a core
+// module is one package whichever way it is spelled), a query dropped (`x?worker`), and the
+// sub-path cut — a scoped name keeps two segments (`@strudel/core/x` → `@strudel/core`), any
+// other keeps one (`monaco-editor/esm/vs/…` → `monaco-editor`). Null for a relative or absolute
+// specifier: those name files, not packages.
+function packageOf(spec) {
+  const s = String(spec || '').replace(/^node:/, '').replace(/[?#].*$/, '');
+  if (!s || s.startsWith('.') || s.startsWith('/')) return null;
+  const parts = s.split('/');
+  return s.startsWith('@') ? (parts.length > 1 && parts[1] ? `${parts[0]}/${parts[1]}` : null) : parts[0];
+}
+
 function loadGraph(cruise, design) {
   const root = design.root ? design.root.replace(/\/+$/, '') + '/' : '';
   const excludes = design.excludes || [];
@@ -218,6 +307,9 @@ function loadGraph(cruise, design) {
   const adj = new Map([...modules].map(s => [s, new Set()]));
   const runtime = new Map([...modules].map(s => [s, new Set()]));   // the edges that survive compilation
   const used = new Set();                   // edges at least one record USES, rather than only re-exports
+  // The packages each module imports (#710), by bare specifier: an archive has no node_modules,
+  // so a package is often unresolved, and the specifier is the one fact both producers share.
+  const externals = new Map();
   let relative = 0, unresolved = 0;
 
   for (const m of listed) {
@@ -227,6 +319,20 @@ function loadGraph(cruise, design) {
       // The analyser marks a specifier nothing of which survives `pre-compilation-only`, but an
       // `import type` beside a value import of the same file carries only `type-only` — and
       // left in, it would turn a re-export into a use.
+      // A bare specifier that does not land in the corpus is a package: unresolved, a core
+      // module, anything under node_modules, or a file outside the root. One that resolves into
+      // the corpus (a tsconfig path alias) is an internal edge, below. A package is recorded
+      // WHATEVER the type-only policy: the analyser never marks an unresolved package as compiled
+      // away (0 of 773 bare-specifier records on stave's archive at c26ca5e7, 2026-11-03), so the
+      // policy could only be applied by one producer, and the graphs would disagree on every
+      // `import type` of a package. A type import also ties a component to the library's shape,
+      // which is what ownership is about.
+      const pkg = packageOf(d.module);
+      if (pkg && (d.couldNotResolve || d.coreModule || !d.resolved || String(d.resolved).split('/').includes('node_modules') || !inCorpus(d.resolved))) {
+        if (!externals.has(m.source)) externals.set(m.source, new Set());
+        externals.get(m.source).add(pkg);
+        continue;
+      }
       const types = d.dependencyTypes || [];
       const typeOnly = COMPILED_AWAY.some(t => types.includes(t));
       if (typeOnly && !counting) continue;
@@ -249,7 +355,7 @@ function loadGraph(cruise, design) {
   // Cycles are computed, never read from an analyser's flag: dependency-cruiser's flag counts a
   // cycle through types, which nothing runs, and a graph built without the analyser has no flag.
   const circular = onCycle(runtime);
-  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved };
+  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved, externals };
 }
 
 // Why the input cannot support a verdict, or null when it can. A CLEAN ZERO IS NOT A PASS:
@@ -355,17 +461,64 @@ function cycleEdges(graph) {
   };
 }
 
+// ── rule: owner (#710) ───────────────────────────────────────────────────────────────
+// A library the ledger gives to one component may be imported by that component alone. A second
+// toucher is a NEW violation keyed `module -> package`, so the hook's "starts in the edited
+// file" filter works unchanged, and the refusal names the owner. Judged only where the static
+// guard is the gatekeeper and its predicate is the import (gatekeeperOf): a library of reach
+// `process`. Everything else is COUNTED apart, never folded into "allowed": a framework (judged,
+// never a violation), a row with no owner yet ("couldn't tell", listed with its touchers), a row
+// another gatekeeper holds, a package the ledger does not list, a module no component claims.
+function owners(graph, design) {
+  const res = isObject(design && design.resources) ? design.resources : {};
+  const of = componentOf(design, graph.root);
+  const found = [], couldntTell = new Map(), unlisted = new Set(), elsewhere = new Set(), unmapped = new Set();
+  let examined = 0, framework = 0;
+  for (const [m, pkgs] of graph.externals || []) {
+    const c = of(m);
+    for (const p of pkgs) {
+      const r = res[p];
+      if (!isObject(r)) { unlisted.add(p); continue; }
+      if (c === undefined) { unmapped.add(m); continue; }
+      if (r.kind === 'framework') { examined++; framework++; continue; }
+      const gk = gatekeeperOf(r);
+      if (r.kind !== 'library' || gk.by !== 'static-guard') { elsewhere.add(p); continue; }
+      examined++;
+      if (!r.owner) {
+        if (!couldntTell.has(p)) couldntTell.set(p, new Map());
+        couldntTell.get(p).set(c, (couldntTell.get(p).get(c) || 0) + 1);
+        continue;
+      }
+      if (r.owner !== c) found.push({ key: edgeKey(m, p), pair: edgeKey(c, r.owner), owner: r.owner, package: p,
+        detail: `${c} imports ${p}, which ${r.owner} owns (${r.verifiedBy ? `verified by ${r.verifiedBy}` : 'UNVERIFIED: no instrument named'})` });
+    }
+  }
+  const unverified = Object.keys(res).filter(id => isObject(res[id]) && gatekeeperOf(res[id]).unverified).sort();
+  return {
+    found, examined, framework,
+    couldntTell: [...couldntTell].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([pkg, by]) => ({ package: pkg, touchers: Object.fromEntries([...by].sort()) })),
+    unlisted: [...unlisted].sort(), elsewhere: [...elsewhere].sort(), unmapped: [...unmapped].sort(), unverified,
+  };
+}
+
 // ── the ratchet ──────────────────────────────────────────────────────────────────────
 
 function judge(graph, design) {
-  return { divergence: divergences(graph, design), cycle: cycleEdges(graph) };
+  return { divergence: divergences(graph, design), cycle: cycleEdges(graph), owner: owners(graph, design) };
 }
 
 function ratchet(results, baseline) {
   const out = {};
   for (const rule of RULES) {
-    const base = new Set((baseline && baseline.rules && baseline.rules[rule]) || []);
     const found = results[rule].found;
+    // Only when the rule examined something: a design with no ledger gives it nothing to judge,
+    // and saying "not judged" there would ask for a regeneration that changes nothing (#725).
+    if (SINCE[rule] && results[rule].examined > 0 && baseline && isObject(baseline.rules) && !(rule in baseline.rules)) {
+      out[rule] = { total: found.length, grandfathered: 0, fresh: [], fixed: [],
+        unbaselined: `the baseline has no "${rule}" section (written before the rule, ${SINCE[rule]}), so ${found.length} ${rule} finding${found.length === 1 ? ' is' : 's are'} not judged — regenerating the baseline measures them` };
+      continue;
+    }
+    const base = new Set((baseline && baseline.rules && baseline.rules[rule]) || []);
     const now = new Set(found.map(f => f.key));
     out[rule] = {
       total: found.length,
@@ -397,5 +550,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
-  componentOf, divergences, byPair, allowedFrom, cycleEdges, judge, ratchet, planBaseline,
+  KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
+  componentOf, divergences, byPair, allowedFrom, cycleEdges, owners, SINCE, judge, ratchet, planBaseline,
 };
