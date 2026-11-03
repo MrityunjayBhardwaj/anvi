@@ -10,9 +10,10 @@
 // THE FAILURE CLASS. An agent can erode structure one import at a time — a shortcut edge
 // here, an upward reach there — and nothing notices until the module graph has knotted.
 // Cycle detection and dependency rules are well served already (dependency-cruiser, ArchUnit,
-// Bazel visibility). Two rules refuse here — divergence from the design's component graph, and
-// cycles — under a RATCHET: existing violations are recorded in a baseline and allowed to
-// stand; only NEW ones are refused.
+// Bazel visibility). Three rules refuse here — divergence from the design's component graph,
+// cycles, and (when the design carries an ownership ledger, #710) a second toucher of a library
+// another component owns — under a RATCHET: existing violations are recorded in a baseline and
+// allowed to stand; only NEW ones are refused.
 //
 // THE DESIGN IS A COMPONENT GRAPH, NOT A LAYER ORDER (#554). A design names components, maps
 // files to them, and DECLARES the edges allowed between them; the code is checked against it
