@@ -125,6 +125,14 @@ function designId(design) {
   const canonical = { root: stripSlash(d.root || ''), excludes: sortedSet(d.excludes), components, allowed };
   // Only when on, so every design written before the key keeps the id its baselines carry.
   if (countsTypeOnly(d)) canonical.typeOnlyImports = 'count';
+  // The ledger (#710), only when present, for the same reason. Per row only what changes who may
+  // touch it or who refuses: id, kind, reach, owner. Touchers are a measurement, verifiedBy and
+  // enforcedBy follow from the row by lookup, purpose and rule are prose.
+  if (isObject(d.resources)) canonical.resources = Object.keys(d.resources).sort().map(id => {
+    const r = isObject(d.resources[id]) ? d.resources[id] : {};
+    return { id, kind: r.kind === undefined ? null : r.kind, reach: r.reach === undefined ? null : r.reach,
+             owner: r.owner === undefined ? null : r.owner };
+  });
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
 }
 
@@ -165,7 +173,70 @@ function designProblem(design) {
   const cyc = [...onCycle(adj)].sort();
   if (cyc.length) return `the declared edges form a cycle (${cyc.join(', ')}) — a cycle between components is a design ` +
     'question with three answers: invert one direction through a port or registry, extract what both need, or merge them';
+  return ledgerProblem(d, names);
+}
+
+// ── the ledger (#710) ────────────────────────────────────────────────────────────────
+// A design may name who OWNS each resource, beside the edges it allows. A row is
+// `id → { kind, reach, owner, verifiedBy, enforcedBy, touchers?, rule?, ruled? }`, and four of its
+// fields decide a verdict: KIND says what counts as touching (an import for a library, a write for
+// state, a parser entry call for a syntax, a register for a registry); OWNER is the one component
+// that may touch it, or null when nobody has ruled ("couldn't tell"); REACH says whether anything
+// outside the corpus can touch it — `process` when only this package's code can, `shared` when a
+// migration, a second service or a person can too; VERIFIED BY names the instrument that can
+// confirm the owner is the only toucher. Who refuses is then a lookup, not a judgment (gatekeeperOf).
+const KINDS = ['library', 'framework', 'state', 'syntax', 'registry', 'door'];
+const REACHES = ['process', 'shared'];
+const INSTRUMENTS = ['imports', 'symbols', 'grants', 'runtime'];
+// What the static guard would have to see, per kind, for a process row.
+const PREDICATE = { library: 'import', door: 'import', state: 'write', syntax: 'parse-call', registry: 'register' };
+
+// Why the ledger would make verdicts lie, or null. Each is a row the guard could not judge as
+// written: a kind or reach it does not know, an owner that is no component (a typo that owns
+// nothing), a shared resource handed to the static guard (it sees only the sessions it runs in, so
+// its refusal is stale by construction), a framework given an owner (a framework is used
+// everywhere by kind; owning it makes every file a violation nobody acts on). And once a design
+// carries a ledger, each component needs a purpose that is not its own name: a component without
+// one is a folder, and an owner map over folders cannot be ruled on. Whether a purpose is TRUE is a
+// ruling no string check can make; this only refuses the purpose that is visibly absent.
+function ledgerProblem(d, names) {
+  if (d.resources === undefined) return null;
+  if (!isObject(d.resources)) return 'the design\'s "resources" is not an object of rows (id → { kind, reach, owner, verifiedBy, enforcedBy })';
+  for (const [id, r] of Object.entries(d.resources)) {
+    if (!isObject(r)) return `resource "${id}" is not an object with kind, reach and owner`;
+    if (!KINDS.includes(r.kind)) return `resource "${id}" has kind ${JSON.stringify(r.kind)} — it is one of ${KINDS.join(', ')}`;
+    if (!REACHES.includes(r.reach)) return `resource "${id}" has reach ${JSON.stringify(r.reach)} — it is "process" (only this package's code can touch it) or "shared" (something outside the corpus can)`;
+    if (r.owner !== null && r.owner !== undefined && !names.has(r.owner)) return `resource "${id}" is owned by "${r.owner}", which is not a component`;
+    if (r.kind === 'framework' && r.owner) return `resource "${id}" is a framework with an owner ("${r.owner}") — a framework is used everywhere by kind and has no single owner; make it a library to own it`;
+    if (r.reach === 'shared' && r.enforcedBy === 'static-guard')
+      return `resource "${id}" is shared but enforced by the static guard — something outside the corpus can reach it, so only its own access control sees every access; name that control, or "none"`;
+    if (r.verifiedBy !== undefined && r.verifiedBy !== null && !INSTRUMENTS.includes(r.verifiedBy))
+      return `resource "${id}" is verified by ${JSON.stringify(r.verifiedBy)} — it is one of ${INSTRUMENTS.join(', ')}, or null (UNVERIFIED)`;
+  }
+  for (const [name, c] of Object.entries(d.components)) {
+    const purpose = typeof c.purpose === 'string' ? c.purpose.trim() : '';
+    if (!purpose) return `component "${name}" has no "purpose" — a design with a ledger needs one sentence per component saying what it is for`;
+    if (purpose.toLowerCase() === name.toLowerCase()) return `component "${name}" has its own name as its purpose — say what it is for`;
+  }
   return null;
+}
+
+// Who refuses a touch of this row, and with what predicate: the lookup in the design (§5.2).
+// `by` is the gatekeeper ('static-guard', the row's own control, or 'none'); `unverified` is set
+// when nothing can confirm the owner is the only toucher, which the report prints as UNVERIFIED.
+function gatekeeperOf(row) {
+  const r = isObject(row) ? row : {};
+  const noInstrument = !r.verifiedBy;
+  if (r.kind === 'framework') return { by: 'none', predicate: null, why: 'a framework is not owned', unverified: false };
+  if (r.reach === 'process')
+    return { by: 'static-guard', predicate: PREDICATE[r.kind] || null, why: 'every access is inside the corpus the guard graphs', unverified: noInstrument };
+  if (r.reach === 'shared') {
+    const control = typeof r.enforcedBy === 'string' && r.enforcedBy && r.enforcedBy !== 'none' && r.enforcedBy !== 'static-guard' ? r.enforcedBy : null;
+    return control
+      ? { by: control, predicate: null, parity: 'live grants == ledger', why: 'something outside the corpus can reach it; its own control sees every access', unverified: noInstrument }
+      : { by: 'none', predicate: null, why: 'shared, and no control of its own is named', unverified: true };
+  }
+  return { by: 'none', predicate: null, why: 'the row has no reach', unverified: true };
 }
 
 // Withheld only on a POSITIVE mismatch. A baseline with no id (written before designs were
@@ -397,5 +468,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
+  KINDS, REACHES, INSTRUMENTS, gatekeeperOf,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, judge, ratchet, planBaseline,
 };
