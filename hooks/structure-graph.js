@@ -118,7 +118,7 @@ function tsExtractor(pkgDir) {
                (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require')))
         mark(n.arguments[0].text, 'use');
       else if (ts.isImportTypeNode(n) && ts.isLiteralTypeNode(n.argument) && ts.isStringLiteral(n.argument.literal))
-        mark(n.argument.literal.text, 'use');
+        void 0; // MUTATION (throwaway, #732): import('…') in a type no longer counted
       ts.forEachChild(n, visit);
     };
     visit(sf);
