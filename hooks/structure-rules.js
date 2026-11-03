@@ -461,6 +461,35 @@ function cycleEdges(graph) {
   };
 }
 
+// Who touches each package: the one count of package imports that both the owner rule and the
+// ledger tool (scripts/ownership-ledger.js) read, so the tool cannot propose an owner from a count
+// the rule does not judge by (#727). One pass over graph.externals gives:
+//   touches            every (module, package) import in graph order, `component` undefined when
+//                      no component claims the module
+//   byPackage          package → { comps: Map<component, module count>, unmapped: [module] (sorted) },
+//                      in first-seen order
+//   modulesWithPackages, unmappedWithPackages   modules importing at least one package, all and unclaimed
+function touchersByPackage(graph, design) {
+  const of = componentOf(design, graph.root);
+  const touches = [], byPackage = new Map();
+  let modulesWithPackages = 0, unmappedWithPackages = 0;
+  for (const [module, pkgs] of graph.externals || []) {
+    if (!pkgs.size) continue;
+    modulesWithPackages++;
+    const component = of(module);
+    if (component === undefined) unmappedWithPackages++;
+    for (const pkg of pkgs) {
+      touches.push({ module, component, package: pkg });
+      if (!byPackage.has(pkg)) byPackage.set(pkg, { comps: new Map(), unmapped: [] });
+      const e = byPackage.get(pkg);
+      if (component === undefined) e.unmapped.push(module);
+      else e.comps.set(component, (e.comps.get(component) || 0) + 1);
+    }
+  }
+  for (const e of byPackage.values()) e.unmapped.sort();
+  return { touches, byPackage, modulesWithPackages, unmappedWithPackages };
+}
+
 // ── rule: owner (#710) ───────────────────────────────────────────────────────────────
 // A library the ledger gives to one component may be imported by that component alone. A second
 // toucher is a NEW violation keyed `module -> package`, so the hook's "starts in the edited
@@ -471,32 +500,25 @@ function cycleEdges(graph) {
 // another gatekeeper holds, a package the ledger does not list, a module no component claims.
 function owners(graph, design) {
   const res = isObject(design && design.resources) ? design.resources : {};
-  const of = componentOf(design, graph.root);
-  const found = [], couldntTell = new Map(), unlisted = new Set(), elsewhere = new Set(), unmapped = new Set();
+  const { touches, byPackage } = touchersByPackage(graph, design);
+  const found = [], couldntTell = new Set(), unlisted = new Set(), elsewhere = new Set(), unmapped = new Set();
   let examined = 0, framework = 0;
-  for (const [m, pkgs] of graph.externals || []) {
-    const c = of(m);
-    for (const p of pkgs) {
-      const r = res[p];
-      if (!isObject(r)) { unlisted.add(p); continue; }
-      if (c === undefined) { unmapped.add(m); continue; }
-      if (r.kind === 'framework') { examined++; framework++; continue; }
-      const gk = gatekeeperOf(r);
-      if (r.kind !== 'library' || gk.by !== 'static-guard') { elsewhere.add(p); continue; }
-      examined++;
-      if (!r.owner) {
-        if (!couldntTell.has(p)) couldntTell.set(p, new Map());
-        couldntTell.get(p).set(c, (couldntTell.get(p).get(c) || 0) + 1);
-        continue;
-      }
-      if (r.owner !== c) found.push({ key: edgeKey(m, p), pair: edgeKey(c, r.owner), owner: r.owner, package: p,
-        detail: `${c} imports ${p}, which ${r.owner} owns (${r.verifiedBy ? `verified by ${r.verifiedBy}` : 'UNVERIFIED: no instrument named'})` });
-    }
+  for (const { module: m, component: c, package: p } of touches) {
+    const r = res[p];
+    if (!isObject(r)) { unlisted.add(p); continue; }
+    if (c === undefined) { unmapped.add(m); continue; }
+    if (r.kind === 'framework') { examined++; framework++; continue; }
+    const gk = gatekeeperOf(r);
+    if (r.kind !== 'library' || gk.by !== 'static-guard') { elsewhere.add(p); continue; }
+    examined++;
+    if (!r.owner) { couldntTell.add(p); continue; }
+    if (r.owner !== c) found.push({ key: edgeKey(m, p), pair: edgeKey(c, r.owner), owner: r.owner, package: p,
+      detail: `${c} imports ${p}, which ${r.owner} owns (${r.verifiedBy ? `verified by ${r.verifiedBy}` : 'UNVERIFIED: no instrument named'})` });
   }
   const unverified = Object.keys(res).filter(id => isObject(res[id]) && gatekeeperOf(res[id]).unverified).sort();
   return {
     found, examined, framework,
-    couldntTell: [...couldntTell].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([pkg, by]) => ({ package: pkg, touchers: Object.fromEntries([...by].sort()) })),
+    couldntTell: [...couldntTell].sort().map(pkg => ({ package: pkg, touchers: Object.fromEntries([...byPackage.get(pkg).comps].sort()) })),
     unlisted: [...unlisted].sort(), elsewhere: [...elsewhere].sort(), unmapped: [...unmapped].sort(), unverified,
   };
 }
@@ -551,5 +573,5 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
   KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
-  componentOf, divergences, byPair, allowedFrom, cycleEdges, owners, SINCE, judge, ratchet, planBaseline,
+  componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, owners, SINCE, judge, ratchet, planBaseline,
 };

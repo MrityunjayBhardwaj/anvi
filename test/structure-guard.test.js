@@ -943,6 +943,17 @@ console.log('\nOWNER — a second toucher of an owned library is refused, a fram
   ok(o.unmapped.join() === 'src/loose.ts' && !o.found.some(f => f.key.startsWith('src/loose.ts')), 'a module no component claims is listed, not judged');
   ok(o.examined === 8, `examined counts every judged import: lib ×2, fw ×2, nul ×2, unv ×2 (${o.examined})`);
 
+  // The one toucher count (#727): the owner rule above and the ledger tool both read it.
+  const t = G.touchersByPackage(g, designO);
+  const flat = pkg => { const e = t.byPackage.get(pkg); return e && JSON.stringify([Object.fromEntries([...e.comps].sort()), e.unmapped]); };
+  ok(flat('lib') === JSON.stringify([{ A: 1, B: 1 }, ['src/loose.ts']]),
+     `a package touched by two components counts each, and the unclaimed module is listed apart, not counted (${flat('lib')})`);
+  ok(flat('fw') === JSON.stringify([{ B: 2 }, []]), `two modules of one component count 2 (${flat('fw')})`);
+  ok([...t.byPackage.keys()].sort().join() === 'fw,lib,nul,shared-lib,stray,unv', `every imported package has an entry, listed or not (${[...t.byPackage.keys()].join()})`);
+  ok(t.modulesWithPackages === 4 && t.unmappedWithPackages === 1, `modules importing a package: 4, of which 1 unclaimed (${t.modulesWithPackages}, ${t.unmappedWithPackages})`);
+  ok(t.touches.length === 11 && t.touches.filter(x => x.component === undefined).map(x => x.module).join() === 'src/loose.ts',
+     `every module→package import appears once, the unclaimed one with no component (${t.touches.length})`);
+
   // The ratchet.
   const res = G.judge(g, designO);
   const fresh = G.ratchet(res, null);

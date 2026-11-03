@@ -60,7 +60,7 @@ const path = require('path');
 
 // The guard's module: its shared rules (`...R`) and its CLI helpers. Requiring it runs nothing.
 const G = require('./structure-guard.js');
-const { loadGraph, notMeasured, componentOf, designProblem, designId, designVersions, gatekeeperOf, divergences, edgeKey, onCycle, analyserOptionProblem } = G;
+const { loadGraph, notMeasured, componentOf, touchersByPackage, designProblem, designId, designVersions, gatekeeperOf, divergences, edgeKey, onCycle, analyserOptionProblem } = G;
 
 const TOOL = 'ownership-ledger.js';
 const FLAGS = new Set(['design', 'graph', 'framework', 'write']);
@@ -99,22 +99,9 @@ function survey(design, graph, frameworks) {
   const div = divergences(graph, design);
   const rows = isObject(design.resources) ? design.resources : {};
 
-  // Touchers per package: component → module count; unmapped modules listed apart.
-  const touch = new Map();               // pkg → { comps: Map<comp, n>, unmapped: [module] }
-  const entry = pkg => { if (!touch.has(pkg)) touch.set(pkg, { comps: new Map(), unmapped: [] }); return touch.get(pkg); };
-  let modulesWithPackages = 0, unmappedWithPackages = 0;
-  for (const [mod, pkgs] of graph.externals || new Map()) {
-    if (!pkgs.size) continue;
-    modulesWithPackages++;
-    const c = of(mod);
-    if (c === undefined) unmappedWithPackages++;
-    for (const pkg of pkgs) {
-      const e = entry(pkg);
-      if (c === undefined) e.unmapped.push(mod);
-      else e.comps.set(c, (e.comps.get(c) || 0) + 1);
-    }
-  }
-  for (const e of touch.values()) e.unmapped.sort();
+  // Touchers per package: component → module count; unmapped modules listed apart. The owner rule
+  // reads the same count (touchersByPackage), so a proposal is made from what the guard judges by.
+  const { byPackage: touch, modulesWithPackages, unmappedWithPackages } = touchersByPackage(graph, design);
   const packages = [...touch.keys()].sort();
   const touchersOf = pkg => touch.has(pkg) ? [...touch.get(pkg).comps.keys()].sort() : [];
   const touchersObj = pkg => Object.fromEntries(touchersOf(pkg).map(c => [c, touch.get(pkg).comps.get(c)]));
