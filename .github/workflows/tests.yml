@@ -15,6 +15,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # The one place the TypeScript pin lives: the install and the check both read it,
+      # so a bump cannot move one without the other.
+      TS_VERSION: '5.9.3'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,9 +40,9 @@ jobs:
         # breaks them passes here. anvi ships no dependency, so TypeScript goes into a
         # throwaway directory under the runner's temp, never into the repo: no
         # package.json, no lockfile, no node_modules in the checkout. Pinned to the
-        # version the extractor's agreement was measured on (5.9.3); bump it on purpose.
+        # version the extractor's agreement was measured on (TS_VERSION, above); bump it on purpose.
         # Install scripts are off: nothing from the registry runs at install time.
-        run: npm install --prefix "$RUNNER_TEMP/ts" --no-save --no-package-lock --ignore-scripts --no-audit --no-fund typescript@5.9.3
+        run: npm install --prefix "$RUNNER_TEMP/ts" --no-save --no-package-lock --ignore-scripts --no-audit --no-fund "typescript@$TS_VERSION"
 
       - name: Check the gated tests will run, not skip
         # The tests resolve `typescript/package.json` from STRUCTURE_TS_FROM and SKIP
@@ -50,7 +54,7 @@ jobs:
         run: >-
           node -e "const p=require.resolve('typescript/package.json',{paths:[process.env.STRUCTURE_TS_FROM]});
           const v=require(p).version; console.log('TypeScript '+v+' resolves from '+process.env.STRUCTURE_TS_FROM+' ('+p+')');
-          if(v!=='5.9.3'){console.error('expected TypeScript 5.9.3, got '+v);process.exit(1)}"
+          if(v!==process.env.TS_VERSION){console.error('expected TypeScript '+process.env.TS_VERSION+', got '+v);process.exit(1)}"
 
       - name: Run the suite
         # The runner discovers its own list and fails on an untracked test file, so
