@@ -404,7 +404,11 @@ function onDefaultBranch(pkgDir, frame, ref, since, calls) {
       const has = commit => {
         const text = gitOut(at.top, 'show', `${commit}:${inRepo}`);
         if (text === null) return false;
-        try { return ex.edges(from, text).edges.some(([t]) => t === to); } catch { return null; }
+        // An owner finding's target is a package (#710), found among the extractor's package records.
+        try {
+          const got = ex.edges(from, text);
+          return f.rule === 'owner' ? (got.externals || []).some(([spec]) => RULES.packageOf(spec) === to) : got.edges.some(([t]) => t === to);
+        } catch { return null; }
       };
       // Every commit on the branch that touched the importing file, oldest first; the carrier is
       // the first one inside the window whose content has the import when its predecessor's did not.

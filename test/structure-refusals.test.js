@@ -712,6 +712,58 @@ exports.create = pkgDir => !fs.existsSync(path.join(pkgDir, 'node_modules')) ? {
   ok(leftovers() === before, `no temporary copy of the branch is left behind (${leftovers() - before} extra)`);
 }
 
+console.log('\nTHE DEFAULT BRANCH — an owner finding is traced to the commit that carried its package import (#710):');
+{
+  const RM = require(path.join(__dirname, '..', 'hooks', 'structure-rules.js'));
+  const REPO = path.join(DIR, 'own', 'repo'), DP = path.join(REPO, 'packages', 'editor');
+  const git = (date, ...a) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: REPO, encoding: 'utf8',
+    env: { ...process.env, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } });
+  const put = (rel, text) => { const f = path.join(DP, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  const commit = (date, msg) => { git(date, 'add', '-A'); git(date, 'commit', '-qm', msg); return git(date, 'rev-parse', '--short', 'HEAD').stdout.trim(); };
+  const PLAIN = 'export const v = 1;\n', LIB = "import { x } from 'lib';\n";
+  fs.mkdirSync(REPO, { recursive: true });
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: REPO });
+  put('src/a/one.ts', LIB + PLAIN);          // the owner's own import: never a finding
+  put('src/b/two.ts', "import { v } from '../a/one';\n" + PLAIN);   // b -> a, allowed
+  put('src/b/user.ts', PLAIN);
+  commit('2026-09-20T00:00:00Z', 'before the window');
+  // Inside the window, through no edit tool: b's file takes a's package.
+  put('src/b/user.ts', LIB + PLAIN); const carrier = commit('2026-09-26T00:00:00Z', 'a script makes b import lib');
+  put('src/b/user.ts', LIB + PLAIN + '// touched\n'); commit('2026-09-26T01:00:00Z', 'a later touch');
+  git('2026-09-26T01:00:00Z', 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+
+  const EX = path.join(DIR, 'own', 'extractor.js');
+  fs.writeFileSync(EX, `const fs = require('fs'), path = require('path');
+exports.create = pkgDir => ({ id: 'fixture-own@1', configFiles: [], edges(rel, content) {
+  const out = new Map(), bare = new Set(); let unresolved = 0;
+  for (const m of content.matchAll(/(?:from\\s+|import\\s+)['"]([^'"]+)['"]/g)) {
+    if (!m[1].startsWith('.')) { bare.add(m[1]); continue; }
+    const t = path.posix.join(path.posix.dirname(rel), m[1]) + '.ts';
+    if (fs.existsSync(path.join(pkgDir, t))) out.set(t, false); else unresolved++;
+  }
+  return { edges: [...out], externals: [...bare].map(s => [s, 'import', null, null]), unresolved };
+} });
+`);
+  const DESIGN_OBJ = { root: 'src',
+    components: { A: { dirs: ['a'], purpose: 'holds the one wrapper around lib' }, B: { dirs: ['b'], purpose: 'shows what A computes' } },
+    allowed: [['B', 'A']],
+    resources: { lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard' } } };
+  const w = (name, obj) => { const f = path.join(DIR, 'own', name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+  const D = w('design.json', DESIGN_OBJ);
+  const B = w('baseline.json', { designId: RM.designId(DESIGN_OBJ), rules: { divergence: [], cycle: [], owner: [] } });
+  const tx = path.join(DIR, 'own-tx'); fs.mkdirSync(path.join(tx, 'p'), { recursive: true });
+  // The window's only edit-tool call is on a's file; none touches b's.
+  const quiet = use('Edit', path.join(DP, 'src/a/one.ts'), '2026-09-26T12:00:00.000Z', 'sess-own');
+  fs.writeFileSync(path.join(tx, 'p', 't.jsonl'), [quiet.line, result(quiet.id, 'The file has been updated successfully.', false, '2026-09-26T12:00:00.000Z')].join('\n') + '\n');
+  const r = runIn(tx, '--package', DP, '--since', '2026-09-25T00:00:00Z', '--design', D, '--baseline', B, '--extractor', EX);
+  const block = (r.out.split('ON THE DEFAULT BRANCH')[1] || '').split('TRIAL READING')[0];
+  ok(/IN NEITHER THE DESIGN NOR THE BASELINE — 1 import at origin\/main /.test(r.out) && /\bowner\s+src\/b\/user\.ts -> lib   \(B -> A\)/.test(block),
+     `the default branch lists b's import of a's package as an owner finding (${(r.out.match(/BASELINE — \d+ imports?/) || ['none'])[0]})`);
+  ok(new RegExp(`src/b/user\\.ts -> lib   \\(B -> A\\)\\n\\s+carried by ${carrier} \\S+ a script makes b import lib\\n\\s+edit-tool calls on that file in the window: 0 — none added it, so it was written through another door`).test(block),
+     `the owner finding names the commit that carried the package import (${carrier}), not the later touch`);
+  ok(!/could not be told from the file's history/.test(block), 'and the package import is not reported as untraceable');
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
