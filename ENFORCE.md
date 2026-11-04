@@ -1488,6 +1488,18 @@ loosened until it stops firing guards nothing.
   proposes rows from the graph and classifies each declared pair; it never writes in place.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
+- **The coupling table (#722) is a plan-time reading, never a refusal.**
+  `node scripts/coupling-table.js --design <d> --graph <g> [--ownership <index.json>] [--framework <pkg>] [--previous <table.json>] [--json <out>]`
+  prints Martin's Ca, Ce and I per component at file grain over the edges the guard judges, the
+  files imported from two or more other components (a file that only re-exports is marked
+  "forwards only": a passthrough door, not an owner), a random-DAG control (a floor) and a
+  shuffled-membership control. Every row carries library homes, and, from
+  `ownership-index.js --findings --json`, state homes and a duplication reading (top-level function
+  names defined in two or more components), because every import-graph coupling figure falls when
+  a function is copied instead of imported: against `--previous`, a fall in coupling with no fall
+  in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
+  be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
+  option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with
