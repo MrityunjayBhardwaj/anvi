@@ -181,6 +181,8 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
     states: [
       // registry SHAPE: every write inside `register`, an export another file calls
       st('src/a/one.ts#reg', 'container', { writers: { a: ['src/a/one.ts#register'] }, writerFiles: { 'src/a/one.ts': 1 }, readers: { a: 1 }, readerFiles: { 'src/a/one.ts': 1 }, writeSites: ['src/a/one.ts:3'] }),
+      // one write inside the door, one outside it: a state, NOT a registry (every write, not some)
+      st('src/a/one.ts#mixed', 'container', { writers: { a: ['src/a/one.ts#register', 'src/a/one.ts#tidy'] }, writerFiles: { 'src/a/one.ts': 2 }, readers: { a: 1 }, readerFiles: { 'src/a/one.ts': 1 }, writeSites: ['src/a/one.ts:3', 'src/a/one.ts:12'] }),
       // reached directly from b, written outside any door: a state, owner a, SPRAWL (no door) — NOT a registry
       st('src/a/one.ts#cache', 'container', { writers: { a: ['src/a/one.ts#helper'] }, writerFiles: { 'src/a/one.ts': 1 }, readers: { b: 2 }, readerFiles: { 'src/b/two.ts': 2 }, writeSites: ['src/a/one.ts:10'] }),
       // written from two components: couldn't tell
@@ -193,7 +195,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
       st('src/c/four.ts#handed', 'container', { readers: { b: 1 }, readerFiles: { 'src/b/two.ts': 1 }, escapes: 2 }),
     ],
     exports: [
-      { id: 'src/a/one.ts#register', file: 'src/a/one.ts', name: 'register', component: 'a', callers: { b: 2 }, callerFiles: { 'src/b/two.ts': 2 }, writesStates: ['src/a/one.ts#reg'], passthroughFile: false, lines: [2, 4] },
+      { id: 'src/a/one.ts#register', file: 'src/a/one.ts', name: 'register', component: 'a', callers: { b: 2 }, callerFiles: { 'src/b/two.ts': 2 }, writesStates: ['src/a/one.ts#mixed', 'src/a/one.ts#reg'], passthroughFile: false, lines: [2, 4] },
       { id: 'src/b/two.ts#setShared', file: 'src/b/two.ts', name: 'setShared', component: 'b', callers: { b: 1 }, callerFiles: { 'src/b/three.ts': 1 }, writesStates: ['src/b/two.ts#shared'], passthroughFile: false, lines: [3, 5] },
       { id: 'src/c/four.ts#pure', file: 'src/c/four.ts', name: 'pure', component: 'c', callers: { a: 1 }, callerFiles: { 'src/a/one.ts': 1 }, writesStates: [], passthroughFile: false, lines: [8, 9] },
       { id: 'src/c/index.ts#fwd', file: 'src/c/index.ts', name: 'fwd', component: 'c', callers: { a: 1 }, callerFiles: { 'src/a/one.ts': 1 }, writesStates: ['src/a/one.ts#reg'], passthroughFile: true, lines: [1, 1] },
@@ -228,10 +230,12 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   ok(v.out.startsWith(plain.out.trimEnd() + '\n\nLEDGER V1'), 'everything v0 prints is printed unchanged, then the v1 block');
 
   const S1 = section(v.out, 'STATE AND REGISTRY ROWS', 'DOOR ROWS');
-  ok(/module states: 6 = 1 private to their file \(excluded, rule 9\) \+ 5 reached from another file/.test(S1), `private states are counted and excluded (${line(S1, /module states:/).trim()})`);
-  ok(/reached: 5 = 4 referenced from another file directly \+ 1 only through an export another file calls/.test(S1), `reach is split direct / through a door (${line(S1, /reached:/).trim()})`);
-  ok(/of the reached: 1 never written and never handed on[^+]*\+ 1 with no write seen but handed on[^+]*\+ 0 in a file no component claims[^+]*\+ 3 proposed \+ 0 already ruled/.test(S1), `constants and unseen writes get no row (${line(S1, /of the reached/).trim()})`);
+  ok(/module states: 7 = 1 private to their file \(excluded, rule 9\) \+ 6 reached from another file/.test(S1), `private states are counted and excluded (${line(S1, /module states:/).trim()})`);
+  ok(/reached: 6 = 4 referenced from another file directly \+ 2 only through an export another file calls/.test(S1), `reach is split direct / through a door (${line(S1, /reached:/).trim()})`);
+  ok(/of the reached: 1 never written and never handed on[^+]*\+ 1 with no write seen but handed on[^+]*\+ 0 in a file no component claims[^+]*\+ 4 proposed \+ 0 already ruled/.test(S1), `constants and unseen writes get no row (${line(S1, /of the reached/).trim()})`);
   ok(/registry rows proposed: 1\n\s+src\/a\/one\.ts#reg: owner a/.test(S1), 'a container written only inside a door another file calls is a registry, owner a');
+  ok(/state rows proposed: 3/.test(S1) && /\n\s+src\/a\/one\.ts#mixed: owner a · writers a 2/.test(S1) && !/registry rows proposed: 1\n[^\n]*\n\s+src\/a\/one\.ts#mixed/.test(S1),
+     'a container with one write inside a door and one outside is a state, not a registry');
   ok(/src\/a\/one\.ts#cache: owner a[^\n]*doors 0/.test(S1) && !/registry rows proposed: [^\n]*\n[^\n]*#cache/.test(S1) && /SPRAWL \(rule 9\)/.test(S1), 'a container written outside any door is a state, not a registry, and with no door it is SPRAWL');
   ok(/src\/b\/two\.ts#shared: owner null — COULDN'T TELL · writers a 1, b 1/.test(S1), 'a state written from two components is couldn\'t tell, with its writers');
   ok(!/#priv/.test(v.out.split('\nPROPOSAL')[0].split('\nLEDGER V1')[1]) && !/#TABLE:/.test(S1), 'the private state and the constant get no row');
@@ -255,7 +259,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   ok(/stale — a ruled v1 row with no toucher \(no writer, no caller\): 2\n\s+src\/c\/four\.ts#gone \(the state is no longer in the code\)\n\s+src\/c\/four\.ts#nocall\n/.test(RT), 'a ruled state gone from the code and a ruled door nobody calls are STALE');
   ok(/orphan jobs: 1 of 2/.test(RT), 'orphans counted with their denominator');
   const SV1 = section(v.out, 'SUMMARY (v1)', 'PROPOSAL');
-  ok(/rows proposed: 6 = 2 state \+ 1 registry \+ 1 door \+ 2 syntax; 3 v1 rows already ruled, kept/.test(SV1), `v1 rows by kind (${line(SV1, /rows proposed/).trim()})`);
+  ok(/rows proposed: 7 = 3 state \+ 1 registry \+ 1 door \+ 2 syntax; 3 v1 rows already ruled, kept/.test(SV1), `v1 rows by kind (${line(SV1, /rows proposed/).trim()})`);
   for (const re of [/rows proposed: (\d+) = ([^;]*);/m, /states: (\d+) module states = (.*)$/m]) {
     const m = SV1.match(re);
     const parts = m ? (m[2].match(/\d+/g) || []).map(Number).reduce((x, y) => x + y, 0) : -1;
@@ -278,7 +282,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   ok(membersAlone.code === 2 && /--members reads member uses from the ownership index/.test(membersAlone.out), '--members without --index is refused');
 }
 
-if (process.env.KEEP) console.log(DIR); else try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
+try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
