@@ -321,6 +321,45 @@ function printReclassification(r, ctx, print) {
   return total === 0 ? 0 : 1;
 }
 
+// THE SYMBOL SIDE (#696), said on every run that has a door or fields row: what was examined, how
+// many files the type checker read, and every reach it could not resolve — "could not look" is
+// never "nothing found".
+function printSymbolSide(results, symbols, design, print) {
+  const rows = design.resources && typeof design.resources === 'object' ? Object.values(design.resources) : [];
+  if (!rows.some(r => r && (r.kind === 'door' || Array.isArray(r.fields)))) return;
+  if (!symbols || symbols.notMeasured) { print(`  symbols   : NOT MEASURED — ${(symbols && symbols.notMeasured) || 'no source was read (a graph alone names no symbols; give --package)'}`); return; }
+  const d = symbols.door || {}, r = symbols.reads || {};
+  print(`  symbols   : ${symbols.ms} ms · door: ${d.examined || 0} files examined, ${d.checked || 0} read by the type checker (the rest name no door), ` +
+        `${(d.couldNotTell || []).length} COULD NOT TELL (receiver typed any) · reads: ${r.examined || 0} files examined, by name`);
+  for (const c of (d.couldNotTell || []).slice(0, 20)) print(`    could not tell: ${c.file}:${c.line} .${c.member} — ${c.why}`);
+  if ((symbols.couldntTell || []).length) print(`    couldn't tell (no owner yet, not judged): ${symbols.couldntTell.join(', ')}`);
+  const perRow = new Map();
+  for (const f of [...results.door.found, ...results.reads.found]) perRow.set(f.row, (perRow.get(f.row) || 0) + 1);
+  for (const [row, n] of [...perRow].sort()) print(`    ${row}: ${n} finding${n === 1 ? '' : 's'} outside its owner`);
+}
+
+// What a proposed design adds or removes under the ledger's rules (#695/#696): owner, entrance,
+// door and reads findings under each design, by key. A proposal that adds rows is reviewed on what
+// those rows would find today — every one would be held by the re-measured baseline, and only a
+// RULED row refuses anything after that.
+function printLedgerReclassification(a, b, print) {
+  const LEDGER = ['owner', 'entrance', 'door', 'reads'];
+  const A = judge(a.graph, a.design, a.symbols), B = judge(b.graph, b.design, b.symbols);
+  print('\n  THE LEDGER\'S RULES — findings under each design (a finding on a row not yet ruled is reported, never refused):');
+  let moved = 0;
+  for (const rule of LEDGER) {
+    const say = (res) => res.notMeasured ? `NOT MEASURED (${res.notMeasured})` : `${res.found.length} of ${res.examined} examined` +
+      ` (${res.found.filter(f => f.ruled === false).length} on a row not yet ruled)`;
+    const ka = new Set(A[rule].found.map(f => f.key)), kb = new Map(B[rule].found.map(f => [f.key, f]));
+    const added = [...kb.values()].filter(f => !ka.has(f.key)), gone = [...ka].filter(k => !kb.has(k));
+    moved += added.length + gone.length;
+    print(`    ${rule.padEnd(9)}: in force ${say(A[rule])} · proposed ${say(B[rule])} · ${added.length} become findings, ${gone.length} stop`);
+    for (const f of added) print(`        + ${f.key}   (${f.detail})`);
+    for (const k of gone) print(`        - ${k}`);
+  }
+  return moved ? 1 : 0;
+}
+
 // Record the user's go for an edit to one of a refusing check's own files. The registry and the
 // state directory are the hook's own, so the marker lands exactly where the hook will look.
 function allowCheckEdit(args, print, stop) {
@@ -418,17 +457,23 @@ function main(argv) {
       if (at && at.notMeasured) return stop(at.notMeasured);
       if (!at && args.ref) return stop(`--ref ${args.ref} needs a package inside a git checkout, and ${pkgDir} is not in one`);
     }
-    let got, gotProposed = null;
+    let got, gotProposed = null, symbols = null, symbolsProposed = null;
     try {
       const dir = at ? at.dir : pkgDir;
       const extractor = S.loadExtractor(args.extractor ? { extractor: args.extractor } : {}, dir);
       got = S.buildGraph({ pkgDir: dir, design, extractor, cachePath: null, proposed: null });
       // A design also says which files are in the corpus, so the proposed one gets its own graph.
       if (proposed) gotProposed = S.buildGraph({ pkgDir: dir, design: proposed, extractor, cachePath: null, proposed: null });
+      // Who calls a door and reads a tree's fields (#696), over every file, while the source is
+      // still there (an archive is removed below). Only a design that names such a row pays for it.
+      const SY = loadFromCandidates('structure-symbols.js');
+      const symbolsUnder = d => { const m = SY.measure({ pkgDir: dir, design: d, rels: S.listCorpus(dir, d) }); delete m.program; return m; };
+      symbols = symbolsUnder(design);
+      if (proposed) symbolsProposed = symbolsUnder(proposed);
     } finally { if (at) at.cleanup(); }
     if (got.notMeasured) return stop(got.notMeasured);
     if (gotProposed && gotProposed.notMeasured) return stop(`under the proposed design: ${gotProposed.notMeasured}`);
-    built = { pkgDir, graph: got.graph, extractor: got.stats.extractor, at, proposedGraph: gotProposed && gotProposed.graph };
+    built = { pkgDir, graph: got.graph, extractor: got.stats.extractor, at, proposedGraph: gotProposed && gotProposed.graph, symbols, symbolsProposed };
   }
   const analyser = cruise ? loadGraph(cruise, design) : null;
 
@@ -510,8 +555,9 @@ function main(argv) {
     if (built) print(built.at
       ? `structure-guard: measured ${built.at.ref} at ${built.at.sha.slice(0, 8)} (${built.at.date}) through git archive — not the working tree (ref chosen by ${built.at.why})`
       : `structure-guard: measured ${built.pkgDir} as it is on disk — it is not inside a git checkout, so there is no branch to measure instead`);
-    return printReclassification(reclassify({ graph, design }, { graph: graphB, design: proposed }),
+    const code = printReclassification(reclassify({ graph, design }, { graph: graphB, design: proposed }),
       { idA: frame.id, idB: designId(proposed), baseline, frame, proposed, graphA: graph, graphB }, print);
+    return printLedgerReclassification({ graph, design, symbols: built && built.symbols }, { graph: graphB, design: proposed, symbols: built && built.symbolsProposed }, print) || code;
   }
 
   // A baseline measured under another design is not judged: its keys belong to another frame,
@@ -525,7 +571,7 @@ function main(argv) {
     return 2;
   }
 
-  const results = judge(graph, design);
+  const results = judge(graph, design, built && built.symbols);
   const ledger = ratchet(results, baseline);
 
   if (built) print(built.at
@@ -548,10 +594,12 @@ function main(argv) {
     'it is judged as given; regenerating it stamps the design in force');
   for (const rule of RULES) {
     const r = ledger[rule];
-    print(`  ${rule.padEnd(10)}: ${r.total} of ${results[rule].examined} examined — ` +
+    print(`  ${rule.padEnd(10)}: ` + (r.notMeasured ? `NOT MEASURED — ${r.notMeasured}` : `${r.total} of ${results[rule].examined} examined — ` +
           (r.unbaselined ? `NOT JUDGED: ${r.unbaselined}`
-            : `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline`));
+            : `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline` +
+              (r.proposed && r.proposed.length ? `, ${r.proposed.length} NEW on a row not yet ruled (reported, not refused)` : ''))));
   }
+  printSymbolSide(results, built && built.symbols, design, print);
   // THE LEDGER'S SIDE (#710), said on every run so "no owner violations" cannot be read off a
   // design that owns nothing, and each kind of not-judged is counted apart from "allowed".
   const own = results.owner;
@@ -601,6 +649,12 @@ function main(argv) {
     print('\n  NEW — refused:');
     for (const f of fresh) print(`    ${f.rule.padEnd(10)} ${f.key}   (${f.detail})`);
   }
+  // On a row nobody has ruled: the guard reports it and refuses nothing (#695/#696).
+  const unruled = RULES.flatMap(rule => (ledger[rule].proposed || []).map(f => ({ rule, ...f })));
+  if (unruled.length) {
+    print('\n  NEW on a row not yet ruled — reported, NOT refused (refused once the owner rules the row):');
+    for (const f of unruled) print(`    ${f.rule.padEnd(10)} ${f.key}   (${f.detail})`);
+  }
 
   // A repair the baseline still holds is grandfathered again if it comes back — in silence. The
   // check never rewrites the baseline itself: it is a reviewed file, and changing it is a person's
@@ -628,6 +682,9 @@ function main(argv) {
     for (const r of retiredSections(previous))
       print(`\n  dropped the previous baseline's "${r.rule}" section (${r.keys} keys) — ${r.why}`);
     const plan = planBaseline(results, previous, { allowGrowth: args.allowGrowth });
+    for (const rule of RULES) if (results[rule].notMeasured)
+      print(`\n  ${rule}: NOT MEASURED (${results[rule].notMeasured}) — ` + (plan.carried.includes(rule)
+        ? `the previous baseline's "${rule}" section is carried over unchanged` : `no "${rule}" section is written, so the rule is not judged against this baseline`));
     if (plan.refused) {
       print(`\n  baseline NOT written — it would grow: ` +
             Object.entries(plan.grown).map(([r, ks]) => `${ks.length} ${r}`).join(', ') +
@@ -639,7 +696,7 @@ function main(argv) {
     plan.baseline = { designId: frame.id, ...plan.baseline };
     plan.baseline.measured = { modules: graph.modules.size, edges: graph.edges.length, written: new Date().toISOString() };
     fs.writeFileSync(args['write-baseline'], JSON.stringify(plan.baseline, null, 1) + '\n');
-    print(`\n  baseline written: ${RULES.map(r => `${plan.baseline.rules[r].length} ${r}`).join(', ')} · design ${frame.id}`);
+    print(`\n  baseline written: ${RULES.map(r => plan.baseline.rules[r] ? `${plan.baseline.rules[r].length} ${r}` : `${r} not measured`).join(', ')} · design ${frame.id}`);
     return 0;
   }
 

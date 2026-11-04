@@ -261,7 +261,22 @@ function refusalText(pkgName, rel, fresh, examined, pkgDir, entry, design, workt
       `or revise the ledger: if ${from} should own ${f.package}, or it should have no single owner, change resources["${f.package}"] in ${entry.design}. ` +
       'That is the user\'s decision — ask them. It changes the design id, so the baseline is re-measured under it and the package re-armed.');
   }
-  return `BLOCKED: this edit to ${rel} adds ${fresh.length} import${fresh.length === 1 ? '' : 's'} that erode ${pkgName}'s declared structure:\n` +
+  // Past a component's entrance (#695): through the entrance, or the entrance is wrong.
+  for (const f of fresh.filter(x => x.rule === 'entrance')) {
+    remedies.push(`  · entrance ${f.component} — import it through ${f.entrance.join(', ')}; if the name you need is not exported there, ` +
+      `adding it is ${f.component}'s change to make. Or revise the design: if this file should be reachable from outside, ` +
+      `change components["${f.component}"].entrance in ${entry.design}. That is the user's decision — ask them.`);
+  }
+  // A door or a tree's fields (#696): the owner does the work, or the ledger is wrong.
+  for (const f of fresh.filter(x => x.rule === 'door' || x.rule === 'reads')) {
+    remedies.push(`  · ${f.rule} ${f.row} — ${f.owner} owns it: ` + (f.rule === 'door'
+      ? `the work that needs ${f.symbol} belongs in ${f.owner}; ask it for an operation that does it instead of reaching the door from here. `
+      : `ask ${f.owner} for what you need instead of reading the field here; an existing count may only fall. `) +
+      `Or revise the ledger: change resources["${f.row}"] in ${entry.design}. That is the user's decision — ask them.`);
+  }
+  const what = fresh.every(f => f.rule === 'door' || f.rule === 'reads') ? 'reach' : 'import';
+  const plural = fresh.length === 1 ? what : what === 'reach' ? 'reaches' : 'imports';
+  return `BLOCKED: this edit to ${rel} adds ${fresh.length} ${plural} that erode ${pkgName}'s declared structure:\n` +
     lines.join('\n') + '\n' +
     // The design id is in the refusal itself (#536): refusals are counted per design version, and
     // the transcript is the only record a refusal leaves.
@@ -367,27 +382,57 @@ function evaluate(payload, deps) {
   const why = R.notMeasured(built.graph);
   if (why) return { decision: 'unmeasured', why: `${pkgName}: ${why}` };
 
-  const ledger = R.ratchet(R.judge(built.graph, design), baseline);
+  // Who calls a door and who reads a tree's fields (#696): asked of the type checker about THIS file
+  // only — the findings the hook may refuse all start in it — and only when the design names such a
+  // row. Scoped, so the ratchet compares this file's baseline keys alone.
+  const SY = deps.symbols || require('./structure-symbols.js');
+  // Inside the hook's budget (#696): with too little left, the door check says NOT MEASURED instead of
+  // running past the timeout, where the edit would go through with no record at all.
+  const symbolsFor = (overlay, oldProgram) => SY.measure({ pkgDir: owner.dir, design, rels: [owner.rel], overlay, scoped: true, oldProgram,
+    deadline: deps.deadline === undefined ? null : deps.deadline });
+  const symbols = symbolsFor(new Map([[owner.rel, content]]), null);
+  const ledger = R.ratchet(R.judge(built.graph, design, symbols), baseline);
   const prefix = `${owner.rel} -> `;
   const all = R.RULES.flatMap(rule => ledger[rule].fresh.map(f => ({ rule, ...f })));
   let fresh = all.filter(f => f.key.startsWith(prefix));
+  // Found on a row nobody has ruled yet: reported, never refused (#695/#696).
+  let proposed = R.RULES.flatMap(rule => (ledger[rule].proposed || []).map(f => ({ rule, ...f }))).filter(f => f.key.startsWith(prefix));
   // Not in the baseline is not the same as added by this edit (#544). A violation that landed
   // outside the hook — a Bash heredoc, a `git pull`, a hand edit — is on disk already, and
   // refusing the next ordinary edit of its file would refuse the wrong thing and say it was
   // added. So only when something here looks new, judge the graph as it stands on disk too
   // (from the cache, so cheap): what is already there is said, not refused.
   let onDisk = [];
-  if (fresh.length) {
+  if (fresh.length || proposed.length) {
     const disk = S.buildGraph({ pkgDir: owner.dir, design, extractor, cachePath, proposed: null });
     if (disk.notMeasured) return { decision: 'unmeasured', why: `${pkgName}: ${disk.notMeasured}` };
-    const judged = R.judge(disk.graph, design);
+    // The disk's version of the edited file, in a program that reuses every other file.
+    const diskSymbols = [...fresh, ...proposed].some(f => f.rule === 'door' || f.rule === 'reads')
+      ? symbolsFor(new Map(), symbols && symbols.program) : symbols;
+    const judged = R.judge(disk.graph, design, diskSymbols);
     const present = new Set(R.RULES.flatMap(rule => judged[rule].found.map(f => `${rule}|${f.key}`)));
     onDisk = fresh.filter(f => present.has(`${f.rule}|${f.key}`));
     fresh = fresh.filter(f => !present.has(`${f.rule}|${f.key}`));
+    proposed = proposed.filter(f => !present.has(`${f.rule}|${f.key}`));
   }
   // Counted, not refused: new violations this edit caused in OTHER files' edges.
   const elsewhere = all.length - fresh.length;
-  const examined = { modules: built.graph.modules.size, edges: built.graph.edges.length, extracted: built.stats.extracted };
+  const examined = { modules: built.graph.modules.size, edges: built.graph.edges.length, extracted: built.stats.extracted,
+    symbolMs: symbols ? symbols.ms : 0, symbolFiles: symbols && symbols.door ? symbols.door.checked : 0 };
+  // What the symbol rules could not look at, for this file: said once per session, never a pass.
+  const blind = [];
+  for (const rule of ['door', 'reads']) if (ledger[rule].notMeasured) blind.push(`${rule}: ${ledger[rule].notMeasured}`);
+  const anyReceivers = symbols && symbols.door && symbols.door.couldNotTell ? symbols.door.couldNotTell : [];
+  if (anyReceivers.length) blind.push(`door: ${anyReceivers.length} member access${anyReceivers.length === 1 ? '' : 'es'} in ${owner.rel} spelled like a door ` +
+    `member cannot be resolved (${anyReceivers.slice(0, 3).map(c => `line ${c.line} .${c.member}`).join(', ')}${anyReceivers.length > 3 ? ', …' : ''}) — the receiver is typed any`);
+  const symbolNotice = blind.length
+    ? `structure guard: NOT MEASURED in ${pkgName} — ${blind.join('; ')}. Those reaches were not judged for this edit; that is not a pass.`
+    : null;
+  const proposedNotice = proposed.length
+    ? `structure guard: this edit to ${owner.rel} adds ${proposed.length} reach${proposed.length === 1 ? '' : 'es'} the ledger would refuse once its row is ruled ` +
+      `(the row is PROPOSED, so it is reported, not refused):\n` + proposed.map(f => `  · ${f.rule}: ${f.key}\n      ${f.detail}`).join('\n') +
+      '\nRuling the row, or recording the reach as an exception, is the user\'s decision — ask them.'
+    : null;
   // Only an ALLOWED edit reports repairs: a refused one never lands, so its graph is not the disk's.
   const fixed = R.RULES.flatMap(rule => ledger[rule].fixed.map(key => ({ rule, key })));
   // A rule the baseline predates found something it could not judge (#725): allowed, and SAID,
@@ -397,11 +442,17 @@ function evaluate(payload, deps) {
     ? `structure guard: ${pkgName}: ${unbaselined.join('; ')}. Regenerating the baseline is the user's decision — ask them. This does it:\n` +
       baselineCommand(home, owner.entry, false, worktree)
     : null;
-  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk, unbaselinedNotice,
+  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk, unbaselinedNotice, proposed,
+    // Keyed by file, rule and member names — not by line, so an edit that only moves lines is not told again.
+    symbolNotice, symbolKind: symbolNotice ? 'symbols-' + crypto.createHash('sha1').update([owner.rel,
+      ...['door', 'reads'].filter(r => ledger[r].notMeasured), ...[...new Set(anyReceivers.map(c => c.member))].sort()].join('|')).digest('hex').slice(0, 12) : null,
+    proposedNotice, proposedKind: proposedNotice ? 'proposed-' + crypto.createHash('sha1').update(proposed.map(f => f.key).join('|')).digest('hex').slice(0, 12) : null,
     notice: fixed.length ? fixedText(pkgName, fixed, home, owner.entry, worktree) : null,
     landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, home, owner.entry, worktree) : null,
     unmappedNotice: unmapped, unmappedKind: unmapped ? unmappedKind(owner.rel) : null };
-  return { decision: 'deny', fresh, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) };
+  // A refusal is the one answer this edit gets, so what it also adds on unruled rows goes with it.
+  return { decision: 'deny', fresh, proposed, examined, elsewhere,
+    reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) + (proposedNotice ? `\n\n${proposedNotice}` : '') };
 }
 
 // THE PROJECT'S OWN CHECK (#600). What counts as a violation belongs to the codebase, as runnable
@@ -765,6 +816,7 @@ if (require.main === module) {
       try {
         result = evaluate(payload, {
           registry,
+          deadline: started + HOOK_BUDGET_MS - EXIT_MARGIN_MS,
           readFile: f => fs.readFileSync(f, 'utf8'),
           rules: require('./structure-rules.js'),
           graph: require('./structure-graph.js'),
@@ -808,7 +860,8 @@ if (require.main === module) {
           ? `structure guard: NOT MEASURED — ${result.why}. Edits made with it are not being checked; Write and Edit still are.`
           : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`]);
       if (result.decision === 'allow')
-        notices.push(['fixed', result.notice], ['landed', result.landedNotice], [result.unmappedKind, result.unmappedNotice], ['unbaselined', result.unbaselinedNotice]);
+        notices.push(['fixed', result.notice], ['landed', result.landedNotice], [result.unmappedKind, result.unmappedNotice], ['unbaselined', result.unbaselinedNotice],
+          [result.symbolKind, result.symbolNotice], [result.proposedKind, result.proposedNotice]);
       if (row && row.notice) notices.push([row.noticeKind, row.notice]);
       noticesOnce(payload.session_id, notices.filter(([, t]) => t), STATE_DIR);
       process.exit(0);
