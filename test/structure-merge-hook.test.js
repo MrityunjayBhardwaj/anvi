@@ -126,10 +126,10 @@ const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').split('\n').fi
 const prCalls = cs => cs.filter(c => !c.startsWith('api '));
 const rows = () => { try { return fs.readFileSync(ROWS, 'utf8').split('\n').filter(Boolean).map(JSON.parse); } catch { return []; } };
 const REGS_TIMEOUT = () => require(path.join(ROOT, 'scripts', 'register-hooks.cjs')).REGISTRATIONS.find(r => r[2] === 'structure-merge-hook.js')[3];
-function fire(command, { head = ERODING, env = {}, cwd = DIR } = {}) {
+function fire(command, { head = ERODING, env = {}, cwd = DIR, sid = 'merge-1' } = {}) {
   fs.rmSync(CALLS, { force: true });
   const r = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ session_id: 'merge-1', cwd, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }),
+    input: JSON.stringify({ session_id: sid, cwd, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command } }),
     encoding: 'utf8', timeout: 60000,
     env: { ...process.env, HOME, PATH: `${BIN}:${process.env.PATH}`, FAKE_HEAD: head, ...env },
   });
@@ -355,6 +355,31 @@ console.log('\nIT STOPS INSIDE ITS OWN TIMEOUT (#671):');
   ok(quick.decision === 'allow' && quick.rows[0].outcome === 'clean' && seen.some(c => c.cmd === process.execPath),
      `with time to spare the same merge is judged (${quick.rows[0].outcome})`);
   ok(M.BUDGET_MS + 5000 <= REGS_TIMEOUT() * 1000, `the budget (${M.BUDGET_MS} ms) leaves room inside the registered timeout for start-up and the reply`);
+}
+
+console.log('\nTHE METER TELLS A TURNED-AWAY CALL FROM A MERGE (#706):');
+{
+  // The registration's `if` lets non-merges through, so the meter's runs are only "merges seen"
+  // if each run the script's own test turns away says so.
+  register();
+  const METER = path.join(DIR, 'meter');
+  const metered = (command, sid) => {
+    fire(command, { env: { ANVI_METER_DIR: METER }, sid });
+    try { return fs.readFileSync(path.join(METER, `${sid}.jsonl`), 'utf8').split('\n').filter(Boolean).map(JSON.parse); } catch { return []; }
+  };
+  const expansion = metered('echo "$(date)" > "$TMPDIR/out-${USER}"', 'm-expansion');
+  ok(expansion.length === 1 && expansion[0].outcome === 'skipped' && expansion[0].why === 'not-a-merge' && expansion[0].bytes === 0,
+     `a command with no merge in it prints nothing and is metered skipped, not-a-merge (${JSON.stringify(expansion)})`);
+  const lookalike = metered('gh pr view 7 && git merge feat', 'm-lookalike');
+  ok(lookalike.length === 1 && lookalike[0].outcome === 'skipped' && lookalike[0].why === 'not-a-merge',
+     `one that passes the first test (gh … merge) but holds no \`gh pr merge\` is turned away the same (${JSON.stringify(lookalike)})`);
+  const merged = metered('gh pr merge 7 --repo Acme/Widget --squash', 'm-merge');
+  ok(merged.length === 1 && merged[0].outcome === 'refused' && !('why' in merged[0]), `a merge it judges is metered by what it said: refused (${JSON.stringify(merged)})`);
+  const elsewhere = metered('gh pr merge 7 --repo Someone/Else --squash', 'm-elsewhere');
+  ok(elsewhere.length === 1 && elsewhere[0].outcome === 'silent', `a merge into a repository it does not judge is a merge seen: silent, not skipped (${JSON.stringify(elsewhere)})`);
+  const noReg = M.evaluate({ cwd: DIR, tool_name: 'Bash', tool_input: { command: 'gh pr merge 7 --repo Acme/Widget' } },
+    { registry: () => null, run: () => ({ status: 1 }), rules: R, readFile: () => '', now: () => 0 });
+  ok(noReg.decision === 'skip' && noReg.why === 'no-registry', `with no registry the skip says so (${JSON.stringify(noReg)})`);
 }
 
 console.log('\nREGISTERED WITH ITS FILTER:');

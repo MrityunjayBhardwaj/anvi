@@ -12,9 +12,10 @@
 // most commits are `git add … && git commit …` in ONE command, so a PreToolUse hook sees the index
 // before the add has run.)
 //
-// WHAT IT COSTS. Registered with `"if": "Bash(gh pr merge:*)"`, so Claude Code spawns it only for
-// a command with a `gh pr merge` subcommand — observed on 2.1.299: a hook filtered to
-// `git commit:*` ran for three commits (one inside `echo x; git commit …`) and never for `echo` or
+// WHAT IT COSTS. Registered with `"if": "Bash(gh pr merge:*)"`: a cost filter, never the check (#706).
+// On 2.1.314 it let through about 28% of all Bash calls, nearly none of them merges; each such run is
+// metered as `skipped`, why `not-a-merge`. On 2.1.299 a `git commit:*` filter had held — it ran for
+// three commits (one inside `echo x; git commit …`) and never for `echo` or
 // `git status`. A version that ignores `if` spawns it for every Bash call; the first thing it does
 // is look for that subcommand, and without one it exits before reading anything else. With one, a
 // merge into a repository spelled as a registered checkout's `origin` needs no extra network call;
@@ -348,15 +349,16 @@ function timed(deps, run) {
 }
 
 // The decision for one Bash call: { decision: 'skip' | 'allow' | 'deny', reason?, notice?, rows }.
+// A skip says why: `not-a-merge` (no `gh pr merge` in the command) or `no-registry`.
 function evaluate(payload, given) {
   const deps = { ...given, started: given.started === undefined ? given.now() : given.started };
   deps.run = timed(deps, given.run);
   const identity = identityResolver(deps.run, given.identityCache || memoryCache(), deps.now);
   const input = (payload && payload.tool_input) || {};
   const merges = mergesIn(input.command, payload && payload.cwd);
-  if (!merges.length) return { decision: 'skip', rows: [] };
+  if (!merges.length) return { decision: 'skip', why: 'not-a-merge', rows: [] };
   const registry = deps.registry();
-  if (!registry) return { decision: 'skip', rows: [] };
+  if (!registry) return { decision: 'skip', why: 'no-registry', rows: [] };
   const rows = [], refusals = [], notices = [];
   for (const m of merges) {
     if (m.unreadable && !m.repo) { notices.push(`structure guard: NOT MEASURED — a \`gh pr merge\` here was not judged: ${m.unreadable}.`); rows.push({ outcome: 'not-measured', why: m.unreadable }); continue; }
@@ -413,7 +415,12 @@ if (require.main === module) {
     // The edit guard's failure log is shared; its module is loaded only when there is a merge to judge.
     const fail = line => { try { require('./structure-guard-hook.js').recordFailure(LOG, line); } catch { /* nothing more to do */ } };
     try {
-      if (payload.tool_name !== 'Bash' || !/\bgh\b[\s\S]*\bmerge\b/.test(String((payload.tool_input || {}).command || ''))) process.exit(0);
+      // The check that keeps this hook to merges: the registration's `if` does not (#706). A run
+      // it turns away is metered as skipped, so the meter's runs can be read as merges seen.
+      if (payload.tool_name !== 'Bash' || !/\bgh\b[\s\S]*\bmerge\b/.test(String((payload.tool_input || {}).command || ''))) {
+        if (meter) meter.skip('not-a-merge');
+        process.exit(0);
+      }
       const result = evaluate(payload, {
         // The user's registry plus every package locked where only the owner can change it (#680).
         registry: () => require('./structure-lock.js').registryInForce(),
@@ -432,6 +439,7 @@ if (require.main === module) {
           fs.appendFileSync(MERGE_LOG, result.rows.map(r => JSON.stringify({ ts, session: payload.session_id, ...r })).join('\n') + '\n');
         } catch (e) { fail(`${ts}\tmerge row not written: ${e && e.message}\n`); }
       }
+      if (result.decision === 'skip' && meter) meter.skip(result.why);
       if (result.decision === 'deny') {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: {
           hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.reason } }));

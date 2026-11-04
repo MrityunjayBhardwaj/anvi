@@ -14,7 +14,7 @@
 // metered too. A run killed from outside (the harness timeout) writes nothing; no row
 // is not a zero.
 //
-// Row: { ts, sid, hook, event, bytes, ms, outcome }
+// Row: { ts, sid, hook, event, bytes, ms, outcome[, why] }
 //   bytes    Buffer.byteLength of exactly what was written to stdout; 0 when silent.
 //            A refusal's copy of its reason on stderr is not counted: stdout is the
 //            channel with effect, and what the harness does with stderr on exit 2 is
@@ -25,7 +25,12 @@
 //            6 runs of three hooks on this repo.
 //   outcome  silent (nothing written) | refused (the output is a PreToolUse deny, or a
 //            top-level block decision) | informed (anything else written). Read from the
-//            output's own structure, never from its wording.
+//            output's own structure, never from its wording. And skipped: nothing written,
+//            and the hook's own first test found nothing for it to look at — it called
+//            skip(why), and `why` is on the row (#706). A filter in the registration (`if`)
+//            is the harness's to apply and does not always hold, so a run it let through is
+//            only told apart from a run that did the hook's work by the hook saying so. A
+//            skip() followed by output is not a skip: what was written decides.
 //
 // Where: machine-local, never the store — a session's measurements are not knowledge,
 // and a hook may be running in a directory whose store project the caller does not own.
@@ -41,7 +46,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const OUTCOMES = ['silent', 'informed', 'refused'];
+const OUTCOMES = ['silent', 'informed', 'refused', 'skipped'];
 
 function meterDir(env = process.env) {
   if (env.ANVI_METER_DIR) return env.ANVI_METER_DIR;
@@ -77,6 +82,10 @@ function write() {
   try {
     row.ms = Math.round(performance.now() * 10) / 10;
     row.outcome = outcomeOf(written, row.bytes);
+    if (row.skip !== undefined) {
+      if (row.outcome === 'silent') { row.outcome = 'skipped'; row.why = row.skip; }
+      delete row.skip;
+    }
     const dir = meterDir();
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, fileFor(row.sid)), JSON.stringify(row) + '\n');
@@ -103,4 +112,9 @@ function session(sid) {
   if (row && sid) row.sid = String(sid);
 }
 
-module.exports = { start, session, outcomeOf, meterDir, fileFor, workflowReadsDir, OUTCOMES };
+// The hook's own test found nothing for it to look at: a silent run is recorded as skipped.
+function skip(why) {
+  if (row) row.skip = String(why);
+}
+
+module.exports = { start, session, skip, outcomeOf, meterDir, fileFor, workflowReadsDir, OUTCOMES };
