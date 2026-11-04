@@ -32,7 +32,7 @@
 // THE LEDGER KEEPS OWNERS AND JOBS; THIS KEEPS NUMBERS. No value lives in both.
 //
 // Usage (prints the effective table):
-//   node hooks/project-settings.js --project <name> | --settings <file>
+//   node scripts/project-settings.js --project <name> | --settings <file>
 // Exit: 0 printed · 2 the file was refused or the arguments were wrong.
 
 'use strict';
@@ -80,7 +80,7 @@ const SCHEMA = {
   },
 };
 
-const { storeProjectsRoot } = require('./anvi-paths.js');
+const { storeProjectsRoot } = require('../hooks/anvi-paths.js');
 const pathFor = project => path.join(storeProjectsRoot(), project, 'settings.json');
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 

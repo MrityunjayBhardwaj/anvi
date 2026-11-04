@@ -59,7 +59,7 @@ const fs = require('fs');
 const path = require('path');
 const R = require('../hooks/structure-rules.js');
 const S = require('../hooks/structure-graph.js');
-const PS = require('../hooks/project-settings.js');
+const PS = require('./project-settings.js');
 const SV = require('./signature-vectors.js');
 
 const MUTATORS = new Set(['set', 'delete', 'add', 'clear', 'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
