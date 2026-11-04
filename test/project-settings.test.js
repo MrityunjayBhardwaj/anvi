@@ -19,7 +19,7 @@ let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
 
 const ROOT = path.join(__dirname, '..');
-const MOD = path.join(ROOT, 'hooks', 'project-settings.js');
+const MOD = path.join(ROOT, 'scripts', 'project-settings.js');
 const S = require(MOD);
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-settings-'));
 let n = 0;
