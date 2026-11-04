@@ -18,6 +18,7 @@
 
 'use strict';
 require('./meter-sandbox');
+const { onlyGuardLine } = require('./guard-banner-line');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -145,7 +146,10 @@ console.log('\na machine-wide fact does not depend on which project is open (anv
 {
   // The silence that must survive the move: healthy says nothing, here as anywhere.
   const r = healthLine(home('empty-fresh', [`health-${iso(1)}.json`]), EMPTY);
-  ok(r.all === '', 'a zero-entry project with a current series emits nothing at all');
+  // Nothing at all — except, on a machine with the locked guard installed, the one guard
+  // line no test can switch off (#703; see guard-banner-line.js for why it must not be).
+  const quiet = onlyGuardLine(r.all);
+  ok(quiet.ok, `a zero-entry project with a current series emits ${quiet.expected}${quiet.why ? ` (${quiet.why})` : ''}`);
 }
 {
   // Not an anvi project: stays silent whatever the series says (the #463 ruling).

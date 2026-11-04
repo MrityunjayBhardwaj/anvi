@@ -19,6 +19,7 @@
 
 'use strict';
 require('./meter-sandbox');
+const { onlyGuardLine } = require('./guard-banner-line');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -118,8 +119,11 @@ console.log('\na project with NO entries yet is still told the store is failing'
   // no fleet to measure, so the only thing this case can hear is the checkpoint.
   const NOSTORE = { HOME: path.join(TMP, 'nostore-home') };
 
+  // Nothing at all — except, on a machine with the locked guard installed, the one guard
+  // line no test can switch off (#703; see guard-banner-line.js for why it must not be).
   record(null);
-  ok(bannerAt(EMPTY, NOSTORE) === '', 'CONTROL — healthy and empty says nothing at all, as before');
+  const quiet = onlyGuardLine(bannerAt(EMPTY, NOSTORE));
+  ok(quiet.ok, `CONTROL — healthy and empty says ${quiet.expected}, as before${quiet.why ? ` (${quiet.why})` : ''}`);
 
   failing();
   const b = bannerAt(EMPTY, NOSTORE);
