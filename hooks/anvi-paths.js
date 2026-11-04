@@ -806,6 +806,9 @@ function subjectRepoFor(filePath, sessionCwd) {
 }
 
 module.exports = {
+  // The store's projects folder, ~/.anvideck/projects — one definition, read by every
+  // per-project file the store keeps (settings.json, #740).
+  storeProjectsRoot,
   candidates, resolveDir, existingDirs, warnIfSplitBrain, projectRootFor, projectRootOfDir,
   // "Which repository is this root a checkout of" — so a worktree and its main
   // checkout can be recognised as one project without each consumer parsing `.git`.
