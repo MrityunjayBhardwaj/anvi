@@ -1488,6 +1488,15 @@ loosened until it stops firing guards nothing.
   proposes rows from the graph and classifies each declared pair; it never writes in place.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
+- **What a task did, from the session record (#712).** `node scripts/task-telemetry.js --session <id>
+  [--since <t>] [--until <t>] [--package <dir>] [--design <d>] [--radius <components,files>] [--widen <t>=<items>]`
+  prints per task: files read and edited (the tool call's operated field, successful calls only),
+  components touched, edits outside the radius with the radius size and widening count beside them,
+  refusals (the guard's, another hook's or a permission rule's, apart from a user's rejection) and the
+  design id. A task is one session with its subagents, optionally narrowed by time. The radius is
+  never defaulted: without one, out-of-radius prints NOT MEASURED. Files changed through Bash are
+  not visible to it, and the count of Bash calls prints as that door. The columns and units in its
+  header are the contract the live test (#711) reuses.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with
