@@ -14,14 +14,14 @@
 //       "files": { "<abs path>": [[functionName, startOffset, endOffset, count], …] } } ] }
 // Every function listed RAN (count > 0) inside that bucket. A "test" bucket is one test case;
 // "between" buckets hold module loading, hooks around tests, and what ran after the last test.
-// scripts/coexecution-vitest-setup.mjs produces exactly this from a vitest suite (V8 precise
+// scripts/coexecution-vitest-setup.mjs produces exactly this from a vitest suite (the engine's precise
 // coverage, counters reset per test). Run it on a COPY of the project, never a live checkout.
 //
 // DEFINITIONS (the report prints every one of these counts, zero included).
 //   corpus      the files the guard judges: loadGraph(graph, design).modules.
 //   loaded      a corpus file whose module body ran in some bucket.
 //   called      a corpus file with a function OTHER than its module body that ran inside a test
-//               bucket. The module body is the function(s) spanning the whole script (V8 reports
+//               bucket. The module body is the function(s) spanning the whole script (the engine reports
 //               the script and the runner's wrapper; both end where the script ends).
 //   unit        one test bucket; its files are the corpus files called in it.
 //   executed-file share  called files / corpus files — what the findings are computed from. Below

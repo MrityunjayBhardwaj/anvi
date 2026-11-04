@@ -1,7 +1,7 @@
 // coexecution-vitest-setup.mjs — per-test coverage for scripts/coexecution.js (#713).
 //
-// A vitest setup file. It starts V8 precise coverage in the test worker and takes it around every
-// test: each take RESETS V8's counters, so a "test" bucket holds exactly the functions that ran in
+// A vitest setup file. It starts the JavaScript engine's precise coverage (node:inspector) in the test worker and takes it around every
+// test: each take RESETS the engine's counters, so a "test" bucket holds exactly the functions that ran in
 // that test case (its beforeEach/afterEach included), and "between" buckets hold module loading,
 // beforeAll work and what ran after the last test. One JSON record per test file, the shape
 // scripts/coexecution.js reads. Only scripts under COEXEC_ROOT are kept.
