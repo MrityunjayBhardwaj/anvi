@@ -319,6 +319,7 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     };
     visit(sf);
   }
+  let followedIntoParameter = 0;   // bindings handed to a resolved corpus function, followed into its parameter
   // Follow every binding through its references; aliases and destructuring add bindings, so loop.
   const done = new Set();
   for (let pass = 0; pass < 10; pass++) {
@@ -353,6 +354,23 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
           if (ts.isIdentifier(p.name)) bind(p.name, b.pkg, null, sf);
           else if (ts.isObjectBindingPattern(p.name)) for (const el of p.name.elements) { if (ts.isIdentifier(el.name)) bind(el.name, b.pkg, (el.propertyName || el.name).getText(), sf); }
           else escapes.push({ pkg: b.pkg, site: at.site, why: 'destructured in a shape not followed' });
+        } else if (p && ts.isCallExpression(p) && p.arguments.indexOf(n) >= 0 && (() => {
+          // Handed to a function the checker resolves to a corpus declaration: follow the binding
+          // into the parameter at the same position (`this.deps(wa)` → `deps(wa: any) { wa.x }`).
+          // A rest parameter, a destructured parameter, a declaration with no body (`declare
+          // function use(v)`: the code that runs is elsewhere) or an unresolved callee stays an escape.
+          const idx = p.arguments.indexOf(n);
+          const calleeNode = ts.isPropertyAccessExpression(p.expression) ? p.expression.name : p.expression;
+          let cs = null; try { cs = resolve(checker.getSymbolAtLocation(calleeNode)); } catch { cs = null; }
+          const d = cs && cs.declarations && cs.declarations.find(x => x.parameters || (ts.isVariableDeclaration(x) && x.initializer));
+          const fn = d && (d.parameters ? d : (ts.isArrowFunction(strip(d.initializer)) || ts.isFunctionExpression(strip(d.initializer)) ? strip(d.initializer) : null));
+          const dsf = fn && fn.getSourceFile();
+          const param = fn && fn.parameters[idx];
+          if (!param || !fn.body || param.dotDotDotToken || !ts.isIdentifier(param.name) || !inCorpus.has(relOf(dsf.fileName))) return false;
+          bind(param.name, b.pkg, b.member, dsf);
+          return true;
+        })()) {
+          followedIntoParameter++;
         } else {
           escapes.push({ pkg: b.pkg, site: at.site, why: p ? `handed on (${ts.SyntaxKind[p.kind]})` : 'handed on' });
         }
@@ -536,7 +554,7 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       passthrough.add(relOf(sf.fileName));
   }
 
-  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf,
+  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf, followedIntoParameter,
     crossRefs, declNames, passthrough, compOfRel: rel => of(rel) || '(unmapped)' };
 }
 
@@ -655,6 +673,7 @@ function main(argv) {
   print('');
   print('COULD NOT FOLLOW (counted wherever it happens; any answer it could touch says so)');
   print(`  package bindings traced: ${ix.bindings.size} · member uses recorded: ${ix.uses.length}`);
+  print(`  followed into a parameter (a binding passed to a resolved corpus function): ${ix.followedIntoParameter}`);
   print(`  escapes (a package binding handed on, or read with a computed key): ${ix.escapes.length}`);
   for (const [pkg, es] of groupBy(ix.escapes, e => e.pkg)) print(`    ${pkg}: ${es.length} — ${es.slice(0, 4).map(e => `${e.site} ${e.why}`).join('; ')}${es.length > 4 ? ' …' : ''}`);
   print(`  dynamic imports bound to nothing we follow: ${ix.unbound.length}`);
