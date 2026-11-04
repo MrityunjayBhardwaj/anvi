@@ -1494,6 +1494,15 @@ loosened until it stops firing guards nothing.
   proposed. `designProblem` validates it, its home and resources enter the design id, and the
   report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
   still refuses only on library rows; v1 rows are proposals and readings.
+  `scripts/ownership-index.js --task <t.json> | --task-resources <ids> | --task-files <files>`
+  places a task by distance to each owner's prototype built from ruled jobs (#723,
+  `scripts/place.js`): HOME (with its nearest job, or "new job"), SPLIT with the door into each
+  owner named, NO EXISTING HOME (never the nearest), or COULDN'T TELL when the views disagree.
+  `--leave-one-out` holds out each ruled job and reports recovery k of n against the project's
+  ruled floor ("underpowered, k of n" below its minimum job count); `--blend` checks that a task
+  blended from two nearest owners is answered with a split. A plan-time reading: nothing is
+  refused on it. Its tuning numbers are settings keys, printed with the settings id. A design
+  with `"scratch": "<why>"` holds rows that are not rulings, and every printed line says so.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output

@@ -71,7 +71,22 @@ const SCHEMA = {
   'signatures.nearTwoBand': {
     type: 'fraction', min: 0, max: 1, default: 0.1,
     about: 'a second owner within this fraction of the nearest distance makes the file "near two"',
-    readBy: '#647 (signature vectors)',
+    readBy: '#647 (signature vectors), #723 (PLACE: near two owners → split)',
+  },
+  'placement.farDistance': {
+    type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.8,
+    about: 'a nearest cosine distance at or above this is "far": from every owner (no existing home) or from every job of the home (new job)',
+    readBy: '#723 (PLACE)',
+  },
+  'placement.centralDistance': {
+    type: 'fraction', min: 0, max: 1, default: 0.2,
+    about: 'a task the lead view puts within this distance of its owner keeps that answer when another view disagrees; farther, the disagreement makes it "couldn\'t tell"',
+    readBy: '#723 (PLACE)',
+  },
+  'placement.blend.weight': {
+    type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.5,
+    about: 'the first owner\'s share of a blended boundary task (the second gets the rest)',
+    readBy: '#723 (PLACE, blended boundary)',
   },
   'signatures.vocabulary.minTokenLength': {
     type: 'integer', min: 1, default: 3,
