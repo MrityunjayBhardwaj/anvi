@@ -795,7 +795,7 @@ function main(argv) {
     const rd = SV.reading(sig, { band });
     const sigMs = Date.now() - t2;
     json.signatures = { settingsId: settings.id, weights, minTokenLength, band, ms: sigMs, files: {}, jobs: jv.perJob.map(j => ({ ...j, vec: Object.fromEntries(Object.entries(j.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })),
-      owners: jv.perOwner.map(o => ({ ...o, vec: Object.fromEntries(Object.entries(o.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })), reading: rd.rows };
+      homes: jv.perHome.map(o => ({ ...o, vec: Object.fromEntries(Object.entries(o.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })), reading: rd.rows };
     for (const s of sig.values()) json.signatures.files[s.file] = { component: s.component, passthrough: s.passthrough, unresolved: s.unresolved,
       doors: Object.fromEntries(s.doors), views: Object.fromEntries(SV.VIEWS.map(v => [v, SV.vecJSON(s.views[v])])) };
     const syntaxRows = Object.values(design.resources || {}).filter(r => r && (r.kind === 'syntax' || r.kind === 'registry')).length;
@@ -809,8 +809,9 @@ function main(argv) {
     const empty = v => [...sig.values()].filter(s => !s.views[v].size).length;
     print(`  files with no feature, per view: ${SV.VIEWS.map(v => `${v} ${empty(v)}`).join(' · ')} (of ${sig.size})`);
     print(`  per job: ${jobs.ruled.length ? plural(jobs.ruled.length, 'ruled job') : 'NOT BUILT — 0 jobs ruled'}${jobs.unruled.length ? ` · ${plural(jobs.unruled.length, 'job row')} not ruled, not used: ${jobs.unruled.join(', ')}` : ''}`);
-    print(`  per owner: ${jv.perOwner.length ? jv.perOwner.map(o => `${o.owner} (${plural(o.jobs, 'job')})`).join(', ') : 'NOT BUILT — no ruled job names an owner; the reading below uses DIRECTORY PRIORS'}`);
-    if (jv.missing.length) print(`  job members not in the program: ${jv.missing.join('; ')}`);
+    print(`  per home: ${jv.perHome.length ? jv.perHome.map(o => `${o.home} (${plural(o.jobs, 'job')})`).join(', ') : 'NOT BUILT — no ruled job with a member file; the reading below uses DIRECTORY PRIORS'}`);
+    for (const j of jv.perJob) print(`    job ${j.id} (home ${j.home}): ${plural(j.files.length, 'member file')} — files that touch its ${plural(j.resources, 'resource')} directly or declare its ${plural(j.doors, 'door')}`);
+    if (jv.missing.length) print(`  jobs not built: ${jv.missing.join('; ')}`);
     for (const f of args.signatures) {
       const s = sig.get(f);
       print('');
@@ -827,7 +828,7 @@ function main(argv) {
     if (args['placement-reading']) {
       const rows = rd.rows.filter(r => r.component !== '(unmapped)');
       print('');
-      print(`PLACEMENT READING — a reading, not an acceptance: ${jv.perOwner.length ? 'owner prototypes from ruled jobs' : 'DIRECTORY PRIORS (component directories, not owners), each file left out of its own'} · near two = second within ${band * 100}% of the nearest`);
+      print(`PLACEMENT READING — a reading, not an acceptance: ${jv.perHome.length ? 'home prototypes from ruled jobs (the reading itself still compares directory priors)' : 'DIRECTORY PRIORS (component directories, not owners), each file left out of its own'} · near two = second within ${band * 100}% of the nearest`);
       for (const v of SV.VIEWS) {
         const has = rows.filter(r => !r.views[v].empty), far = has.filter(r => r.views[v].far).length, placed = has.length - far;
         const own = has.filter(r => r.views[v].ownNearest).length, two = has.filter(r => r.views[v].nearTwo).length;
