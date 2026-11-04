@@ -33,6 +33,10 @@ ok(!none.refused && none.exists === false, 'absent file: loaded, marked absent')
 ok(none.entries['signatures.weight.viaDoor'].source === 'default' && none.values['signatures.weight.viaDoor'] === 0.5, 'a key with a default takes it, marked default');
 ok(none.entries['refusal.forceableShareFloor'].source === 'unruled' && none.values['refusal.forceableShareFloor'] === null, 'a key with no default is unruled, value null');
 
+const dflt = S.load({ defaultsOnly: true });
+ok(!dflt.refused && dflt.file === null && dflt.id === none.id && /no project named: defaults only/.test(S.headline(dflt)), 'defaults only (no project named): the defaults, the same id as an absent file, and the header says so');
+ok(S.load({}).refused, 'without defaultsOnly, naming nothing is refused');
+
 console.log('a ruled file');
 const good = S.load({ file: put({ about: 'x', settings: {
   'refusal.forceableShareFloor': entry('1/3'),
