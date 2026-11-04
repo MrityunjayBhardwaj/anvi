@@ -131,6 +131,12 @@ function designId(design) {
   const canonical = { root: stripSlash(d.root || ''), excludes: sortedSet(d.excludes), components, allowed };
   // Only when on, so every design written before the key keeps the id its baselines carry.
   if (countsTypeOnly(d)) canonical.typeOnlyImports = 'count';
+  // `hotPaths` (#719) is NOT here, by decision: it changes no verdict of the three rules. An edit on
+  // a hot edge gets a notice and is never refused, and its budget is judged at PR time against a
+  // profiler snapshot, which prints the manifest's own id beside every figure (hotPathsId). Putting
+  // it in this id would make ruling a budget — or recording a new measurement — read as a new
+  // design, withhold every verdict until the baseline was regenerated, and disarm a package armed
+  // under the old id, for a change that refuses nothing. A test holds this both ways.
   // The ledger (#710), only when present, for the same reason. Per row only what changes who may
   // touch it or who refuses: id, kind, reach, owner. Touchers are a measurement, verifiedBy and
   // enforcedBy follow from the row by lookup, purpose and rule are prose.
@@ -179,7 +185,7 @@ function designProblem(design) {
   const cyc = [...onCycle(adj)].sort();
   if (cyc.length) return `the declared edges form a cycle (${cyc.join(', ')}) — a cycle between components is a design ` +
     'question with three answers: invert one direction through a port or registry, extract what both need, or merge them';
-  return ledgerProblem(d, names);
+  return ledgerProblem(d, names) || hotPathsProblem(d);
 }
 
 // ── the ledger (#710) ────────────────────────────────────────────────────────────────
@@ -225,6 +231,87 @@ function ledgerProblem(d, names) {
     if (purpose.toLowerCase() === name.toLowerCase()) return `component "${name}" has its own name as its purpose — say what it is for`;
   }
   return null;
+}
+
+// ── hot paths (#719) ─────────────────────────────────────────────────────────────────
+// Machine load enters as a manifest of edges the project's profiler measured hot, never as a
+// refusal (ruling 3): a refusal keyed on a syntactic proxy (a dynamic import on the edge) fires on
+// an `import()` a preload makes harmless and stays silent on a synchronous regression. A row is
+//   { from, to, frame?, budget, unit, metric?, instrument, frequency, frequencyUnit, measured }
+// — `from`/`to` are files as the graph keys them (package-relative, the design's root included);
+// `frame` names the hot root the edge was found under; `budget` is a number in `unit` or null
+// while unruled; `metric` is what the budget test reads from a snapshot ({ section, stat } or
+// { counter, stat }); `frequency` is how often the edge runs, in `frequencyUnit`, as `instrument`
+// measured it on the date `measured` — or `measured: "TO MEASURE"` and no frequency at all, so a
+// frequency nobody measured cannot be written down.
+const TO_MEASURE = 'TO MEASURE';
+const SECTION_STATS = ['count', 'mean', 'p50', 'p95', 'p99', 'max', 'last'];
+const COUNTER_STATS = ['value', 'rate'];
+const isDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(s) && !Number.isNaN(Date.parse(s));
+const nonEmpty = s => typeof s === 'string' && s.trim().length > 0;
+
+// Why the manifest would print something untrue, or null. Each is a row whose notice or budget
+// would mislead: an edge outside the corpus (no edit can ever touch it), a frequency with no
+// measurement behind it, a measurement with no frequency, a budget with no unit or nothing to
+// read it from, the same edge twice (two budgets, one edge).
+function hotPathsProblem(d) {
+  if (d.hotPaths === undefined) return null;
+  if (!Array.isArray(d.hotPaths)) return 'the design\'s "hotPaths" is not a list of edges ({ from, to, budget, unit, instrument, measured })';
+  const root = d.root ? stripSlash(d.root) + '/' : '';
+  const seen = new Set();
+  for (const [i, h] of d.hotPaths.entries()) {
+    const at = isObject(h) && nonEmpty(h.from) && nonEmpty(h.to) ? `hot path ${edgeKey(h.from, h.to)}` : `hot path #${i + 1}`;
+    if (!isObject(h)) return `${at} is not an object with from, to, budget, unit, instrument and measured`;
+    if (!nonEmpty(h.from) || !nonEmpty(h.to)) return `${at} needs "from" and "to", the files at each end as the graph names them`;
+    if (h.from === h.to) return `${at} is a file to itself — a hot path is an import between two files`;
+    for (const f of [h.from, h.to]) if (root && !f.startsWith(root))
+      return `${at} names "${f}", outside the design's root "${root}" — no edit the guard sees could touch it`;
+    const key = edgeKey(h.from, h.to);
+    if (seen.has(key)) return `${at} is listed twice — one edge carries one budget`;
+    seen.add(key);
+    if (!nonEmpty(h.unit)) return `${at} has no "unit" — a budget is read in its own unit (ms per trigger, allocations per frame)`;
+    if (!nonEmpty(h.instrument)) return `${at} has no "instrument" — say what measured it, or what will`;
+    if (h.budget !== null && h.budget !== undefined && !(typeof h.budget === 'number' && Number.isFinite(h.budget) && h.budget > 0))
+      return `${at} has budget ${JSON.stringify(h.budget)} — a positive number in its unit, or null while it is not ruled`;
+    if (h.metric !== undefined && h.metric !== null) {
+      const m = h.metric;
+      const ok = isObject(m) && ((nonEmpty(m.section) && m.counter === undefined && SECTION_STATS.includes(m.stat)) ||
+        (nonEmpty(m.counter) && m.section === undefined && COUNTER_STATS.includes(m.stat)));
+      if (!ok) return `${at} has metric ${JSON.stringify(m)} — { "section": <name>, "stat": one of ${SECTION_STATS.join('|')} } ` +
+        `or { "counter": <name>, "stat": ${COUNTER_STATS.join('|')} }`;
+    }
+    if (typeof h.budget === 'number' && !isObject(h.metric))
+      return `${at} has a budget and no "metric" — the budget test would have nothing in a snapshot to read it against`;
+    if (h.measured === TO_MEASURE) {
+      if (h.frequency !== undefined && h.frequency !== null)
+        return `${at} is "TO MEASURE" yet gives a frequency (${JSON.stringify(h.frequency)}) — a frequency is written only beside the date it was measured`;
+    } else if (isDate(h.measured)) {
+      if (!(typeof h.frequency === 'number' && Number.isFinite(h.frequency) && h.frequency >= 0))
+        return `${at} was measured ${h.measured} but gives no frequency — the number, or "TO MEASURE"`;
+      if (!nonEmpty(h.frequencyUnit)) return `${at} gives a frequency with no "frequencyUnit"`;
+    } else return `${at} has measured ${JSON.stringify(h.measured)} — a date (YYYY-MM-DD) or "${TO_MEASURE}"`;
+  }
+  return null;
+}
+
+// The manifest itself, identified: printed beside every budget figure, so two readings are
+// compared only when they were judged against the same manifest. Every field, ordered by edge.
+function hotPathsId(design) {
+  const rows = Array.isArray(design && design.hotPaths) ? design.hotPaths : [];
+  const canonical = rows.map(h => JSON.stringify(h, Object.keys(h).sort())).sort();
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
+}
+
+// The manifest rows an edit keeps or adds: edges that START in the edited file and are present,
+// as edges that run, in the graph built around the edit. A type-only import compiles away and
+// costs nothing at run time, so it is not a hot edge whatever the manifest says.
+function hotPathsTouched(design, graph, rel) {
+  const rows = Array.isArray(design && design.hotPaths) ? design.hotPaths : [];
+  if (!rows.length || !graph || !graph.adj) return [];
+  const out = graph.adj.get(rel);
+  if (!out) return [];
+  const typeOnly = graph.typeOnly || new Set();
+  return rows.filter(h => isObject(h) && h.from === rel && out.has(h.to) && !typeOnly.has(edgeKey(h.from, h.to)));
 }
 
 // Who refuses a touch of this row, and with what predicate: the lookup in the design (§5.2).
@@ -572,6 +659,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
-  KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
+  KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf, TO_MEASURE, hotPathsProblem, hotPathsId, hotPathsTouched,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, owners, SINCE, judge, ratchet, planBaseline,
 };
