@@ -614,5 +614,5 @@ function main(argv) {
   return 0;
 }
 
-module.exports = { build, loadTypeScript, main };
+module.exports = { build, loadTypeScript, makeProgram, main };
 if (require.main === module) process.exit(main(process.argv.slice(2)));
