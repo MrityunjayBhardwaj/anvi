@@ -100,7 +100,7 @@ const REPEATABLE = new Set(['framework', 'members']);
 const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
 const today = () => new Date().toISOString().slice(0, 10);
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
-// The kinds whose touchers the import graph can count (v0); every other kind waits for #647.
+// The kinds whose touchers the import graph can count (v0); the others are measured with --index (v1).
 const IMPORT_KINDS = new Set(['library', 'framework']);
 // The kinds ledger v1 measures from the ownership index.
 const SYMBOL_KINDS = new Set(['state', 'registry', 'door', 'syntax']);
@@ -332,7 +332,8 @@ function report(s, ctx, print) {
 }
 
 // ── ledger v1 (#710): state, registry, door and syntax rows from the ownership index ────────────
-const mappingIdOf = design => designId({ root: design.root, excludes: design.excludes, components: design.components, allowed: [] });
+// One definition of the mapping id, the index's, so the two sides of the check cannot drift apart.
+const { mappingId: mappingIdOf } = require('./ownership-index.js');
 const sumValues = o => Object.values(o || {}).reduce((a, x) => a + (Array.isArray(x) ? x.length : x), 0);
 const lineOf = site => Number(String(site).slice(String(site).lastIndexOf(':') + 1));
 
@@ -486,7 +487,7 @@ function reportV1(v, s, ctx, print) {
   const owner = r => r.owner ? `owner ${r.owner}` : "owner null — COULDN'T TELL";
   const c = v.counts;
   print('');
-  print('LEDGER V1 — INSTRUMENT');
+  print('LEDGER v1 — INSTRUMENT');
   print(`  index         ${ctx.indexPath} (ownership-index.js --json, TypeScript ${ctx.index.instrument.typescript}; measured under design ${ctx.index.instrument.designId}, mapping ${ctx.index.instrument.mappingId} = this design's)`);
   print(`  grain         "reached from another FILE"; doors list how many of their calling components are outside their own`);
   if (v.couldNotLook) print(`  could not look ${plural(v.couldNotLook, 'file')} the type checker gives no module symbol: their exports, and any door among them, are not seen`);
@@ -553,7 +554,7 @@ function reportV1(v, s, ctx, print) {
   }
 
   print('');
-  print('DERIVATION UNDER V1 (the pairs v0 left as consumption, pending v1, re-read through doors and states)');
+  print('DERIVATION UNDER v1 (the pairs v0 left as consumption, pending v1, re-read through doors and states)');
   print(`  pending from v0: ${s.derivation.consumption.length} = ${v.derivedV1.length} derivable from a door, state or registry owned by <to> that <from> calls, reads or writes + ${v.stillPending.length} still consumption only`);
   for (const it of v.derivedV1) print(`    ${it.pair} — via ${it.via.slice(0, 4).join(', ')}${it.via.length > 4 ? `, and ${it.via.length - 4} more` : ''}`);
   for (const it of v.stillPending) print(`    still consumption: ${it.pair} — ${plural(it.edges, 'internal edge')}`);

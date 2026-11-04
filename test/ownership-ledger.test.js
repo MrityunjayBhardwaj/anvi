@@ -221,13 +221,13 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   const v1Out = path.join(DIR, 'proposed-v1.json');
   const v = run(['--design', v1File, '--graph', graphFile, '--framework', 'fw', '--index', indexFile, '--members', 'owned#make', '--write', v1Out]);
   ok(v.code === 0, `a v1 report exits 0 (got ${v.code}${v.code ? ': ' + v.out.slice(0, 400) : ''})`);
-  const V1HEADS = ['LEDGER V1 — INSTRUMENT', 'STATE AND REGISTRY ROWS', 'DOOR ROWS', 'SYNTAX ROWS', 'MEMBER USES', 'DEFINITIONS', 'JOBS', 'DERIVATION UNDER V1', 'ROT (v1)', 'SUMMARY (v1)'];
+  const V1HEADS = ['LEDGER v1 — INSTRUMENT', 'STATE AND REGISTRY ROWS', 'DOOR ROWS', 'SYNTAX ROWS', 'MEMBER USES', 'DEFINITIONS', 'JOBS', 'DERIVATION UNDER v1', 'ROT (v1)', 'SUMMARY (v1)'];
   let at1 = v.out.search(/^SUMMARY$/m), inOrder1 = at1 >= 0;
   for (const h of V1HEADS) { const i = v.out.indexOf(`\n${h}`); if (i < 0 || i < at1) inOrder1 = false; at1 = i; }
   ok(inOrder1, 'the v1 sections print after the v0 SUMMARY, in order');
   // v0's output is unchanged by --index: the v1 run's text up to the v1 block equals a run without it.
   const plain = run(['--design', v1File, '--graph', graphFile, '--framework', 'fw']);
-  ok(v.out.startsWith(plain.out.trimEnd() + '\n\nLEDGER V1'), 'everything v0 prints is printed unchanged, then the v1 block');
+  ok(v.out.startsWith(plain.out.trimEnd() + '\n\nLEDGER v1'), 'everything v0 prints is printed unchanged, then the v1 block');
 
   const S1 = section(v.out, 'STATE AND REGISTRY ROWS', 'DOOR ROWS');
   ok(/module states: 7 = 1 private to their file \(excluded, rule 9\) \+ 6 reached from another file/.test(S1), `private states are counted and excluded (${line(S1, /module states:/).trim()})`);
@@ -238,7 +238,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
      'a container with one write inside a door and one outside is a state, not a registry');
   ok(/src\/a\/one\.ts#cache: owner a[^\n]*doors 0/.test(S1) && !/registry rows proposed: [^\n]*\n[^\n]*#cache/.test(S1) && /SPRAWL \(rule 9\)/.test(S1), 'a container written outside any door is a state, not a registry, and with no door it is SPRAWL');
   ok(/src\/b\/two\.ts#shared: owner null — COULDN'T TELL · writers a 1, b 1/.test(S1), 'a state written from two components is couldn\'t tell, with its writers');
-  ok(!/#priv/.test(v.out.split('\nPROPOSAL')[0].split('\nLEDGER V1')[1]) && !/#TABLE:/.test(S1), 'the private state and the constant get no row');
+  ok(!/#priv/.test(v.out.split('\nPROPOSAL')[0].split('\nLEDGER v1')[1]) && !/#TABLE:/.test(S1), 'the private state and the constant get no row');
   ok(/no write seen, handed on — could not tell whether written, no row: 1\n\s+src\/c\/four\.ts#handed · escapes 2/.test(S1), 'the handed-on state with no write seen is listed, not a row');
   const D1 = section(v.out, 'DOOR ROWS', 'SYNTAX ROWS');
   ok(/doors: 2 = 1 called from another component \+ 1 called only from files of their own component; 0 in unmapped files not examined; 1 in a passthrough file, never doors/.test(D1), `doors counted with the cross-component subset and the passthrough apart (${line(D1, /doors:/).trim()})`);
@@ -250,10 +250,10 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   ok(/owned \(owner c\): make — b 1/.test(M1) && !/other —/.test(M1), 'a member of an owned library used outside its owner is a second home; one used only by the owner is not');
   ok(/--members owned#make: 2 homes — c 2, b 1; library owner c \(ruled\); second homes: b/.test(M1), `--members prints the homes and the second homes (${line(M1, /--members/).trim()})`);
   ok(/toMidi: defined in 1 component — c \(src\/c\/four\.ts:7\)/.test(v.out) && /listed apart, not a definition: src\/a\/one\.ts:40 \(a\) takes p\.toMidi/.test(v.out), 'definitions are read from the index; a package member of that name is listed apart');
-  const J1 = section(v.out, 'JOBS', 'DERIVATION UNDER V1');
+  const J1 = section(v.out, 'JOBS', 'DERIVATION UNDER v1');
   ok(/idle: home b · 1 resource · 1 door · blast radius b, c · ORPHAN — no door it holds has a caller/.test(J1), `a job whose doors have no caller is an ORPHAN, its radius the home plus the owners (${line(J1, /idle:/).trim()})`);
   ok(/load: home a · 2 resources · 1 door · blast radius a, c(?! ·)/.test(J1) && !/load:[^\n]*ORPHAN/.test(J1), `a job whose door has callers is not (${line(J1, /load:/).trim()})`);
-  const RV = section(v.out, 'DERIVATION UNDER V1', 'ROT (v1)');
+  const RV = section(v.out, 'DERIVATION UNDER v1', 'ROT (v1)');
   ok(/required, not declared \(v1\): 1[^\n]*\n\s+b -> a — via [^\n]*src\/a\/one\.ts#register/.test(RV), 'calling a door owned elsewhere implies consumer -> owner; undeclared, it is a finding');
   const RT = section(v.out, 'ROT (v1)', 'SUMMARY (v1)');
   ok(/stale — a ruled v1 row with no toucher \(no writer, no caller\): 2\n\s+src\/c\/four\.ts#gone \(the state is no longer in the code\)\n\s+src\/c\/four\.ts#nocall\n/.test(RT), 'a ruled state gone from the code and a ruled door nobody calls are STALE');
