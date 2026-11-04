@@ -72,7 +72,7 @@ console.log('\nNOT MEASURED — every input the tool cannot measure from exits 2
 
 // The number of `ok` calls in the block below. Asserted when the block runs, so the skip line
 // cannot go on quoting a count that drifted.
-const GATED = 40;
+const GATED = 42;
 console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -99,7 +99,9 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
       '  return api;\n}\n');
     put('src/engine/midi.ts', 'export function noteToMidi(n: string): number { return n.length; }\nexport function helper(): number { return 1; }\n');
     // ws: a named import of the member; the registry state.
-    put('src/ws/fetch.ts', "import { load } from 'snd';\nexport function fetchIt(u: string) { return load(u); }\n");
+    // …and a helper NESTED in a function that shares a top-level name in engine: not a duplicate.
+    put('src/ws/fetch.ts', "import { load } from 'snd';\nexport function fetchIt(u: string) { return load(u); }\n" +
+      'export function outer() { const wrap = () => 3; return wrap(); }\n');
     put('src/ws/registry.ts',
       'const editors = new Map<string, number>();\n' +
       'export function register(k: string) { editors.set(k, 1); shared.set(k, 1); }\n' +
@@ -170,6 +172,10 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
     const Fi = section(r.out, 'FINDINGS');
     ok(/written from two or more components: 1 of 3 states/.test(Fi) && /src\/ws\/registry\.ts#shared \(ws\) — written by ws, viz/.test(Fi) && !/#editors/.test(Fi),
        `findings list the shared Map with writers ws, viz, and not the one-writer editors (${Fi.split('\n')[0]})`);
+    ok(/top-level function names defined in two or more components: 1 of \d+ top-level names/.test(Fi) &&
+       /^ {4}helper — engine: src\/engine\/midi\.ts:2 · viz: src\/viz\/play\.ts:9$/m.test(Fi),
+       `the duplication reading lists helper, top-level in engine and viz (${(Fi.match(/top-level function names.*/) || [''])[0]})`);
+    ok(!/^ {4}wrap — /m.test(Fi), 'a nested `const wrap` in ws is not a duplicate of the top-level wrap in engine');
 
     console.log('\n  DEFINE:');
     ok(/DEFINE — noteToMidi: defined in 1 component\n {4}engine: src\/engine\/midi\.ts:1\n/.test(r.out), 'noteToMidi is defined in one component; the .d.ts declaration is not counted');
