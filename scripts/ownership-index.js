@@ -44,6 +44,10 @@
 //     [--callers <file>]...                    callers of every export of that file
 //     [--findings]                             every state written from two or more components
 //     [--refresh <file>]                       rebuild once reusing the program, and time it
+//     [--signatures <file>]...                 that file's signature vector under each view (#647)
+//     [--placement-reading]                    each file's distance to every prior, per view, with denominators
+//     [--project <name> | --settings <file>]   the numbers signatures are judged by (#740); none = defaults
+//   Signature vectors are built in scripts/signature-vectors.js from this index; see its header.
 //     [--json <out.json>]                      the whole index
 //
 // Exit: 0 report printed · 2 NOT MEASURED (no TypeScript 5, an unreadable input, a design the
@@ -55,12 +59,14 @@ const fs = require('fs');
 const path = require('path');
 const R = require('../hooks/structure-rules.js');
 const S = require('../hooks/structure-graph.js');
+const PS = require('../hooks/project-settings.js');
+const SV = require('./signature-vectors.js');
 
 const MUTATORS = new Set(['set', 'delete', 'add', 'clear', 'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 const CONTAINERS = new Set(['Map', 'Set', 'WeakMap', 'WeakSet', 'Array']);
-const REPEATABLE = new Set(['load', 'state', 'define', 'callers']);
-const FLAGS = new Set(['design', 'package', 'typescript', 'load', 'state', 'define', 'callers', 'findings', 'refresh', 'json']);
-const BOOLEAN = new Set(['findings']);
+const REPEATABLE = new Set(['load', 'state', 'define', 'callers', 'signatures']);
+const FLAGS = new Set(['design', 'package', 'typescript', 'load', 'state', 'define', 'callers', 'findings', 'refresh', 'json', 'signatures', 'placement-reading', 'project', 'settings']);
+const BOOLEAN = new Set(['findings', 'placement-reading']);
 
 function loadTypeScript(pkgDir, explicit) {
   let p;
@@ -147,11 +153,44 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     ts.isMethodDeclaration(id.parent) || ts.isPropertyDeclaration(id.parent) || ts.isPropertySignature(id.parent) || ts.isMethodSignature(id.parent) ||
     ts.isInterfaceDeclaration(id.parent) || ts.isTypeAliasDeclaration(id.parent) || ts.isEnumDeclaration(id.parent) || ts.isFunctionExpression(id.parent));
 
+  const inTypePosition = id => { for (let q = id.parent; q; q = q.parent) { if (ts.isTypeNode(q) || ts.isTypeQueryNode(q) || ts.isHeritageClause(q)) return true; if (ts.isExpression(q) || ts.isStatement(q)) return false; } return false; };
+  const isCallee = id => {
+    let x = id;
+    if (x.parent && ts.isPropertyAccessExpression(x.parent) && x.parent.name === x) x = x.parent;
+    x = unwrap(x);
+    return !!(x.parent && (ts.isCallExpression(x.parent) || ts.isNewExpression(x.parent)) && x.parent.expression === x);
+  };
+  const TYPE_DECL = d => ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d) || ts.isClassDeclaration(d) || ts.isEnumDeclaration(d);
+  const FN_DECL = d => ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d) || ts.isClassDeclaration(d) ||
+    (ts.isVariableDeclaration(d) && d.initializer && (ts.isArrowFunction(strip(d.initializer)) || ts.isFunctionExpression(strip(d.initializer))));
+
   // ── one pass: every reference, by the symbol it reaches ────────────────────────────────────
+  // Beside the symbol index, the same pass records each reference that crosses into another
+  // corpus file (#647, signature vectors): a TYPE used (a type position resolving to an
+  // interface, type alias, class or enum declared elsewhere), a CALL (a callee resolving to a
+  // function, method or class declared elsewhere), or any other VALUE read. Each carries the
+  // calling function, so a resource reached through another file's function can be weighed as
+  // reached through a door, not touched.
+  // A door is an export of its file: the module's own export symbols, resolved through aliases,
+  // so a property of an exported type (`s.name`) is not mistaken for one.
+  const exportSets = new Map();
+  const exportsOfFile = dsf => {
+    if (!exportSets.has(dsf)) {
+      const m = (() => { try { return checker.getSymbolAtLocation(dsf) || dsf.symbol; } catch { return null; } })();
+      let es = []; try { es = m ? checker.getExportsOfModule(m).map(resolve) : []; } catch { es = []; }
+      exportSets.set(dsf, new Set(es));
+    }
+    return exportSets.get(dsf);
+  };
   const refs = new Map();          // symbol -> [{ id, sf }]
+  const crossRefs = [];            // { from, fromComp, fromFn, to, toComp, name, kind: type|call|value, exported }
+  const declNames = new Map();     // file -> [identifier declared in it]
   let identifiers = 0;
   for (const sf of files) {
+    const fromRel = relOf(sf.fileName), names = [];
+    declNames.set(fromRel, names);
     const visit = n => {
+      if (ts.isIdentifier(n) && isDeclName(n)) names.push(n.text);
       // The name after a dot is indexed too: `R.loadGraph(…)` on a CommonJS require or an
       // `import * as R` is a caller of the export `loadGraph`, and skipping it would read every
       // such caller as none.
@@ -164,6 +203,14 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
         // shared "unknown" symbol, so the alias is the only key that tells two imports apart.
         const target = resolve(sym);
         for (const k of new Set([sym, target])) if (k) { if (!refs.has(k)) refs.set(k, []); refs.get(k).push({ id: n, sf }); }
+        const decl = target && target.declarations && target.declarations[0];
+        const dsf = decl && decl.getSourceFile();
+        if (dsf && dsf !== sf && inCorpus.has(relOf(dsf.fileName))) {
+          const typePos = inTypePosition(n);
+          const kind = typePos ? (TYPE_DECL(decl) ? 'type' : null) : (isCallee(n) && FN_DECL(decl) ? 'call' : 'value');
+          if (kind) crossRefs.push({ from: fromRel, fromComp: compOf(sf), fromFn: enclosing(n), to: relOf(dsf.fileName), toComp: compOf(dsf), name: target.name, kind,
+            exported: exportsOfFile(dsf).has(target) });
+        }
       }
       ts.forEachChild(n, visit);
     };
@@ -311,7 +358,7 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
         if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) continue;
         const sym = symOfDecl(d.name);
         if (!sym) continue;
-        const st0 = { file: relOf(sf.fileName), name: d.name.text, kind: isLet ? 'let' : 'container', component: compOf(sf), writes: [], reads: 0, escapes: [] };
+        const st0 = { file: relOf(sf.fileName), name: d.name.text, kind: isLet ? 'let' : 'container', component: compOf(sf), writes: [], reads: 0, escapes: [], readers: {} };
         for (const { id, sf: rsf } of refs.get(sym) || []) {
           const n = unwrap(id);
           const p = n.parent;
@@ -335,6 +382,16 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
             continue;
           }
           st0.reads++;
+        }
+        // Who reads it, by file: every reference that is not a write (an escape included — the
+        // state left through that file). Needed for the "states read" feature; derived from the
+        // same classification, so a reader here is exactly a reference not counted as a write.
+        const writeSites = new Set(st0.writes.map(w => w.site));
+        for (const { id, sf: rsf } of refs.get(sym) || []) {
+          const at = site(rsf, id);
+          if (writeSites.has(at)) continue;
+          const f = relOf(rsf.fileName);
+          st0.readers[f] = (st0.readers[f] || 0) + 1;
         }
         states.push(st0);
       }
@@ -443,7 +500,19 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     }).sort((a, b) => b.refs - a.refs || (a.name < b.name ? -1 : 1)) };
   };
 
-  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf };
+  // A passthrough declares nothing: every statement imports or re-exports. Its doors forward
+  // another file's code and never count as ownership (design rule 7). A file with no statements
+  // at all is not a passthrough; it is empty.
+  const passthrough = new Set();
+  for (const sf of files) {
+    const sts = sf.statements;
+    if (sts.length && sts.some(st => ts.isExportDeclaration(st)) &&
+        sts.every(st => ts.isImportDeclaration(st) || ts.isExportDeclaration(st) || (ts.isExportAssignment(st) && ts.isIdentifier(st.expression))))
+      passthrough.add(relOf(sf.fileName));
+  }
+
+  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf,
+    crossRefs, declNames, passthrough };
 }
 
 // ── the report ───────────────────────────────────────────────────────────────────────────────
@@ -451,7 +520,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 const groupBy = (xs, k) => { const m = new Map(); for (const x of xs) { const v = k(x); if (!m.has(v)) m.set(v, []); m.get(v).push(x); } return m; };
 
 function main(argv) {
-  const args = { load: [], state: [], define: [], callers: [] };
+  const args = { load: [], state: [], define: [], callers: [], signatures: [] };
   const print = s => console.log(s);
   const stop = why => { print(`ownership-index: NOT MEASURED — ${why}`); return 2; };
   for (let i = 0; i < argv.length; i++) {
@@ -472,6 +541,9 @@ function main(argv) {
   if (!fs.existsSync(pkgDir)) return stop(`${pkgDir} does not exist`);
   const T = loadTypeScript(pkgDir, args.typescript);
   if (T.notMeasured) return stop(T.notMeasured);
+  const wantSignatures = args.signatures.length > 0 || args['placement-reading'];
+  const settings = PS.load(args.settings ? { file: args.settings } : args.project ? { project: args.project } : { defaultsOnly: true });
+  if (wantSignatures && settings.refused) return stop(`the settings were refused: ${settings.refused.join('; ')}`);
 
   const t0 = Date.now();
   const cache = new Map();
@@ -484,6 +556,7 @@ function main(argv) {
   print(`  tool        ownership-index.js (spike, #647) · TypeScript ${T.ts.version} from ${T.from}`);
   print(`  package     ${pkgDir} · ${ix.made.config ? `tsconfig ${ix.made.config}` : 'no tsconfig: read as JavaScript (allowJs)'}`);
   print(`  design      ${args.design} — id ${R.designId(design)}`);
+  if (wantSignatures) print('  ' + PS.headline(settings).trimStart());
   print(`  date        ${new Date().toISOString().slice(0, 10)}`);
   print(`  corpus      ${plural(ix.corpusRel.length, 'script file')} listed; ${ix.files.length} in the program; ${ix.identifiers} references resolved`);
   print(`  build       ${buildMs} ms cold`);
@@ -604,6 +677,70 @@ function main(argv) {
     print(`REFRESH — after ${args.refresh} is re-read as if changed: ${ms} ms (cold was ${buildMs} ms); ${reused} of ${again.program.getSourceFiles().length} parsed files reused, ` +
       `${again.program.getSourceFiles().length - reused} re-parsed; every reference re-resolved by the checker`);
     json.instrument.refreshMs = ms;
+  }
+
+  if (wantSignatures) {
+    const opt = k => PS.need(settings, k).value;
+    const weights = { direct: opt('signatures.weight.direct'), viaDoor: opt('signatures.weight.viaDoor') };
+    const minTokenLength = opt('signatures.vocabulary.minTokenLength'), band = opt('signatures.nearTwoBand');
+    const t2 = Date.now();
+    const sig = SV.fileSignatures(ix, { weights, minTokenLength });
+    const jobs = SV.jobsOf(design);
+    const jv = SV.jobVectors(sig, jobs);
+    const rd = SV.reading(sig, { band });
+    const sigMs = Date.now() - t2;
+    json.signatures = { settingsId: settings.id, weights, minTokenLength, band, ms: sigMs, files: {}, jobs: jv.perJob.map(j => ({ ...j, vec: Object.fromEntries(Object.entries(j.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })),
+      owners: jv.perOwner.map(o => ({ ...o, vec: Object.fromEntries(Object.entries(o.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })), reading: rd.rows };
+    for (const s of sig.values()) json.signatures.files[s.file] = { component: s.component, passthrough: s.passthrough, unresolved: s.unresolved,
+      doors: Object.fromEntries(s.doors), views: Object.fromEntries(SV.VIEWS.map(v => [v, SV.vecJSON(s.views[v])])) };
+    const syntaxRows = Object.values(design.resources || {}).filter(r => r && (r.kind === 'syntax' || r.kind === 'registry')).length;
+
+    print('');
+    print(`SIGNATURES — ${plural(sig.size, 'file')} · views ${SV.VIEWS.join(', ')} · runtime NOT MEASURED (no co-execution yet, #712/#713) · ${sigMs} ms`);
+    print(`  weights: direct ${weights.direct}, through a door ${weights.viaDoor} · vocabulary tokens of ${minTokenLength}+ letters, weight 1 + ln(count) · types and calls by presence`);
+    print(`  syntax and registry features: ${syntaxRows ? plural(syntaxRows, 'ledger row') + ' of those kinds' : 'ABSENT — 0 ledger rows of kind syntax or registry are ruled, so files carry none (absent, not zero)'}`);
+    const passthroughs = [...sig.values()].filter(s => s.passthrough).map(s => s.file);
+    print(`  passthrough files (only import and re-export; their doors are never ownership): ${passthroughs.length}${passthroughs.length ? ' — ' + passthroughs.slice(0, 12).join(', ') + (passthroughs.length > 12 ? `, and ${passthroughs.length - 12} more` : '') : ''}`);
+    const empty = v => [...sig.values()].filter(s => !s.views[v].size).length;
+    print(`  files with no feature, per view: ${SV.VIEWS.map(v => `${v} ${empty(v)}`).join(' · ')} (of ${sig.size})`);
+    print(`  per job: ${jobs.ruled.length ? plural(jobs.ruled.length, 'ruled job') : 'NOT BUILT — 0 jobs ruled'}${jobs.unruled.length ? ` · ${plural(jobs.unruled.length, 'job row')} not ruled, not used: ${jobs.unruled.join(', ')}` : ''}`);
+    print(`  per owner: ${jv.perOwner.length ? jv.perOwner.map(o => `${o.owner} (${plural(o.jobs, 'job')})`).join(', ') : 'NOT BUILT — no ruled job names an owner; the reading below uses DIRECTORY PRIORS'}`);
+    if (jv.missing.length) print(`  job members not in the program: ${jv.missing.join('; ')}`);
+    for (const f of args.signatures) {
+      const s = sig.get(f);
+      print('');
+      if (!s) { print(`SIGNATURE — ${f}: NOT IN THE PROGRAM (could not look)`); continue; }
+      const blind = s.unresolved.escapes + s.unresolved.unbound + s.unresolved.computedLoads;
+      print(`SIGNATURE — ${f} (${s.component})${s.passthrough ? ' · PASSTHROUGH' : ''}${blind ? ` · AT LEAST: ${s.unresolved.escapes} escapes, ${s.unresolved.unbound} unbound imports, ${s.unresolved.computedLoads} computed loads not followed` : ''}`);
+      for (const v of SV.VIEWS) {
+        const es = [...s.views[v]].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+        const cap = v === 'vocabulary' ? 15 : 40;
+        print(`  ${v} (${es.length}): ${es.length ? es.slice(0, cap).map(([k, x]) => x === 1 ? k : `${k} ×${+x.toFixed(2)}`).join(' · ') + (es.length > cap ? ` · and ${es.length - cap} more` : '') : '(none)'}`);
+      }
+      print(`  doors used from other components (${s.doors.size}): ${s.doors.size ? [...s.doors].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') : '(none)'}`);
+    }
+    if (args['placement-reading']) {
+      const rows = rd.rows.filter(r => r.component !== '(unmapped)');
+      print('');
+      print(`PLACEMENT READING — a reading, not an acceptance: ${jv.perOwner.length ? 'owner prototypes from ruled jobs' : 'DIRECTORY PRIORS (component directories, not owners), each file left out of its own'} · near two = second within ${band * 100}% of the nearest`);
+      for (const v of SV.VIEWS) {
+        const has = rows.filter(r => !r.views[v].empty), far = has.filter(r => r.views[v].far).length, placed = has.length - far;
+        const own = has.filter(r => r.views[v].ownNearest).length, two = has.filter(r => r.views[v].nearTwo).length;
+        print(`  ${v.padEnd(11)} ${rows.length} files = ${rows.length - has.length} no feature + ${far} far from every prior + ${placed} near one: ` +
+          `own directory nearest ${own} (${placed ? (100 * own / placed).toFixed(1) : '—'}% of ${placed}) · near two ${two}`);
+      }
+      const featured = rows.filter(r => r.featured >= 2);
+      const disagree = featured.filter(r => !r.agree);
+      print(`  views agree on the nearest component: ${featured.length - disagree.length} of ${featured.length} files with 2+ views featured; disagree ${disagree.length}`);
+      const nearTwoRes = rows.filter(r => !r.views.resources.empty && r.views.resources.nearTwo);
+      const show = (title, list, fmt) => { print(`  ${title}: ${list.length}`); for (const r of list.slice(0, 25)) print(`    ${fmt(r)}`); if (list.length > 25) print(`    … and ${list.length - 25} more (all in --json)`); };
+      const fmtV = (r, v) => { const x = r.views[v]; return x.empty ? `${v} —` : x.far ? `${v} far` : `${v} ${x.nearest} ${x.d.toFixed(3)}${x.second ? ` / ${x.second} ${x.d2.toFixed(3)}` : ''}`; };
+      show('near two under resources', nearTwoRes, r => `${r.file} (${r.component}) — ${fmtV(r, 'resources')}`);
+      show('views disagree', disagree, r => `${r.file} (${r.component}) — ${SV.VIEWS.map(v => fmtV(r, v)).join(' · ')}`);
+      json.signatures.readingSummary = Object.fromEntries(SV.VIEWS.map(v => { const has = rows.filter(r => !r.views[v].empty); return [v, { featured: has.length, far: has.filter(r => r.views[v].far).length, ownNearest: has.filter(r => r.views[v].ownNearest).length, nearTwo: has.filter(r => r.views[v].nearTwo).length }]; }));
+      json.signatures.readingSummary.files = rows.length;
+      json.signatures.readingSummary.disagree = disagree.length; json.signatures.readingSummary.featured2 = featured.length;
+    }
   }
 
   print('');
