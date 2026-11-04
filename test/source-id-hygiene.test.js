@@ -42,6 +42,7 @@ const ALLOWED = new Set([
   'Z0',                                  // not a token at all — the tail of `[a-zA-Z0-9]` in a regex
   'MD5', 'SHA1', 'CRC32', 'UTF8',        // hash and encoding names
   'TS2322',                              // a TypeScript diagnostic code
+  'ES2015',                              // a TypeScript script target (ts.ScriptTarget.ES2015), the transpiler's default
   'U1', 'UV1', 'UK1', 'UV2', 'UK3',      // placeholder ids in this repo's PUBLIC templates, not private keys
 ]);
 
