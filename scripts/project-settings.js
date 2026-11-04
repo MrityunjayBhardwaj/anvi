@@ -58,6 +58,11 @@ const SCHEMA = {
     about: 'below this many ruled jobs the floor is not judged; the result prints "underpowered, k of n"',
     readBy: '#723 (PLACE acceptance)',
   },
+  'duplication.bodyHash.minStatements': {
+    type: 'integer', min: 1, default: 5,
+    about: 'a function body with fewer statements is too small to count as a re-implemented copy',
+    readBy: '#700 (forceable share)',
+  },
   'signatures.weight.direct': {
     type: 'number', min: 0, exclusiveMin: true, default: 1,
     about: 'weight of a resource the file touches itself',
