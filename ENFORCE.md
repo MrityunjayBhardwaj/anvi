@@ -1522,11 +1522,17 @@ loosened until it stops firing guards nothing.
   once per session at edit time, never refused and never passed. A key computed at run time and a
   write a library makes on a prop's behalf are not seen. A file that spells no door name and forwards
   no module wholesale is not handed to the type checker.
-  - **Cost, measured on stave `c26ca5e7`** (see the issue thread of #696 for the population and the
-    machine load it was measured under): the door check builds a program over the edited file's
-    import closure, so it costs what that closure costs; a file the gate passes over costs a string
-    search. The report's whole-package pass is a plan-time and merge-time cost (the merge hook runs
-    the report).
+  - **Cost, measured on stave `c26ca5e7`** (2026-11-05; the hook as a process, wall time, one Edit per
+    file on 122 files: the 62 the door gate hands to the checker and every fifth of the other 300;
+    the same files under the ledger design without these rows as the control, interleaved; machine
+    load average 19–48, median 29). Warm (graph cache valid): p50 0.90 s, p95 2.1 s, max 2.8 s,
+    against the control's 0.38 / 0.66 / 1.6 s — the checker adds p50 1.0 s, p95 1.7 s, max 2.35 s
+    on a gated file and about nothing on the rest. Cold (graph cache removed): p50 3.6 s, p95
+    6.1 s, and one of 122 at 14.6 s, past the registered 10 s budget (control max 7.0 s). So the
+    door check starts only with at least 3 s of the budget left (`DOOR_MIN_MS`); with less it is
+    NOT MEASURED and said, never a hook killed at its timeout, which lets the edit through with no
+    record. The report's whole-package pass (about 4 s on stave) is a plan-time and merge-time cost;
+    the merge hook runs the report.
   - `--proposed` prints, beside the divergence reclassification, what each ledger rule finds under
     each design: a design version that adds an entrance, a door or a fields row is reviewed on what
     those would find today.

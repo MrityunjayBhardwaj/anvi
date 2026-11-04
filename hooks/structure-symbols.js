@@ -241,7 +241,13 @@ function programFor(ts, pkgDir, roots, overlay, oldProgram) {
 // Measure both rules over `rels` (package-relative), with `overlay` (rel → content) in place of the
 // disk. Returns { door, reads } results in the shape the rules take, each with `scope` when only
 // some files were measured, plus `ms` and `program` (to hand back as `oldProgram`).
-function measure({ pkgDir, design, rels, overlay = new Map(), scoped = false, oldProgram = null, tsLoaded = null }) {
+// What the door check must have left of a deadline to start (#696): building a program is one call
+// that cannot be stopped part-way, and a hook killed at its timeout lets the edit through with no
+// record. Measured on stave c26ca5e7 (2026-11-05, load average ~29): the checker added p95 1.7 s and
+// at most 2.35 s warm, p95 2.7 s cold.
+const DOOR_MIN_MS = 3000;
+
+function measure({ pkgDir, design, rels, overlay = new Map(), scoped = false, oldProgram = null, tsLoaded = null, deadline = null, now = Date.now }) {
   const t0 = Date.now();
   const rows = symbolRows(design);
   if (!rows.doors.length && !rows.reads.length) return { door: { found: [], examined: 0 }, reads: { found: [], examined: 0 }, ms: 0 };
@@ -276,7 +282,9 @@ function measure({ pkgDir, design, rels, overlay = new Map(), scoped = false, ol
       if (rows.doors.every(d => R.touchAllowed(d.row, comp, rel.slice(root.length)))) continue;
       if (mentions(text, names) || /\bexport\s*\*/.test(text)) gated.push(rel);
     }
-    if (gated.length) {
+    if (gated.length && deadline !== null && now() + DOOR_MIN_MS > deadline)
+      door.notMeasured = `not enough of the hook's time budget left to build the type checker's program (${Math.max(0, deadline - now())} ms left, ${DOOR_MIN_MS} needed)`;
+    else if (gated.length) {
       const built = programFor(ts, pkgDir, gated, overlay, oldProgram);
       if (built.notMeasured) return { notMeasured: built.notMeasured, ms: Date.now() - t0 };
       program = built.program;
@@ -294,4 +302,4 @@ function measure({ pkgDir, design, rels, overlay = new Map(), scoped = false, ol
   return { door, reads, couldntTell: rows.couldntTell, ms: Date.now() - t0, program };
 }
 
-module.exports = { loadTypeScript, symbolRows, doorNames, measure, readsIn, doorsIn, originOf };
+module.exports = { loadTypeScript, symbolRows, doorNames, measure, readsIn, doorsIn, originOf, DOOR_MIN_MS };

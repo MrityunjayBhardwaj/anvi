@@ -736,7 +736,9 @@ function symbolResult(design, symbols, rule) {
   if (!wants) return { found: [], examined: 0 };
   if (!symbols) return NOT_LOOKED('the type checker was not run over the source (a graph alone names no symbols — give the package)');
   if (symbols.notMeasured) return NOT_LOOKED(symbols.notMeasured);
-  return symbols[rule] || NOT_LOOKED(`no ${rule} measurement was handed in`);
+  const got = symbols[rule];
+  if (got && got.notMeasured) return NOT_LOOKED(got.notMeasured);
+  return got || NOT_LOOKED(`no ${rule} measurement was handed in`);
 }
 
 // ── the ratchet ──────────────────────────────────────────────────────────────────────

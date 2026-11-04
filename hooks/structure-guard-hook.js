@@ -386,7 +386,10 @@ function evaluate(payload, deps) {
   // only — the findings the hook may refuse all start in it — and only when the design names such a
   // row. Scoped, so the ratchet compares this file's baseline keys alone.
   const SY = deps.symbols || require('./structure-symbols.js');
-  const symbolsFor = (overlay, oldProgram) => SY.measure({ pkgDir: owner.dir, design, rels: [owner.rel], overlay, scoped: true, oldProgram });
+  // Inside the hook's budget (#696): with too little left, the door check says NOT MEASURED instead of
+  // running past the timeout, where the edit would go through with no record at all.
+  const symbolsFor = (overlay, oldProgram) => SY.measure({ pkgDir: owner.dir, design, rels: [owner.rel], overlay, scoped: true, oldProgram,
+    deadline: deps.deadline === undefined ? null : deps.deadline });
   const symbols = symbolsFor(new Map([[owner.rel, content]]), null);
   const ledger = R.ratchet(R.judge(built.graph, design, symbols), baseline);
   const prefix = `${owner.rel} -> `;
@@ -813,6 +816,7 @@ if (require.main === module) {
       try {
         result = evaluate(payload, {
           registry,
+          deadline: started + HOOK_BUDGET_MS - EXIT_MARGIN_MS,
           readFile: f => fs.readFileSync(f, 'utf8'),
           rules: require('./structure-rules.js'),
           graph: require('./structure-graph.js'),

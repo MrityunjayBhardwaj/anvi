@@ -169,7 +169,7 @@ console.log('\nNOT MEASURED — a door or fields row with no source read is neve
 const from = process.env.STRUCTURE_TS_FROM;
 let tsDir = null;
 try { tsDir = from && path.dirname(require.resolve('typescript/package.json', { paths: [from] })); } catch { tsDir = null; }
-const GATED = 28;
+const GATED = 30;
 console.log('\nDOOR AND READS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 if (!tsDir) console.log(`  – SKIPPED ${GATED} cases, NOT MEASURED here: ${from ? `no TypeScript resolvable from ${from}` : 'STRUCTURE_TS_FROM is not set'}`);
 else {
@@ -273,6 +273,13 @@ else {
   ok(elsewhereRead.decision === 'deny' && elsewhereRead.fresh.some(f => f.rule === 'reads' && f.key === 'src/workspace/clean.ts -> reads krill-fields in nothing #1'),
      `a new reader in another component is refused (${elsewhereRead.decision}: ${(elsewhereRead.fresh || []).map(f => f.rule + ' ' + f.key).join()})`);
   ok(elsewhereRead.fresh.some(f => f.rule === 'entrance') === false, '... and its import of a codeView internal is judged by the entrance rule apart (type-only: not in this graph, as the design does not count types)');
+
+  // Inside the hook's budget: with too little time left, the door check says so instead of running past it.
+  const late = H.evaluate(PLANT, { registry: reg, readFile, rules: R, graph: S, stateDir: STATE, deadline: Date.now() + SY.DOOR_MIN_MS - 1000 });
+  ok(late.decision === 'allow' && /NOT MEASURED[\s\S]*door: not enough of the hook's time budget left/.test(late.symbolNotice || ''),
+     `with less than ${SY.DOOR_MIN_MS} ms left the door is NOT MEASURED, said, and the edit allowed — never a silent pass (${late.decision})`);
+  const roomy = H.evaluate(PLANT, { registry: reg, readFile, rules: R, graph: S, stateDir: STATE, deadline: Date.now() + 60000 });
+  ok(roomy.decision === 'deny', `with time left the same call is refused (${roomy.decision})`);
 
   // Only a RULED row refuses.
   const unruled = clone(design); delete unruled['resources']['write-door'].ruled;
