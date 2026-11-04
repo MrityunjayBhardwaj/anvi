@@ -139,6 +139,13 @@ function designId(design) {
     return { id, kind: r.kind === undefined ? null : r.kind, reach: r.reach === undefined ? null : r.reach,
              owner: r.owner === undefined ? null : r.owner };
   });
+  // Jobs (#710, ledger v1), only when present: a job's home and the resources it holds are a
+  // ruling, and moving either changes what a placement is judged against. Its doors, reason, date,
+  // evidence and any blast radius written beside it are commentary or follow from the rows.
+  if (isObject(d.jobs)) canonical.jobs = Object.keys(d.jobs).sort().map(id => {
+    const j = isObject(d.jobs[id]) ? d.jobs[id] : {};
+    return { id, home: j.home === undefined ? null : j.home, resources: sortedSet(j.resources) };
+  });
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
 }
 
@@ -219,12 +226,52 @@ function ledgerProblem(d, names) {
     if (r.verifiedBy !== undefined && r.verifiedBy !== null && !INSTRUMENTS.includes(r.verifiedBy))
       return `resource "${id}" is verified by ${JSON.stringify(r.verifiedBy)} — it is one of ${INSTRUMENTS.join(', ')}, or null (UNVERIFIED)`;
   }
+  const jobs = jobsProblem(d, names);
+  if (jobs) return jobs;
   for (const [name, c] of Object.entries(d.components)) {
     const purpose = typeof c.purpose === 'string' ? c.purpose.trim() : '';
     if (!purpose) return `component "${name}" has no "purpose" — a design with a ledger needs one sentence per component saying what it is for`;
     if (purpose.toLowerCase() === name.toLowerCase()) return `component "${name}" has its own name as its purpose — say what it is for`;
   }
   return null;
+}
+
+// The jobs table (#710, ledger v1; design §5.2): `id → { home, resources: [id], doors: [id], reason,
+// ruled, evidence }`. A job is a RULING — the tool never proposes one — so each field is checked
+// for the reason a verdict built on it would lie: a home that is no component, a resource or door
+// the ledger does not hold (a typo that points at nothing), a reason outside the three the design
+// names, a ruling with no date. `blastRadius` is computed from the rows when printed; a stored one
+// is not read.
+const JOB_REASONS = ['ownership', 'rules', 'reference'];
+function jobsProblem(d, names) {
+  if (d.jobs === undefined) return null;
+  if (!isObject(d.jobs)) return 'the design\'s "jobs" is not an object of rows (id → { home, resources, doors, reason, ruled })';
+  const res = isObject(d.resources) ? d.resources : {};
+  for (const [id, j] of Object.entries(d.jobs)) {
+    if (!isObject(j)) return `job "${id}" is not an object with home, resources and doors`;
+    if (!names.has(j.home)) return `job "${id}" has home ${JSON.stringify(j.home)}, which is not a component`;
+    for (const field of ['resources', 'doors']) {
+      if (!Array.isArray(j[field])) return `job "${id}": "${field}" must be a list of resource ids`;
+      const missing = j[field].filter(x => !Object.prototype.hasOwnProperty.call(res, x));
+      if (missing.length) return `job "${id}" names ${field === 'doors' ? 'a door' : 'a resource'} the ledger does not hold: ${missing.map(x => JSON.stringify(x)).join(', ')}`;
+    }
+    if (!JOB_REASONS.includes(j.reason)) return `job "${id}" has reason ${JSON.stringify(j.reason)} — it is one of ${JOB_REASONS.join(', ')}`;
+    if (typeof j.ruled !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(j.ruled)) return `job "${id}" has no ruling date (ruled: YYYY-MM-DD) — a job is a ruling, and an undated one cannot be told from a draft`;
+  }
+  return null;
+}
+
+// The components a job reaches: its home, and the owner of every resource and door it holds
+// (§5.2, computed, never stored). Rows with no owner yet add nothing and are listed, so a radius
+// that looks small because nobody has ruled is never read as small.
+function blastRadius(job, resources) {
+  const res = isObject(resources) ? resources : {};
+  const comps = new Set(job && job.home ? [job.home] : []), unowned = [];
+  for (const id of [...((job && job.resources) || []), ...((job && job.doors) || [])]) {
+    const r = res[id];
+    if (isObject(r) && r.owner) comps.add(r.owner); else unowned.push(id);
+  }
+  return { components: [...comps].sort(), unowned: [...new Set(unowned)].sort() };
 }
 
 // Who refuses a touch of this row, and with what predicate: the lookup in the design (§5.2).
@@ -572,6 +619,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
-  KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
+  KINDS, REACHES, INSTRUMENTS, JOB_REASONS, gatekeeperOf, blastRadius, packageOf,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, owners, SINCE, judge, ratchet, planBaseline,
 };
