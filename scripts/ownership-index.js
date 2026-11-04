@@ -209,7 +209,7 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
           const typePos = inTypePosition(n);
           const kind = typePos ? (TYPE_DECL(decl) ? 'type' : null) : (isCallee(n) && FN_DECL(decl) ? 'call' : 'value');
           if (kind) crossRefs.push({ from: fromRel, fromComp: compOf(sf), fromFn: enclosing(n), to: relOf(dsf.fileName), toComp: compOf(dsf), name: target.name, kind,
-            exported: exportsOfFile(dsf).has(target) });
+            exported: exportsOfFile(dsf).has(target), isClass: ts.isClassDeclaration(decl) });
         }
       }
       ts.forEachChild(n, visit);

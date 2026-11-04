@@ -79,7 +79,11 @@ function fileSignatures(ix, { weights, minTokenLength }) {
     if (r.kind === 'type') add(s.views.types, `type:${r.to}#${r.name}`, 1);
     if (r.kind === 'call') {
       add(s.views.calls, `calls:${r.to}#${r.name}`, 1);
-      for (const feature of byFn.get(`${r.to}|${r.name}`) || []) {
+      // `new Foo()` runs Foo's constructor, whose writes are recorded under "constructor".
+      // (Functions are keyed by file and name: two classes in one file with a method of the same
+      // name share a key — a known coarseness, noted rather than hidden.)
+      const reached = [...(byFn.get(`${r.to}|${r.name}`) || []), ...(r.isClass ? byFn.get(`${r.to}|constructor`) || [] : [])];
+      for (const feature of reached) {
         if (!s.views.resources.has(feature) || s.views.resources.get(feature) < weights.viaDoor) s.views.resources.set(feature, Math.max(s.views.resources.get(feature) || 0, weights.viaDoor));
       }
     }

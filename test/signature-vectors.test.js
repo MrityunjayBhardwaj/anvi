@@ -65,7 +65,7 @@ console.log('\nARITHMETIC — runs everywhere:');
   ok(SV.jobsOf({}).ruled.length === 0, 'a design with no jobs table has no ruled jobs');
 }
 
-const GATED = 23;
+const GATED = 24;
 console.log('\nFEATURES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -84,12 +84,14 @@ console.log('\nFEATURES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names 
     put('src/ws/assets.ts', "import { loadSound, Sound } from '../engine/audio';\nexport function registerAsset(s: Sound) { return loadSound(s.name); }\n");
     put('src/ws/index.ts', "export { registerAsset } from './assets';\n");
     put('src/viz/mixed.ts', "export { loadSound } from '../engine/audio';\nexport const mixedValue = 2;\n");
+    put('src/engine/player.ts', "import { cache } from './audio';\nexport class Player { constructor(n: string) { cache.set(n, 2); } }\n");
+    put('src/viz/maker.ts', "import { Player } from '../engine/player';\nexport function make() { return new Player('x'); }\n");
     put('src/viz/reader.ts', "import { cache } from '../engine/audio';\nexport function cacheSize() { return cache.size; }\n");
     const run = (args, extra = []) => { const r = spawnSync(process.execPath, [TOOL, '--design', design, '--package', P, '--typescript', tsDir, ...extra, ...args], { encoding: 'utf8', timeout: 120000 }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
     const line = (out, file, view) => { const b = out.split('\nSIGNATURE — ').find(x => x.startsWith(file)) || ''; return (b.split('\n').find(l => l.trim().startsWith(view + ' (')) || '').trim(); };
 
     const r = run(['--signatures', 'src/ws/assets.ts', '--signatures', 'src/viz/reader.ts', '--signatures', 'src/engine/audio.ts',
-      '--signatures', 'src/ws/index.ts', '--signatures', 'src/viz/mixed.ts', '--placement-reading']);
+      '--signatures', 'src/ws/index.ts', '--signatures', 'src/viz/mixed.ts', '--signatures', 'src/viz/maker.ts', '--placement-reading']);
     ok(r.code === 0, `the run exits 0 (got ${r.code}${r.code ? ': ' + r.out.slice(0, 300) : ''})`);
     ok(/settings\s+\w{12} · no project named: defaults only/.test(r.out), 'with no project named, the defaults are used and the header says so');
     ok(/runtime NOT MEASURED/.test(r.out), 'runtime prints NOT MEASURED, never an empty vector');
@@ -106,12 +108,14 @@ console.log('\nFEATURES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names 
     const ar = line(r.out, 'src/engine/audio.ts', 'resources');
     ok(/lib:snd(?! ×)/.test(ar) && /writes:src\/engine\/audio\.ts#cache(?! ×)/.test(ar), `the file that touches a resource itself carries it at the direct weight (${ar})`);
     ok(!/reads:src\/engine\/audio\.ts#cache/.test(ar), 'a write (cache.set) is not also counted as a read');
+    const mk = line(r.out, 'src/viz/maker.ts', 'resources');
+    ok(/writes:src\/engine\/audio\.ts#cache ×0\.5/.test(mk), `\`new Player()\` reaches what Player's constructor writes, at the door weight (${mk})`);
     ok(/doors used from other components \(3\): (?=.*\bloadSound 1\b)(?=.*\bSound 1\b)(?=.*\bcache 1\b)(?!.*\bname\b)/.test(r.out.split('\nSIGNATURE — src/engine/audio.ts')[1] || ''),
        `its exports used from other components are listed as doors (${((r.out.split('\nSIGNATURE — src/engine/audio.ts')[1] || '').split('\n').find(l => /doors/.test(l)) || '').trim()})`);
     ok(/SIGNATURE — src\/ws\/index\.ts \(ws\) · PASSTHROUGH/.test(r.out), 'a file that only re-exports is a passthrough');
     ok(/SIGNATURE — src\/viz\/mixed\.ts \(viz\)(?! · PASSTHROUGH)/.test(r.out) && !/SIGNATURE — src\/viz\/mixed\.ts \(viz\) · PASSTHROUGH/.test(r.out), 'a file that re-exports AND declares is not');
     ok(/per job: NOT BUILT — 0 jobs ruled/.test(r.out) && /DIRECTORY PRIORS/.test(r.out), 'no ruled jobs: per job NOT BUILT, and the reading says it uses directory priors');
-    ok(/resources\s+5 files = \d+ no feature \+ \d+ far from every prior \+ \d+ near one/.test(r.out), 'the reading counts every file once per view: no feature + far + near one');
+    ok(/resources\s+7 files = \d+ no feature \+ \d+ far from every prior \+ \d+ near one/.test(r.out), 'the reading counts every file once per view: no feature + far + near one');
 
     const sFile = put('settings.json', JSON.stringify({ settings: { 'signatures.weight.viaDoor': { value: 0.25, ruled: '2026-11-05', why: 'test' } } }));
     const r2 = run(['--signatures', 'src/ws/assets.ts'], ['--settings', sFile]);
