@@ -169,7 +169,7 @@ console.log('\nNOT MEASURED — a door or fields row with no source read is neve
 const from = process.env.STRUCTURE_TS_FROM;
 let tsDir = null;
 try { tsDir = from && path.dirname(require.resolve('typescript/package.json', { paths: [from] })); } catch { tsDir = null; }
-const GATED = 27;
+const GATED = 28;
 console.log('\nDOOR AND READS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 if (!tsDir) console.log(`  – SKIPPED ${GATED} cases, NOT MEASURED here: ${from ? `no TypeScript resolvable from ${from}` : 'STRUCTURE_TS_FROM is not set'}`);
 else {
@@ -280,6 +280,12 @@ else {
   const prop = decide(PLANT);
   ok(prop.decision === 'allow' && prop.proposed.length === 1 && /would refuse once its row is ruled[\s\S]*Writeback\.replaceRanges/.test(prop.proposedNotice || ''),
      `on a proposed door row the same call is allowed and reported (${prop.decision})`);
+  // A refusal carries the same edit's reaches on unruled rows with it: the deny is the only answer it gets.
+  const mixed = clone(design); delete mixed.resources['krill-fields'].ruled;
+  fs.writeFileSync(DF, JSON.stringify(mixed));
+  const both = decide(edit('src/workspace/model.ts', 'return m.getValue();', "m.setValue('x'); return m.getValue() + ((m as unknown as { type_: string }).type_);"));
+  ok(both.decision === 'deny' && both.fresh.every(f => f.rule === 'door') && both.proposed.some(f => f.rule === 'reads') && /would refuse once its row is ruled[\s\S]*reads: src\/workspace\/model\.ts/.test(both.reason || ''),
+     `a refusal also lists the reaches on unruled rows the same edit adds (${both.decision}: refused ${(both.fresh || []).length}, reported ${(both.proposed || []).length})`);
   fs.writeFileSync(DF, JSON.stringify(design));
 
   // Through the hook process: a refusal and an allow.

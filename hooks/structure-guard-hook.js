@@ -440,12 +440,16 @@ function evaluate(payload, deps) {
       baselineCommand(home, owner.entry, false, worktree)
     : null;
   if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk, unbaselinedNotice, proposed,
-    symbolNotice, symbolKind: symbolNotice ? 'symbols-' + crypto.createHash('sha1').update(owner.rel + '|' + blind.join('|')).digest('hex').slice(0, 12) : null,
+    // Keyed by file, rule and member names — not by line, so an edit that only moves lines is not told again.
+    symbolNotice, symbolKind: symbolNotice ? 'symbols-' + crypto.createHash('sha1').update([owner.rel,
+      ...['door', 'reads'].filter(r => ledger[r].notMeasured), ...[...new Set(anyReceivers.map(c => c.member))].sort()].join('|')).digest('hex').slice(0, 12) : null,
     proposedNotice, proposedKind: proposedNotice ? 'proposed-' + crypto.createHash('sha1').update(proposed.map(f => f.key).join('|')).digest('hex').slice(0, 12) : null,
     notice: fixed.length ? fixedText(pkgName, fixed, home, owner.entry, worktree) : null,
     landedNotice: onDisk.length ? landedText(pkgName, owner.rel, onDisk, home, owner.entry, worktree) : null,
     unmappedNotice: unmapped, unmappedKind: unmapped ? unmappedKind(owner.rel) : null };
-  return { decision: 'deny', fresh, proposed, examined, elsewhere, reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) };
+  // A refusal is the one answer this edit gets, so what it also adds on unruled rows goes with it.
+  return { decision: 'deny', fresh, proposed, examined, elsewhere,
+    reason: refusalText(pkgName, owner.rel, fresh, examined, home, owner.entry, design, worktree) + (proposedNotice ? `\n\n${proposedNotice}` : '') };
 }
 
 // THE PROJECT'S OWN CHECK (#600). What counts as a violation belongs to the codebase, as runnable
