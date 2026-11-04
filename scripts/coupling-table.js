@@ -221,7 +221,16 @@ function compare(now, before) {
     rows.push({ name: c.name, dCa: c.Ca - p.Ca, dCe, dI: c.I !== null && p.I !== null ? c.I - p.I : null, dOut, dup: [dPrev, dNow], verdict });
   }
   for (const n of prev.keys()) if (!now.components.some(c => c.name === n)) rows.push({ name: n, verdict: 'GONE (no row now)' });
-  return rows;
+  // The whole graph, read the same way: a copy can move several components a little each.
+  const dupTotal = t => Array.isArray(t.duplicates) ? t.duplicates.length : null;
+  const [b, a] = [dupTotal(before), dupTotal(now)];
+  const dEdges = now.crossEdges - before.crossEdges;
+  const total = { crossEdges: [before.crossEdges, now.crossEdges], dup: [b, a],
+    verdict: dEdges >= 0 ? (dEdges > 0 ? 'coupling rose' : 'coupling unchanged')
+      : (a === null || b === null) ? 'UNREAD — cross-component edges fell, but duplication was not measured on both sides'
+      : a < b ? 'coupling fell and duplication fell'
+      : `SUSPECT — cross-component edges fell with no fall in duplication (${b} → ${a} shared names)` };
+  return { rows, total };
 }
 
 function main(argv) {
@@ -281,6 +290,7 @@ function main(argv) {
     if (pi.typeOnlyImports !== graph.typeOnlyImports) return stop(`--previous counted type-only imports as "${pi.typeOnlyImports}", this run as "${graph.typeOnlyImports}": the edge sets differ by policy, so no delta between them is a change in the code`);
     if (pi.root !== graph.root) return stop(`--previous read root "${pi.root}", this run "${graph.root}": not the same corpus`);
     deltas = compare(t, previous);
+    if (typeof previous.crossEdges !== 'number') return stop(`--previous ${args.previous} has no "crossEdges": written by an older coupling-table.js — rerun it`);
   }
 
   const date = new Date().toISOString().slice(0, 10);   // UTC
@@ -364,13 +374,15 @@ function main(argv) {
   if (deltas) {
     print('');
     print(`AGAINST --previous ${path.resolve(args.previous)} (design ${previous.instrument.designId}, run ${previous.instrument.date}) → design ${id}`);
-    for (const d of deltas) {
+    for (const d of deltas.rows) {
       if (d.dCe === undefined) { print(`    ${d.name.padEnd(12)} ${d.verdict}`); continue; }
       const sg = x => (x > 0 ? '+' : '') + x;
       print(`    ${d.name.padEnd(12)} ΔCa ${sg(d.dCa)} ΔCe ${sg(d.dCe)} ΔI ${d.dI === null ? 'n/a' : (d.dI >= 0 ? '+' : '') + d.dI.toFixed(2)} Δout ${sg(d.dOut)} · dup ${d.dup[0] === null ? '?' : d.dup[0]} → ${d.dup[1] === null ? '?' : d.dup[1]} · ${d.verdict}`);
     }
-    const sus = deltas.filter(d => /^SUSPECT/.test(d.verdict)).length, unread = deltas.filter(d => /^UNREAD/.test(d.verdict)).length;
-    print(`  ${sus} suspect · ${unread} unread · of ${deltas.length} components compared`);
+    const sus = deltas.rows.filter(d => /^SUSPECT/.test(d.verdict)).length, unread = deltas.rows.filter(d => /^UNREAD/.test(d.verdict)).length;
+    print(`  ${sus} suspect · ${unread} unread · of ${deltas.rows.length} components compared`);
+    const q = x => x === null ? '?' : x;
+    print(`  whole graph: cross-component edges ${deltas.total.crossEdges[0]} → ${deltas.total.crossEdges[1]} · duplicated names ${q(deltas.total.dup[0])} → ${q(deltas.total.dup[1])} · ${deltas.total.verdict}`);
   }
 
   print('');

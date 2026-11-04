@@ -153,6 +153,7 @@ ok(comp(S, 'b').I !== comp(T, 'b').I && comp(S, 'c').I !== comp(T, 'c').I && com
 ok(/^ {4}c +ΔCa \+3 ΔCe -1 ΔI -0\.50 Δout -1 · dup 1 → \? · UNREAD — coupling fell, but duplication was not measured on both sides/m.test(s.out),
    `c's coupling fell with duplication unmeasured now: UNREAD, not an improvement (${(s.out.match(/^ {4}c +ΔCa.*$/m) || [''])[0].trim().slice(0, 80)})`);
 ok(/^ {4}b +ΔCa -2 ΔCe \+1 ΔI \+0\.30 Δout \+1 · .*coupling rose$/m.test(s.out), 'b\'s rose and is printed as a rise');
+ok(/whole graph: cross-component edges 6 → 6 · duplicated names 1 → \? · coupling unchanged/.test(s.out), 'the swap leaves the whole graph\'s cross edges at 6');
 ok(/read: PARTIAL — library homes measured; state homes and duplication NOT MEASURED/.test(s.out) && /states NOT MEASURED +dup NOT MEASURED/.test(s.out),
    'without an index every row says states and dup were NOT MEASURED, never 0');
 
@@ -164,10 +165,13 @@ console.log('\nA COPY INSTEAD OF AN IMPORT — a fall in coupling with no fall i
   ok(same.code === 0 && /^ {4}a +ΔCa 0 ΔCe -1 ΔI \+0\.00 Δout -1 · dup 1 → 1 · SUSPECT — coupling fell with no fall in duplication/m.test(same.out),
      `duplication held at 1: SUSPECT (${(same.out.match(/^ {4}a +ΔCa.*$/m) || [''])[0].trim().slice(0, 90)})`);
   ok(/1 suspect · 0 unread · of 3 components compared/.test(same.out), 'and counted');
+  ok(/whole graph: cross-component edges 6 → 5 · duplicated names 1 → 1 · SUSPECT — cross-component edges fell with no fall in duplication/.test(same.out),
+     `the whole graph is read the same way (${(same.out.match(/whole graph:.*/) || [''])[0].trim().slice(0, 90)})`);
   const fewer = put('index-fewer.json', index(DESIGN, { duplicates: [] }));
   const fell = run(['--design', designFile, '--graph', copied, '--ownership', fewer, '--framework', 'react', '--previous', base]);
   ok(fell.code === 0 && /^ {4}a +ΔCa 0 ΔCe -1 .* · dup 1 → 0 · coupling fell and duplication fell$/m.test(fell.out) && /0 suspect · 0 unread/.test(fell.out),
      'the same fall with duplication falling is not suspect');
+  ok(/whole graph: cross-component edges 6 → 5 · duplicated names 1 → 0 · coupling fell and duplication fell$/m.test(fell.out), 'and not for the whole graph either');
 }
 
 console.log('\nNOT MEASURED — every input the table cannot be read from exits 2 and says so:');
