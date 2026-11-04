@@ -708,7 +708,7 @@ module.exports = { create: pkgDir => ({ id: 'owner-lines@1', configFiles: [],
     components: { A: { dirs: ['a'], purpose: 'parses the language' }, B: { dirs: ['b'], purpose: 'draws what was parsed' } },
     allowed: [['B', 'A']],
     resources: {
-      lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard' },
+      lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard', ruled: '2026-11-05' },
       fw: { kind: 'framework', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'none' },
     } }));
   const OB = path.join(DIR, 'owner-baseline.json');
@@ -725,6 +725,14 @@ module.exports = { create: pkgDir => ({ id: 'owner-lines@1', configFiles: [],
      'the refusal names the owner and offers both remedies: through the owner, or revise the ledger');
   ok(/revise the ledger: if B should own lib[\s\S]*change resources\["lib"\]/.test(lib.reason || ''), 'the design remedy points at the ledger row');
 
+  // The same import on a row nobody has ruled: found, allowed, and SAID — never refused (#695/#696).
+  const odesign = JSON.parse(fs.readFileSync(OD, 'utf8'));
+  const unruled = JSON.parse(JSON.stringify(odesign)); delete unruled.resources.lib.ruled;
+  fs.writeFileSync(OD, JSON.stringify(unruled));
+  const prop = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport { parse } from 'lib/sub';"), oreg);
+  ok(prop.decision === 'allow' && prop.proposed.length === 1 && /would refuse once its row is ruled[\s\S]*owner: src\/b\/b\.ts -> lib[\s\S]*PROPOSED, not ruled/.test(prop.proposedNotice || ''),
+     `on an unruled row the same import is allowed and reported as a refusal-in-waiting (${prop.decision}: ${(prop.proposedNotice || 'no notice').split('\n')[0]})`);
+  fs.writeFileSync(OD, JSON.stringify(odesign));
   const fw = decide(oedit("import { a } from '../a/a';", "import { a } from '../a/a';\nimport React from 'fw';"), oreg);
   ok(fw.decision === 'allow', `B adding a framework import is allowed (${fw.decision}: ${fw.why})`);
   const fwJudged = R.owners(S.buildGraph({ pkgDir: OP, design: JSON.parse(fs.readFileSync(OD, 'utf8')), extractor: S.loadExtractor({ extractor: OX }, OP),

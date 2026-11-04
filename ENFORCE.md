@@ -1493,7 +1493,43 @@ loosened until it stops firing guards nothing.
   A design's `jobs` table (`home`, `resources`, `doors`, `reason`, `ruled`) is a ruling, never
   proposed. `designProblem` validates it, its home and resources enter the design id, and the
   report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
-  still refuses only on library rows; v1 rows are proposals and readings.
+  refuses on library rows, entrances, doors and fields rows (below), and **only on a ruled one**.
+- **Only a ruled row refuses (#695/#696).** A row (or an entrance) carrying `ruled: YYYY-MM-DD` is
+  the owner's ruling and its NEW findings are refused; one without (`proposed: …`) is found the same
+  way, held by the baseline the same way, and reported — "would refuse once ruled" — never refused.
+  So ruling a row later needs no new baseline, and `ruled` stays out of the design id.
+- **Who owns an outside library, and where a component's entrance is (#695).** A library row may
+  stand for several names (`packages: ["acorn-*"]`: `acorn-walk` is the `acorn` row's; `acorn/x` is
+  `acorn` already) and may narrow where inside its owner it is imported (`within: ["codeView/strudelMini"]`,
+  paths under the root, which must lie in the owner). A component may name its **entrance**
+  (`entrance: { files: ["codeView/index.ts"], ruled? }`): an import of any other file of it from
+  another component is an `entrance` finding keyed `module -> module`, re-exports included, so an
+  exception is one file and one import. Type-only imports count only when the design counts them,
+  as for divergences. All of it is read off the import graph, so it costs the hook nothing new.
+- **Who may call a door and read a field (#696).** A `door` row names `symbols`
+  (`<file>#<Name>`, `<file>#<Class>.<member>`, `<file>#<Class>.*`, `<package>#<Interface>.<method>`;
+  with none, the row's own id), and is touched by REFERENCE: the project's TypeScript resolves each
+  reference to its declaration, through aliases, re-exports and destructuring, so a call on a
+  callback parameter that never imports the class is seen and a same-named method elsewhere is not.
+  A re-export of a door symbol outside the owner (`export { … }`, `export *`) is a finding too: a
+  forwarding façade is not ownership. A row with `fields` (a parse tree's node fields) is touched by
+  READING one, read by name from the syntax tree, as stave's own `krill` rule reads it, counted per
+  top-level declaration with one baseline key per read (`… in fn #3`), so a count can only fall.
+  Code: `hooks/structure-symbols.js`, shared by the hook (the edited file only) and the report (every
+  file, `--package` only — a graph alone names no symbols, so both rules print NOT MEASURED there and
+  a baseline written from it carries the previous `door`/`reads` sections over unchanged). A member
+  access spelled like a door member on a receiver typed `any` is COULD NOT TELL: listed, counted, said
+  once per session at edit time, never refused and never passed. A key computed at run time and a
+  write a library makes on a prop's behalf are not seen. A file that spells no door name and forwards
+  no module wholesale is not handed to the type checker.
+  - **Cost, measured on stave `c26ca5e7`** (see the issue thread of #696 for the population and the
+    machine load it was measured under): the door check builds a program over the edited file's
+    import closure, so it costs what that closure costs; a file the gate passes over costs a string
+    search. The report's whole-package pass is a plan-time and merge-time cost (the merge hook runs
+    the report).
+  - `--proposed` prints, beside the divergence reclassification, what each ledger rule finds under
+    each design: a design version that adds an entrance, a door or a fields row is reviewed on what
+    those would find today.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
