@@ -1593,6 +1593,22 @@ loosened until it stops firing guards nothing.
   never defaulted: without one, out-of-radius prints NOT MEASURED. Files changed through Bash are
   not visible to it, and the count of Bash calls prints as that door. The columns and units in its
   header are the contract the live test (#711) reuses.
+- **A hot-path manifest (#719) is told, never refused.** A design may carry `hotPaths`: one row
+  per import edge the project's profiler measured hot — `from`, `to`, `frame`, `budget` (a number
+  in `unit`, or `null` while unruled), `metric` (what a snapshot answers it with), `instrument`,
+  and either `measured: <date>` with `frequency`/`frequencyUnit`, or `measured: "TO MEASURE"`
+  with no frequency at all. A malformed row makes the design one the guard cannot judge against,
+  as any design problem does. An allowed edit whose file keeps or adds a listed edge that runs
+  (type-only imports excluded) gets a NOTICE once per session per edge — the measured frequency,
+  the budget, and how to judge it — and each notice told is recorded as a fire. The manifest is
+  NOT part of the design id: it changes no refusal, so ruling a budget never asks for a new
+  baseline or a re-arm; it has an id of its own (`hotPathsId`), printed beside every budget
+  figure. `node scripts/hot-paths.js propose` lists the import edges on one hot function's call
+  path (the project's TypeScript checker) with the root's measured frequency;
+  `node scripts/hot-paths.js budget --design <d> --snapshot <s> [--before <s0>]` is the PR-time
+  test (exit 0 within, 1 over budget, 3 NOT MEASURED — nothing budgeted, a metric the snapshot
+  lacks, or a disabled profiler, never a pass); `hot-paths.js wrong-fire` records a notice that
+  was wrong for its edit, and the budget report prints fires and wrong fires per edge.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with
