@@ -111,6 +111,7 @@ const COVERED = new Set([
   'catalogue-context-injector.js', // injector-currency + injector-ownership
   'provenance-guard.js',
   'ground-truth-session-start.js',
+  'session-area-start.js',        // test/session-area.test.js drives it through real stdin: every outcome, and the timeout
   'debug-grounding-gate.js',
   'named-entry-delivery.js',      // test/named-entry-delivery.test.js drives it through real stdin
   'absent-warrant-check.js',      // witnessed below, plus test/absent-warrant-check.test.js
@@ -400,7 +401,7 @@ ok(r.ctx === '', 'silent on 4 distinct id-shaped tokens (SHA1/MD5/CRC32/UTF8) �
 // a crash or a non-zero exit. This is the contract the blanket catch exists for —
 // worth asserting, since it is also what hides the deaths above.
 console.log('degradation (the never-block contract)');
-const ALL = ['ground-truth-session-start.js', 'debug-grounding-gate.js',
+const ALL = ['ground-truth-session-start.js', 'session-area-start.js', 'debug-grounding-gate.js',
   'experiment-protocol-guard.js', 'provenance-guard.js', 'catalogue-id-leak-guard.js',
   'anvi-route-logger.js', 'catalogue-context-injector.js', 'absent-warrant-check.js',
   // ⚠ THE ENFORCING HOOK IS IN THIS LIST DELIBERATELY. It is the one hook allowed to

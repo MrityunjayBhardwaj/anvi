@@ -41,6 +41,10 @@ const FILES_ONLY = process.argv.slice(2).includes('--files-only');
 // still listed first, and marked, so a reader finds them at once (ENFORCE.md §Liveness).
 const REGISTRATIONS = [
   ['SessionStart',     null,         'ground-truth-session-start.js', 5],
+  // The task's candidate homes (#718). 15s: it waits for the reader at most 10s (a cold build of
+  // stave's program measured 7.6s) and says "couldn't tell (timed out)" past that; a hook killed
+  // by its own timeout would say nothing instead.
+  ['SessionStart',     null,         'session-area-start.js',         15],
   ['UserPromptSubmit', null,         'debug-grounding-gate.js',       5],
   ['UserPromptSubmit', null,         'named-entry-delivery.js',       5],
   // Enforcing (may refuse a call) — listed first for the reader; see the note above.
