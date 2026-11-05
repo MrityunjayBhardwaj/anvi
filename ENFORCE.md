@@ -140,6 +140,7 @@ User message
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` or the root-owned lock directory (#680) | `~/.claude/hooks/structure-guard-hook.js` |
+| Write scope — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a write, by `file_path`, outside the radius of the task this session placed with `scripts/write-scope.js --place`: the ruled jobs PLACE names, their member files from the ledger, callers of a door the task changes, declared new files in a named home, and what was widened). An answer that needs the owner's ruling ("couldn't tell", no existing home, a home with no ruled job near the task) refuses outside those files; no placed task, a stale or unreadable record, or a file outside the ledger's corpus allows and says so once per session (#716) | `~/.claude/hooks/write-scope-guard.js` |
 | Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. A merge belongs to every registered package whose checkout's `origin` is the same repository — the same one, not the same spelling: a name spelled as the `origin` is matched with no network call, and any other is compared by GitHub's numeric id for both sides (`gh api repos/<owner>/<name>`, remembered for a week in `~/.claude/structure-guard-cache/repo-identity.json`), so a repository renamed on GitHub whose checkout still names the old one is judged under either name (#705). When that id cannot be looked up the merge is allowed NOT MEASURED, said and recorded; only a repository GitHub says is a different one, or does not exist, passes in silence | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
@@ -417,11 +418,12 @@ exits 0. That is correct and non-negotiable *for these*: an optional annotation 
 never cost the user the thing it annotates, so a guard that cannot decide stays quiet
 and the call proceeds.
 
-**Enforcing hooks — a deliberately small second category (anvi #391).** Three exist:
+**Enforcing hooks — a deliberately small second category (anvi #391).** Four exist:
 `tree-lock-guard.js`; `structure-guard-hook.js`, which exits 2 with a deny when an edit
-adds a new divergence from the design's component graph; and `structure-merge-hook.js`, which
-does the same for a `gh pr merge` whose head carries one (§Hook Files has their rows, and the
-structure guard's own section describes both). What follows was written for the tree-lock guard. It may refuse a tool call, because the failures it catches are
+adds a new divergence from the design's component graph; `structure-merge-hook.js`, which
+does the same for a `gh pr merge` whose head carries one; and `write-scope-guard.js`, which
+refuses a write outside the placed task's radius (§Hook Files has their rows; the
+structure guard's own section describes the first two of these, §Write Scope the last). What follows was written for the tree-lock guard. It may refuse a tool call, because the failures it catches are
 not recoverable by re-deriving an answer — a destroyed uncommitted change, or a test
 gate that read a tree while it moved and reported a number that looks exactly like a
 real pass. There is no artifact afterwards that distinguishes that number from a true
@@ -574,7 +576,7 @@ event and matcher, held to its `REGISTRATIONS` in both directions by `test/hook-
 - `SessionStart`: ground-truth-session-start.js
 - `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js
 - `PreToolUse:Bash`: tree-lock-guard.js (enforcing), structure-merge-hook.js (enforcing, only for `gh pr merge`), experiment-protocol-guard.js, catalogue-id-leak-guard.js, shell-rewrite-guard.js
-- `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js (enforcing), structure-guard-hook.js (enforcing), catalogue-context-injector.js
+- `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js (enforcing), structure-guard-hook.js (enforcing), write-scope-guard.js (enforcing), catalogue-context-injector.js
 - `PreToolUse:Read`: catalogue-context-injector.js
 - `PostToolUse:Read`: anvi-route-logger.js
 - `PostToolUse:Artifact`: provenance-guard.js
@@ -1939,3 +1941,50 @@ loosened until it stops firing guards nothing.
   `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
   assertion reddened by some mutation: rules + command **65 of 65** conclusive over 80
   assertions · builder **24 of 24** over 29 · hook **58 of 58** over 62.
+
+## Write Scope — a write outside the task's radius, refused with the radius named
+
+The structure guard refuses a wrong import. It does not refuse a write to a file the task has no
+business in, and a task about sound loading that edits a visualizer renderer is exactly how a job
+grows a second home (#716; design document `architecture-ownership-2026-11-02.md` §7.2 item 10,
+§7.4 test 6, §7.4a rule 16).
+
+- **Draw the radius:** `node ~/.claude/anvi/scripts/write-scope.js --place --design <design.json>
+  --package <dir> [--project <name>] --task-resources <ids> [--task-files <files>]
+  [--changes-door <file#name>]`. It runs PLACE (`scripts/place.js`) over the ownership index and
+  writes this session's scope record. The radius is a **set of jobs**, never directories: HOME
+  gives the nearest ruled job, SPLIT the nearest ruled job on each side. A job's files are its
+  member files as the ledger derives them — every file touching one of its resources directly
+  and every file declaring one of its doors — so a second home of the job is in the radius and is
+  printed apart as one. Added: callers of a door of a radius job the task says it changes, and
+  declared files that do not exist yet in a component the placement named as a home (a new file
+  has no signature, so it is judged by its component until the index reads it).
+- **What a task is:** one session — `session_id` in the hook, `CLAUDE_CODE_SESSION_ID` in the
+  script (the same id, a subagent's shell included), the definition `scripts/task-telemetry.js`
+  uses.
+- **What each answer does, each in its own words.** Inside the radius: allowed, silent. Outside:
+  refused, naming the task, the placement, the radius (jobs and their files), the job the file
+  belongs to and its door when one is ruled, and the widening command. PLACE "couldn't tell", "no
+  existing home", or a home with no ruled job near the task: refused outside the files already
+  in the radius, because writing before the ruling is how a second home is made and the placer
+  never picks the nearest home for the agent. No placed task in a registered package ("NO
+  RADIUS"), PLACE could not look, an unreadable record or design, a design or jobs table changed
+  since placement, a file outside the ledger's corpus or in another package, or a crash: allowed
+  and said once per session. The guard never blocks on its own ignorance; "no radius" is not
+  ignorance and is never printed as "inside".
+- **Widening is counted.** `write-scope.js --widen <job id | file> --why "<reason>"` takes effect
+  at once and is recorded with its time and reason. Every refusal and every `--show` prints
+  `radius_size`, the widenings and the placements, because out-of-radius writes reach zero by
+  widening as easily as by better placement. Re-placing a task keeps its widenings and is counted.
+- **Report:** `write-scope.js --show` prints the radius and the hook's own rows: writes judged
+  inside, writes refused outside, and which files.
+- **What it cannot see.** A file changed through Bash, by another program or by hand. The scope
+  record and its event rows live under `~/.claude/structure-guard-cache/write-scope/`, which the
+  agent's own shell can write: a widening made by editing the record leaves no trace. The lock
+  (`structure-lock.js`) does not cover it.
+- **Not yet measured:** the design's test 6 — out-of-radius writes in live telemetry falling
+  toward zero after this lands — needs sessions run with it; it is a post-merge check.
+- **Tests:** `node test/write-scope.test.js` — every outcome through real stdin with a hermetic
+  HOME, a refusal whose printed radius equals the ledger's member files, a write inside not
+  refused, a mutant hook whose radius predicate always answers "inside" that the outside case
+  catches; the PLACE-driven half on real TypeScript runs when `STRUCTURE_TS_FROM` names one.
