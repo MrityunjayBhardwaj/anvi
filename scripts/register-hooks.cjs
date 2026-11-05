@@ -50,6 +50,10 @@ const REGISTRATIONS = [
   // a package with no entry in ~/.claude/structure-guard.json. 10s: a cold graph build on a
   // ~300-module package measured ~0.8s, a warm call ~0.2s including Node startup.
   ['PreToolUse',       'Write|Edit|MultiEdit', 'structure-guard-hook.js', 10],
+  // Enforcing: a write outside the placed task's radius (a set of jobs from the ledger) is refused
+  // with the radius named (#716). Inert for a session with no scope record outside registered
+  // packages; it reads a file and recomputes nothing (the radius is drawn by scripts/write-scope.js).
+  ['PreToolUse',       'Write|Edit|MultiEdit', 'write-scope-guard.js', 10],
   // Enforcing: the same judge at the door every line passes through, whoever wrote it (#667).
   // The fifth field is Claude Code's `if` filter: the hook is spawned only for a command with a
   // `gh pr merge` subcommand (observed on 2.1.299), so the other Bash calls cost nothing. 60s: a
