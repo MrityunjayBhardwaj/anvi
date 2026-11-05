@@ -42,7 +42,8 @@
 //     [--state <file>#<name>]...               writers of a module-level state
 //     [--define <name>]...                     where a function of that name is defined
 //     [--callers <file>]...                    callers of every export of that file
-//     [--findings]                             every state written from two or more components
+//     [--findings]                             every state written from two or more components, and every
+//                                              top-level function name defined in two or more (duplication)
 //     [--refresh <file>]                       rebuild once reusing the program, and time it
 //     [--signatures <file>]...                 that file's signature vector under each view (#647)
 //     [--placement-reading]                    each file's distance to every prior, per view, with denominators
@@ -449,7 +450,12 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       let name = null;
       if (ts.isFunctionDeclaration(n) && n.name && n.body) name = n.name.text;
       else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && (ts.isArrowFunction(strip(n.initializer)) || ts.isFunctionExpression(strip(n.initializer)))) name = n.name.text;
-      if (name) { if (!definitions.has(name)) definitions.set(name, []); definitions.get(name).push({ file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n) }); }
+      // Top level: a statement of the file itself, not a helper nested in a function. The duplication
+      // reading (--findings) counts these alone: a helper copied instead of imported lands at the top
+      // level, and nested handlers (`onClick`, `render`) share names without being copies.
+      const topLevel = ts.isFunctionDeclaration(n) ? n.parent === sf
+        : !!(n.parent && n.parent.parent && ts.isVariableStatement(n.parent.parent) && n.parent.parent.parent === sf);
+      if (name) { if (!definitions.has(name)) definitions.set(name, []); definitions.get(name).push({ file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n), topLevel }); }
       ts.forEachChild(n, visit);
     };
     visit(sf);
@@ -875,6 +881,17 @@ function main(argv) {
     print(`FINDINGS — module states written from two or more components: ${multi.length} of ${ix.states.length} states`);
     for (const { s, comps } of multi) print(`    ${s.file}#${s.name} (${s.component}) — written by ${comps.join(', ')}${s.escapes.length ? ` · escapes at ${s.escapes.length}` : ''}`);
     json.findings = multi.map(({ s, comps }) => ({ state: `${s.file}#${s.name}`, owner: s.component, writers: comps, escapes: s.escapes.length }));
+    // The duplication reading the coupling table prints beside every coupling figure (#722): a
+    // function copied into a second component instead of imported lowers every import-graph
+    // coupling figure, and shows up here as one more component defining the name.
+    const top = [...ix.definitions].map(([name, ds]) => [name, ds.filter(d => d.topLevel)]).filter(([, ds]) => ds.length);
+    const dup = top.map(([name, ds]) => ({ name, by: groupBy(ds, d => d.component) })).filter(x => x.by.size >= 2)
+      .sort((a, b) => b.by.size - a.by.size || (a.name < b.name ? -1 : 1));
+    print(`FINDINGS — top-level function names defined in two or more components: ${dup.length} of ${top.length} top-level names ` +
+      '(a NAME match, not a clone match: a renamed copy is invisible, and unrelated functions sharing a name are counted)');
+    for (const { name, by } of dup) print(`    ${name} — ${[...by].sort().map(([c, ds]) => `${c}: ${ds.map(d => d.site).join(', ')}`).join(' · ')}`);
+    json.duplicates = dup.map(({ name, by }) => ({ name, definedIn: Object.fromEntries([...by].sort().map(([c, ds]) => [c, ds.map(d => d.site)])) }));
+    json.instrument.topLevelNames = top.length;
   }
 
   if (args.refresh) {
