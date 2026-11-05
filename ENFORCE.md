@@ -1678,6 +1678,21 @@ loosened until it stops firing guards nothing.
   (the web page, a person's terminal); the trial report's judgement of the default branch does.
   It does not judge at commit: most commits are `git add … && git commit …` in one command, and a
   PreToolUse hook sees the index before the add has run.
+  **The area rule (#717)**, for a package whose registry entry names an `areas` directory: a pull
+  request's AREA is the set of ledger jobs PLACE gives the task of the issue its body names
+  (`Closes`/`Fixes`/`Resolves`/`Refs #N` — the body, because GitHub fills `closingIssuesReferences`
+  only for a pull request into the default branch), with those jobs' member files. It is derived at
+  plan time by `scripts/derive-area.js --issue <n> --task <task.json> --out <areas>` (the TypeScript
+  program is too slow for a hook) and read at merge from `<areas>/<n>.json`. A changed file of the
+  package outside the area refuses the merge, named with the area, until it leaves the pull request
+  or the owner widens the area: a comment on the pull request by an OWNER with a line
+  `anvi-area-widen: <file>, <file>`. Every judgement prints the area's size and the widening count.
+  NO AREA (no issue named, no record, a record from another design, a placement with no ruled job)
+  refuses and says NO AREA, never "inside"; could not look (gh, an unreadable record, a file list
+  GitHub cut short, out of time) allows and says NOT MEASURED. A file the pull request adds is in no
+  job until the area is derived again, so it needs a widening. Under the owner's own GitHub account an
+  agent's comment is also OWNER: the widening is visible and counted, not authenticated. An entry
+  without `areas` is untouched. The verdict is the row's `area` field in `merges.jsonl`.
 - **Before arming: replay the project's real sessions (`scripts/structure-replay.js`, #540).**
   Every Write/Edit call in a window of the session transcripts is placed on the tree that was on
   disk when it happened (the checkout's own HEAD reflog first) and run through the hook's own
