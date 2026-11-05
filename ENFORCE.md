@@ -1870,3 +1870,55 @@ loosened until it stops firing guards nothing.
   `test/structure-guard-hook.test.js` (the hook, hermetic HOME). Falsified per file, every
   assertion reddened by some mutation: rules + command **65 of 65** conclusive over 80
   assertions · builder **24 of 24** over 29 · hook **58 of 58** over 62.
+
+## Structural instruments on a cadence — each figure beside its control, behind the guard's counts
+
+`scripts/structure-instruments.js` (#714) runs the structural instruments of the architecture
+design as one shipped command, so a month's figures come from the same code every time and land in
+the store with their frame: instrument, date, design id, the commit measured, the settings id.
+
+- **The guard's graph, and the guard says so first.** Every figure is read off the graph the
+  shipped guard judges (`loadGraph` / `buildGraph`, the design's type-only policy). Before anything
+  is read, `structure-guard.js` is run on the same inputs; its module and edge counts, the
+  baseline's `measured` counts and the runner's own graph must all agree. If any differs the run
+  prints the three pairs, reads nothing, writes nothing and exits **3**. The one-off scripts read
+  the analyser's records with type-only imports included (1,352 records against the guard's 938
+  edges on stave at `c26ca5e7`) — the drift this gate stops.
+- **Every instrument is a registered entry and prints on every run**, as RAN, NOT ASKED, NOT
+  MEASURED, NOT INSTALLED ON THIS BRANCH (its script arrives with an open PR, named), INSTALLED,
+  NOT WIRED (the script is here, the runner does not know its arguments — never run with guessed
+  ones), or NOT SHIPPED BY RULING. `--list` prints the registry. Commit history is in it as NOT
+  SHIPPED BY RULING: since 2026-11-02 it derives no coupling, homes or boundaries.
+- **Controls.** Propagation cost beside a random digraph and a random DAG with the same N and E
+  (10 draws, seed 7) — the DAG is a floor, not a bar. Component figures beside the same figures
+  with the files' component labels shuffled (sizes kept, seed 11). A **borrowed** control:
+  `--borrowed <pkg dir> --borrowed-root <dir>` builds a reference project's graph with its own
+  TypeScript, its top-level directories as components, test files excluded, and prints its name,
+  commit and size beside the measured row; absent it prints NOT ASKED, unbuildable NOT MEASURED.
+  A move (`--moves {file: component}`) prints beside the run without it.
+- **Coupling is never read alone.** Homes per library print beside the graph figures, and the
+  extractor's findings (`ownership-index.js --findings`, with `--package`) and the duplication
+  reading are entries of their own: a fall in coupling with no fall in duplication is suspect.
+- **Writes** `report.txt` and `figures.json` to
+  `~/.anvideck/projects/<project>/instances/structure-instruments/<date>-<ref>-<design id>/`
+  (`--store` to put it elsewhere, `--dry-run` for none); a second run the same day lands beside the
+  first, never over it.
+- **Scheduling — documented, not installed.** Measure the default branch through an archive, never
+  a working tree. A monthly cron line (first of the month, 06:00):
+
+  ```
+  0 6 1 * * cd ~/anvi && node scripts/structure-instruments.js --project stave \
+      --design <design.json> --baseline <baseline.json> \
+      --package ~/stave/packages/editor --ref origin/main >> ~/.anvideck/projects/stave/instances/structure-instruments/cron.log 2>&1
+  ```
+
+  `--ref` measures the ref through `git archive` (as the guard's baseline writer does), so the
+  checkout is read, never written; fetch it first if the schedule should see new commits. On macOS
+  the same command goes in a LaunchAgent (`~/Library/LaunchAgents/<label>.plist`, `ProgramArguments`
+  = the command split into words, `StartCalendarInterval` = `{Day: 1, Hour: 6}`), loaded with
+  `launchctl bootstrap gui/$(id -u) <plist>`. A scheduled run that exits 3 has written nothing and
+  says why in the log; exit 2 likewise.
+- **Tests:** `node test/structure-instruments.test.js` — the gate on both sides (exit 3 with
+  nothing written; exit 0 with the frame), every registry state, the swap mutation moving the
+  divergence count, the borrowed control's three outcomes (the real-TypeScript case runs when
+  `STRUCTURE_TS_FROM` names a TypeScript 5 directory).
