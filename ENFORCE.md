@@ -142,6 +142,7 @@ User message
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` or the root-owned lock directory (#680) | `~/.claude/hooks/structure-guard-hook.js` |
 | Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call. Repositories are matched by name against each checkout's `origin`, so a repository renamed on GitHub whose checkout still names the old one is treated as unregistered and skipped with no row and no notice (#705) | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
+| Task area | SessionStart (a registered package in the session's checkout, or a declared task): the task's top candidate homes with their distances, the doors into them, and the view disagreements — or NO EXISTING HOME, or COULDN'T TELL with the reason (#718) | `~/.claude/hooks/session-area-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
 | Experiment protocol guard | PreToolUse:Bash (diagnostic tools) | `~/.claude/hooks/experiment-protocol-guard.js` |
@@ -571,7 +572,7 @@ Two things it checks that a plain loop would not:
 
 `~/.claude/settings.json` — hooks section (wired by `scripts/register-hooks.cjs`; one line per
 event and matcher, held to its `REGISTRATIONS` in both directions by `test/hook-table-parity.test.js`):
-- `SessionStart`: ground-truth-session-start.js
+- `SessionStart`: ground-truth-session-start.js, session-area-start.js
 - `UserPromptSubmit`: debug-grounding-gate.js, named-entry-delivery.js
 - `PreToolUse:Bash`: tree-lock-guard.js (enforcing), structure-merge-hook.js (enforcing, only for `gh pr merge`), experiment-protocol-guard.js, catalogue-id-leak-guard.js, shell-rewrite-guard.js
 - `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js (enforcing), structure-guard-hook.js (enforcing), catalogue-context-injector.js
@@ -1503,6 +1504,18 @@ loosened until it stops firing guards nothing.
   blended from two nearest owners is answered with a split. A plan-time reading: nothing is
   refused on it. Its tuning numbers are settings keys, printed with the settings id. A design
   with `"scratch": "<why>"` holds rows that are not rulings, and every printed line says so.
+  **At session start** (#718), `hooks/session-area-start.js` runs the same placement for the
+  session's declared task — `$ANVI_TASK`, else `<store project>/tasks/<branch>.json` with each
+  `/` in the branch written `__` — against the registered package in the session's checkout,
+  and injects one block (`scripts/session-area.js`): the top candidate homes with their distance
+  under every view and the doors into them, the view disagreements, or NO EXISTING HOME (which
+  names no owner), or COULDN'T TELL with its reason (no task, no ledger, settings refused, NOT
+  MEASURED, views disagree, could not look, timed out, store not served, the reader failed). The
+  design, settings and task ids print beside the figures. A reading is cached per package,
+  design, settings and task; a hit on code that moved since says "STALE: N files changed" and
+  re-reads in the background. A cold reading the hook waits for at most 10 s; past that it says
+  "couldn't tell (timed out)" and the reader finishes detached, so the next start has it. Silent
+  only with no registered package in the checkout and no task declared.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
