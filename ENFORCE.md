@@ -1584,6 +1584,15 @@ loosened until it stops firing guards nothing.
   in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
   be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
   option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
+- **What a task did, from the session record (#712).** `node scripts/task-telemetry.js --session <id>
+  [--since <t>] [--until <t>] [--package <dir>] [--design <d>] [--radius <components,files>] [--widen <t>=<items>]`
+  prints per task: files read and edited (the tool call's operated field, successful calls only),
+  components touched, edits outside the radius with the radius size and widening count beside them,
+  refusals (the guard's, another hook's or a permission rule's, apart from a user's rejection) and the
+  design id. A task is one session with its subagents, optionally narrowed by time. The radius is
+  never defaulted: without one, out-of-radius prints NOT MEASURED. Files changed through Bash are
+  not visible to it, and the count of Bash calls prints as that door. The columns and units in its
+  header are the contract the live test (#711) reuses.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with
