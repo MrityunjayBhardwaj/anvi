@@ -242,6 +242,60 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
   }
 }
 
+// LEDGER FACTS (#710, ledger v1): what --json writes for the ledger to propose state, registry,
+// door and syntax rows from. Its own small package, so the counts above do not move.
+const GATED_FACTS = 14;
+console.log('\nLEDGER FACTS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
+{
+  const from = process.env.STRUCTURE_TS_FROM;
+  let tsDir = null;
+  try { tsDir = from && path.dirname(require.resolve('typescript/package.json', { paths: [from] })); } catch { tsDir = null; }
+  if (!tsDir) console.log(`  – SKIPPED ${GATED_FACTS} cases, NOT MEASURED here: ${from ? `no TypeScript resolvable from ${from}` : 'STRUCTURE_TS_FROM is not set'}`);
+  else {
+    const before = pass + fail;
+    const P = path.join(DIR, 'facts');
+    const put = putIn(P);
+    put('tsconfig.json', JSON.stringify({ compilerOptions: { target: 'ESNext', module: 'ESNext', moduleResolution: 'bundler', strict: true, noEmit: true }, include: ['src'] }));
+    const FD = { root: 'src', components: { ws: { dirs: ['ws'] }, viz: { dirs: ['viz'] } }, allowed: [] };
+    const design = put('design.json', JSON.stringify(FD));
+    put('src/ws/registry.ts', 'const editors = new Map<string, number>();\n' +
+      'export function register(k: string) {\n  editors.set(k, 1);\n}\n' +
+      'export function unregister(k: string) {\n  const drop = () => editors.delete(k);\n  drop();\n}\n' +
+      'export function size() { return editors.size; }\n' +
+      'let counter = 0;\nfunction bump() { counter++; }\nexport function viaHelper() { bump(); }\n');
+    put('src/ws/view.ts', "import { register, unregister, viaHelper } from './registry';\nexport function mount() { register('a'); unregister('a'); viaHelper(); }\n");
+    put('src/ws/index.ts', "export { register } from './registry';\n");
+    put('src/viz/use.ts', "import { register } from '../ws/index';\nexport function v() { register('b'); }\n");
+    put('src/viz/p.ts', "import { parse } from 'acorn';\nexport function p(s: string) { return parse(s); }\n");
+    const out = path.join(DIR, 'facts.json');
+    const r = run(['--design', design, '--package', P, '--typescript', from, '--syntax', 'acorn#parse', '--define', 'register', '--json', out]);
+    ok(r.code === 0 && fs.existsSync(out), `the index with --json exits 0 and writes the file (exit ${r.code})`);
+    const j = JSON.parse(fs.readFileSync(out, 'utf8'));
+    const lf = j.ledgerFacts || { states: [], exports: [], syntax: [], definitions: [] };
+    const R = require(path.join(__dirname, '..', 'hooks', 'structure-rules.js'));
+    ok(j.instrument.mappingId === R.designId({ root: FD.root, excludes: FD.excludes, components: FD.components, allowed: [] }), 'the instrument records the id of the file → component mapping');
+    const ex = id => lf.exports.find(e => e.id === id);
+    const reg = ex('src/ws/registry.ts#register');
+    ok(reg && JSON.stringify(reg.callerFiles) === JSON.stringify({ 'src/viz/use.ts': 1, 'src/ws/view.ts': 1 }) && JSON.stringify(reg.callers) === JSON.stringify({ viz: 1, ws: 1 }),
+       `an export's callers include the one that reached it through a barrel (${reg && JSON.stringify(reg.callerFiles)})`);
+    ok(reg && JSON.stringify(reg.writesStates) === '["src/ws/registry.ts#editors"]', 'a write inside the export\'s body is the export\'s write');
+    ok(JSON.stringify((ex('src/ws/registry.ts#unregister') || {}).writesStates) === '["src/ws/registry.ts#editors"]', 'so is a write inside a closure in its body');
+    ok(ex('src/ws/registry.ts#viaHelper') && ex('src/ws/registry.ts#viaHelper').writesStates.length === 0, 'a write in a private helper it calls is NOT attributed to it (no false door)');
+    ok(!ex('src/ws/registry.ts#size'), 'an export no other file references is not listed');
+    ok(!lf.exports.some(e => e.file === 'src/ws/index.ts') && lf.reexports >= 1, `a barrel's re-export is counted apart, never listed as the barrel's export (re-exports ${lf.reexports})`);
+    const ed = lf.states.find(x => x.id === 'src/ws/registry.ts#editors');
+    ok(ed && Object.keys(ed.writers).join() === 'ws' && ed.writers.ws.includes('src/ws/registry.ts#register') && JSON.stringify(ed.readerFiles) === '{"src/ws/registry.ts":1}',
+       `a state's writers by component and its reader files (${ed && JSON.stringify(ed.writers)})`);
+    ok(ed && JSON.stringify(ed.writeSites) === '["src/ws/registry.ts:3","src/ws/registry.ts:6"]', `its write sites (${ed && JSON.stringify(ed.writeSites)})`);
+    const sx = lf.syntax[0] || {};
+    ok(sx.id === 'acorn#parse' && JSON.stringify(Object.keys(sx.sites)) === '["viz"]' && sx.sites.viz.length === 1, `--syntax acorn#parse: its call sites by component (${JSON.stringify(sx.sites)})`);
+    ok(/SYNTAX — acorn#parse \(a ruling input: the member is named, never detected\): called or referenced from 1 component/.test(r.out), 'the report prints the syntax query');
+    ok(lf.definitions[0] && JSON.stringify(Object.keys(lf.definitions[0].definedIn)) === '["ws"]', '--define names travel into the facts');
+    const ran = pass + fail - before;
+    ok(ran + 1 === GATED_FACTS, `the skip count matches the cases this block runs (${ran + 1} of ${GATED_FACTS})`);
+  }
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 console.log(`\n${pass} passed, ${fail} failed`);

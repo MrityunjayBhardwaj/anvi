@@ -22,11 +22,18 @@
 // `signatures.weight.viaDoor`, so consumers do not drift toward their provider. Other features
 // weigh 1; vocabulary weighs 1 + ln(count), so one long file's repetition does not drown the rest.
 //
-// PRIORS, NOT OWNERS. An owner's prototype is the mean of its RULED jobs (§5.4a). A design with
-// no ruled jobs gets a directory prior instead: the mean of a component's file vectors, each unit
+// PRIORS, NOT OWNERS. A home's prototype is the mean of its RULED jobs (§5.4a). A design with no
+// ruled jobs gets a directory prior instead: the mean of a component's file vectors, each unit
 // length, the file being read left out of its own component's prior. Every line built on it says
-// "prior". A design with a `jobs` table (id → { owner, members: [file | file#symbol], ruled })
-// gets per-job and per-owner vectors from the ruled rows; unruled rows are listed, never used.
+// "prior". A design's `jobs` table has the ledger's shape (design §5.2, #710):
+// id → { home, resources: [resource id], doors: [resource id], reason, ruled }. A job's MEMBER FILES
+// are derived, never listed: every file that touches one of its resources DIRECTLY (a feature it
+// carries at the direct weight, not one reached through a door) and every file that declares one
+// of its doors. A resource id maps to features by its row's kind: a library or framework `pkg` to
+// lib:pkg; a state or registry `file#name` to writes:/reads: of it; a syntax `pkg#member` to
+// member:pkg#member; a door `file#name` to its file. Per-job and per-home vectors are built from
+// the ruled rows (a home, a resources list and a ruling date); the rest are listed, never used.
+// (The provisional `{ owner, members }` shape of the first spike, #743, is superseded.)
 
 'use strict';
 
@@ -55,7 +62,7 @@ function fileSignatures(ix, { weights, minTokenLength }) {
   const files = ix.files.map(sf => ix.relOf(sf.fileName));
   const comp = new Map(ix.files.map(sf => [ix.relOf(sf.fileName), ix.compOf(sf)]));
   const sig = new Map(files.map(f => [f, { file: f, component: comp.get(f), views: Object.fromEntries(VIEWS.map(v => [v, new Map()])),
-    doors: new Map(), passthrough: ix.passthrough.has(f), unresolved: { escapes: 0, unbound: 0, computedLoads: 0 } }]));
+    doors: new Map(), passthrough: ix.passthrough.has(f), unresolved: { escapes: 0, unbound: 0, computedLoads: 0 }, direct: new Set() }]));
   const at = f => sig.get(f);
 
   // Resources touched directly, per file and per function (for the door weighting below).
@@ -63,6 +70,7 @@ function fileSignatures(ix, { weights, minTokenLength }) {
   const direct = (file, fn, feature) => {
     const s = at(file); if (!s) return;
     add(s.views.resources, feature, 0);               // presence; the weight is set once below
+    s.direct.add(feature);                            // touched here, not through a door: job membership reads this
     if (fn) { const k = `${file}|${fn}`; if (!byFn.has(k)) byFn.set(k, new Set()); byFn.get(k).add(feature); }
   };
   for (const b of ix.bindings.values()) { const f = b.site.replace(/:\d+$/, ''); direct(f, null, `lib:${b.pkg}`); }
@@ -119,11 +127,33 @@ function prototype(members, view, leaveOut) {
   return sum;
 }
 
-// Ruled jobs from the design (shape adopted by ledger v1, #710): { id: { owner, members, ruled } }.
+// Ruled jobs from the design, in the ledger's shape (#710): { id: { home, resources, doors, ruled } }.
+// The resource rows come along, because a resource id becomes features by its row's kind.
+const isRuledJob = j => !!(j && typeof j === 'object' && j.ruled && j.home && Array.isArray(j.resources));
 function jobsOf(design) {
   const rows = design && design.jobs && typeof design.jobs === 'object' ? Object.entries(design.jobs) : [];
-  return { ruled: rows.filter(([, j]) => j && j.ruled && j.owner && Array.isArray(j.members)).map(([id, j]) => ({ id, ...j })),
-    unruled: rows.filter(([, j]) => !(j && j.ruled && j.owner && Array.isArray(j.members))).map(([id]) => id) };
+  return { ruled: rows.filter(([, j]) => isRuledJob(j)).map(([id, j]) => ({ id, ...j, doors: Array.isArray(j.doors) ? j.doors : [] })),
+    unruled: rows.filter(([, j]) => !isRuledJob(j)).map(([id]) => id),
+    resources: (design && design.resources && typeof design.resources === 'object') ? design.resources : {} };
+}
+
+// The features a resource id stands for, by its row's kind; a row the design does not hold is read
+// by the id's own form (pkg → library, file#name → state), and said so by the caller.
+function featuresOf(id, row) {
+  const kind = row && row.kind;
+  if (kind === 'library' || kind === 'framework' || (!kind && !id.includes('#'))) return [`lib:${id}`];
+  if (kind === 'syntax') return [`member:${id}`];
+  if (kind === 'door') return [];
+  return [`writes:${id}`, `reads:${id}`];
+}
+
+// A job's member files: direct touchers of its resources, and the files declaring its doors.
+function jobMembers(sig, job, resources) {
+  const wanted = new Set(job.resources.flatMap(id => featuresOf(id, resources[id])));
+  const doorFiles = new Set(job.doors.map(d => String(d).split('#')[0]));
+  const members = [...sig.values()].filter(s => doorFiles.has(s.file) || [...s.direct].some(f => wanted.has(f)));
+  const missingDoors = [...doorFiles].filter(f => !sig.has(f));
+  return { members, missingDoors };
 }
 
 // For each file and view: distance to each prior (own component left one out), nearest two,
@@ -164,26 +194,28 @@ function reading(sig, { band }) {
   return { rows: out.sort((a, b) => a.file < b.file ? -1 : 1), components: comps };
 }
 
-// Per-job vectors (a member is a file, or file#symbol read at file grain and labelled so) and
-// per-owner prototypes from the ruled jobs only.
+// Per-job vectors over the derived member files, and per-home prototypes from the ruled jobs only.
+// A job with no member file in the program is listed in `missing`, never built from nothing.
 function jobVectors(sig, jobs) {
-  const perJob = [], byOwner = new Map(), missing = [];
+  const perJob = [], byHome = new Map(), missing = [];
+  const resources = jobs.resources || {};
   for (const j of jobs.ruled) {
-    const members = [];
-    for (const m of j.members) { const f = String(m).split('#')[0]; const s = sig.get(f); if (s) members.push(s); else missing.push(`${j.id}: ${m}`); }
+    const { members, missingDoors } = jobMembers(sig, j, resources);
+    for (const f of missingDoors) missing.push(`${j.id}: door file ${f} is not in the program`);
+    if (!members.length) { missing.push(`${j.id}: no file touches its resources or declares its doors`); continue; }
     const vec = Object.fromEntries(VIEWS.map(v => [v, prototype(members, v, null)]));
-    perJob.push({ id: j.id, owner: j.owner, members: j.members.length, found: members.length, fileGrain: j.members.some(m => String(m).includes('#')), vec });
-    if (!byOwner.has(j.owner)) byOwner.set(j.owner, []);
-    byOwner.get(j.owner).push(members);
+    perJob.push({ id: j.id, home: j.home, resources: j.resources.length, doors: j.doors.length, files: members.map(s => s.file).sort(), vec });
+    if (!byHome.has(j.home)) byHome.set(j.home, []);
+    byHome.get(j.home).push(members);
   }
-  const perOwner = [...byOwner].map(([owner, groups]) => {
-    // An owner's prototype weighs each job once, whatever its file count (two-level: owner, then job).
-    const jobs = groups.map(ms => ({ views: Object.fromEntries(VIEWS.map(v => [v, prototype(ms, v, null) || new Map()])) }));
-    return { owner, jobs: groups.length, vec: Object.fromEntries(VIEWS.map(v => [v, prototype(jobs, v, null)])) };
+  const perHome = [...byHome].map(([home, groups]) => {
+    // A home's prototype weighs each job once, whatever its file count (two-level: home, then job).
+    const js = groups.map(ms => ({ views: Object.fromEntries(VIEWS.map(v => [v, prototype(ms, v, null) || new Map()])) }));
+    return { home, jobs: groups.length, vec: Object.fromEntries(VIEWS.map(v => [v, prototype(js, v, null)])) };
   });
-  return { perJob, perOwner, missing };
+  return { perJob, perHome, missing };
 }
 
 const vecJSON = v => Object.fromEntries([...v].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, x]) => [k, +x.toFixed(4)]));
 
-module.exports = { VIEWS, tokens, fileSignatures, prototype, jobsOf, jobVectors, reading, cosineDistance, unit, vecJSON };
+module.exports = { VIEWS, tokens, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, jobVectors, reading, cosineDistance, unit, vecJSON };

@@ -1486,6 +1486,14 @@ loosened until it stops firing guards nothing.
   package import as compiled away), and the agreement check compares them.
   `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
   proposes rows from the graph and classifies each declared pair; it never writes in place.
+  With `--index <ownership-index.json>` (written by `scripts/ownership-index.js --json`, which
+  reads the project's own type checker) it also proposes ledger v1 rows: `state` and `registry`
+  for module states reached from another file, `door` for an export that writes one and is
+  called from another file, and `syntax` only for members passed to the index with `--syntax`.
+  A design's `jobs` table (`home`, `resources`, `doors`, `reason`, `ruled`) is a ruling, never
+  proposed. `designProblem` validates it, its home and resources enter the design id, and the
+  report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
+  still refuses only on library rows; v1 rows are proposals and readings.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
 - **Runtime co-execution verifies a plan; it never refuses an edit (#713).**
