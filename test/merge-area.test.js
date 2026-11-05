@@ -166,6 +166,10 @@ console.log('\nAT MERGE, THROUGH THE HOOK:');
   fs.mkdirSync(BIN);
   fs.writeFileSync(path.join(BIN, 'gh'), `#!/bin/sh
 case "$*" in *number,body,files*) cat "${VIEW}"; exit 0;; esac
+# GitHub's id for a repository spelling (the merge check asks it since #737): acme/widget is
+# this fixture's; every other spelling — a locked package's checkout on this machine included —
+# is some other repository, so its rule stays out of these cases.
+case "$*" in "api repos/acme/widget "*) echo "101 Acme/Widget"; exit 0;; "api repos/"*) echo "999 Some/Other"; exit 0;; esac
 printf '{"number":7,"headRefOid":"%s","headRefName":"feat","baseRefName":"main","state":"OPEN"}' "${HEAD}"
 `);
   fs.chmodSync(path.join(BIN, 'gh'), 0o755);
