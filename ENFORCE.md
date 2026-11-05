@@ -1488,6 +1488,16 @@ loosened until it stops firing guards nothing.
   proposes rows from the graph and classifies each declared pair; it never writes in place.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
+- **Runtime co-execution verifies a plan; it never refuses an edit (#713).**
+  `node scripts/coexecution.js --coverage <dir> --source-root <dir> --graph <g> --design <d>
+  --project <name> [--pair <A>,<B>] [--plan <plan.json>]` reads per-test coverage (produced by
+  `scripts/coexecution-vitest-setup.mjs` on a copy of the project) and prints which files run
+  together, the pairs nothing static explains (no path either way, and no product file that ran
+  in the same test reaching both), and, given a plan, the files that run with the moved code
+  unexplained and outside its radius — exit 1 until each is in the radius, named under a ledger
+  resource, or recorded as a hole with a reason. Every report prints the share of corpus files
+  the suite called; below `coexecution.partialBelow` every finding says PARTIAL. Its thresholds
+  are `coexecution.*` settings (`scripts/project-settings.js`), printed with the settings id.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with

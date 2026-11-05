@@ -91,7 +91,7 @@ ok(shown.code === 0, `prints, exit 0 (got ${shown.code})`);
 ok(/refusal\.forceableShareFloor\s+1\/3 \(0\.333333\)/.test(shown.out) && /ruled 2026-11-05/.test(shown.out), 'a ruled fraction prints as written and as its value, with its date');
 ok(/signatures\.weight\.viaDoor\s+0\.5\s+default, not ruled/.test(shown.out), 'a default prints as "default, not ruled"');
 ok(/placement\.leaveOneOut\.minRate\s+NOT RULED/.test(shown.out), 'an unruled key prints NOT RULED');
-ok(/1 ruled, 5 default, 2 unruled/.test(shown.out), 'the headline counts ruled, default and unruled (1 + 5 + 2 = 8 keys)');
+ok(/1 ruled, 8 default, 2 unruled/.test(shown.out), 'the headline counts ruled, default and unruled (1 + 8 + 2 = 11 keys)');
 const badRun = run(['--settings', put('{')]);
 ok(badRun.code === 2 && /REFUSED/.test(badRun.out), 'a refused file exits 2 and says REFUSED');
 ok(run([]).code === 2, 'no arguments: usage, exit 2');
