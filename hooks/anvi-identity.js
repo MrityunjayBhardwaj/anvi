@@ -101,6 +101,35 @@ function provenancePath(storeProjectDir) {
   return path.join(storeProjectDir, PROVENANCE);
 }
 
+// The record as a READER should be pointed at it: the path the filesystem itself
+// spells, plus one sentence when that spelling differs from the one looked up
+// only by case.
+//
+// Store projects are located by name, and on a case-insensitive filesystem
+// (macOS by default) a directory called `Stave` opens the record of a store
+// project called `stave`. The binding check still refuses correctly — the
+// record is read and the identity does not match — but a notice built from the
+// LOOKED-UP spelling names `projects/Stave/PROVENANCE.json`, a path `ls` never
+// shows, and hides the one fact that explains the refusal. `fs.realpathSync`
+// echoes the spelling it was given; only the native call asks the filesystem.
+//
+// Text only. Nothing here decides anything: callers keep their verdicts and use
+// this solely to word the remedy they print.
+function recordForNotice(storeProjectDir) {
+  const asked = provenancePath(storeProjectDir);
+  let onDisk = asked;
+  try { onDisk = fs.realpathSync.native(asked); } catch { /* no record on disk — name it as looked up */ }
+  const lookedUp = path.basename(storeProjectDir);
+  const actual = path.basename(path.dirname(onDisk));
+  const caseOnly = lookedUp !== actual && lookedUp.toLowerCase() === actual.toLowerCase();
+  return {
+    path: onDisk,
+    caseNote: caseOnly
+      ? `This directory looked the store project up as \`${lookedUp}\`; the store record is \`${actual}\`, which differs only by case.`
+      : null,
+  };
+}
+
 function readProvenance(storeProjectDir) {
   let txt;
   try { txt = fs.readFileSync(provenancePath(storeProjectDir), 'utf8'); } catch { return null; }
@@ -219,6 +248,6 @@ function verifyBinding(identity, record) {
 
 module.exports = {
   PROVENANCE, normalizeRemote, identityOf, defaultRun,
-  provenancePath, readProvenance, writeProvenance, verifyBinding,
+  provenancePath, readProvenance, writeProvenance, verifyBinding, recordForNotice,
   storeProjectFor,
 };

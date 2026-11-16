@@ -42,13 +42,21 @@
 //     [--state <file>#<name>]...               writers of a module-level state
 //     [--define <name>]...                     where a function of that name is defined
 //     [--callers <file>]...                    callers of every export of that file
-//     [--findings]                             every state written from two or more components
+//     [--findings]                             every state written from two or more components, and every
+//                                              top-level function name defined in two or more (duplication)
 //     [--refresh <file>]                       rebuild once reusing the program, and time it
 //     [--signatures <file>]...                 that file's signature vector under each view (#647)
 //     [--placement-reading]                    each file's distance to every prior, per view, with denominators
 //     [--syntax <pkg>#<member>]...             call sites of that package member by component (a RULING input:
 //                                              the member is named by the owner, never detected by name)
 //     [--project <name> | --settings <file>]   the numbers signatures are judged by (#740); none = defaults
+//     [--task <task.json>] [--task-resources <id>[,<id>…]]... [--task-files <file>[,<file>…]]...
+//                                              PLACE the task (#723, scripts/place.js): distances per owner and
+//                                              view, one of four outcomes, the door named for a split
+//     [--leave-one-out]                        each ruled job held out and placed; recovery k of n against the
+//                                              ruled floor, "underpowered, k of n" below its minimum job count
+//     [--blend]                                each pair of nearest owners: a blended task must answer "split"
+//   A design carrying "scratch": "<why>" holds rows that are NOT rulings; every line printed says so.
 //   Signature vectors are built in scripts/signature-vectors.js from this index; see its header.
 //     [--json <out.json>]                      the whole index, with a `ledgerFacts` section (below)
 //
@@ -78,12 +86,14 @@ const R = require('../hooks/structure-rules.js');
 const S = require('../hooks/structure-graph.js');
 const PS = require('./project-settings.js');
 const SV = require('./signature-vectors.js');
+const PL = require('./place.js');
 
 const MUTATORS = new Set(['set', 'delete', 'add', 'clear', 'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 const CONTAINERS = new Set(['Map', 'Set', 'WeakMap', 'WeakSet', 'Array']);
-const REPEATABLE = new Set(['load', 'state', 'define', 'callers', 'signatures', 'syntax']);
-const FLAGS = new Set(['design', 'package', 'typescript', 'load', 'state', 'define', 'callers', 'findings', 'refresh', 'json', 'signatures', 'placement-reading', 'project', 'settings', 'syntax']);
-const BOOLEAN = new Set(['findings', 'placement-reading']);
+const REPEATABLE = new Set(['load', 'state', 'define', 'callers', 'signatures', 'syntax', 'task-resources', 'task-files']);
+const FLAGS = new Set(['design', 'package', 'typescript', 'load', 'state', 'define', 'callers', 'findings', 'refresh', 'json', 'signatures', 'placement-reading', 'project', 'settings', 'syntax',
+  'task', 'task-resources', 'task-files', 'leave-one-out', 'blend']);
+const BOOLEAN = new Set(['findings', 'placement-reading', 'leave-one-out', 'blend']);
 
 function loadTypeScript(pkgDir, explicit) {
   let p;
@@ -440,7 +450,12 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       let name = null;
       if (ts.isFunctionDeclaration(n) && n.name && n.body) name = n.name.text;
       else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && (ts.isArrowFunction(strip(n.initializer)) || ts.isFunctionExpression(strip(n.initializer)))) name = n.name.text;
-      if (name) { if (!definitions.has(name)) definitions.set(name, []); definitions.get(name).push({ file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n) }); }
+      // Top level: a statement of the file itself, not a helper nested in a function. The duplication
+      // reading (--findings) counts these alone: a helper copied instead of imported lands at the top
+      // level, and nested handlers (`onClick`, `render`) share names without being copies.
+      const topLevel = ts.isFunctionDeclaration(n) ? n.parent === sf
+        : !!(n.parent && n.parent.parent && ts.isVariableStatement(n.parent.parent) && n.parent.parent.parent === sf);
+      if (name) { if (!definitions.has(name)) definitions.set(name, []); definitions.get(name).push({ file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n), topLevel }); }
       ts.forEachChild(n, visit);
     };
     visit(sf);
@@ -622,13 +637,78 @@ function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
   return { states, exports: exportsOut.sort((a, b) => a.id < b.id ? -1 : 1), reexports, couldNotLook, packages: sortObj(packages), syntax: syntaxOut, definitions };
 }
 
+// PLACE (#723): the algorithm is scripts/place.js; this prints it over the index's signatures.
+function placeReport({ print, sig, design, settings, task, args, json, weights, band, opt }) {
+  const opts = { far: opt('placement.farDistance'), central: opt('placement.centralDistance'), band, weight: opt('placement.blend.weight') };
+  const floor = { minRate: PS.need(settings, 'placement.leaveOneOut.minRate').value, minJobs: PS.need(settings, 'placement.leaveOneOut.minJobs').value };
+  const ow = PL.ownersOf(sig, design, { seeds: true });
+  json.place = { settingsId: settings.id, opts };
+  print('');
+  print(`PLACE — settings ${settings.id} · far ≥ ${opts.far} · near two within ${band * 100}% · central ≤ ${opts.central} · views ${SV.VIEWS.join(', ')}; runtime NOT MEASURED`);
+  const ruledOwners = ow.owners.filter(o => o.source === 'ruled'), seedOwners = ow.owners.filter(o => o.source === 'seed');
+  print(`  owners: ${ow.owners.length} = ${ruledOwners.length} from ruled jobs (${ruledOwners.map(o => `${o.owner} ${o.jobs.length}`).join(', ') || 'none'}) + ` +
+    `${seedOwners.length} seeded from ledger rows, marked * (${seedOwners.map(o => `${o.owner}: ${o.files.length} files touching ${o.resources.length} rows`).join(', ') || 'none'})`);
+  const noFiles = ow.seeded.filter(s => !s.files);
+  if (noFiles.length) print(`  ledger owners with no seed (no file of the component touches its rows): ${noFiles.map(s => s.owner).join(', ')}`);
+  if (ow.missing.length) print(`  jobs not built: ${ow.missing.join('; ')}`);
+  if (!ow.owners.length) print('  NOT PLACED — no owner has a prototype: 0 ruled jobs with a member file and 0 seeded owners');
+
+  if (task && ow.owners.length) {
+    const tv = PL.taskVector(sig, design, task, { weights });
+    const p = PL.place(tv.vec, ow.owners, opts);
+    print('');
+    print(`TASK ${task.id || '(unnamed)'}${task.about ? ` — ${task.about}` : ''}`);
+    print(`  described by ${(task.resources || []).length} resources and ${tv.files.length} files${(task.resources || []).length ? ` · resources: ${task.resources.join(', ')}` : ''}${tv.files.length ? ` · files: ${tv.files.join(', ')}` : ''}`);
+    for (const n of tv.notes) print(`  note: ${n}`);
+    print(`  outcome: ${PL.describe(p)}`);
+    for (const l of PL.viewLines(p)) print(l);
+    json.place.task = { task, notes: tv.notes, ...p, views: p.views.map(v => ({ ...v })) };
+  }
+
+  if (args['leave-one-out']) {
+    const lo = PL.leaveOneOut(sig, design, opts);
+    print('');
+    print(`LEAVE-ONE-OUT — each ruled job held out and placed from its own signature; recovered = HOME on its ruled home`);
+    for (const r of lo.rows) {
+      if (!r.built) { print(`  ${r.id}: NOT BUILT — no member file (counted in the denominator, not recovered)`); continue; }
+      const nearest = x => { const v = x.place.views.find(w => w.view === x.place.lead); return v && v.ds ? `; ${v.view} ${v.ds.slice(0, 2).map(d => `${d.owner}${d.source === 'seed' ? '*' : ''} ${Math.max(0, d.d).toFixed(3)}`).join(', ')}` : ''; };
+      const s = x => `${x.recovered ? 'recovered' : 'not recovered'} (${x.outcome}${x.placed ? ` ${x.placed}` : ''}${nearest(x)}; its home has ${x.homeHas === 'nothing' ? 'no prototype' : x.homeHas === 'seed' ? 'a seed' : 'other ruled jobs'})`;
+      print(`  ${r.id} (ruled home ${r.home}): ruled prototypes — ${s(r.ruled)} · with seeds — ${s(r.seeded)}`);
+    }
+    const j = PL.judge(lo.k, lo.n, floor);
+    print(`  acceptance (ruled prototypes only): ${j.line}`);
+    print(`  of the ${lo.n}: ${lo.sole} held out from a home with no other ruled job (unrecoverable from ruled code by construction); ${lo.unbuilt} not built`);
+    print(`  with ledger seeds (a reading, not the acceptance): ${lo.kSeeded} of ${lo.n}`);
+    json.place.leaveOneOut = { n: lo.n, k: lo.k, kSeeded: lo.kSeeded, sole: lo.sole, unbuilt: lo.unbuilt, verdict: j.verdict, floor,
+      rows: lo.rows.map(r => r.built ? { id: r.id, home: r.home, ruled: { ...r.ruled, place: undefined }, seeded: { ...r.seeded, place: undefined } } : r) };
+  }
+
+  if (args.blend) {
+    const bl = ow.owners.length >= 2 ? PL.blend(ow.owners, opts) : [];
+    print('');
+    print(`BLENDED BOUNDARY — each owner's nearest other owner; a task blended ${opts.weight} / ${+(1 - opts.weight).toFixed(6)} from both; PASS only on a split of that pair with a door named`);
+    if (ow.owners.length < 2) print(`  NOT MEASURED — ${ow.owners.length} owner${ow.owners.length === 1 ? '' : 's'} with a prototype; a pair needs two`);
+    for (const b of bl) {
+      print(`  ${b.a}${b.sources[0] === 'seed' ? '*' : ''} + ${b.b}${b.sources[1] === 'seed' ? '*' : ''} (mean distance ${b.d.toFixed(3)}): ${b.why}`);
+      print(`    outcome: ${PL.describe(b.place)}`);
+      for (const l of PL.viewLines(b.place, '      ')) print(l);
+    }
+    if (bl.alone && bl.alone.length) print(`  owners with no nearest owner (no feature shared with any other; never paired): ${bl.alone.join(', ')}`);
+    if (ow.owners.length >= 2) print(`  pairs: ${bl.length} · pass ${bl.filter(b => b.pass).length} · fail ${bl.filter(b => !b.pass).length}`);
+    json.place.blendAlone = bl.alone || [];
+    json.place.blend = bl.map(b => ({ a: b.a, b: b.b, sources: b.sources, d: b.d, pass: b.pass, why: b.why, outcome: b.place.outcome }));
+  }
+}
+
 // ── the report ───────────────────────────────────────────────────────────────────────────────
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 const groupBy = (xs, k) => { const m = new Map(); for (const x of xs) { const v = k(x); if (!m.has(v)) m.set(v, []); m.get(v).push(x); } return m; };
 
 function main(argv) {
-  const args = { load: [], state: [], define: [], callers: [], signatures: [], syntax: [] };
-  const print = s => console.log(s);
+  const args = { load: [], state: [], define: [], callers: [], signatures: [], syntax: [], 'task-resources': [], 'task-files': [] };
+  // A design that says it is SCRATCH (its jobs are not rulings) has every report line say so.
+  let mark = '';
+  const print = s => console.log(mark + s);
   const stop = why => { print(`ownership-index: NOT MEASURED — ${why}`); return 2; };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -644,11 +724,29 @@ function main(argv) {
   try { design = JSON.parse(fs.readFileSync(args.design, 'utf8')); } catch (e) { return stop(`cannot read the design ${args.design}: ${e.message}`); }
   const problem = R.designProblem(design);
   if (problem) return stop(`the design cannot be judged against: ${problem}`);
+  if (design.scratch !== undefined) {
+    if (typeof design.scratch !== 'string' || !design.scratch.trim()) return stop('the design\'s "scratch" must say why its rows are not rulings');
+    mark = 'SCRATCH — not a ruling · ';
+  }
+  let task = null;
+  if (args.task) {
+    try { task = JSON.parse(fs.readFileSync(args.task, 'utf8')); } catch (e) { return stop(`cannot read the task ${args.task}: ${e.message}`); }
+    if (!task || typeof task !== 'object' || Array.isArray(task)) return stop(`the task ${args.task} must be an object { id, about, resources: [...], files: [...] }`);
+    for (const f of ['resources', 'files']) if (task[f] !== undefined && !(Array.isArray(task[f]) && task[f].every(x => typeof x === 'string'))) return stop(`the task's "${f}" must be a list of strings`);
+  }
+  const split = xs => xs.flatMap(x => x.split(',')).map(x => x.trim()).filter(Boolean);
+  if (args['task-resources'].length || args['task-files'].length) {
+    task = task || { id: '(command line)' };
+    task.resources = [...(task.resources || []), ...split(args['task-resources'])];
+    task.files = [...(task.files || []), ...split(args['task-files'])];
+  }
+  if (task && !(task.resources || []).length && !(task.files || []).length) return stop('the task names no resource and no file — nothing to place');
   const pkgDir = path.resolve(args.package);
   if (!fs.existsSync(pkgDir)) return stop(`${pkgDir} does not exist`);
   const T = loadTypeScript(pkgDir, args.typescript);
   if (T.notMeasured) return stop(T.notMeasured);
-  const wantSignatures = args.signatures.length > 0 || args['placement-reading'];
+  const wantPlace = !!task || args['leave-one-out'] || args.blend;
+  const wantSignatures = args.signatures.length > 0 || args['placement-reading'] || wantPlace;
   const settings = PS.load(args.settings ? { file: args.settings } : args.project ? { project: args.project } : { defaultsOnly: true });
   if (wantSignatures && settings.refused) return stop(`the settings were refused: ${settings.refused.join('; ')}`);
 
@@ -783,6 +881,17 @@ function main(argv) {
     print(`FINDINGS — module states written from two or more components: ${multi.length} of ${ix.states.length} states`);
     for (const { s, comps } of multi) print(`    ${s.file}#${s.name} (${s.component}) — written by ${comps.join(', ')}${s.escapes.length ? ` · escapes at ${s.escapes.length}` : ''}`);
     json.findings = multi.map(({ s, comps }) => ({ state: `${s.file}#${s.name}`, owner: s.component, writers: comps, escapes: s.escapes.length }));
+    // The duplication reading the coupling table prints beside every coupling figure (#722): a
+    // function copied into a second component instead of imported lowers every import-graph
+    // coupling figure, and shows up here as one more component defining the name.
+    const top = [...ix.definitions].map(([name, ds]) => [name, ds.filter(d => d.topLevel)]).filter(([, ds]) => ds.length);
+    const dup = top.map(([name, ds]) => ({ name, by: groupBy(ds, d => d.component) })).filter(x => x.by.size >= 2)
+      .sort((a, b) => b.by.size - a.by.size || (a.name < b.name ? -1 : 1));
+    print(`FINDINGS — top-level function names defined in two or more components: ${dup.length} of ${top.length} top-level names ` +
+      '(a NAME match, not a clone match: a renamed copy is invisible, and unrelated functions sharing a name are counted)');
+    for (const { name, by } of dup) print(`    ${name} — ${[...by].sort().map(([c, ds]) => `${c}: ${ds.map(d => d.site).join(', ')}`).join(' · ')}`);
+    json.duplicates = dup.map(({ name, by }) => ({ name, definedIn: Object.fromEntries([...by].sort().map(([c, ds]) => [c, ds.map(d => d.site)])) }));
+    json.instrument.topLevelNames = top.length;
   }
 
   if (args.refresh) {
@@ -866,6 +975,7 @@ function main(argv) {
       json.signatures.readingSummary.files = rows.length;
       json.signatures.readingSummary.disagree = disagree.length; json.signatures.readingSummary.featured2 = featured.length;
     }
+    if (wantPlace) placeReport({ print, sig, design, settings, task, args, json, weights, band, opt });
   }
 
   print('');
