@@ -1035,6 +1035,9 @@ console.log('\nOWNER — a types-only import of an owned library is an allowed u
   const files = ['src/b/b1.ts', 'src/b/b2.ts', 'src/b/b3.ts', 'src/b/b4.ts'];
   const kinds = files.map(m => gT.externalKinds.get(m).get('monaco-editor')).join();
   ok(kinds === 'types,runs,runs,unknown', `each import's use is read off its records: types, runs, runs (a value record beside a type one), unknown (${kinds})`);
+  // A mark that says how the import was resolved, not whether it runs, tells nothing (`aliased`).
+  const gA = G.loadGraph({ modules: [{ source: 'src/b/b1.ts', dependencies: [rec('monaco-editor', ['aliased'])] }] }, designT);
+  ok(gA.externalKinds.get('src/b/b1.ts').get('monaco-editor') === 'unknown', 'a record marked only `aliased` cannot be told, never read as a use');
   ok([...gT.externals.values()].every(s => s.has('monaco-editor')), 'every import is still recorded as a package import, whatever its use (the graphs\' agreement reads these)');
   const oT = G.owners(gT, designT);
   ok(oT.found.map(f => f.key).sort().join() === 'src/b/b2.ts -> monaco-editor,src/b/b3.ts -> monaco-editor',

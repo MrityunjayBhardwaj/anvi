@@ -616,7 +616,7 @@ function loadGraph(cruise, design) {
 // erases the import, so it loads no code. A mark that names how the import runs — the package
 // graph writes `import` or `export` beside `unknown` — says it survives. A record with neither
 // (the analyser writes only `unknown` for a package it did not resolve) cannot be told.
-const RUNS_MARKS = ['import', 'export', 'require', 'dynamic-import', 'exotic-require', 'import-equals', 'aliased'];
+const RUNS_MARKS = ['import', 'export', 'require', 'dynamic-import', 'exotic-require', 'import-equals'];
 function packageUse(types) {
   const t = Array.isArray(types) ? types : [];
   if (COMPILED_AWAY.some(x => t.includes(x))) return 'types';
