@@ -106,11 +106,11 @@ function checkValue(key, spec, raw) {
 
 // Effective settings from a file, or { refused } with every reason. A missing file is not an
 // error: every key takes its default, and must-be-ruled keys stay unruled.
-function load({ file, project } = {}) {
+function load({ file, project, defaultsOnly } = {}) {
   const where = file || (project ? pathFor(project) : null);
-  if (!where) return { refused: ['no project and no settings file named'] };
+  if (!where && !defaultsOnly) return { refused: ['no project and no settings file named'] };
   let doc = null;
-  if (fs.existsSync(where)) {
+  if (where && fs.existsSync(where)) {
     let text;
     try { text = fs.readFileSync(where, 'utf8'); } catch (e) { return { refused: [`cannot read ${where}: ${e.code || e.message}`], file: where }; }
     try { doc = JSON.parse(text); } catch (e) { return { refused: [`${where} is not valid JSON: ${e.message}`], file: where }; }
@@ -158,7 +158,7 @@ function need(settings, key) {
 
 // One line for a report header: where the numbers came from, and the id that pins them.
 const headline = s => s.refused ? `settings    REFUSED (${s.file || 'no file'}): ${s.refused.join('; ')}`
-  : `settings    ${s.id} · ${s.exists ? s.file : `${s.file} (absent: defaults only)`} · ${Object.values(s.entries).filter(e => e.source === 'ruled').length} ruled, ${Object.values(s.entries).filter(e => e.source === 'default').length} default, ${Object.values(s.entries).filter(e => e.source === 'unruled').length} unruled`;
+  : `settings    ${s.id} · ${s.exists ? s.file : s.file ? `${s.file} (absent: defaults only)` : 'no project named: defaults only'} · ${Object.values(s.entries).filter(e => e.source === 'ruled').length} ruled, ${Object.values(s.entries).filter(e => e.source === 'default').length} default, ${Object.values(s.entries).filter(e => e.source === 'unruled').length} unruled`;
 
 function main(argv) {
   const out = s => process.stdout.write(s + '\n');
