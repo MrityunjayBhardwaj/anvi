@@ -1,7 +1,7 @@
 // signature-vectors.js — what each file touches, as vectors under independent views, and the
-// distance reading a placer will stand on (#647, design §5.4a). Reads an index built by
-// ownership-index.js; computes nothing from the program itself, so every feature traces to a
-// fact the index already prints.
+// distance reading the placer stands on (#647, design §5.4a; the placer is scripts/place.js,
+// #723). Reads an index built by ownership-index.js; computes nothing from the program itself,
+// so every feature traces to a fact the index already prints.
 //
 // VIEWS. Each is its own vector; they are never summed, because disagreement between views is
 // the signal a placer reads (§5.4a), not noise to average.
