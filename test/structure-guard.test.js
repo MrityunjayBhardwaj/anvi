@@ -176,8 +176,12 @@ console.log('\nNO IMPLIED RULE — a direct import of something also reachable a
   const d = design({ a: { files: ['x/a.ts'] }, b: { files: ['x/b.ts'] }, c: { files: ['x/c.ts'] } }, [['a', 'b'], ['a', 'c'], ['b', 'c']]);
   const g = G.loadGraph(cruise({ 'src/x/a.ts': ['src/x/b.ts', 'src/x/c.ts'], 'src/x/b.ts': ['src/x/c.ts'], 'src/x/c.ts': [] }), d);
   const j = G.judge(g, d);
-  // The owner rule joined in #710; a design with no ledger gives it nothing to find.
-  ok(Object.keys(j).join() === 'divergence,cycle,owner' && G.RULES.join() === 'divergence,cycle,owner', `the rules are divergence, cycle and owner (${Object.keys(j).join()})`);
+  // The owner rule joined in #710, entrance in #695, door and reads in #696; a design with no ledger
+  // and no entrance gives them nothing to find.
+  const ALL = 'divergence,cycle,owner,entrance,door,reads';
+  ok(Object.keys(j).join() === ALL && G.RULES.join() === ALL, `the rules are divergence, cycle, owner, entrance, door and reads (${Object.keys(j).join()})`);
+  ok(['entrance', 'door', 'reads'].every(r => j[r].found.length === 0 && j[r].examined === 0 && !j[r].notMeasured),
+     'a design with no entrance and no door or fields rows: those rules examine nothing, find nothing, and are not "not measured"');
   ok(j.owner.found.length === 0 && j.owner.examined === 0, 'a design with no ledger: the owner rule examines nothing and finds nothing');
   ok(j.divergence.examined === 3 && j.divergence.found.length === 0 && j.cycle.found.length === 0,
      `the diamond is examined and nothing is found (${j.divergence.examined} edges examined)`);
@@ -919,11 +923,11 @@ console.log('\nOWNER — a second toucher of an owned library is refused, a fram
     components: { A: { dirs: ['a'], purpose: 'owns parsing' }, B: { dirs: ['b'], purpose: 'draws the editor' } },
     allowed: [['B', 'A']],
     resources: {
-      lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard' },
+      lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard', ruled: '2026-11-05' },
       fw: { kind: 'framework', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'none' },
       nul: { kind: 'library', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'static-guard' },
       'shared-lib': { kind: 'library', reach: 'shared', owner: 'A', verifiedBy: 'grants', enforcedBy: 'registry-acl' },
-      unv: { kind: 'library', reach: 'process', owner: 'A', enforcedBy: 'static-guard' },
+      unv: { kind: 'library', reach: 'process', owner: 'A', enforcedBy: 'static-guard', ruled: '2026-11-05' },
     },
   };
   ok(G.designProblem(designO) === null, `the fixture design is judgeable (${G.designProblem(designO)})`);
@@ -966,12 +970,31 @@ console.log('\nOWNER — a second toucher of an owned library is refused, a fram
   const plan = G.planBaseline(res, { rules: { divergence: [], cycle: [] } });
   ok(plan.refused && plan.grown.owner.length === 2, 'regenerating such a baseline writes the owner section, and the new section is growth (refused without --allow-growth)');
 
+  // ONLY A RULED ROW REFUSES (#695/#696). The same finding on a row nobody has ruled is found — and
+  // so held by a baseline like any other — but reported, never refused.
+  const unruled = JSON.parse(JSON.stringify(designO)); delete unruled.resources.lib.ruled;
+  const resU = G.judge(G.loadGraph(cruiseO, unruled), unruled);
+  const ledU = G.ratchet(resU, null);
+  ok(resU.owner.found.some(f => f.key === 'src/b/b.ts -> lib' && f.ruled === false && /PROPOSED, not ruled/.test(f.detail)),
+     'a finding on an unruled row is found, marked not ruled');
+  ok(ledU.owner.fresh.map(f => f.key).join() === 'src/b/b.ts -> unv' && ledU.owner.proposed.map(f => f.key).join() === 'src/b/b.ts -> lib',
+     `... and the ratchet refuses only the ruled row's, reporting the other (fresh ${ledU.owner.fresh.map(f => f.key)} · proposed ${ledU.owner.proposed.map(f => f.key)})`);
+  ok(G.designId(unruled) === G.designId(designO), 'ruling a row does not move the design id: the baseline already holds what it finds');
+  const planU = G.planBaseline(resU, null);
+  ok(planU.baseline.rules.owner.includes('src/b/b.ts -> lib'), 'a baseline written under the unruled row holds its finding, so a later ruling refuses nothing that was there');
+
   // The report, end to end.
   const dF = path.join(DIR, 'owner-design.json'), gF = path.join(DIR, 'owner-graph.json');
   fs.writeFileSync(dF, JSON.stringify(designO)); fs.writeFileSync(gF, JSON.stringify(cruiseO));
   const r = spawnSync(process.execPath, [GUARD, '--design', dF, '--graph', gF], { encoding: 'utf8' });
   ok(r.status === 1 && /owner\s+: 2 of 8 examined — 0 grandfathered, 2 NEW/.test(r.stdout), `the report counts the owner rule and exits 1 on new findings (exit ${r.status})`);
   ok(/NEW — refused:[\s\S]*owner\s+src\/b\/b\.ts -> lib\s+\(B imports lib, which A owns/.test(r.stdout), 'the new owner finding is listed as refused');
+  const dU = path.join(DIR, 'owner-design-unruled.json');
+  const allUnruled = JSON.parse(JSON.stringify(designO)); delete allUnruled.resources.lib.ruled; delete allUnruled.resources.unv.ruled;
+  fs.writeFileSync(dU, JSON.stringify(allUnruled));
+  const ru = spawnSync(process.execPath, [GUARD, '--design', dU, '--graph', gF], { encoding: 'utf8' });
+  ok(ru.status === 0 && /2 NEW on a row not yet ruled \(reported, not refused\)/.test(ru.stdout) && /NEW on a row not yet ruled — reported, NOT refused/.test(ru.stdout) && !/NEW — refused:/.test(ru.stdout),
+     `with no row ruled, the report lists both findings as reported and exits 0 (exit ${ru.status})`);
   ok(/couldn't tell: nul has no owner yet — touched by A \(1\), B \(1\)/.test(r.stdout) && /UNVERIFIED: unv/.test(r.stdout) && /not in the ledger: stray/.test(r.stdout),
      'the report lists couldn\'t-tell rows, UNVERIFIED rows and unlisted packages');
   const noLedger = { ...designO }; delete noLedger.resources;
