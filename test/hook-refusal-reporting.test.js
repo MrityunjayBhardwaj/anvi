@@ -147,6 +147,10 @@ const payloadFor = (hook, dir) => {
   switch (hook) {
     case 'ground-truth-session-start.js':
       return { hook_event_name: 'SessionStart' };
+    case 'session-area-start.js':
+      // It reads the store only to find the session's declared task and its settings; with no
+      // registered package and no task it is silent, which a refusal is allowed to be.
+      return { hook_event_name: 'SessionStart', source: 'startup' };
     case 'catalogue-context-injector.js':
       return { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: file } };
     case 'debug-grounding-gate.js':
