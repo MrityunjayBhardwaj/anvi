@@ -1487,6 +1487,14 @@ loosened until it stops firing guards nothing.
   "couldn't tell". Who may refuse is a lookup on the row (`gatekeeperOf`). Both graph producers
   record package imports by bare name, under every type-only policy (the analyser never marks a
   package import as compiled away), and the agreement check compares them.
+  **A types-only import is an allowed use, not a second home** (#741 row 2, ruled 2026-11-05;
+  #762): `import type`, or every name marked `type`, compiles to nothing. The rule reads it off
+  the import's own records — the package graph marks one that compiled away `type-only` — and
+  counts it apart ("types only"). The analyser writes a package record with no such mark, so from
+  a graph alone the rule cannot tell a type import from a value one: each such import outside its
+  owner is COULDN'T TELL, listed and never a finding, and a baselined finding there is kept, not
+  read as fixed (nor dropped from a baseline written from that run). The hook and the merge check
+  build the package graph, so they always tell. Both counts print on every run, zero included.
   `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
   proposes rows from the graph and classifies each declared pair; it never writes in place.
   With `--index <ownership-index.json>` (written by `scripts/ownership-index.js --json`, which

@@ -557,6 +557,11 @@ function loadGraph(cruise, design) {
   // The packages each module imports (#710), by bare specifier: an archive has no node_modules,
   // so a package is often unresolved, and the specifier is the one fact both producers share.
   const externals = new Map();
+  // How each (module, package) import is used (#762): 'runs' when a record of it survives
+  // compilation, 'types' when every record of it compiled away, 'unknown' when a record carries no
+  // mark either way. The analyser writes no mark on a package record; the package graph
+  // always writes one. Read off each record's own marks, never off which producer made the graph.
+  const externalKinds = new Map();
   let relative = 0, unresolved = 0;
 
   for (const m of listed) {
@@ -572,12 +577,14 @@ function loadGraph(cruise, design) {
       // WHATEVER the type-only policy: the analyser never marks an unresolved package as compiled
       // away (0 of 773 bare-specifier records on stave's archive at c26ca5e7, 2026-11-03), so the
       // policy could only be applied by one producer, and the graphs would disagree on every
-      // `import type` of a package. A type import also ties a component to the library's shape,
-      // which is what ownership is about.
+      // `import type` of a package. Whether an import is types only is kept beside it
+      // (`externalKinds`, #762): the owner rule allows one, as the owner ruled (#741 row 2).
       const pkg = packageOf(d.module);
       if (pkg && (d.couldNotResolve || d.coreModule || !d.resolved || String(d.resolved).split('/').includes('node_modules') || !inCorpus(d.resolved))) {
-        if (!externals.has(m.source)) externals.set(m.source, new Set());
+        if (!externals.has(m.source)) { externals.set(m.source, new Set()); externalKinds.set(m.source, new Map()); }
         externals.get(m.source).add(pkg);
+        const kinds = externalKinds.get(m.source);
+        kinds.set(pkg, strongerUse(kinds.get(pkg), packageUse(d.dependencyTypes)));
         continue;
       }
       const types = d.dependencyTypes || [];
@@ -602,8 +609,24 @@ function loadGraph(cruise, design) {
   // Cycles are computed, never read from an analyser's flag: dependency-cruiser's flag counts a
   // cycle through types, which nothing runs, and a graph built without the analyser has no flag.
   const circular = onCycle(runtime);
-  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved, externals };
+  return { root, modules, adj, edges, circular, reexports, typeOnly, typeOnlyImports: counting ? 'count' : 'ignore', relative, unresolved, externals, externalKinds };
 }
+
+// One package record's use, from its own marks (#762). A compiled-away mark wins: TypeScript
+// erases the import, so it loads no code. A mark that names how the import runs — the package
+// graph writes `import` or `export` beside `unknown` — says it survives. A record with neither
+// (the analyser writes only `unknown` for a package it did not resolve) cannot be told.
+const RUNS_MARKS = ['import', 'export', 'require', 'dynamic-import', 'exotic-require', 'import-equals', 'aliased'];
+function packageUse(types) {
+  const t = Array.isArray(types) ? types : [];
+  if (COMPILED_AWAY.some(x => t.includes(x))) return 'types';
+  if (RUNS_MARKS.some(x => t.includes(x))) return 'runs';
+  return 'unknown';
+}
+// Two records of one import: any record that runs makes it a use; otherwise one that cannot be
+// told keeps the whole import untold; only when every record compiled away is it types only.
+const USE_ORDER = { types: 0, unknown: 1, runs: 2 };
+const strongerUse = (a, b) => (a === undefined || USE_ORDER[b] > USE_ORDER[a] ? b : a);
 
 // Why the input cannot support a verdict, or null when it can. A CLEAN ZERO IS NOT A PASS:
 // dependency-cruiser run with a TypeScript it cannot read parses nothing and prints its
@@ -725,8 +748,10 @@ function touchersByPackage(graph, design) {
     modulesWithPackages++;
     const component = of(module);
     if (component === undefined) unmappedWithPackages++;
+    const kinds = (graph.externalKinds && graph.externalKinds.get(module)) || null;
     for (const pkg of pkgs) {
-      touches.push({ module, component, package: pkg });
+      // `use`: 'runs', 'types' or 'unknown' (#762); a graph built before uses were read says 'unknown'.
+      touches.push({ module, component, package: pkg, use: (kinds && kinds.get(pkg)) || 'unknown' });
       if (!byPackage.has(pkg)) byPackage.set(pkg, { comps: new Map(), unmapped: [] });
       const e = byPackage.get(pkg);
       if (component === undefined) e.unmapped.push(module);
@@ -745,13 +770,21 @@ function touchersByPackage(graph, design) {
 // `process`. Everything else is COUNTED apart, never folded into "allowed": a framework (judged,
 // never a violation), a row with no owner yet ("couldn't tell", listed with its touchers), a row
 // another gatekeeper holds, a package the ledger does not list, a module no component claims.
+//
+// A TYPES-ONLY import is an allowed kind of use, not a second home (#741 row 2, ruled 2026-11-05;
+// #762): `import type`, or every name marked `type`, compiles to nothing, so it loads no code. It is
+// read off the import's own records (`graph.externalKinds`), never declared, and is counted apart
+// (`typesOnly`). An import whose records say neither (the analyser's, for a package it did not
+// resolve) would be a finding only if it runs, so it is COULDN'T TELL (`untold`), never a finding —
+// and its key is in `unjudged`, so the ratchet does not read a baselined finding there as fixed.
 function owners(graph, design) {
   const res = isObject(design && design.resources) ? design.resources : {};
   const { touches, byPackage } = touchersByPackage(graph, design);
   const found = [], couldntTell = new Set(), unlisted = new Set(), elsewhere = new Set(), unmapped = new Set();
+  const typesOnly = [], untold = [];
   let examined = 0, framework = 0;
   const rel = m => m.slice((graph.root || '').length);
-  for (const { module: m, component: c, package: p } of touches) {
+  for (const { module: m, component: c, package: p, use } of touches) {
     const hit = rowFor(res, p);
     if (!hit) { unlisted.add(p); continue; }
     const r = hit.row;
@@ -762,6 +795,8 @@ function owners(graph, design) {
     examined++;
     if (!r.owner) { couldntTell.add(p); continue; }
     if (touchAllowed(r, c, rel(m))) continue;
+    if (use === 'types') { typesOnly.push({ key: edgeKey(m, p), component: c, package: p, row: hit.id }); continue; }
+    if (use !== 'runs') { untold.push({ key: edgeKey(m, p), component: c, package: p, row: hit.id }); continue; }
     // Under the row's id, so `acorn-walk` and `acorn` are one finding series; the package as named
     // is in the detail. Only a RULED row refuses (#695/#696): a proposed one is found, held by the
     // baseline like any other, and reported — so ruling it later needs no new baseline.
@@ -773,7 +808,7 @@ function owners(graph, design) {
   }
   const unverified = Object.keys(res).filter(id => isObject(res[id]) && gatekeeperOf(res[id]).unverified).sort();
   return {
-    found, examined, framework,
+    found, examined, framework, typesOnly, untold, unjudged: untold.map(u => u.key),
     couldntTell: [...couldntTell].sort().map(pkg => ({ package: pkg, touchers: Object.fromEntries([...byPackage.get(pkg).comps].sort()) })),
     proposedRows: Object.keys(res).filter(id => isObject(res[id]) && res[id].kind === 'library' && res[id].owner && !isRuled(res[id])).sort(),
     unlisted: [...unlisted].sort(), elsewhere: [...elsewhere].sort(), unmapped: [...unmapped].sort(), unverified,
@@ -859,6 +894,9 @@ function ratchet(results, baseline) {
     const scope = Array.isArray(results[rule].scope) ? results[rule].scope.map(m => `${m} -> `) : null;
     const base = new Set(((baseline && baseline.rules && baseline.rules[rule]) || []).filter(k => !scope || scope.some(p => k.startsWith(p))));
     const now = new Set(found.map(f => f.key));
+    // A key the rule could not tell this time (#762) was not judged: a baselined finding there is
+    // not fixed, only unseen.
+    const unjudged = new Set(results[rule].unjudged || []);
     const fresh = found.filter(f => !base.has(f.key));
     out[rule] = {
       total: found.length,
@@ -866,7 +904,8 @@ function ratchet(results, baseline) {
       // Only a finding on a RULED row refuses; one on a proposed row is reported (#695/#696).
       fresh: fresh.filter(f => f.ruled !== false),
       proposed: fresh.filter(f => f.ruled === false),
-      fixed: [...base].filter(k => !now.has(k)),
+      fixed: [...base].filter(k => !now.has(k) && !unjudged.has(k)),
+      unjudged: [...base].filter(k => unjudged.has(k)).length,
     };
   }
   return out;
@@ -887,7 +926,11 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
       if (previous && previous.rules && Array.isArray(previous.rules[rule])) { rules[rule] = [...previous.rules[rule]]; carried.push(rule); }
       continue;
     }
-    rules[rule] = results[rule].found.map(f => f.key).sort();
+    // A previous key the rule could not tell this time is kept as it was (#762): dropping it would
+    // refuse that import as new the next time a graph that can tell is judged.
+    const untoldBefore = previous && previous.rules && Array.isArray(previous.rules[rule])
+      ? previous.rules[rule].filter(k => (results[rule].unjudged || []).includes(k)) : [];
+    rules[rule] = [...new Set([...results[rule].found.map(f => f.key), ...untoldBefore])].sort();
     if (previous) {
       const old = new Set((previous.rules && previous.rules[rule]) || []);
       const added = rules[rule].filter(k => !old.has(k));
