@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // meter-report.js — what the hooks cost, from the rows the hook meter wrote (#527).
 //
-// Per hook: runs, the silent · informed · refused split (it sums to runs), bytes
+// Per hook: runs, the silent · informed · refused · skipped split (it sums to runs), bytes
 // injected, the median size of an informed run, and time at p50 and p95. Every figure
 // is printed beside its population — runs, sessions, the window, the directory — and a
 // percentile over fewer than 20 runs says what it really is.
@@ -144,7 +144,7 @@ for (const f of files) {
     if (!line.trim()) continue;
     let r;
     try { r = JSON.parse(line); } catch { unreadable[f] = (unreadable[f] || 0) + 1; continue; }
-    // An outcome outside the meter's three is a malformed row, not a quiet one: counting
+    // An outcome outside the meter's four is a malformed row, not a quiet one: counting
     // it as silent would hide it inside a split that is supposed to sum to the runs.
     if (!r || typeof r.hook !== 'string' || typeof r.bytes !== 'number' || typeof r.ms !== 'number'
       || !OUTCOMES.includes(r.outcome)) {
@@ -163,7 +163,7 @@ const SMALL = 20;
 
 const hooks = {};
 for (const r of kept) {
-  const h = hooks[r.hook] || (hooks[r.hook] = { runs: 0, silent: 0, informed: 0, refused: 0, bytes: 0, ms: [], informedBytes: [] });
+  const h = hooks[r.hook] || (hooks[r.hook] = { runs: 0, silent: 0, informed: 0, refused: 0, skipped: 0, bytes: 0, ms: [], informedBytes: [] });
   h.runs++;
   h[r.outcome]++;
   h.bytes += r.bytes;
@@ -175,7 +175,7 @@ for (const [name, h] of Object.entries(hooks)) {
   const ms = [...h.ms].sort((a, b) => a - b);
   const ib = [...h.informedBytes].sort((a, b) => a - b);
   summary[name] = {
-    runs: h.runs, silent: h.silent, informed: h.informed, refused: h.refused, bytes: h.bytes,
+    runs: h.runs, silent: h.silent, informed: h.informed, refused: h.refused, skipped: h.skipped, bytes: h.bytes,
     median_informed_bytes: ib.length ? rank(ib, 50) : null,
     p50_ms: rank(ms, 50), p95_ms: rank(ms, 95),
   };
@@ -217,5 +217,5 @@ for (const n of names) {
   const s = summary[n];
   const p95 = s.runs < SMALL ? `p95 ${s.p95_ms} ms (n=${s.runs}: the max)` : `p95 ${s.p95_ms} ms`;
   const med = s.median_informed_bytes == null ? 'median informed —' : `median informed ${s.median_informed_bytes} B`;
-  console.log(`${n.padEnd(width)}  ${String(s.runs).padStart(5)} runs  ${s.silent} silent · ${s.informed} informed · ${s.refused} refused  ${s.bytes} B  ${med}  p50 ${s.p50_ms} ms  ${p95}`);
+  console.log(`${n.padEnd(width)}  ${String(s.runs).padStart(5)} runs  ${s.silent} silent · ${s.informed} informed · ${s.refused} refused · ${s.skipped} skipped  ${s.bytes} B  ${med}  p50 ${s.p50_ms} ms  ${p95}`);
 }
