@@ -910,7 +910,9 @@ console.log('\nPackages a module imports (#710)');
 
 console.log('\nOWNER — a second toucher of an owned library is refused, a framework import is not (#710)');
 {
-  const pk = (module, extra) => ({ module, resolved: '', coreModule: false, couldNotResolve: true, dependencyTypes: ['unknown'], ...extra });
+  // Package records as the package graph writes them: `import` beside `unknown` says the import runs
+  // (#762). The analyser's bare `['unknown']` cannot be told, and has its own section below.
+  const pk = (module, extra) => ({ module, resolved: '', coreModule: false, couldNotResolve: true, dependencyTypes: ['unknown', 'import'], ...extra });
   const loc = t => ({ module: './x', resolved: t, coreModule: false, couldNotResolve: false, dependencyTypes: ['local', 'import'] });
   const cruiseO = { modules: [
     { source: 'src/a/a.ts', dependencies: [pk('lib'), pk('nul'), pk('unv')] },
@@ -1007,6 +1009,72 @@ console.log('\nOWNER — a second toucher of an owned library is refused, a fram
      'with no ledger and a baseline from before the rule, the owner line is an ordinary zero, not "not judged" (#725)');
   const rlb = spawnSync(process.execPath, [GUARD, '--design', dF, '--graph', gF, '--baseline', bOld], { encoding: 'utf8' });
   ok(/owner\s+: 2 of 8 examined — NOT JUDGED: the baseline has no "owner" section/.test(rlb.stdout), '... while a ledger design with that baseline says the rule was not judged');
+}
+
+console.log('\nOWNER — a types-only import of an owned library is an allowed use; an untold one is not a finding (#762)');
+{
+  const rec = (module, dependencyTypes) => ({ module, resolved: '', coreModule: false, couldNotResolve: true, dependencyTypes });
+  const RUNS = ['unknown', 'import'], TYPES = ['unknown', 'type-only', 'import'], UNTOLD = ['unknown'];
+  const designT = {
+    root: 'src',
+    components: { A: { dirs: ['a'], purpose: 'owns the editor' }, B: { dirs: ['b'], purpose: 'draws the panels' } },
+    allowed: [['B', 'A']],
+    resources: { 'monaco-editor': { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard', ruled: '2026-11-05' } },
+  };
+  // b1: `import type * as Monaco from 'monaco-editor'` · b2: a value import · b3: both, in one file ·
+  // b4: the analyser's record, which says neither · a: the owner itself.
+  const cruiseT = { modules: [
+    { source: 'src/a/a.ts', dependencies: [rec('monaco-editor', RUNS)] },
+    { source: 'src/b/b1.ts', dependencies: [rec('monaco-editor', TYPES)] },
+    // One allowed internal edge: a graph with modules and no edges reads as "imports were not parsed".
+    { source: 'src/b/b2.ts', dependencies: [rec('monaco-editor', RUNS), { module: '../a/a', resolved: 'src/a/a.ts', coreModule: false, couldNotResolve: false, dependencyTypes: ['local', 'import'] }] },
+    { source: 'src/b/b3.ts', dependencies: [rec('monaco-editor', TYPES), rec('monaco-editor/esm/x.js', RUNS)] },
+    { source: 'src/b/b4.ts', dependencies: [rec('monaco-editor', UNTOLD)] },
+  ] };
+  const gT = G.loadGraph(cruiseT, designT);
+  const files = ['src/b/b1.ts', 'src/b/b2.ts', 'src/b/b3.ts', 'src/b/b4.ts'];
+  const kinds = files.map(m => gT.externalKinds.get(m).get('monaco-editor')).join();
+  ok(kinds === 'types,runs,runs,unknown', `each import's use is read off its records: types, runs, runs (a value record beside a type one), unknown (${kinds})`);
+  // A mark that says how the import was resolved, not whether it runs, tells nothing (`aliased`).
+  const gA = G.loadGraph({ modules: [{ source: 'src/b/b1.ts', dependencies: [rec('monaco-editor', ['aliased'])] }] }, designT);
+  ok(gA.externalKinds.get('src/b/b1.ts').get('monaco-editor') === 'unknown', 'a record marked only `aliased` cannot be told, never read as a use');
+  ok([...gT.externals.values()].every(s => s.has('monaco-editor')), 'every import is still recorded as a package import, whatever its use (the graphs\' agreement reads these)');
+  const oT = G.owners(gT, designT);
+  ok(oT.found.map(f => f.key).sort().join() === 'src/b/b2.ts -> monaco-editor,src/b/b3.ts -> monaco-editor',
+     `exactly the value imports are owner findings (${oT.found.map(f => f.key).join(' | ')})`);
+  ok(oT.typesOnly.map(t => t.key).join() === 'src/b/b1.ts -> monaco-editor', `the types-only import is counted apart as allowed (${oT.typesOnly.map(t => t.key)})`);
+  ok(oT.untold.map(t => t.key).join() === 'src/b/b4.ts -> monaco-editor' && oT.unjudged.join() === 'src/b/b4.ts -> monaco-editor',
+     `the untold import is COULDN'T TELL, never a finding (${oT.untold.map(t => t.key)})`);
+  ok(oT.examined === 5, `all five imports are examined, the owner's own included (${oT.examined})`);
+  const insideTypes = { modules: [{ source: 'src/a/a.ts', dependencies: [rec('monaco-editor', TYPES)] }, { source: 'src/b/b2.ts', dependencies: [rec('monaco-editor', RUNS)] }] };
+  ok(G.owners(G.loadGraph(insideTypes, designT), designT).typesOnly.length === 0, 'the owner\'s own types-only import is simply allowed, not counted as types only');
+
+  // A baselined finding the graph cannot tell this run is not FIXED, and a baseline written from it keeps it.
+  const resT = G.judge(gT, designT);
+  const base = { rules: { divergence: [], cycle: [], owner: ['src/b/b2.ts -> monaco-editor', 'src/b/b4.ts -> monaco-editor', 'src/b/b1.ts -> monaco-editor'] } };
+  const led = G.ratchet(resT, base);
+  ok(led.owner.fixed.join() === 'src/b/b1.ts -> monaco-editor' && led.owner.unjudged === 1,
+     `the untold baselined key is kept, not fixed; the types-only one IS fixed (fixed: ${led.owner.fixed} · unjudged ${led.owner.unjudged})`);
+  ok(led.owner.fresh.map(f => f.key).join() === 'src/b/b3.ts -> monaco-editor', `the unbaselined value import is new (${led.owner.fresh.map(f => f.key)})`);
+  const planT = G.planBaseline(resT, base, { allowGrowth: true });
+  ok(planT.baseline.rules.owner.includes('src/b/b4.ts -> monaco-editor') && !planT.baseline.rules.owner.includes('src/b/b1.ts -> monaco-editor'),
+     `a baseline written from this run keeps the untold key and drops the types-only one (${planT.baseline.rules.owner.join(' | ')})`);
+  ok(!G.planBaseline(resT, null).baseline.rules.owner.includes('src/b/b4.ts -> monaco-editor'), 'with no previous baseline, nothing untold is invented into the new one');
+
+  // The report, from a graph alone: says both counts, and lists the untold import, every run.
+  const dT = path.join(DIR, 'types-design.json'), gTf = path.join(DIR, 'types-graph.json');
+  fs.writeFileSync(dT, JSON.stringify(designT)); fs.writeFileSync(gTf, JSON.stringify(cruiseT));
+  const rT = spawnSync(process.execPath, [GUARD, '--design', dT, '--graph', gTf], { encoding: 'utf8' });
+  ok(/types only \(allowed, #741 row 2\): 1 import outside the owner name only types; COULDN'T TELL: 1 outside the owner/.test(rT.stdout) &&
+     /couldn't tell: src\/b\/b4\.ts -> monaco-editor/.test(rT.stdout) && /give --package/.test(rT.stdout),
+     'the report prints the types-only and couldn\'t-tell counts and names the untold import');
+  ok(rT.status === 1 && /owner\s+: 2 of 5 examined — 0 grandfathered, 2 NEW/.test(rT.stdout) && !/b1\.ts -> monaco-editor\s+\(/.test(rT.stdout),
+     `only the two value imports are new (exit ${rT.status})`);
+  const gZ = path.join(DIR, 'types-graph-zero.json');
+  fs.writeFileSync(gZ, JSON.stringify({ modules: [{ source: 'src/a/a.ts', dependencies: [rec('monaco-editor', RUNS)] }] }));
+  const rZ = spawnSync(process.execPath, [GUARD, '--design', dT, '--graph', gZ], { encoding: 'utf8' });
+  ok(/types only \(allowed, #741 row 2\): 0 imports outside the owner name only types; COULDN'T TELL: 0 outside the owner/.test(rZ.stdout),
+     'zero of each is said too, so silence never reads as "none"');
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

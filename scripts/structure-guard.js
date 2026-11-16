@@ -597,7 +597,8 @@ function main(argv) {
     print(`  ${rule.padEnd(10)}: ` + (r.notMeasured ? `NOT MEASURED — ${r.notMeasured}` : `${r.total} of ${results[rule].examined} examined — ` +
           (r.unbaselined ? `NOT JUDGED: ${r.unbaselined}`
             : `${r.grandfathered} grandfathered, ${r.fresh.length} NEW, ${r.fixed.length} fixed since the baseline` +
-              (r.proposed && r.proposed.length ? `, ${r.proposed.length} NEW on a row not yet ruled (reported, not refused)` : ''))));
+              (r.proposed && r.proposed.length ? `, ${r.proposed.length} NEW on a row not yet ruled (reported, not refused)` : '') +
+              (r.unjudged ? `, ${r.unjudged} baselined but COULDN'T TELL this run (kept, not fixed)` : ''))));
   }
   printSymbolSide(results, built && built.symbols, design, print);
   // THE LEDGER'S SIDE (#710), said on every run so "no owner violations" cannot be read off a
@@ -611,6 +612,13 @@ function main(argv) {
           `${own.couldntTell.reduce((n, c) => n + Object.values(c.touchers).reduce((a, b) => a + b, 0), 0)} of them of a row with no owner yet; ` +
           `${own.unlisted.length} package${own.unlisted.length === 1 ? '' : 's'} not in the ledger, ${own.elsewhere.length} held by another gatekeeper, ` +
           `${own.unmapped.length} module${own.unmapped.length === 1 ? '' : 's'} outside every component — none of those judged`);
+    // Said every run, zero included (#762): a types-only import outside its owner is an allowed use
+    // (#741 row 2), and an import whose use the graph does not say is not a finding.
+    print(`    types only (allowed, #741 row 2): ${own.typesOnly.length} import${own.typesOnly.length === 1 ? '' : 's'} outside the owner name only types; ` +
+          `COULDN'T TELL: ${own.untold.length} outside the owner whose records do not say whether they run` +
+          (own.untold.length ? ' — the graph alone does not read `import type` for a package; give --package' : ''));
+    for (const u of own.untold.slice(0, 10)) print(`      couldn't tell: ${u.key} (${u.component}; row ${u.row})`);
+    if (own.untold.length > 10) print(`      … and ${own.untold.length - 10} more`);
     for (const c of own.couldntTell)
       print(`    couldn't tell: ${c.package} has no owner yet — touched by ${Object.entries(c.touchers).map(([k, v]) => `${k} (${v})`).join(', ')}`);
     for (const id of own.unverified) print(`    UNVERIFIED: ${id} — no instrument can confirm its owner is the only toucher`);
