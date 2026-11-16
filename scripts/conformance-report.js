@@ -694,8 +694,10 @@ function classifyBinding(dir) {
       : `no record, and no remote to key one on`,
       { remedy: `node scripts/bind-store.js --apply ${tilde(dir)}` });
   }
+  // Named as the filesystem spells it (#707) — see recordForNotice.
+  const shown = IDENT.recordForNotice(storeProject);
   return check('binding', verdict.state, verdict.reason,
-    { remedy: `resolve by hand: ${tilde(path.join(storeProject, IDENT.PROVENANCE))}` });
+    { remedy: `resolve by hand: ${tilde(shown.path)}${shown.caseNote ? `. ${shown.caseNote}` : ''}` });
 }
 
 // --- the subject list, taken from the store rather than from the caller -------

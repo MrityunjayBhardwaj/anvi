@@ -250,6 +250,7 @@ The everyday loop:
 | `/anvi:settings` | Workflow toggles, model profile, and how long Claude Code keeps sessions |
 | `/anvi:health` | Diagnose the planning directory and optionally repair it |
 | `node ~/.claude/anvi/scripts/meter-report.js` | What each hook costs: runs, bytes injected, milliseconds |
+| `node ~/.claude/anvi/scripts/task-telemetry.js --session <id>` | What one task did: files read and edited, components touched, edits outside a given radius, refusals |
 
 Run `/anvi:help` for the complete list.
 
