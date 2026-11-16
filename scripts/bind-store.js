@@ -129,7 +129,12 @@ function main(argv) {
         say(`  ${c.detail}`);
         say(`  Not repaired automatically: overwriting a record is the write this guards against,`);
         say(`  and this tool cannot tell which side is the stranger. Resolve by hand:`);
-        say(`  ${tilde(path.join(c.store, ID.PROVENANCE))}`);
+        {
+          // Named as the filesystem spells it (#707) — see recordForNotice.
+          const shown = ID.recordForNotice(c.store);
+          say(`  ${tilde(shown.path)}`);
+          if (shown.caseNote) say(`  ${shown.caseNote}`);
+        }
         break;
       case 'UNBOUND':
       case 'NEW_WORKTREE': {

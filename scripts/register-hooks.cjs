@@ -51,8 +51,11 @@ const REGISTRATIONS = [
   // ~300-module package measured ~0.8s, a warm call ~0.2s including Node startup.
   ['PreToolUse',       'Write|Edit|MultiEdit', 'structure-guard-hook.js', 10],
   // Enforcing: the same judge at the door every line passes through, whoever wrote it (#667).
-  // The fifth field is Claude Code's `if` filter: the hook is spawned only for a command with a
-  // `gh pr merge` subcommand (observed on 2.1.299), so the other Bash calls cost nothing. 60s: a
+  // The fifth field is Claude Code's `if` filter, meant to spawn the hook only for a command with a
+  // `gh pr merge` subcommand. It is a cost filter and nothing relies on it for correctness (#706):
+  // on 2.1.299 it held, but on 2.1.314 it let through about 28% of all Bash calls, nearly none of
+  // them merges. The script's own test is what keeps it to merges, and each run that test turns
+  // away is metered as `skipped`, why `not-a-merge`, so the meter's runs are not read as merges. 60s: a
   // `gh pr view`, at worst a fetch of the head, and a whole-package judgement (~1.5s on stave).
   ['PreToolUse',       'Bash',       'structure-merge-hook.js',       60, 'Bash(gh pr merge:*)'],
   // The same matcher as the guard above, and it should stay so for COVERAGE: the guard is
