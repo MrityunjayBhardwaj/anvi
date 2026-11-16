@@ -141,7 +141,7 @@ User message
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` or the root-owned lock directory (#680) | `~/.claude/hooks/structure-guard-hook.js` |
 | Write scope — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a write, by `file_path`, outside the radius of the task this session placed with `scripts/write-scope.js --place`: the ruled jobs PLACE names, their member files from the ledger, callers of a door the task changes, declared new files in a named home, and what was widened). An answer that needs the owner's ruling ("couldn't tell", no existing home, a home with no ruled job near the task) refuses outside those files; no placed task, a stale or unreadable record, or a file outside the ledger's corpus allows and says so once per session (#716) | `~/.claude/hooks/write-scope-guard.js` |
-| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call. Repositories are matched by name against each checkout's `origin`, so a repository renamed on GitHub whose checkout still names the old one is treated as unregistered and skipped with no row and no notice (#705) | `~/.claude/hooks/structure-merge-hook.js` |
+| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. A merge belongs to every registered package whose checkout's `origin` is the same repository — the same one, not the same spelling: a name spelled as the `origin` is matched with no network call, and any other is compared by GitHub's numeric id for both sides (`gh api repos/<owner>/<name>`, remembered for a week in `~/.claude/structure-guard-cache/repo-identity.json`), so a repository renamed on GitHub whose checkout still names the old one is judged under either name (#705). When that id cannot be looked up the merge is allowed NOT MEASURED, said and recorded; only a repository GitHub says is a different one, or does not exist, passes in silence | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -1495,8 +1495,50 @@ loosened until it stops firing guards nothing.
   A design's `jobs` table (`home`, `resources`, `doors`, `reason`, `ruled`) is a ruling, never
   proposed. `designProblem` validates it, its home and resources enter the design id, and the
   report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
-  still refuses only on library rows; v1 rows are proposals and readings.
-  `scripts/ownership-index.js --task <t.json> | --task-resources <ids> | --task-files <files>`
+  refuses on library rows, entrances, doors and fields rows (below), and **only on a ruled one**.
+- **Only a ruled row refuses (#695/#696).** A row (or an entrance) carrying `ruled: YYYY-MM-DD` is
+  the owner's ruling and its NEW findings are refused; one without (`proposed: …`) is found the same
+  way, held by the baseline the same way, and reported — "would refuse once ruled" — never refused.
+  So ruling a row later needs no new baseline, and `ruled` stays out of the design id.
+- **Who owns an outside library, and where a component's entrance is (#695).** A library row may
+  stand for several names (`packages: ["acorn-*"]`: `acorn-walk` is the `acorn` row's; `acorn/x` is
+  `acorn` already) and may narrow where inside its owner it is imported (`within: ["codeView/strudelMini"]`,
+  paths under the root, which must lie in the owner). A component may name its **entrance**
+  (`entrance: { files: ["codeView/index.ts"], ruled? }`): an import of any other file of it from
+  another component is an `entrance` finding keyed `module -> module`, re-exports included, so an
+  exception is one file and one import. Type-only imports count only when the design counts them,
+  as for divergences. All of it is read off the import graph, so it costs the hook nothing new.
+- **Who may call a door and read a field (#696).** A `door` row names `symbols`
+  (`<file>#<Name>`, `<file>#<Class>.<member>`, `<file>#<Class>.*`, `<package>#<Interface>.<method>`;
+  with none, the row's own id), and is touched by REFERENCE: the project's TypeScript resolves each
+  reference to its declaration, through aliases, re-exports and destructuring, so a call on a
+  callback parameter that never imports the class is seen and a same-named method elsewhere is not.
+  A re-export of a door symbol outside the owner (`export { … }`, `export *`) is a finding too: a
+  forwarding façade is not ownership. A row with `fields` (a parse tree's node fields) is touched by
+  READING one, read by name from the syntax tree, as stave's own `krill` rule reads it, counted per
+  top-level declaration with one baseline key per read (`… in fn #3`), so a count can only fall.
+  Code: `hooks/structure-symbols.js`, shared by the hook (the edited file only) and the report (every
+  file, `--package` only — a graph alone names no symbols, so both rules print NOT MEASURED there and
+  a baseline written from it carries the previous `door`/`reads` sections over unchanged). A member
+  access spelled like a door member on a receiver typed `any` is COULD NOT TELL: listed, counted, said
+  once per session at edit time, never refused and never passed. A key computed at run time and a
+  write a library makes on a prop's behalf are not seen. A file that spells no door name and forwards
+  no module wholesale is not handed to the type checker.
+  - **Cost, measured on stave `c26ca5e7`** (2026-11-05; the hook as a process, wall time, one Edit per
+    file on 122 files: the 62 the door gate hands to the checker and every fifth of the other 300;
+    the same files under the ledger design without these rows as the control, interleaved; machine
+    load average 19–48, median 29). Warm (graph cache valid): p50 0.90 s, p95 2.1 s, max 2.8 s,
+    against the control's 0.38 / 0.66 / 1.6 s — the checker adds p50 1.0 s, p95 1.7 s, max 2.35 s
+    on a gated file and about nothing on the rest. Cold (graph cache removed): p50 3.6 s, p95
+    6.1 s, and one of 122 at 14.6 s, past the registered 10 s budget (control max 7.0 s). So the
+    door check starts only with at least 3 s of the budget left (`DOOR_MIN_MS`); with less it is
+    NOT MEASURED and said, never a hook killed at its timeout, which lets the edit through with no
+    record. The report's whole-package pass (about 4 s on stave) is a plan-time and merge-time cost;
+    the merge hook runs the report.
+  - `--proposed` prints, beside the divergence reclassification, what each ledger rule finds under
+    each design: a design version that adds an entrance, a door or a fields row is reviewed on what
+    those would find today.
+- **Placing a task (#723).** `scripts/ownership-index.js --task <t.json> | --task-resources <ids> | --task-files <files>`
   places a task by distance to each owner's prototype built from ruled jobs (#723,
   `scripts/place.js`): HOME (with its nearest job, or "new job"), SPLIT with the door into each
   owner named, NO EXISTING HOME (never the nearest), or COULDN'T TELL when the views disagree.
@@ -1507,6 +1549,53 @@ loosened until it stops firing guards nothing.
   with `"scratch": "<why>"` holds rows that are not rulings, and every printed line says so.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
+- **Runtime co-execution verifies a plan; it never refuses an edit (#713).**
+  `node scripts/coexecution.js --coverage <dir> --source-root <dir> --graph <g> --design <d>
+  --project <name> [--pair <A>,<B>] [--plan <plan.json>]` reads per-test coverage (produced by
+  `scripts/coexecution-vitest-setup.mjs` on a copy of the project) and prints which files run
+  together, the pairs nothing static explains (no path either way, and no product file that ran
+  in the same test reaching both), and, given a plan, the files that run with the moved code
+  unexplained and outside its radius — exit 1 until each is in the radius, named under a ledger
+  resource, or recorded as a hole with a reason. Every report prints the share of corpus files
+  the suite called; below `coexecution.partialBelow` every finding says PARTIAL. Its thresholds
+  are `coexecution.*` settings (`scripts/project-settings.js`), printed with the settings id.
+- **The coupling table (#722) is a plan-time reading, never a refusal.**
+  `node scripts/coupling-table.js --design <d> --graph <g> [--ownership <index.json>] [--framework <pkg>] [--previous <table.json>] [--json <out>]`
+  prints Martin's Ca, Ce and I per component at file grain over the edges the guard judges, the
+  files imported from two or more other components (a file that only re-exports is marked
+  "forwards only": a passthrough door, not an owner), a random-DAG control (a floor) and a
+  shuffled-membership control. Every row carries library homes, and, from
+  `ownership-index.js --findings --json`, state homes and a duplication reading (top-level function
+  names defined in two or more components), because every import-graph coupling figure falls when
+  a function is copied instead of imported: against `--previous`, a fall in coupling with no fall
+  in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
+  be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
+  option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
+- **What a task did, from the session record (#712).** `node scripts/task-telemetry.js --session <id>
+  [--since <t>] [--until <t>] [--package <dir>] [--design <d>] [--radius <components,files>] [--widen <t>=<items>]`
+  prints per task: files read and edited (the tool call's operated field, successful calls only),
+  components touched, edits outside the radius with the radius size and widening count beside them,
+  refusals (the guard's, another hook's or a permission rule's, apart from a user's rejection) and the
+  design id. A task is one session with its subagents, optionally narrowed by time. The radius is
+  never defaulted: without one, out-of-radius prints NOT MEASURED. Files changed through Bash are
+  not visible to it, and the count of Bash calls prints as that door. The columns and units in its
+  header are the contract the live test (#711) reuses.
+- **A hot-path manifest (#719) is told, never refused.** A design may carry `hotPaths`: one row
+  per import edge the project's profiler measured hot — `from`, `to`, `frame`, `budget` (a number
+  in `unit`, or `null` while unruled), `metric` (what a snapshot answers it with), `instrument`,
+  and either `measured: <date>` with `frequency`/`frequencyUnit`, or `measured: "TO MEASURE"`
+  with no frequency at all. A malformed row makes the design one the guard cannot judge against,
+  as any design problem does. An allowed edit whose file keeps or adds a listed edge that runs
+  (type-only imports excluded) gets a NOTICE once per session per edge — the measured frequency,
+  the budget, and how to judge it — and each notice told is recorded as a fire. The manifest is
+  NOT part of the design id: it changes no refusal, so ruling a budget never asks for a new
+  baseline or a re-arm; it has an id of its own (`hotPathsId`), printed beside every budget
+  figure. `node scripts/hot-paths.js propose` lists the import edges on one hot function's call
+  path (the project's TypeScript checker) with the root's measured frequency;
+  `node scripts/hot-paths.js budget --design <d> --snapshot <s> [--before <s0>]` is the PR-time
+  test (exit 0 within, 1 over budget, 3 NOT MEASURED — nothing budgeted, a metric the snapshot
+  lacks, or a disabled profiler, never a pass); `hot-paths.js wrong-fire` records a notice that
+  was wrong for its edit, and the budget report prints fires and wrong fires per edge.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with
@@ -1626,6 +1715,21 @@ loosened until it stops firing guards nothing.
   (the web page, a person's terminal); the trial report's judgement of the default branch does.
   It does not judge at commit: most commits are `git add … && git commit …` in one command, and a
   PreToolUse hook sees the index before the add has run.
+  **The area rule (#717)**, for a package whose registry entry names an `areas` directory: a pull
+  request's AREA is the set of ledger jobs PLACE gives the task of the issue its body names
+  (`Closes`/`Fixes`/`Resolves`/`Refs #N` — the body, because GitHub fills `closingIssuesReferences`
+  only for a pull request into the default branch), with those jobs' member files. It is derived at
+  plan time by `scripts/derive-area.js --issue <n> --task <task.json> --out <areas>` (the TypeScript
+  program is too slow for a hook) and read at merge from `<areas>/<n>.json`. A changed file of the
+  package outside the area refuses the merge, named with the area, until it leaves the pull request
+  or the owner widens the area: a comment on the pull request by an OWNER with a line
+  `anvi-area-widen: <file>, <file>`. Every judgement prints the area's size and the widening count.
+  NO AREA (no issue named, no record, a record from another design, a placement with no ruled job)
+  refuses and says NO AREA, never "inside"; could not look (gh, an unreadable record, a file list
+  GitHub cut short, out of time) allows and says NOT MEASURED. A file the pull request adds is in no
+  job until the area is derived again, so it needs a widening. Under the owner's own GitHub account an
+  agent's comment is also OWNER: the widening is visible and counted, not authenticated. An entry
+  without `areas` is untouched. The verdict is the row's `area` field in `merges.jsonl`.
 - **Before arming: replay the project's real sessions (`scripts/structure-replay.js`, #540).**
   Every Write/Edit call in a window of the session transcripts is placed on the tree that was on
   disk when it happened (the checkout's own HEAD reflog first) and run through the hook's own
@@ -1936,3 +2040,54 @@ grows a second home (#716; design document `architecture-ownership-2026-11-02.md
   HOME, a refusal whose printed radius equals the ledger's member files, a write inside not
   refused, a mutant hook whose radius predicate always answers "inside" that the outside case
   catches; the PLACE-driven half on real TypeScript runs when `STRUCTURE_TS_FROM` names one.
+## Structural instruments on a cadence — each figure beside its control, behind the guard's counts
+
+`scripts/structure-instruments.js` (#714) runs the structural instruments of the architecture
+design as one shipped command, so a month's figures come from the same code every time and land in
+the store with their frame: instrument, date, design id, the commit measured, the settings id.
+
+- **The guard's graph, and the guard says so first.** Every figure is read off the graph the
+  shipped guard judges (`loadGraph` / `buildGraph`, the design's type-only policy). Before anything
+  is read, `structure-guard.js` is run on the same inputs; its module and edge counts, the
+  baseline's `measured` counts and the runner's own graph must all agree. If any differs the run
+  prints the three pairs, reads nothing, writes nothing and exits **3**. The one-off scripts read
+  the analyser's records with type-only imports included (1,352 records against the guard's 938
+  edges on stave at `c26ca5e7`) — the drift this gate stops.
+- **Every instrument is a registered entry and prints on every run**, as RAN, NOT ASKED, NOT
+  MEASURED, NOT INSTALLED ON THIS BRANCH (its script arrives with an open PR, named), INSTALLED,
+  NOT WIRED (the script is here, the runner does not know its arguments — never run with guessed
+  ones), or NOT SHIPPED BY RULING. `--list` prints the registry. Commit history is in it as NOT
+  SHIPPED BY RULING: since 2026-11-02 it derives no coupling, homes or boundaries.
+- **Controls.** Propagation cost beside a random digraph and a random DAG with the same N and E
+  (10 draws, seed 7) — the DAG is a floor, not a bar. Component figures beside the same figures
+  with the files' component labels shuffled (sizes kept, seed 11). A **borrowed** control:
+  `--borrowed <pkg dir> --borrowed-root <dir>` builds a reference project's graph with its own
+  TypeScript, its top-level directories as components, test files excluded, and prints its name,
+  commit and size beside the measured row; absent it prints NOT ASKED, unbuildable NOT MEASURED.
+  A move (`--moves {file: component}`) prints beside the run without it.
+- **Coupling is never read alone.** Homes per library print beside the graph figures, and the
+  extractor's findings (`ownership-index.js --findings`, with `--package`) and the duplication
+  reading are entries of their own: a fall in coupling with no fall in duplication is suspect.
+- **Writes** `report.txt` and `figures.json` to
+  `~/.anvideck/projects/<project>/instances/structure-instruments/<date>-<ref>-<design id>/`
+  (`--store` to put it elsewhere, `--dry-run` for none); a second run the same day lands beside the
+  first, never over it.
+- **Scheduling — documented, not installed.** Measure the default branch through an archive, never
+  a working tree. A monthly cron line (first of the month, 06:00):
+
+  ```
+  0 6 1 * * cd ~/anvi && node scripts/structure-instruments.js --project stave \
+      --design <design.json> --baseline <baseline.json> \
+      --package ~/stave/packages/editor --ref origin/main >> ~/.anvideck/projects/stave/instances/structure-instruments/cron.log 2>&1
+  ```
+
+  `--ref` measures the ref through `git archive` (as the guard's baseline writer does), so the
+  checkout is read, never written; fetch it first if the schedule should see new commits. On macOS
+  the same command goes in a LaunchAgent (`~/Library/LaunchAgents/<label>.plist`, `ProgramArguments`
+  = the command split into words, `StartCalendarInterval` = `{Day: 1, Hour: 6}`), loaded with
+  `launchctl bootstrap gui/$(id -u) <plist>`. A scheduled run that exits 3 has written nothing and
+  says why in the log; exit 2 likewise.
+- **Tests:** `node test/structure-instruments.test.js` — the gate on both sides (exit 3 with
+  nothing written; exit 0 with the frame), every registry state, the swap mutation moving the
+  divergence count, the borrowed control's three outcomes (the real-TypeScript case runs when
+  `STRUCTURE_TS_FROM` names a TypeScript 5 directory).
