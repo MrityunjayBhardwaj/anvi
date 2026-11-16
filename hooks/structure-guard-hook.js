@@ -316,6 +316,43 @@ function fixedText(pkgName, fixed, pkgDir, entry, worktree) {
     baselineCommand(pkgDir, entry, false, worktree);
 }
 
+// THE HOT-PATH NOTICE (#719). An edit whose file keeps or adds an import the design's manifest
+// lists as measured hot. Never a refusal (ruling 3): the heat is a runtime fact, judged against
+// its budget by the budget test at PR time; what the edit is told is the measured frequency, the
+// budget and how to judge it. Once per session per edge — the condition its advice turns off is
+// "this edge changed and nobody has judged it since", and that is the session's question, not
+// each keystroke's. A reader who finds it wrong for the edit records that, so wrong fires are
+// counted beside fires (`hot-paths.js wrong-fire`; the budget report prints both).
+const HOT_TOOL = path.join(__dirname, '..', 'scripts', 'hot-paths.js');
+function hotNoticeKind(h) {
+  return 'hot-' + crypto.createHash('sha1').update(`${h.from} -> ${h.to}`).digest('hex').slice(0, 12);
+}
+function hotNoticeText(pkgName, h) {
+  const heat = typeof h.frequency === 'number'
+    ? `measured ${h.frequency} ${h.frequencyUnit} (${h.measured})`
+    : `heat NOT YET MEASURED ("${h.measured}")`;
+  const budget = typeof h.budget === 'number' ? `budget ${h.budget} ${h.unit}` : `budget not yet ruled (unit: ${h.unit})`;
+  return `structure guard: HOT PATH (a notice, not a refusal) — ${pkgName}: ${h.from} -> ${h.to}, inside ${h.frame || 'a measured-hot path'}: ${heat}; ${budget}.`;
+}
+// What to do about it, said once per session beside the first hot notice: how the budget is
+// judged, where the heat came from, and how to record a notice that was wrong for the edit.
+function hotAdviceText(rows, pkgDir) {
+  const h = rows[0];
+  return `structure guard: about HOT PATH notices — the heat was measured by ${h.instrument}. Nothing here is judged by the shape of an import; ` +
+    `the budget is judged at PR time against a profiler snapshot taken after the change: node ${HOT_TOOL} budget --design <design.json> --snapshot <snapshot.json> ` +
+    `[--before <snapshot before the change>]. If a notice was wrong for the edit, record it so wrong fires are counted: node ${HOT_TOOL} wrong-fire --package ${pkgDir} ` +
+    '--from <file> --to <file> --reason "<why>"';
+}
+// A fire, recorded beside the wrong fires readers record, so the report can print both. Apart
+// from deciding: a log that cannot be written costs the count, never the edit.
+function recordHotFires(stateDir, pkgDir, sessionId, rows) {
+  if (!rows || !rows.length) return;
+  const file = path.join(stateDir, 'hot-path-notices.jsonl');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const ts = new Date().toISOString();
+  fs.appendFileSync(file, rows.map(h => JSON.stringify({ ts, kind: 'fired', package: pkgDir, from: h.from, to: h.to, session: sessionId || null })).join('\n') + '\n');
+}
+
 // Every tool in the registered matcher is in exactly one of these; a test derives the matcher
 // from the registrar and asserts it, so the two lists cannot drift apart in silence (#533).
 const JUDGED_TOOLS = ['Write', 'Edit'];
@@ -442,7 +479,11 @@ function evaluate(payload, deps) {
     ? `structure guard: ${pkgName}: ${unbaselined.join('; ')}. Regenerating the baseline is the user's decision — ask them. This does it:\n` +
       baselineCommand(home, owner.entry, false, worktree)
     : null;
-  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk, unbaselinedNotice, proposed,
+  // A hot edge this edit keeps or adds (#719): told, never refused. Only on an allowed edit — a
+  // refused one never lands, and the refusal is the one answer a hook prints.
+  const hot = R.hotPathsTouched ? R.hotPathsTouched(design, built.graph, owner.rel) : [];
+  const hotNotices = hot.length ? [...hot.map(h => [hotNoticeKind(h), hotNoticeText(pkgName, h)]), ['hot-advice-' + crypto.createHash('sha1').update(home).digest('hex').slice(0, 8), hotAdviceText(hot, home)]] : [];
+  if (!fresh.length) return { decision: 'allow', why: 'nothing new starts in this file', examined, elsewhere, fixed, onDisk, unbaselinedNotice, proposed, hot, hotNotices, hotPackage: home,
     // Keyed by file, rule and member names — not by line, so an edit that only moves lines is not told again.
     symbolNotice, symbolKind: symbolNotice ? 'symbols-' + crypto.createHash('sha1').update([owner.rel,
       ...['door', 'reads'].filter(r => ledger[r].notMeasured), ...[...new Set(anyReceivers.map(c => c.member))].sort()].join('|')).digest('hex').slice(0, 12) : null,
@@ -782,10 +823,11 @@ function noticesOnce(sessionId, notices, stateDir) {
   if (!due.length) return false;
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse',
     additionalContext: due.map(([, text]) => text).join('\n\n') } }));
-  return true;
+  // Truthy as before; also names the kinds told, so a caller can tell which notices went out.
+  return due.map(([kind]) => kind);
 }
 
-module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
+module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, hotNoticeKind, hotNoticeText, hotAdviceText, recordHotFires, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
   shadowCheck, shadowLogPath, recordShadow, checkVersion, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR,
   registryInForce: LOCK.registryInForce, LOCKED: LOCK.LOCKED, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 
@@ -861,9 +903,13 @@ if (require.main === module) {
           : `structure guard: NOT MEASURED — ${result.why}. Edits there are not being checked this session.`]);
       if (result.decision === 'allow')
         notices.push(['fixed', result.notice], ['landed', result.landedNotice], [result.unmappedKind, result.unmappedNotice], ['unbaselined', result.unbaselinedNotice],
-          [result.symbolKind, result.symbolNotice], [result.proposedKind, result.proposedNotice]);
+          [result.symbolKind, result.symbolNotice], [result.proposedKind, result.proposedNotice], ...(result.hotNotices || []));
       if (row && row.notice) notices.push([row.noticeKind, row.notice]);
-      noticesOnce(payload.session_id, notices.filter(([, t]) => t), STATE_DIR);
+      const due = noticesOnce(payload.session_id, notices.filter(([, t]) => t), STATE_DIR);
+      // Only the hot rows actually told this time are fires: a marker already set means not told.
+      if (result.decision === 'allow' && result.hot && result.hot.length && due) try {
+        recordHotFires(STATE_DIR, result.hotPackage, payload.session_id, result.hot.filter(h => due.includes(hotNoticeKind(h))));
+      } catch (e) { try { recordFailure(LOG, `${new Date().toISOString()}\thot-path fire not recorded: ${e && e.message}\n`); } catch { /* nothing more */ } }
       process.exit(0);
     } catch (e) {
       // Fail open on its own bugs — and record it, because a crash and "nothing to refuse"
