@@ -43,6 +43,14 @@
 // was armed — each ALLOWS the merge, and says so on that merge: "could not look" is never printed
 // as "nothing found". Every judgement is one row in merges.jsonl beside the edit guard's state.
 //
+// AND ITS AREA (#717). For a package whose registry entry names an `areas` directory, the files the
+// pull request changes are judged against its AREA: the set of ledger jobs PLACE gives the task of
+// the issue its body names, written at plan time by scripts/derive-area.js. A changed file outside the
+// area refuses the merge, named with the area, until it leaves the pull request or the owner widens
+// the area by a comment on it. No area (no issue named, none derived, a placement with no job) also
+// refuses: it is a fact about the pull request, not this hook's ignorance. The rule and its reasons
+// are in hooks/merge-area.js; an entry without `areas` is untouched by it.
+//
 // WHAT IT CANNOT SEE. A merge made outside Claude Code — the GitHub web page, a person's own
 // terminal — runs no hook. The trial report's judgement of the default branch counts those.
 
@@ -314,6 +322,37 @@ function guardAt(run, script, entry) {
   };
 }
 
+// The area judgement of one merge for one package (#717; the rule is hooks/merge-area.js):
+// { refuse, text, row }. Never throws but for the budget; could not look is NOT MEASURED, allowed.
+function areaOf(m, entry, deps) {
+  const A = require('./merge-area.js');
+  const pkgName = path.basename(entry.dir);
+  const notMeasured = why => ({ refuse: false, row: { outcome: 'not-measured', why },
+    text: `structure guard: NOT MEASURED — the area of this merge into ${pkgName} was not judged, and the merge is allowed: ${why}.` });
+  if (m.unreadable) return notMeasured(m.unreadable);
+  try {
+    const prefix = git(deps.run, entry.dir, 'rev-parse', '--show-prefix');
+    if (prefix === null) return notMeasured(`${entry.dir} is not inside a git checkout`);
+    let designId;
+    try { designId = deps.rules.designId(JSON.parse(deps.readFile(entry.design))); } catch (e) { return notMeasured(`cannot read the design ${entry.design}: ${e.message}`); }
+    if (entry.designId && entry.designId !== designId) return notMeasured(`the design on disk is ${designId}, but the package was armed under ${entry.designId}`);
+    const view = deps.run('gh', ['pr', 'view', ...(m.pr ? [m.pr] : []), ...(m.repo ? ['--repo', m.repo] : []),
+      '--json', 'number,body,files,changedFiles,comments'], { cwd: m.dir || entry.dir, timeoutMs: 15000 });
+    let pr;
+    try { pr = JSON.parse(view.stdout); } catch { pr = null; }
+    if (view.status !== 0 || !pr || typeof pr.number !== 'number')
+      return notMeasured(view.status === 0 ? `gh pr view ${m.pr || '(the current branch)'} answered with no pull request it could read`
+        : `gh pr view ${m.pr || '(the current branch)'} did not answer: ${String(view.stderr || view.error || '').trim().split('\n')[0] || `exit ${view.status === null ? `on ${view.signal || 'a timeout'}` : view.status}`}`);
+    const r = A.judgeArea({ view: pr, prefix, designId, read: n => A.readRecord(entry.areas, n) });
+    const t = A.areaText(pkgName, pr.number, r);
+    const { area, ...rest } = r;
+    return { ...t, row: { pr: pr.number, ...rest, ...(area ? { jobs: area.jobs, size: area.size, missing: area.missing } : {}) } };
+  } catch (e) {
+    if (e instanceof OutOfTime) return notMeasured(e.message);
+    throw e;
+  }
+}
+
 // What the default branch already carries, said beside a merge that did not add it.
 function carriedText(repo, r) {
   const n = r.carried.length;
@@ -377,10 +416,14 @@ function evaluate(payload, given) {
     }
     for (const entry of owners) {
       const t0 = deps.now();
+      // The area rule (#717), only for a package whose entry names its areas directory. First,
+      // because it costs one gh call: the import judgement after it may spend the rest of the budget.
+      const area = entry.areas ? areaOf(m, entry, deps) : null;
       let r;
       try { r = m.unreadable ? { outcome: 'not-measured', why: m.unreadable } : judgeMerge(m, entry, deps); }
       catch (e) { if (!(e instanceof OutOfTime)) throw e; r = { outcome: 'not-measured', why: e.message }; }
-      rows.push({ package: entry.dir, repo, ...r, ms: deps.now() - t0 });
+      rows.push({ package: entry.dir, repo, ...r, ...(area ? { area: area.row } : {}), ms: deps.now() - t0 });
+      if (area) (area.refuse ? refusals : notices).push(area.text);
       if (r.outcome === 'refused') refusals.push(refusalText(entry, r));
       if (r.carried && r.carried.length) notices.push(carriedText(repo, r));
       if (r.outcome === 'not-measured')
