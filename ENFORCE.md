@@ -140,7 +140,7 @@ User message
 |------|---------|------|
 | Tree lock guard — **ENFORCING, may refuse a call** | PreToolUse:Bash\|Write\|Edit\|MultiEdit (a tree op the repo's policy bans; any tree mutation while a test gate is reading that same tree). Inert for a repo with no entry in `~/.claude/tree-guard.json` | `~/.claude/hooks/tree-lock-guard.js` |
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` or the root-owned lock directory (#680) | `~/.claude/hooks/structure-guard-hook.js` |
-| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. Inert for a repository no registered package lives in, before any network call. Repositories are matched by name against each checkout's `origin`, so a repository renamed on GitHub whose checkout still names the old one is treated as unregistered and skipped with no row and no notice (#705) | `~/.claude/hooks/structure-merge-hook.js` |
+| Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. A merge belongs to every registered package whose checkout's `origin` is the same repository — the same one, not the same spelling: a name spelled as the `origin` is matched with no network call, and any other is compared by GitHub's numeric id for both sides (`gh api repos/<owner>/<name>`, remembered for a week in `~/.claude/structure-guard-cache/repo-identity.json`), so a repository renamed on GitHub whose checkout still names the old one is judged under either name (#705). When that id cannot be looked up the merge is allowed NOT MEASURED, said and recorded; only a repository GitHub says is a different one, or does not exist, passes in silence | `~/.claude/hooks/structure-merge-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
 | Named-entry delivery | UserPromptSubmit (prompt names catalogue entry ids) | `~/.claude/hooks/named-entry-delivery.js` |
@@ -1486,6 +1486,65 @@ loosened until it stops firing guards nothing.
   package import as compiled away), and the agreement check compares them.
   `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
   proposes rows from the graph and classifies each declared pair; it never writes in place.
+  With `--index <ownership-index.json>` (written by `scripts/ownership-index.js --json`, which
+  reads the project's own type checker) it also proposes ledger v1 rows: `state` and `registry`
+  for module states reached from another file, `door` for an export that writes one and is
+  called from another file, and `syntax` only for members passed to the index with `--syntax`.
+  A design's `jobs` table (`home`, `resources`, `doors`, `reason`, `ruled`) is a ruling, never
+  proposed. `designProblem` validates it, its home and resources enter the design id, and the
+  report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
+  refuses on library rows, entrances, doors and fields rows (below), and **only on a ruled one**.
+- **Only a ruled row refuses (#695/#696).** A row (or an entrance) carrying `ruled: YYYY-MM-DD` is
+  the owner's ruling and its NEW findings are refused; one without (`proposed: …`) is found the same
+  way, held by the baseline the same way, and reported — "would refuse once ruled" — never refused.
+  So ruling a row later needs no new baseline, and `ruled` stays out of the design id.
+- **Who owns an outside library, and where a component's entrance is (#695).** A library row may
+  stand for several names (`packages: ["acorn-*"]`: `acorn-walk` is the `acorn` row's; `acorn/x` is
+  `acorn` already) and may narrow where inside its owner it is imported (`within: ["codeView/strudelMini"]`,
+  paths under the root, which must lie in the owner). A component may name its **entrance**
+  (`entrance: { files: ["codeView/index.ts"], ruled? }`): an import of any other file of it from
+  another component is an `entrance` finding keyed `module -> module`, re-exports included, so an
+  exception is one file and one import. Type-only imports count only when the design counts them,
+  as for divergences. All of it is read off the import graph, so it costs the hook nothing new.
+- **Who may call a door and read a field (#696).** A `door` row names `symbols`
+  (`<file>#<Name>`, `<file>#<Class>.<member>`, `<file>#<Class>.*`, `<package>#<Interface>.<method>`;
+  with none, the row's own id), and is touched by REFERENCE: the project's TypeScript resolves each
+  reference to its declaration, through aliases, re-exports and destructuring, so a call on a
+  callback parameter that never imports the class is seen and a same-named method elsewhere is not.
+  A re-export of a door symbol outside the owner (`export { … }`, `export *`) is a finding too: a
+  forwarding façade is not ownership. A row with `fields` (a parse tree's node fields) is touched by
+  READING one, read by name from the syntax tree, as stave's own `krill` rule reads it, counted per
+  top-level declaration with one baseline key per read (`… in fn #3`), so a count can only fall.
+  Code: `hooks/structure-symbols.js`, shared by the hook (the edited file only) and the report (every
+  file, `--package` only — a graph alone names no symbols, so both rules print NOT MEASURED there and
+  a baseline written from it carries the previous `door`/`reads` sections over unchanged). A member
+  access spelled like a door member on a receiver typed `any` is COULD NOT TELL: listed, counted, said
+  once per session at edit time, never refused and never passed. A key computed at run time and a
+  write a library makes on a prop's behalf are not seen. A file that spells no door name and forwards
+  no module wholesale is not handed to the type checker.
+  - **Cost, measured on stave `c26ca5e7`** (2026-11-05; the hook as a process, wall time, one Edit per
+    file on 122 files: the 62 the door gate hands to the checker and every fifth of the other 300;
+    the same files under the ledger design without these rows as the control, interleaved; machine
+    load average 19–48, median 29). Warm (graph cache valid): p50 0.90 s, p95 2.1 s, max 2.8 s,
+    against the control's 0.38 / 0.66 / 1.6 s — the checker adds p50 1.0 s, p95 1.7 s, max 2.35 s
+    on a gated file and about nothing on the rest. Cold (graph cache removed): p50 3.6 s, p95
+    6.1 s, and one of 122 at 14.6 s, past the registered 10 s budget (control max 7.0 s). So the
+    door check starts only with at least 3 s of the budget left (`DOOR_MIN_MS`); with less it is
+    NOT MEASURED and said, never a hook killed at its timeout, which lets the edit through with no
+    record. The report's whole-package pass (about 4 s on stave) is a plan-time and merge-time cost;
+    the merge hook runs the report.
+  - `--proposed` prints, beside the divergence reclassification, what each ledger rule finds under
+    each design: a design version that adds an entrance, a door or a fields row is reviewed on what
+    those would find today.
+- **Placing a task (#723).** `scripts/ownership-index.js --task <t.json> | --task-resources <ids> | --task-files <files>`
+  places a task by distance to each owner's prototype built from ruled jobs (#723,
+  `scripts/place.js`): HOME (with its nearest job, or "new job"), SPLIT with the door into each
+  owner named, NO EXISTING HOME (never the nearest), or COULDN'T TELL when the views disagree.
+  `--leave-one-out` holds out each ruled job and reports recovery k of n against the project's
+  ruled floor ("underpowered, k of n" below its minimum job count); `--blend` checks that a task
+  blended from two nearest owners is answered with a split. A plan-time reading: nothing is
+  refused on it. Its tuning numbers are settings keys, printed with the settings id. A design
+  with `"scratch": "<why>"` holds rows that are not rulings, and every printed line says so.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
 - **Runtime co-execution verifies a plan; it never refuses an edit (#713).**
@@ -1498,6 +1557,27 @@ loosened until it stops firing guards nothing.
   resource, or recorded as a hole with a reason. Every report prints the share of corpus files
   the suite called; below `coexecution.partialBelow` every finding says PARTIAL. Its thresholds
   are `coexecution.*` settings (`scripts/project-settings.js`), printed with the settings id.
+- **The coupling table (#722) is a plan-time reading, never a refusal.**
+  `node scripts/coupling-table.js --design <d> --graph <g> [--ownership <index.json>] [--framework <pkg>] [--previous <table.json>] [--json <out>]`
+  prints Martin's Ca, Ce and I per component at file grain over the edges the guard judges, the
+  files imported from two or more other components (a file that only re-exports is marked
+  "forwards only": a passthrough door, not an owner), a random-DAG control (a floor) and a
+  shuffled-membership control. Every row carries library homes, and, from
+  `ownership-index.js --findings --json`, state homes and a duplication reading (top-level function
+  names defined in two or more components), because every import-graph coupling figure falls when
+  a function is copied instead of imported: against `--previous`, a fall in coupling with no fall
+  in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
+  be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
+  option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
+- **What a task did, from the session record (#712).** `node scripts/task-telemetry.js --session <id>
+  [--since <t>] [--until <t>] [--package <dir>] [--design <d>] [--radius <components,files>] [--widen <t>=<items>]`
+  prints per task: files read and edited (the tool call's operated field, successful calls only),
+  components touched, edits outside the radius with the radius size and widening count beside them,
+  refusals (the guard's, another hook's or a permission rule's, apart from a user's rejection) and the
+  design id. A task is one session with its subagents, optionally narrowed by time. The radius is
+  never defaulted: without one, out-of-radius prints NOT MEASURED. Files changed through Bash are
+  not visible to it, and the count of Bash calls prints as that door. The columns and units in its
+  header are the contract the live test (#711) reuses.
 - **Type-only imports are judged only when the design counts them (#605).** Compiled output
   drops an import that only names types, so by default such a dependency is absent from the
   graph — never refused, and an edge carried only by types reads as unused. A design with

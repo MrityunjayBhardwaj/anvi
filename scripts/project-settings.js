@@ -58,6 +58,11 @@ const SCHEMA = {
     about: 'below this many ruled jobs the floor is not judged; the result prints "underpowered, k of n"',
     readBy: '#723 (PLACE acceptance)',
   },
+  'duplication.bodyHash.minStatements': {
+    type: 'integer', min: 1, default: 5,
+    about: 'a function body with fewer statements is too small to count as a re-implemented copy',
+    readBy: '#700 (forceable share)',
+  },
   'signatures.weight.direct': {
     type: 'number', min: 0, exclusiveMin: true, default: 1,
     about: 'weight of a resource the file touches itself',
@@ -71,7 +76,22 @@ const SCHEMA = {
   'signatures.nearTwoBand': {
     type: 'fraction', min: 0, max: 1, default: 0.1,
     about: 'a second owner within this fraction of the nearest distance makes the file "near two"',
-    readBy: '#647 (signature vectors)',
+    readBy: '#647 (signature vectors), #723 (PLACE: near two owners → split)',
+  },
+  'placement.farDistance': {
+    type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.8,
+    about: 'a nearest cosine distance at or above this is "far": from every owner (no existing home) or from every job of the home (new job)',
+    readBy: '#723 (PLACE)',
+  },
+  'placement.centralDistance': {
+    type: 'fraction', min: 0, max: 1, default: 0.2,
+    about: 'a task the lead view puts within this distance of its owner keeps that answer when another view disagrees; farther, the disagreement makes it "couldn\'t tell"',
+    readBy: '#723 (PLACE)',
+  },
+  'placement.blend.weight': {
+    type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.5,
+    about: 'the first owner\'s share of a blended boundary task (the second gets the rest)',
+    readBy: '#723 (PLACE, blended boundary)',
   },
   'coexecution.minTests': {
     type: 'integer', min: 1, default: 2,
@@ -121,11 +141,11 @@ function checkValue(key, spec, raw) {
 
 // Effective settings from a file, or { refused } with every reason. A missing file is not an
 // error: every key takes its default, and must-be-ruled keys stay unruled.
-function load({ file, project } = {}) {
+function load({ file, project, defaultsOnly } = {}) {
   const where = file || (project ? pathFor(project) : null);
-  if (!where) return { refused: ['no project and no settings file named'] };
+  if (!where && !defaultsOnly) return { refused: ['no project and no settings file named'] };
   let doc = null;
-  if (fs.existsSync(where)) {
+  if (where && fs.existsSync(where)) {
     let text;
     try { text = fs.readFileSync(where, 'utf8'); } catch (e) { return { refused: [`cannot read ${where}: ${e.code || e.message}`], file: where }; }
     try { doc = JSON.parse(text); } catch (e) { return { refused: [`${where} is not valid JSON: ${e.message}`], file: where }; }
@@ -173,7 +193,7 @@ function need(settings, key) {
 
 // One line for a report header: where the numbers came from, and the id that pins them.
 const headline = s => s.refused ? `settings    REFUSED (${s.file || 'no file'}): ${s.refused.join('; ')}`
-  : `settings    ${s.id} · ${s.exists ? s.file : `${s.file} (absent: defaults only)`} · ${Object.values(s.entries).filter(e => e.source === 'ruled').length} ruled, ${Object.values(s.entries).filter(e => e.source === 'default').length} default, ${Object.values(s.entries).filter(e => e.source === 'unruled').length} unruled`;
+  : `settings    ${s.id} · ${s.exists ? s.file : s.file ? `${s.file} (absent: defaults only)` : 'no project named: defaults only'} · ${Object.values(s.entries).filter(e => e.source === 'ruled').length} ruled, ${Object.values(s.entries).filter(e => e.source === 'default').length} default, ${Object.values(s.entries).filter(e => e.source === 'unruled').length} unruled`;
 
 function main(argv) {
   const out = s => process.stdout.write(s + '\n');

@@ -409,18 +409,30 @@ function checkAccess(cwd, dir) {
   return { state: v.state, storeProject, reason: v.reason };
 }
 
+// The record is named as the filesystem spells it, not as it was looked up: on a
+// case-insensitive filesystem the two can differ, and the looked-up spelling is a
+// path no listing shows (#707). The case difference, when it is the only one, is
+// said in a sentence of its own — it is usually the whole explanation. An older
+// installed identity module lacks the helper; a decline must not throw over
+// wording, so that case names the record as looked up, as it always did.
+function recordNamed(storeProject) {
+  const shown = (IDENTITY && typeof IDENTITY.recordForNotice === 'function')
+    ? IDENTITY.recordForNotice(storeProject)
+    : { path: path.join(storeProject, IDENTITY ? IDENTITY.PROVENANCE : 'PROVENANCE.json'), caseNote: null };
+  return shown.caseNote ? `${shown.path}. ${shown.caseNote}` : shown.path;
+}
+
 // The remedy differs by state, and naming one that will not act is how a decline
 // becomes a dead end: bind-store REFUSES a MISMATCH by design, so telling anyone
 // to run it there would be advice that cannot work.
 function remedyFor(state, cwd, storeProject) {
-  const record = IDENTITY ? path.join(storeProject, IDENTITY.PROVENANCE) : path.join(storeProject, 'PROVENANCE.json');
   switch (state) {
     case 'UNBOUND':
       return `bind this directory: node scripts/bind-store.js --apply ${cwd}`;
     case 'MISMATCH':
-      return `resolve by hand — this is not repaired automatically, because the caller may be the stranger and nothing here can tell which side is wrong: ${record}`;
+      return `resolve by hand — this is not repaired automatically, because the caller may be the stranger and nothing here can tell which side is wrong: ${recordNamed(storeProject)}`;
     case 'MALFORMED':
-      return `repair the record by hand: ${record}`;
+      return `repair the record by hand: ${recordNamed(storeProject)}`;
     default:
       return 're-run install.sh so the identity module is present';
   }

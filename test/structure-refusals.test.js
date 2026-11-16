@@ -747,7 +747,7 @@ exports.create = pkgDir => ({ id: 'fixture-own@1', configFiles: [], edges(rel, c
   const DESIGN_OBJ = { root: 'src',
     components: { A: { dirs: ['a'], purpose: 'holds the one wrapper around lib' }, B: { dirs: ['b'], purpose: 'shows what A computes' } },
     allowed: [['B', 'A']],
-    resources: { lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard' } } };
+    resources: { lib: { kind: 'library', reach: 'process', owner: 'A', verifiedBy: 'imports', enforcedBy: 'static-guard', ruled: '2026-11-05' } } };
   const w = (name, obj) => { const f = path.join(DIR, 'own', name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
   const D = w('design.json', DESIGN_OBJ);
   const B = w('baseline.json', { designId: RM.designId(DESIGN_OBJ), rules: { divergence: [], cycle: [], owner: [] } });

@@ -33,6 +33,10 @@ ok(!none.refused && none.exists === false, 'absent file: loaded, marked absent')
 ok(none.entries['signatures.weight.viaDoor'].source === 'default' && none.values['signatures.weight.viaDoor'] === 0.5, 'a key with a default takes it, marked default');
 ok(none.entries['refusal.forceableShareFloor'].source === 'unruled' && none.values['refusal.forceableShareFloor'] === null, 'a key with no default is unruled, value null');
 
+const dflt = S.load({ defaultsOnly: true });
+ok(!dflt.refused && dflt.file === null && dflt.id === none.id && /no project named: defaults only/.test(S.headline(dflt)), 'defaults only (no project named): the defaults, the same id as an absent file, and the header says so');
+ok(S.load({}).refused, 'without defaultsOnly, naming nothing is refused');
+
 console.log('a ruled file');
 const good = S.load({ file: put({ about: 'x', settings: {
   'refusal.forceableShareFloor': entry('1/3'),
@@ -87,7 +91,7 @@ ok(shown.code === 0, `prints, exit 0 (got ${shown.code})`);
 ok(/refusal\.forceableShareFloor\s+1\/3 \(0\.333333\)/.test(shown.out) && /ruled 2026-11-05/.test(shown.out), 'a ruled fraction prints as written and as its value, with its date');
 ok(/signatures\.weight\.viaDoor\s+0\.5\s+default, not ruled/.test(shown.out), 'a default prints as "default, not ruled"');
 ok(/placement\.leaveOneOut\.minRate\s+NOT RULED/.test(shown.out), 'an unruled key prints NOT RULED');
-ok(/1 ruled, 7 default, 2 unruled/.test(shown.out), 'the headline counts ruled, default and unruled (1 + 7 + 2 = 10 keys)');
+ok(/1 ruled, 11 default, 2 unruled/.test(shown.out), 'the headline counts ruled, default and unruled (1 + 11 + 2 = 14 keys)');
 const badRun = run(['--settings', put('{')]);
 ok(badRun.code === 2 && /REFUSED/.test(badRun.out), 'a refused file exits 2 and says REFUSED');
 ok(run([]).code === 2, 'no arguments: usage, exit 2');
