@@ -12,12 +12,23 @@
 // most commits are `git add … && git commit …` in ONE command, so a PreToolUse hook sees the index
 // before the add has run.)
 //
-// WHAT IT COSTS. Registered with `"if": "Bash(gh pr merge:*)"`, so Claude Code spawns it only for
-// a command with a `gh pr merge` subcommand — observed on 2.1.299: a hook filtered to
-// `git commit:*` ran for three commits (one inside `echo x; git commit …`) and never for `echo` or
+// WHAT IT COSTS. Registered with `"if": "Bash(gh pr merge:*)"`: a cost filter, never the check (#706).
+// On 2.1.314 it let through about 28% of all Bash calls, nearly none of them merges; each such run is
+// metered as `skipped`, why `not-a-merge`. On 2.1.299 a `git commit:*` filter had held — it ran for
+// three commits (one inside `echo x; git commit …`) and never for `echo` or
 // `git status`. A version that ignores `if` spawns it for every Bash call; the first thing it does
 // is look for that subcommand, and without one it exits before reading anything else. With one, a
-// repository that no registered package lives in exits before any network call.
+// merge into a repository spelled as a registered checkout's `origin` needs no extra network call;
+// any other spelling is resolved to GitHub's own id for the repository, once, and remembered.
+//
+// WHICH PACKAGES A MERGE BELONGS TO: THE SAME REPOSITORY, NOT THE SAME SPELLING (#705). GitHub keeps
+// answering a renamed repository's old name, so a checkout cloned before a rename still names it in
+// `origin` and every git and gh command keeps working. Comparing names then misses a merge written
+// with the new name — stave's `stave-code` became `Stave`, and a `gh pr merge … --repo …/Stave` passed
+// with no row and no word. So a merge whose repository is spelled unlike a registered checkout's
+// `origin` is compared by the numeric id `gh api repos/<owner>/<name>` returns for both sides, which a
+// rename does not change. When that lookup cannot be made the merge is NOT MEASURED, said and recorded:
+// only a repository GitHub says is a different one, or says does not exist, passes in silence.
 //
 // WHAT IT JUDGES. The pull request's head commit (`gh pr view --json headRefOid`), fetched as
 // `pull/<n>/head` when it is not already local, judged by the guard itself —
@@ -45,6 +56,11 @@ const { spawnSync } = require('child_process');
 const STATE_DIR = path.join(os.homedir(), '.claude', 'structure-guard-cache');
 const LOG = path.join(STATE_DIR, 'errors.log');
 const MERGE_LOG = path.join(STATE_DIR, 'merges.jsonl');
+// GitHub's id for each repository spelling looked up, so the lookup is paid once per spelling, not
+// once per merge. Ids never change; a spelling can come to name another repository (renamed away,
+// then reused), so an answer is trusted for a week and then asked again.
+const IDENTITY_CACHE = path.join(STATE_DIR, 'repo-identity.json');
+const IDENTITY_TTL_MS = 7 * 24 * 3600 * 1000;
 // Inside the 60 s it is registered with (#671). A hook Claude Code kills at its timeout lets the
 // call through with no row and no word — a merge passed unjudged, looking exactly like a clean one.
 // So every call it makes gets only what is left of this budget, and below MIN_CALL_MS it stops and
@@ -148,14 +164,66 @@ function git(run, dir, ...args) {
 // and a rewritten URL no longer names the GitHub repository a pull request belongs to.
 const originOf = (run, dir) => git(run, dir, 'config', '--get', 'remote.origin.url');
 
-// Every registered package whose checkout's `origin` is this repository.
-function packagesOf(repo, registry, run) {
-  const hits = [];
+// The repository GitHub serves under one spelling (`owner/name`, lower case): { id, fullName },
+// { absent: true } when GitHub says there is none, or { why } when it could not be asked. A
+// redirect from an old name answers with the repository it now is.
+function identityResolver(run, cache, now) {
+  return key => {
+    const hit = cache.get(key);
+    if (hit && typeof hit.id === 'number' && now() - hit.at < IDENTITY_TTL_MS) return hit;
+    const r = run('gh', ['api', `repos/${key}`, '--jq', '"\\(.id) \\(.full_name)"'], { timeoutMs: 10000 });
+    const m = r.status === 0 && String(r.stdout).trim().match(/^(\d+) (\S+\/\S+)$/);
+    if (m) { const v = { id: Number(m[1]), fullName: m[2], at: now() }; cache.set(key, v); return v; }
+    if (r.status !== 0 && /HTTP 404/.test(r.stderr || '')) return { absent: true };
+    return { why: `\`gh api repos/${key}\` did not answer: ${String(r.stderr || r.error || '').trim().split('\n')[0] || `exit ${r.status === null ? `on ${r.signal || 'a timeout'}` : r.status}`}` };
+  };
+}
+
+// Every registered package whose checkout's `origin` is this repository: { owners, unknown }, where
+// `unknown` lists each package that could not be told apart from it, with why. A checkout whose
+// `origin` is spelled as `repo` is that repository with no lookup; any other is compared by id.
+function packagesOf(repo, registry, run, identity) {
+  const owners = [], others = [];
   for (const entry of (registry && Array.isArray(registry.packages) ? registry.packages : [])) {
     if (!entry || typeof entry.dir !== 'string' || !fs.existsSync(entry.dir)) continue;
-    if (repoKey(originOf(run, entry.dir)) === repo) hits.push(entry);
+    const key = repoKey(originOf(run, entry.dir));
+    if (!key) continue;                                    // not a GitHub checkout: no `gh pr merge` lands in it
+    if (key === repo) owners.push(entry); else others.push({ entry, key });
   }
-  return hits;
+  if (!others.length) return { owners, unknown: [] };
+  const target = identity(repo);
+  if (target.absent) return { owners, unknown: [] };      // GitHub has no such repository: none of these is it
+  if (target.why) return { owners, unknown: others.map(o => ({ ...o, why: target.why })) };
+  const unknown = [];
+  for (const o of others) {
+    const id = identity(o.key);
+    if (id.why) unknown.push({ ...o, why: id.why });
+    else if (id.id === target.id) owners.push(o.entry);
+  }
+  return { owners, unknown };
+}
+
+// The cache of identities in a file beside merges.jsonl, read once and written when it learns one.
+function fileCache(file) {
+  let data = null;
+  const load = () => { if (!data) { try { data = JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { data = {}; } } return data; };
+  return {
+    get: key => load()[key],
+    set: (key, v) => {
+      load()[key] = v;
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const tmp = `${file}.${process.pid}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(data, null, 1) + '\n');
+        fs.renameSync(tmp, file);
+      } catch { /* the lookup is paid again next time; nothing else is lost */ }
+    },
+  };
+}
+
+function memoryCache() {
+  const m = new Map();
+  return { get: k => m.get(k), set: (k, v) => m.set(k, v) };
 }
 
 // The guard script beside this hook (a checkout or a dev install's symlink), else the install's.
@@ -281,14 +349,16 @@ function timed(deps, run) {
 }
 
 // The decision for one Bash call: { decision: 'skip' | 'allow' | 'deny', reason?, notice?, rows }.
+// A skip says why: `not-a-merge` (no `gh pr merge` in the command) or `no-registry`.
 function evaluate(payload, given) {
   const deps = { ...given, started: given.started === undefined ? given.now() : given.started };
   deps.run = timed(deps, given.run);
+  const identity = identityResolver(deps.run, given.identityCache || memoryCache(), deps.now);
   const input = (payload && payload.tool_input) || {};
   const merges = mergesIn(input.command, payload && payload.cwd);
-  if (!merges.length) return { decision: 'skip', rows: [] };
+  if (!merges.length) return { decision: 'skip', why: 'not-a-merge', rows: [] };
   const registry = deps.registry();
-  if (!registry) return { decision: 'skip', rows: [] };
+  if (!registry) return { decision: 'skip', why: 'no-registry', rows: [] };
   const rows = [], refusals = [], notices = [];
   for (const m of merges) {
     if (m.unreadable && !m.repo) { notices.push(`structure guard: NOT MEASURED — a \`gh pr merge\` here was not judged: ${m.unreadable}.`); rows.push({ outcome: 'not-measured', why: m.unreadable }); continue; }
@@ -296,9 +366,15 @@ function evaluate(payload, given) {
     const repo = repoKey(m.repo) || (/github\.com/.test(m.pr || '') && repoKey(m.pr)) ||
       (m.dir && repoKey(originOf(deps.run, m.dir)));
     if (!repo) continue;                                   // not a GitHub repository this hook can name
-    let owners;
-    try { owners = packagesOf(repo, registry, deps.run); }
+    let owners, unknown;
+    try { ({ owners, unknown } = packagesOf(repo, registry, deps.run, identity)); }
     catch (e) { if (!(e instanceof OutOfTime)) throw e; notices.push(`structure guard: NOT MEASURED — a merge into ${repo} was not judged: ${e.message}.`); rows.push({ repo, outcome: 'not-measured', why: e.message }); continue; }
+    // Could not tell whether this is a registered package's repository: never the silence of "not one".
+    for (const u of unknown) {
+      const why = `could not tell whether ${repo} is the repository ${u.entry.dir} is a checkout of (its origin names ${u.key}): ${u.why}`;
+      notices.push(`structure guard: NOT MEASURED — this merge was allowed without being judged: ${why}.`);
+      rows.push({ package: u.entry.dir, repo, outcome: 'not-measured', why });
+    }
     for (const entry of owners) {
       const t0 = deps.now();
       let r;
@@ -321,7 +397,7 @@ function runSync(cmd, args, { cwd, timeoutMs } = {}) {
   return { status: r.status, signal: r.signal, stdout: r.stdout || '', stderr: r.stderr || '', error: r.error && r.error.message };
 }
 
-module.exports = { BUDGET_MS, MIN_CALL_MS, words, subcommands, mergesIn, repoKey, newImports, judgeMerge, evaluate, refusalText, carriedText, MERGE_LOG };
+module.exports = { BUDGET_MS, MIN_CALL_MS, IDENTITY_TTL_MS, words, subcommands, mergesIn, repoKey, newImports, judgeMerge, evaluate, refusalText, carriedText, MERGE_LOG, IDENTITY_CACHE };
 
 if (require.main === module) {
   let meter = null;
@@ -339,7 +415,12 @@ if (require.main === module) {
     // The edit guard's failure log is shared; its module is loaded only when there is a merge to judge.
     const fail = line => { try { require('./structure-guard-hook.js').recordFailure(LOG, line); } catch { /* nothing more to do */ } };
     try {
-      if (payload.tool_name !== 'Bash' || !/\bgh\b[\s\S]*\bmerge\b/.test(String((payload.tool_input || {}).command || ''))) process.exit(0);
+      // The check that keeps this hook to merges: the registration's `if` does not (#706). A run
+      // it turns away is metered as skipped, so the meter's runs can be read as merges seen.
+      if (payload.tool_name !== 'Bash' || !/\bgh\b[\s\S]*\bmerge\b/.test(String((payload.tool_input || {}).command || ''))) {
+        if (meter) meter.skip('not-a-merge');
+        process.exit(0);
+      }
       const result = evaluate(payload, {
         // The user's registry plus every package locked where only the owner can change it (#680).
         registry: () => require('./structure-lock.js').registryInForce(),
@@ -349,6 +430,7 @@ if (require.main === module) {
         guardScript: guardScript(),
         now: () => Date.now(),
         started,
+        identityCache: fileCache(IDENTITY_CACHE),
       });
       if (result.rows.length) {
         const ts = new Date().toISOString();
@@ -357,6 +439,7 @@ if (require.main === module) {
           fs.appendFileSync(MERGE_LOG, result.rows.map(r => JSON.stringify({ ts, session: payload.session_id, ...r })).join('\n') + '\n');
         } catch (e) { fail(`${ts}\tmerge row not written: ${e && e.message}\n`); }
       }
+      if (result.decision === 'skip' && meter) meter.skip(result.why);
       if (result.decision === 'deny') {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: {
           hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.reason } }));
