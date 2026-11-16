@@ -1486,8 +1486,28 @@ loosened until it stops firing guards nothing.
   package import as compiled away), and the agreement check compares them.
   `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
   proposes rows from the graph and classifies each declared pair; it never writes in place.
+  With `--index <ownership-index.json>` (written by `scripts/ownership-index.js --json`, which
+  reads the project's own type checker) it also proposes ledger v1 rows: `state` and `registry`
+  for module states reached from another file, `door` for an export that writes one and is
+  called from another file, and `syntax` only for members passed to the index with `--syntax`.
+  A design's `jobs` table (`home`, `resources`, `doors`, `reason`, `ruled`) is a ruling, never
+  proposed. `designProblem` validates it, its home and resources enter the design id, and the
+  report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
+  still refuses only on library rows; v1 rows are proposals and readings.
   A baseline written before the rule has no `owner` section: the rule is not judged against it,
   and both the report and the hook (once per session) say so.
+- **The coupling table (#722) is a plan-time reading, never a refusal.**
+  `node scripts/coupling-table.js --design <d> --graph <g> [--ownership <index.json>] [--framework <pkg>] [--previous <table.json>] [--json <out>]`
+  prints Martin's Ca, Ce and I per component at file grain over the edges the guard judges, the
+  files imported from two or more other components (a file that only re-exports is marked
+  "forwards only": a passthrough door, not an owner), a random-DAG control (a floor) and a
+  shuffled-membership control. Every row carries library homes, and, from
+  `ownership-index.js --findings --json`, state homes and a duplication reading (top-level function
+  names defined in two or more components), because every import-graph coupling figure falls when
+  a function is copied instead of imported: against `--previous`, a fall in coupling with no fall
+  in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
+  be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
+  option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
 - **What a task did, from the session record (#712).** `node scripts/task-telemetry.js --session <id>
   [--since <t>] [--until <t>] [--package <dir>] [--design <d>] [--radius <components,files>] [--widen <t>=<items>]`
   prints per task: files read and edited (the tool call's operated field, successful calls only),

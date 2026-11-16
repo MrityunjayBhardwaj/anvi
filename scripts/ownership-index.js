@@ -42,9 +42,31 @@
 //     [--state <file>#<name>]...               writers of a module-level state
 //     [--define <name>]...                     where a function of that name is defined
 //     [--callers <file>]...                    callers of every export of that file
-//     [--findings]                             every state written from two or more components
+//     [--findings]                             every state written from two or more components, and every
+//                                              top-level function name defined in two or more (duplication)
 //     [--refresh <file>]                       rebuild once reusing the program, and time it
-//     [--json <out.json>]                      the whole index
+//     [--signatures <file>]...                 that file's signature vector under each view (#647)
+//     [--placement-reading]                    each file's distance to every prior, per view, with denominators
+//     [--syntax <pkg>#<member>]...             call sites of that package member by component (a RULING input:
+//                                              the member is named by the owner, never detected by name)
+//     [--project <name> | --settings <file>]   the numbers signatures are judged by (#740); none = defaults
+//   Signature vectors are built in scripts/signature-vectors.js from this index; see its header.
+//     [--json <out.json>]                      the whole index, with a `ledgerFacts` section (below)
+//
+// LEDGER FACTS (#710, ledger v1). With --json the index always writes `ledgerFacts`, the facts
+// scripts/ownership-ledger.js --index proposes state, registry, door and syntax rows from:
+//   states      every module state: { id, file, name, kind, component, writers: { component:
+//               [file#fn] }, writerFiles, readers: { component: count }, readerFiles, escapes }
+//   exports     every export DECLARED in its file and referenced from another corpus file:
+//               { id, file, name, component, callers: { component: count }, callerFiles,
+//               writesStates: [state id], passthroughFile }. A write counts for an export when it
+//               lies inside the export's own declaration (a nested closure included; a private
+//               helper it calls is not — so a door through a helper reads as no door, never as a
+//               false one). Callers through a barrel are the origin's callers: references resolve
+//               to the declared symbol. Re-exports are counted apart (`reexports`), never doors.
+//   packages    per package: member uses by component, so a library row can name second homes
+//   syntax      per --syntax query: call and reference sites by component, and the could-not-tell
+//   definitions per --define name: defining sites by component, package members of that name apart
 //
 // Exit: 0 report printed · 2 NOT MEASURED (no TypeScript 5, an unreadable input, a design the
 //       guard cannot judge against, an empty corpus).
@@ -55,12 +77,14 @@ const fs = require('fs');
 const path = require('path');
 const R = require('../hooks/structure-rules.js');
 const S = require('../hooks/structure-graph.js');
+const PS = require('./project-settings.js');
+const SV = require('./signature-vectors.js');
 
 const MUTATORS = new Set(['set', 'delete', 'add', 'clear', 'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin']);
 const CONTAINERS = new Set(['Map', 'Set', 'WeakMap', 'WeakSet', 'Array']);
-const REPEATABLE = new Set(['load', 'state', 'define', 'callers']);
-const FLAGS = new Set(['design', 'package', 'typescript', 'load', 'state', 'define', 'callers', 'findings', 'refresh', 'json']);
-const BOOLEAN = new Set(['findings']);
+const REPEATABLE = new Set(['load', 'state', 'define', 'callers', 'signatures', 'syntax']);
+const FLAGS = new Set(['design', 'package', 'typescript', 'load', 'state', 'define', 'callers', 'findings', 'refresh', 'json', 'signatures', 'placement-reading', 'project', 'settings', 'syntax']);
+const BOOLEAN = new Set(['findings', 'placement-reading']);
 
 function loadTypeScript(pkgDir, explicit) {
   let p;
@@ -147,11 +171,44 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     ts.isMethodDeclaration(id.parent) || ts.isPropertyDeclaration(id.parent) || ts.isPropertySignature(id.parent) || ts.isMethodSignature(id.parent) ||
     ts.isInterfaceDeclaration(id.parent) || ts.isTypeAliasDeclaration(id.parent) || ts.isEnumDeclaration(id.parent) || ts.isFunctionExpression(id.parent));
 
+  const inTypePosition = id => { for (let q = id.parent; q; q = q.parent) { if (ts.isTypeNode(q) || ts.isTypeQueryNode(q) || ts.isHeritageClause(q)) return true; if (ts.isExpression(q) || ts.isStatement(q)) return false; } return false; };
+  const isCallee = id => {
+    let x = id;
+    if (x.parent && ts.isPropertyAccessExpression(x.parent) && x.parent.name === x) x = x.parent;
+    x = unwrap(x);
+    return !!(x.parent && (ts.isCallExpression(x.parent) || ts.isNewExpression(x.parent)) && x.parent.expression === x);
+  };
+  const TYPE_DECL = d => ts.isInterfaceDeclaration(d) || ts.isTypeAliasDeclaration(d) || ts.isClassDeclaration(d) || ts.isEnumDeclaration(d);
+  const FN_DECL = d => ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d) || ts.isClassDeclaration(d) ||
+    (ts.isVariableDeclaration(d) && d.initializer && (ts.isArrowFunction(strip(d.initializer)) || ts.isFunctionExpression(strip(d.initializer))));
+
   // ── one pass: every reference, by the symbol it reaches ────────────────────────────────────
+  // Beside the symbol index, the same pass records each reference that crosses into another
+  // corpus file (#647, signature vectors): a TYPE used (a type position resolving to an
+  // interface, type alias, class or enum declared elsewhere), a CALL (a callee resolving to a
+  // function, method or class declared elsewhere), or any other VALUE read. Each carries the
+  // calling function, so a resource reached through another file's function can be weighed as
+  // reached through a door, not touched.
+  // A door is an export of its file: the module's own export symbols, resolved through aliases,
+  // so a property of an exported type (`s.name`) is not mistaken for one.
+  const exportSets = new Map();
+  const exportsOfFile = dsf => {
+    if (!exportSets.has(dsf)) {
+      const m = (() => { try { return checker.getSymbolAtLocation(dsf) || dsf.symbol; } catch { return null; } })();
+      let es = []; try { es = m ? checker.getExportsOfModule(m).map(resolve) : []; } catch { es = []; }
+      exportSets.set(dsf, new Set(es));
+    }
+    return exportSets.get(dsf);
+  };
   const refs = new Map();          // symbol -> [{ id, sf }]
+  const crossRefs = [];            // { from, fromComp, fromFn, to, toComp, name, kind: type|call|value, exported }
+  const declNames = new Map();     // file -> [identifier declared in it]
   let identifiers = 0;
   for (const sf of files) {
+    const fromRel = relOf(sf.fileName), names = [];
+    declNames.set(fromRel, names);
     const visit = n => {
+      if (ts.isIdentifier(n) && isDeclName(n)) names.push(n.text);
       // The name after a dot is indexed too: `R.loadGraph(…)` on a CommonJS require or an
       // `import * as R` is a caller of the export `loadGraph`, and skipping it would read every
       // such caller as none.
@@ -164,6 +221,14 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
         // shared "unknown" symbol, so the alias is the only key that tells two imports apart.
         const target = resolve(sym);
         for (const k of new Set([sym, target])) if (k) { if (!refs.has(k)) refs.set(k, []); refs.get(k).push({ id: n, sf }); }
+        const decl = target && target.declarations && target.declarations[0];
+        const dsf = decl && decl.getSourceFile();
+        if (dsf && dsf !== sf && inCorpus.has(relOf(dsf.fileName))) {
+          const typePos = inTypePosition(n);
+          const kind = typePos ? (TYPE_DECL(decl) ? 'type' : null) : (isCallee(n) && FN_DECL(decl) ? 'call' : 'value');
+          if (kind) crossRefs.push({ from: fromRel, fromComp: compOf(sf), fromFn: enclosing(n), to: relOf(dsf.fileName), toComp: compOf(dsf), name: target.name, kind,
+            exported: exportsOfFile(dsf).has(target), isClass: ts.isClassDeclaration(decl) });
+        }
       }
       ts.forEachChild(n, visit);
     };
@@ -255,6 +320,7 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     };
     visit(sf);
   }
+  let followedIntoParameter = 0;   // bindings handed to a resolved corpus function, followed into its parameter
   // Follow every binding through its references; aliases and destructuring add bindings, so loop.
   const done = new Set();
   for (let pass = 0; pass < 10; pass++) {
@@ -289,6 +355,23 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
           if (ts.isIdentifier(p.name)) bind(p.name, b.pkg, null, sf);
           else if (ts.isObjectBindingPattern(p.name)) for (const el of p.name.elements) { if (ts.isIdentifier(el.name)) bind(el.name, b.pkg, (el.propertyName || el.name).getText(), sf); }
           else escapes.push({ pkg: b.pkg, site: at.site, why: 'destructured in a shape not followed' });
+        } else if (p && ts.isCallExpression(p) && p.arguments.indexOf(n) >= 0 && (() => {
+          // Handed to a function the checker resolves to a corpus declaration: follow the binding
+          // into the parameter at the same position (`this.deps(wa)` → `deps(wa: any) { wa.x }`).
+          // A rest parameter, a destructured parameter, a declaration with no body (`declare
+          // function use(v)`: the code that runs is elsewhere) or an unresolved callee stays an escape.
+          const idx = p.arguments.indexOf(n);
+          const calleeNode = ts.isPropertyAccessExpression(p.expression) ? p.expression.name : p.expression;
+          let cs = null; try { cs = resolve(checker.getSymbolAtLocation(calleeNode)); } catch { cs = null; }
+          const d = cs && cs.declarations && cs.declarations.find(x => x.parameters || (ts.isVariableDeclaration(x) && x.initializer));
+          const fn = d && (d.parameters ? d : (ts.isArrowFunction(strip(d.initializer)) || ts.isFunctionExpression(strip(d.initializer)) ? strip(d.initializer) : null));
+          const dsf = fn && fn.getSourceFile();
+          const param = fn && fn.parameters[idx];
+          if (!param || !fn.body || param.dotDotDotToken || !ts.isIdentifier(param.name) || !inCorpus.has(relOf(dsf.fileName))) return false;
+          bind(param.name, b.pkg, b.member, dsf);
+          return true;
+        })()) {
+          followedIntoParameter++;
         } else {
           escapes.push({ pkg: b.pkg, site: at.site, why: p ? `handed on (${ts.SyntaxKind[p.kind]})` : 'handed on' });
         }
@@ -311,7 +394,7 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
         if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) continue;
         const sym = symOfDecl(d.name);
         if (!sym) continue;
-        const st0 = { file: relOf(sf.fileName), name: d.name.text, kind: isLet ? 'let' : 'container', component: compOf(sf), writes: [], reads: 0, escapes: [] };
+        const st0 = { file: relOf(sf.fileName), name: d.name.text, kind: isLet ? 'let' : 'container', component: compOf(sf), writes: [], reads: 0, escapes: [], readers: {} };
         for (const { id, sf: rsf } of refs.get(sym) || []) {
           const n = unwrap(id);
           const p = n.parent;
@@ -336,6 +419,16 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
           }
           st0.reads++;
         }
+        // Who reads it, by file: every reference that is not a write (an escape included — the
+        // state left through that file). Needed for the "states read" feature; derived from the
+        // same classification, so a reader here is exactly a reference not counted as a write.
+        const writeSites = new Set(st0.writes.map(w => w.site));
+        for (const { id, sf: rsf } of refs.get(sym) || []) {
+          const at = site(rsf, id);
+          if (writeSites.has(at)) continue;
+          const f = relOf(rsf.fileName);
+          st0.readers[f] = (st0.readers[f] || 0) + 1;
+        }
         states.push(st0);
       }
     }
@@ -348,7 +441,12 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       let name = null;
       if (ts.isFunctionDeclaration(n) && n.name && n.body) name = n.name.text;
       else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && (ts.isArrowFunction(strip(n.initializer)) || ts.isFunctionExpression(strip(n.initializer)))) name = n.name.text;
-      if (name) { if (!definitions.has(name)) definitions.set(name, []); definitions.get(name).push({ file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n) }); }
+      // Top level: a statement of the file itself, not a helper nested in a function. The duplication
+      // reading (--findings) counts these alone: a helper copied instead of imported lands at the top
+      // level, and nested handlers (`onClick`, `render`) share names without being copies.
+      const topLevel = ts.isFunctionDeclaration(n) ? n.parent === sf
+        : !!(n.parent && n.parent.parent && ts.isVariableStatement(n.parent.parent) && n.parent.parent.parent === sf);
+      if (name) { if (!definitions.has(name)) definitions.set(name, []); definitions.get(name).push({ file: relOf(sf.fileName), component: compOf(sf), site: site(sf, n), topLevel }); }
       ts.forEachChild(n, visit);
     };
     visit(sf);
@@ -433,17 +531,101 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
     if (!msym) return { noModule: true, exports: [] };
     return { handedOn: handedOn.get(rel) || 0, exports: checker.getExportsOfModule(msym).map(e => {
       const target = resolve(e);
+      // Where the export is declared, and the lines its declaration spans (the body, for a
+      // function; the class, for a class): a write inside them is the export's write (#710).
+      const decls = (target && target.declarations) || [];
+      const decl = decls.find(d => d.body) || decls[0];
+      const dsf = decl && decl.getSourceFile();
+      const span = decl ? (() => { const holder = decl;
+        return [dsf.getLineAndCharacterOfPosition(holder.getStart(dsf)).line + 1, dsf.getLineAndCharacterOfPosition(holder.getEnd()).line + 1]; })() : null;
+      const declaredIn = dsf ? relOf(dsf.fileName) : null;
       const locals = viaDestructure.get(`${rel}|${e.name}`) || [];
       const all = [...(refs.get(target) || []), ...locals.flatMap(l => refs.get(l) || [])];
       const rs = all.filter(r => r.sf !== sf);
       const by = new Map();
       for (const r of rs) { const c = compOf(r.sf); const k = `${c}|${relOf(r.sf.fileName)}`; by.set(k, (by.get(k) || 0) + 1); }
-      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(),
+      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(), declaredIn, lines: span,
         by: [...by].map(([k, n]) => { const [component, file] = k.split('|'); return { component, file, n }; }).sort((a, b) => a.component < b.component ? -1 : a.component > b.component ? 1 : a.file < b.file ? -1 : 1) };
     }).sort((a, b) => b.refs - a.refs || (a.name < b.name ? -1 : 1)) };
   };
 
-  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf };
+  // A passthrough declares nothing: every statement imports or re-exports. Its doors forward
+  // another file's code and never count as ownership (design rule 7). A file with no statements
+  // at all is not a passthrough; it is empty.
+  const passthrough = new Set();
+  for (const sf of files) {
+    const sts = sf.statements;
+    if (sts.length && sts.some(st => ts.isExportDeclaration(st)) &&
+        sts.every(st => ts.isImportDeclaration(st) || ts.isExportDeclaration(st) || (ts.isExportAssignment(st) && ts.isIdentifier(st.expression))))
+      passthrough.add(relOf(sf.fileName));
+  }
+
+  return { computedLoads, program, made, files, corpusRel, identifiers, bindings, uses, escapes, unbound, states, definitions, anyCallsOf, callersOf, compOf, relOf, followedIntoParameter,
+    crossRefs, declNames, passthrough, compOfRel: rel => of(rel) || '(unmapped)' };
+}
+
+// ── ledger facts (#710, ledger v1) ───────────────────────────────────────────────────────────
+// The facts the ledger proposes v1 rows from, all read off the index already built: nothing here
+// resolves a symbol the index did not. See the header for the shape.
+// The design id of the file → component mapping alone (root, excludes, components' dirs and files).
+const mappingId = design => R.designId({ root: design.root, excludes: design.excludes, components: design.components, allowed: [] });
+const sortObj = o => Object.fromEntries(Object.entries(o).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
+  const inc = (o, k, n = 1) => { o[k] = (o[k] || 0) + n; };
+  const states = ix.states.map(st => {
+    const writers = {}, writerFiles = {}, readers = {};
+    for (const w of st.writes) { (writers[w.component] = writers[w.component] || []).push(`${w.file}#${w.fn}`); inc(writerFiles, w.file); }
+    for (const [f, n] of Object.entries(st.readers || {})) inc(readers, ix.compOfRel(f), n);
+    for (const c of Object.keys(writers)) writers[c] = [...new Set(writers[c])].sort();
+    return { id: `${st.file}#${st.name}`, file: st.file, name: st.name, kind: st.kind, component: st.component,
+      writers: sortObj(writers), writerFiles: sortObj(writerFiles), readers: sortObj(readers), readerFiles: sortObj(st.readers || {}),
+      writeSites: st.writes.map(w => w.site), escapes: st.escapes.length };
+  });
+  // Writes by file and line, for "is this write inside that export's declaration".
+  const writesIn = new Map();      // file -> [{ line, id }]
+  for (const st of ix.states) for (const w of st.writes) {
+    const line = Number(w.site.slice(w.site.lastIndexOf(':') + 1));
+    if (!writesIn.has(w.file)) writesIn.set(w.file, []);
+    writesIn.get(w.file).push({ line, id: `${st.file}#${st.name}` });
+  }
+  const exportsOut = [];
+  let reexports = 0, couldNotLook = 0;
+  for (const sf of ix.files) {
+    const rel = ix.relOf(sf.fileName);
+    const r = ix.callersOf(rel);
+    if (!r || r.noModule) { couldNotLook++; continue; }
+    for (const e of r.exports) {
+      if (!e.refs) continue;
+      if (e.declaredIn !== rel) { reexports++; continue; }
+      const callers = {}, callerFiles = {};
+      for (const b of e.by) { inc(callers, b.component, b.n); inc(callerFiles, b.file, b.n); }
+      const writes = e.lines ? (writesIn.get(rel) || []).filter(w => w.line >= e.lines[0] && w.line <= e.lines[1]).map(w => w.id) : [];
+      exportsOut.push({ id: `${rel}#${e.name}`, file: rel, name: e.name, component: ix.compOfRel(rel), callers: sortObj(callers), callerFiles: sortObj(callerFiles),
+        writesStates: [...new Set(writes)].sort(), passthroughFile: ix.passthrough.has(rel), lines: e.lines });
+    }
+  }
+  const packages = {};
+  for (const u of ix.uses) {
+    const p = packages[u.pkg] = packages[u.pkg] || { members: {} };
+    const m = p.members[u.member] = p.members[u.member] || {};
+    inc(m, u.component);
+  }
+  for (const p of Object.values(packages)) { p.members = sortObj(p.members); for (const k of Object.keys(p.members)) p.members[k] = sortObj(p.members[k]); }
+  const syntaxOut = syntax.map(q => {
+    const [pkg, member] = q.split('#');
+    const hits = ix.uses.filter(u => u.pkg === pkg && u.member === member);
+    const sites = {};
+    for (const h of hits) (sites[h.component] = sites[h.component] || []).push({ site: h.site, kind: h.kind, fn: h.fn });
+    const anyCalls = member ? ix.anyCallsOf(new Set([member])) : [];
+    return { id: q, pkg, member: member || null, sites: sortObj(sites), couldNotTell: ix.escapes.filter(e => e.pkg === pkg).length + ix.unbound.filter(e => e.pkg === pkg).length + anyCalls.length,
+      anyCalls: anyCalls.map(a => ({ site: a.site, component: a.component })) };
+  });
+  const definitions = define.map(name => {
+    const by = {};
+    for (const d of ix.definitions.get(name) || []) (by[d.component] = by[d.component] || []).push(d.site);
+    return { name, definedIn: sortObj(by), fromPackages: ix.uses.filter(u => u.member === name).map(u => ({ site: u.site, component: u.component, pkg: u.pkg, kind: u.kind })) };
+  });
+  return { states, exports: exportsOut.sort((a, b) => a.id < b.id ? -1 : 1), reexports, couldNotLook, packages: sortObj(packages), syntax: syntaxOut, definitions };
 }
 
 // ── the report ───────────────────────────────────────────────────────────────────────────────
@@ -451,7 +633,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 const groupBy = (xs, k) => { const m = new Map(); for (const x of xs) { const v = k(x); if (!m.has(v)) m.set(v, []); m.get(v).push(x); } return m; };
 
 function main(argv) {
-  const args = { load: [], state: [], define: [], callers: [] };
+  const args = { load: [], state: [], define: [], callers: [], signatures: [], syntax: [] };
   const print = s => console.log(s);
   const stop = why => { print(`ownership-index: NOT MEASURED — ${why}`); return 2; };
   for (let i = 0; i < argv.length; i++) {
@@ -472,6 +654,9 @@ function main(argv) {
   if (!fs.existsSync(pkgDir)) return stop(`${pkgDir} does not exist`);
   const T = loadTypeScript(pkgDir, args.typescript);
   if (T.notMeasured) return stop(T.notMeasured);
+  const wantSignatures = args.signatures.length > 0 || args['placement-reading'];
+  const settings = PS.load(args.settings ? { file: args.settings } : args.project ? { project: args.project } : { defaultsOnly: true });
+  if (wantSignatures && settings.refused) return stop(`the settings were refused: ${settings.refused.join('; ')}`);
 
   const t0 = Date.now();
   const cache = new Map();
@@ -484,6 +669,7 @@ function main(argv) {
   print(`  tool        ownership-index.js (spike, #647) · TypeScript ${T.ts.version} from ${T.from}`);
   print(`  package     ${pkgDir} · ${ix.made.config ? `tsconfig ${ix.made.config}` : 'no tsconfig: read as JavaScript (allowJs)'}`);
   print(`  design      ${args.design} — id ${R.designId(design)}`);
+  if (wantSignatures) print('  ' + PS.headline(settings).trimStart());
   print(`  date        ${new Date().toISOString().slice(0, 10)}`);
   print(`  corpus      ${plural(ix.corpusRel.length, 'script file')} listed; ${ix.files.length} in the program; ${ix.identifiers} references resolved`);
   print(`  build       ${buildMs} ms cold`);
@@ -493,6 +679,7 @@ function main(argv) {
   print('');
   print('COULD NOT FOLLOW (counted wherever it happens; any answer it could touch says so)');
   print(`  package bindings traced: ${ix.bindings.size} · member uses recorded: ${ix.uses.length}`);
+  print(`  followed into a parameter (a binding passed to a resolved corpus function): ${ix.followedIntoParameter}`);
   print(`  escapes (a package binding handed on, or read with a computed key): ${ix.escapes.length}`);
   for (const [pkg, es] of groupBy(ix.escapes, e => e.pkg)) print(`    ${pkg}: ${es.length} — ${es.slice(0, 4).map(e => `${e.site} ${e.why}`).join('; ')}${es.length > 4 ? ' …' : ''}`);
   print(`  dynamic imports bound to nothing we follow: ${ix.unbound.length}`);
@@ -503,7 +690,9 @@ function main(argv) {
   const escaped = ix.states.filter(s => s.escapes.length);
   print(`  module states that escape (returned, passed, stored): ${escaped.length} of ${ix.states.length}`);
 
-  const json = { instrument: { typescript: T.ts.version, designId: R.designId(design), pkgDir, buildMs }, load: [], state: [], define: [], callers: [], findings: [] };
+  // mappingId: the id of the file → component mapping alone, so a reader of ledgerFacts can refuse
+  // an index whose component names came from a different mapping than its own design's.
+  const json = { instrument: { typescript: T.ts.version, designId: R.designId(design), mappingId: mappingId(design), pkgDir, buildMs }, load: [], state: [], define: [], callers: [], findings: [] };
 
   for (const q of args.load) {
     const [pkg, membersRaw] = q.split('#');
@@ -580,12 +769,37 @@ function main(argv) {
     json.callers.push({ file: rel, found: true, exports: r.exports });
   }
 
+  for (const q of args.syntax) {
+    const [pkg, member] = q.split('#');
+    print('');
+    if (!pkg || !member) { print(`SYNTAX — ${q}: NOT READ — a syntax is named <pkg>#<member> (the parser entry the owner rules), e.g. acorn#parse`); continue; }
+    const hits = ix.uses.filter(u => u.pkg === pkg && u.member === member);
+    const by = groupBy(hits, h => h.component);
+    const anyCalls = ix.anyCallsOf(new Set([member]));
+    const blind = ix.escapes.filter(e => e.pkg === pkg).length + ix.unbound.filter(e => e.pkg === pkg).length + anyCalls.length;
+    print(`SYNTAX — ${q} (a ruling input: the member is named, never detected): called or referenced from ${plural(by.size, 'component')}` +
+      (by.size === 0 && blind ? ' — COULD NOT LOOK: see the could-not-tell count' : ''));
+    for (const [c, hs] of [...by].sort()) print(`    ${c}: ${hs.map(h => `${h.site} (${h.kind}) in ${h.fn}`).join('; ')}`);
+    print(`  could not tell: ${blind} (escapes and unbound imports of ${pkg}, and calls of .${member} on an untraced \`any\`)`);
+  }
+
   if (args.findings) {
     const multi = ix.states.map(s => ({ s, comps: [...new Set(s.writes.map(w => w.component))] })).filter(x => x.comps.length >= 2);
     print('');
     print(`FINDINGS — module states written from two or more components: ${multi.length} of ${ix.states.length} states`);
     for (const { s, comps } of multi) print(`    ${s.file}#${s.name} (${s.component}) — written by ${comps.join(', ')}${s.escapes.length ? ` · escapes at ${s.escapes.length}` : ''}`);
     json.findings = multi.map(({ s, comps }) => ({ state: `${s.file}#${s.name}`, owner: s.component, writers: comps, escapes: s.escapes.length }));
+    // The duplication reading the coupling table prints beside every coupling figure (#722): a
+    // function copied into a second component instead of imported lowers every import-graph
+    // coupling figure, and shows up here as one more component defining the name.
+    const top = [...ix.definitions].map(([name, ds]) => [name, ds.filter(d => d.topLevel)]).filter(([, ds]) => ds.length);
+    const dup = top.map(([name, ds]) => ({ name, by: groupBy(ds, d => d.component) })).filter(x => x.by.size >= 2)
+      .sort((a, b) => b.by.size - a.by.size || (a.name < b.name ? -1 : 1));
+    print(`FINDINGS — top-level function names defined in two or more components: ${dup.length} of ${top.length} top-level names ` +
+      '(a NAME match, not a clone match: a renamed copy is invisible, and unrelated functions sharing a name are counted)');
+    for (const { name, by } of dup) print(`    ${name} — ${[...by].sort().map(([c, ds]) => `${c}: ${ds.map(d => d.site).join(', ')}`).join(' · ')}`);
+    json.duplicates = dup.map(({ name, by }) => ({ name, definedIn: Object.fromEntries([...by].sort().map(([c, ds]) => [c, ds.map(d => d.site)])) }));
+    json.instrument.topLevelNames = top.length;
   }
 
   if (args.refresh) {
@@ -606,13 +820,84 @@ function main(argv) {
     json.instrument.refreshMs = ms;
   }
 
+  if (wantSignatures) {
+    const opt = k => PS.need(settings, k).value;
+    const weights = { direct: opt('signatures.weight.direct'), viaDoor: opt('signatures.weight.viaDoor') };
+    const minTokenLength = opt('signatures.vocabulary.minTokenLength'), band = opt('signatures.nearTwoBand');
+    const t2 = Date.now();
+    const sig = SV.fileSignatures(ix, { weights, minTokenLength });
+    const jobs = SV.jobsOf(design);
+    const jv = SV.jobVectors(sig, jobs);
+    const rd = SV.reading(sig, { band });
+    const sigMs = Date.now() - t2;
+    json.signatures = { settingsId: settings.id, weights, minTokenLength, band, ms: sigMs, files: {}, jobs: jv.perJob.map(j => ({ ...j, vec: Object.fromEntries(Object.entries(j.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })),
+      homes: jv.perHome.map(o => ({ ...o, vec: Object.fromEntries(Object.entries(o.vec).map(([v, x]) => [v, x ? SV.vecJSON(x) : null])) })), reading: rd.rows };
+    for (const s of sig.values()) json.signatures.files[s.file] = { component: s.component, passthrough: s.passthrough, unresolved: s.unresolved,
+      doors: Object.fromEntries(s.doors), views: Object.fromEntries(SV.VIEWS.map(v => [v, SV.vecJSON(s.views[v])])) };
+    const syntaxRows = Object.values(design.resources || {}).filter(r => r && (r.kind === 'syntax' || r.kind === 'registry')).length;
+
+    print('');
+    print(`SIGNATURES — ${plural(sig.size, 'file')} · views ${SV.VIEWS.join(', ')} · runtime NOT MEASURED (no co-execution yet, #712/#713) · ${sigMs} ms`);
+    print(`  weights: direct ${weights.direct}, through a door ${weights.viaDoor} · vocabulary tokens of ${minTokenLength}+ letters, weight 1 + ln(count) · types and calls by presence`);
+    print(`  syntax and registry features: ${syntaxRows ? plural(syntaxRows, 'ledger row') + ' of those kinds' : 'ABSENT — 0 ledger rows of kind syntax or registry are ruled, so files carry none (absent, not zero)'}`);
+    const passthroughs = [...sig.values()].filter(s => s.passthrough).map(s => s.file);
+    print(`  passthrough files (only import and re-export; their doors are never ownership): ${passthroughs.length}${passthroughs.length ? ' — ' + passthroughs.slice(0, 12).join(', ') + (passthroughs.length > 12 ? `, and ${passthroughs.length - 12} more` : '') : ''}`);
+    const empty = v => [...sig.values()].filter(s => !s.views[v].size).length;
+    print(`  files with no feature, per view: ${SV.VIEWS.map(v => `${v} ${empty(v)}`).join(' · ')} (of ${sig.size})`);
+    print(`  per job: ${jobs.ruled.length ? plural(jobs.ruled.length, 'ruled job') : 'NOT BUILT — 0 jobs ruled'}${jobs.unruled.length ? ` · ${plural(jobs.unruled.length, 'job row')} not ruled, not used: ${jobs.unruled.join(', ')}` : ''}`);
+    print(`  per home: ${jv.perHome.length ? jv.perHome.map(o => `${o.home} (${plural(o.jobs, 'job')})`).join(', ') : 'NOT BUILT — no ruled job with a member file; the reading below uses DIRECTORY PRIORS'}`);
+    for (const j of jv.perJob) print(`    job ${j.id} (home ${j.home}): ${plural(j.files.length, 'member file')} — files that touch its ${plural(j.resources, 'resource')} directly or declare its ${plural(j.doors, 'door')}`);
+    if (jv.missing.length) print(`  jobs not built: ${jv.missing.join('; ')}`);
+    for (const f of args.signatures) {
+      const s = sig.get(f);
+      print('');
+      if (!s) { print(`SIGNATURE — ${f}: NOT IN THE PROGRAM (could not look)`); continue; }
+      const blind = s.unresolved.escapes + s.unresolved.unbound + s.unresolved.computedLoads;
+      print(`SIGNATURE — ${f} (${s.component})${s.passthrough ? ' · PASSTHROUGH' : ''}${blind ? ` · AT LEAST: ${s.unresolved.escapes} escapes, ${s.unresolved.unbound} unbound imports, ${s.unresolved.computedLoads} computed loads not followed` : ''}`);
+      for (const v of SV.VIEWS) {
+        const es = [...s.views[v]].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+        const cap = v === 'vocabulary' ? 15 : 40;
+        print(`  ${v} (${es.length}): ${es.length ? es.slice(0, cap).map(([k, x]) => x === 1 ? k : `${k} ×${+x.toFixed(2)}`).join(' · ') + (es.length > cap ? ` · and ${es.length - cap} more` : '') : '(none)'}`);
+      }
+      print(`  doors used from other components (${s.doors.size}): ${s.doors.size ? [...s.doors].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') : '(none)'}`);
+    }
+    if (args['placement-reading']) {
+      const rows = rd.rows.filter(r => r.component !== '(unmapped)');
+      print('');
+      print(`PLACEMENT READING — a reading, not an acceptance: ${jv.perHome.length ? 'home prototypes from ruled jobs (the reading itself still compares directory priors)' : 'DIRECTORY PRIORS (component directories, not owners), each file left out of its own'} · near two = second within ${band * 100}% of the nearest`);
+      for (const v of SV.VIEWS) {
+        const has = rows.filter(r => !r.views[v].empty), far = has.filter(r => r.views[v].far).length, placed = has.length - far;
+        const own = has.filter(r => r.views[v].ownNearest).length, two = has.filter(r => r.views[v].nearTwo).length;
+        print(`  ${v.padEnd(11)} ${rows.length} files = ${rows.length - has.length} no feature + ${far} far from every prior + ${placed} near one: ` +
+          `own directory nearest ${own} (${placed ? (100 * own / placed).toFixed(1) : '—'}% of ${placed}) · near two ${two}`);
+      }
+      const featured = rows.filter(r => r.featured >= 2);
+      const disagree = featured.filter(r => !r.agree);
+      print(`  views agree on the nearest component: ${featured.length - disagree.length} of ${featured.length} files with 2+ views featured; disagree ${disagree.length}`);
+      const nearTwoRes = rows.filter(r => !r.views.resources.empty && r.views.resources.nearTwo);
+      const show = (title, list, fmt) => { print(`  ${title}: ${list.length}`); for (const r of list.slice(0, 25)) print(`    ${fmt(r)}`); if (list.length > 25) print(`    … and ${list.length - 25} more (all in --json)`); };
+      const fmtV = (r, v) => { const x = r.views[v]; return x.empty ? `${v} —` : x.far ? `${v} far` : `${v} ${x.nearest} ${x.d.toFixed(3)}${x.second ? ` / ${x.second} ${x.d2.toFixed(3)}` : ''}`; };
+      show('near two under resources', nearTwoRes, r => `${r.file} (${r.component}) — ${fmtV(r, 'resources')}`);
+      show('views disagree', disagree, r => `${r.file} (${r.component}) — ${SV.VIEWS.map(v => fmtV(r, v)).join(' · ')}`);
+      json.signatures.readingSummary = Object.fromEntries(SV.VIEWS.map(v => { const has = rows.filter(r => !r.views[v].empty); return [v, { featured: has.length, far: has.filter(r => r.views[v].far).length, ownNearest: has.filter(r => r.views[v].ownNearest).length, nearTwo: has.filter(r => r.views[v].nearTwo).length }]; }));
+      json.signatures.readingSummary.files = rows.length;
+      json.signatures.readingSummary.disagree = disagree.length; json.signatures.readingSummary.featured2 = featured.length;
+    }
+  }
+
   print('');
   print('SUMMARY');
   print(`  ${ix.files.length} files · ${ix.bindings.size} package bindings · ${ix.uses.length} member uses · ${ix.states.length} module states · ` +
     `${ix.escapes.length + ix.unbound.length} package uses not followed · ${escaped.length} states that escape`);
-  if (args.json) { fs.writeFileSync(args.json, JSON.stringify(json, null, 1) + '\n'); print(`  index written: ${args.json}`); }
+  if (args.json) {
+    json.ledgerFacts = ledgerFacts(ix, { syntax: args.syntax.filter(q => /^[^#]+#[^#]+$/.test(q)), define: args.define });
+    const lf = json.ledgerFacts;
+    print(`  ledger facts: ${lf.states.length} module states · ${lf.exports.length} exports referenced from another file (declared there; ${lf.reexports} re-exports counted apart` +
+      `${lf.couldNotLook ? `, ${lf.couldNotLook} files COULD NOT LOOK` : ''}) · ${Object.keys(lf.packages).length} packages with member uses · ${lf.syntax.length} syntax queries`);
+    fs.writeFileSync(args.json, JSON.stringify(json, null, 1) + '\n'); print(`  index written: ${args.json}`);
+  }
   return 0;
 }
 
-module.exports = { build, loadTypeScript, main };
+module.exports = { build, loadTypeScript, ledgerFacts, mappingId, main };
 if (require.main === module) process.exit(main(process.argv.slice(2)));

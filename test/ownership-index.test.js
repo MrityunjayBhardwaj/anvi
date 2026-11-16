@@ -72,7 +72,7 @@ console.log('\nNOT MEASURED — every input the tool cannot measure from exits 2
 
 // The number of `ok` calls in the block below. Asserted when the block runs, so the skip line
 // cannot go on quoting a count that drifted.
-const GATED = 40;
+const GATED = 42;
 console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -99,7 +99,9 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
       '  return api;\n}\n');
     put('src/engine/midi.ts', 'export function noteToMidi(n: string): number { return n.length; }\nexport function helper(): number { return 1; }\n');
     // ws: a named import of the member; the registry state.
-    put('src/ws/fetch.ts', "import { load } from 'snd';\nexport function fetchIt(u: string) { return load(u); }\n");
+    // …and a helper NESTED in a function that shares a top-level name in engine: not a duplicate.
+    put('src/ws/fetch.ts', "import { load } from 'snd';\nexport function fetchIt(u: string) { return load(u); }\n" +
+      'export function outer() { const wrap = () => 3; return wrap(); }\n');
     put('src/ws/registry.ts',
       'const editors = new Map<string, number>();\n' +
       'export function register(k: string) { editors.set(k, 1); shared.set(k, 1); }\n' +
@@ -170,6 +172,10 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
     const Fi = section(r.out, 'FINDINGS');
     ok(/written from two or more components: 1 of 3 states/.test(Fi) && /src\/ws\/registry\.ts#shared \(ws\) — written by ws, viz/.test(Fi) && !/#editors/.test(Fi),
        `findings list the shared Map with writers ws, viz, and not the one-writer editors (${Fi.split('\n')[0]})`);
+    ok(/top-level function names defined in two or more components: 1 of \d+ top-level names/.test(Fi) &&
+       /^ {4}helper — engine: src\/engine\/midi\.ts:2 · viz: src\/viz\/play\.ts:9$/m.test(Fi),
+       `the duplication reading lists helper, top-level in engine and viz (${(Fi.match(/top-level function names.*/) || [''])[0]})`);
+    ok(!/^ {4}wrap — /m.test(Fi), 'a nested `const wrap` in ws is not a duplicate of the top-level wrap in engine');
 
     console.log('\n  DEFINE:');
     ok(/DEFINE — noteToMidi: defined in 1 component\n {4}engine: src\/engine\/midi\.ts:1\n/.test(r.out), 'noteToMidi is defined in one component; the .d.ts declaration is not counted');
@@ -239,6 +245,60 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
 
     const ran = pass + fail - before;
     ok(ran + 1 === GATED, `the skip count matches the cases this block runs (${ran + 1} of ${GATED})`);
+  }
+}
+
+// LEDGER FACTS (#710, ledger v1): what --json writes for the ledger to propose state, registry,
+// door and syntax rows from. Its own small package, so the counts above do not move.
+const GATED_FACTS = 14;
+console.log('\nLEDGER FACTS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
+{
+  const from = process.env.STRUCTURE_TS_FROM;
+  let tsDir = null;
+  try { tsDir = from && path.dirname(require.resolve('typescript/package.json', { paths: [from] })); } catch { tsDir = null; }
+  if (!tsDir) console.log(`  – SKIPPED ${GATED_FACTS} cases, NOT MEASURED here: ${from ? `no TypeScript resolvable from ${from}` : 'STRUCTURE_TS_FROM is not set'}`);
+  else {
+    const before = pass + fail;
+    const P = path.join(DIR, 'facts');
+    const put = putIn(P);
+    put('tsconfig.json', JSON.stringify({ compilerOptions: { target: 'ESNext', module: 'ESNext', moduleResolution: 'bundler', strict: true, noEmit: true }, include: ['src'] }));
+    const FD = { root: 'src', components: { ws: { dirs: ['ws'] }, viz: { dirs: ['viz'] } }, allowed: [] };
+    const design = put('design.json', JSON.stringify(FD));
+    put('src/ws/registry.ts', 'const editors = new Map<string, number>();\n' +
+      'export function register(k: string) {\n  editors.set(k, 1);\n}\n' +
+      'export function unregister(k: string) {\n  const drop = () => editors.delete(k);\n  drop();\n}\n' +
+      'export function size() { return editors.size; }\n' +
+      'let counter = 0;\nfunction bump() { counter++; }\nexport function viaHelper() { bump(); }\n');
+    put('src/ws/view.ts', "import { register, unregister, viaHelper } from './registry';\nexport function mount() { register('a'); unregister('a'); viaHelper(); }\n");
+    put('src/ws/index.ts', "export { register } from './registry';\n");
+    put('src/viz/use.ts', "import { register } from '../ws/index';\nexport function v() { register('b'); }\n");
+    put('src/viz/p.ts', "import { parse } from 'acorn';\nexport function p(s: string) { return parse(s); }\n");
+    const out = path.join(DIR, 'facts.json');
+    const r = run(['--design', design, '--package', P, '--typescript', from, '--syntax', 'acorn#parse', '--define', 'register', '--json', out]);
+    ok(r.code === 0 && fs.existsSync(out), `the index with --json exits 0 and writes the file (exit ${r.code})`);
+    const j = JSON.parse(fs.readFileSync(out, 'utf8'));
+    const lf = j.ledgerFacts || { states: [], exports: [], syntax: [], definitions: [] };
+    const R = require(path.join(__dirname, '..', 'hooks', 'structure-rules.js'));
+    ok(j.instrument.mappingId === R.designId({ root: FD.root, excludes: FD.excludes, components: FD.components, allowed: [] }), 'the instrument records the id of the file → component mapping');
+    const ex = id => lf.exports.find(e => e.id === id);
+    const reg = ex('src/ws/registry.ts#register');
+    ok(reg && JSON.stringify(reg.callerFiles) === JSON.stringify({ 'src/viz/use.ts': 1, 'src/ws/view.ts': 1 }) && JSON.stringify(reg.callers) === JSON.stringify({ viz: 1, ws: 1 }),
+       `an export's callers include the one that reached it through a barrel (${reg && JSON.stringify(reg.callerFiles)})`);
+    ok(reg && JSON.stringify(reg.writesStates) === '["src/ws/registry.ts#editors"]', 'a write inside the export\'s body is the export\'s write');
+    ok(JSON.stringify((ex('src/ws/registry.ts#unregister') || {}).writesStates) === '["src/ws/registry.ts#editors"]', 'so is a write inside a closure in its body');
+    ok(ex('src/ws/registry.ts#viaHelper') && ex('src/ws/registry.ts#viaHelper').writesStates.length === 0, 'a write in a private helper it calls is NOT attributed to it (no false door)');
+    ok(!ex('src/ws/registry.ts#size'), 'an export no other file references is not listed');
+    ok(!lf.exports.some(e => e.file === 'src/ws/index.ts') && lf.reexports >= 1, `a barrel's re-export is counted apart, never listed as the barrel's export (re-exports ${lf.reexports})`);
+    const ed = lf.states.find(x => x.id === 'src/ws/registry.ts#editors');
+    ok(ed && Object.keys(ed.writers).join() === 'ws' && ed.writers.ws.includes('src/ws/registry.ts#register') && JSON.stringify(ed.readerFiles) === '{"src/ws/registry.ts":1}',
+       `a state's writers by component and its reader files (${ed && JSON.stringify(ed.writers)})`);
+    ok(ed && JSON.stringify(ed.writeSites) === '["src/ws/registry.ts:3","src/ws/registry.ts:6"]', `its write sites (${ed && JSON.stringify(ed.writeSites)})`);
+    const sx = lf.syntax[0] || {};
+    ok(sx.id === 'acorn#parse' && JSON.stringify(Object.keys(sx.sites)) === '["viz"]' && sx.sites.viz.length === 1, `--syntax acorn#parse: its call sites by component (${JSON.stringify(sx.sites)})`);
+    ok(/SYNTAX — acorn#parse \(a ruling input: the member is named, never detected\): called or referenced from 1 component/.test(r.out), 'the report prints the syntax query');
+    ok(lf.definitions[0] && JSON.stringify(Object.keys(lf.definitions[0].definedIn)) === '["ws"]', '--define names travel into the facts');
+    const ran = pass + fail - before;
+    ok(ran + 1 === GATED_FACTS, `the skip count matches the cases this block runs (${ran + 1} of ${GATED_FACTS})`);
   }
 }
 
