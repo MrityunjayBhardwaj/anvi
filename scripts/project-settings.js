@@ -58,6 +58,11 @@ const SCHEMA = {
     about: 'below this many ruled jobs the floor is not judged; the result prints "underpowered, k of n"',
     readBy: '#723 (PLACE acceptance)',
   },
+  'duplication.bodyHash.minStatements': {
+    type: 'integer', min: 1, default: 5,
+    about: 'a function body with fewer statements is too small to count as a re-implemented copy',
+    readBy: '#700 (forceable share)',
+  },
   'signatures.weight.direct': {
     type: 'number', min: 0, exclusiveMin: true, default: 1,
     about: 'weight of a resource the file touches itself',
@@ -71,7 +76,37 @@ const SCHEMA = {
   'signatures.nearTwoBand': {
     type: 'fraction', min: 0, max: 1, default: 0.1,
     about: 'a second owner within this fraction of the nearest distance makes the file "near two"',
-    readBy: '#647 (signature vectors)',
+    readBy: '#647 (signature vectors), #723 (PLACE: near two owners → split)',
+  },
+  'placement.farDistance': {
+    type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.8,
+    about: 'a nearest cosine distance at or above this is "far": from every owner (no existing home) or from every job of the home (new job)',
+    readBy: '#723 (PLACE)',
+  },
+  'placement.centralDistance': {
+    type: 'fraction', min: 0, max: 1, default: 0.2,
+    about: 'a task the lead view puts within this distance of its owner keeps that answer when another view disagrees; farther, the disagreement makes it "couldn\'t tell"',
+    readBy: '#723 (PLACE)',
+  },
+  'placement.blend.weight': {
+    type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.5,
+    about: 'the first owner\'s share of a blended boundary task (the second gets the rest)',
+    readBy: '#723 (PLACE, blended boundary)',
+  },
+  'coexecution.minTests': {
+    type: 'integer', min: 1, default: 2,
+    about: 'two files run together only when functions of both run in at least this many of the same tests (one test is one scenario, not a pattern)',
+    readBy: '#713 (runtime co-execution)',
+  },
+  'coexecution.minShare': {
+    type: 'fraction', min: 0, max: 1, default: 0.5,
+    about: 'and in at least this share of the tests of the rarer of the two (a broad test that calls everything does not make every pair a pair)',
+    readBy: '#713 (runtime co-execution)',
+  },
+  'coexecution.partialBelow': {
+    type: 'fraction', min: 0, max: 1, default: 0.5,
+    about: 'below this share of corpus files called by the suite, every co-execution finding is labelled partial (#713 done-when: "below half")',
+    readBy: '#713 (runtime co-execution)',
   },
   'signatures.vocabulary.minTokenLength': {
     type: 'integer', min: 1, default: 3,

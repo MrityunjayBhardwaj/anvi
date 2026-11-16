@@ -56,16 +56,39 @@ console.log('\nARITHMETIC — runs everywhere:');
   ok(lop.nearTwo === false && lop.nearest === 'P', `a file clearly nearer one prior is not near two (${lop.nearest} ${lop.d.toFixed(3)} / ${lop.second} ${lop.d2.toFixed(3)})`);
   ok(row('b1').far === true, 'B\'s only file has no prior of its own left and shares nothing with A: far, not "nearest B"');
 
-  const jobs = SV.jobsOf({ jobs: { load: { owner: 'A', members: ['a1', 'a2#fn'], ruled: '2026-11-05' }, open: { owner: 'B', members: ['b1'] } } });
-  ok(jobs.ruled.length === 1 && jobs.ruled[0].id === 'load' && JSON.stringify(jobs.unruled) === '["open"]', 'a job without a ruling date is listed, never used');
-  const jv = SV.jobVectors(sig, jobs);
-  ok(jv.perJob.length === 1 && jv.perJob[0].found === 2 && jv.perJob[0].fileGrain === true, 'a file#symbol member is read at file grain and says so');
-  ok(jv.perOwner.length === 1 && jv.perOwner[0].owner === 'A' && jv.perOwner[0].jobs === 1, 'an owner prototype is built from its ruled jobs');
-  ok(SV.jobVectors(sig, SV.jobsOf({ jobs: { j: { owner: 'A', members: ['nope'], ruled: '2026-11-05' } } })).missing[0] === 'j: nope', 'a job member not in the program is listed, not dropped');
+  // Jobs in the ledger's shape (#710): member files are DERIVED — direct touchers of the job's
+  // resources and the files declaring its doors — never listed.
+  const J = (file, component, direct, via = {}) => { const res = M({ ...Object.fromEntries(direct.map(k => [k, 1])), ...via });
+    return { file, component, passthrough: false, doors: new Map(), unresolved: {}, direct: new Set(direct), views: { resources: res, types: M({}), calls: M({}), vocabulary: M({}) } }; };
+  const jsig = new Map([
+    J('src/e/load.ts', 'E', ['lib:snd', 'member:snd#samples']),                 // touches the library directly
+    J('src/e/cache.ts', 'E', ['writes:src/e/cache.ts#buffers']),                // writes the job's state
+    J('src/w/ui.ts', 'W', [], { 'lib:snd': 0.5, 'writes:src/e/cache.ts#buffers': 0.5 }),  // reaches both only through a door
+    J('src/e/door.ts', 'E', []),                                                // declares the job's door, touches nothing
+    J('src/w/other.ts', 'W', ['lib:other']),
+  ].map(s => [s.file, s]));
+  const RES = { snd: { kind: 'library' }, 'src/e/cache.ts#buffers': { kind: 'state' }, 'src/e/door.ts#load': { kind: 'door' }, 'snd#samples': { kind: 'syntax' } };
+  const design = { resources: RES, jobs: {
+    soundLoading: { home: 'E', resources: ['snd', 'src/e/cache.ts#buffers'], doors: ['src/e/door.ts#load'], reason: 'ownership', ruled: '2026-11-05' },
+    draft: { home: 'W', resources: ['snd'], doors: [] },                         // no ruling date: listed, never used
+    old: { owner: 'E', members: ['src/e/load.ts'], ruled: '2026-11-05' } } };    // the superseded provisional shape: not a ruled job
+  const jobs = SV.jobsOf(design);
+  ok(jobs.ruled.length === 1 && jobs.ruled[0].id === 'soundLoading' && JSON.stringify(jobs.unruled.sort()) === '["draft","old"]',
+     `a job needs home, resources and a ruling date; the provisional {owner, members} shape is no longer read (unruled: ${JSON.stringify(jobs.unruled)})`);
+  const jv = SV.jobVectors(jsig, jobs);
+  ok(jv.perJob.length === 1 && JSON.stringify(jv.perJob[0].files) === '["src/e/cache.ts","src/e/door.ts","src/e/load.ts"]',
+     `member files: the direct touchers of its resources and its door's file (${JSON.stringify(jv.perJob[0] && jv.perJob[0].files)})`);
+  ok(!jv.perJob[0].files.includes('src/w/ui.ts'), 'a file reaching the resources only through a door is NOT a member (consumers do not join the job)');
+  ok(jv.perHome.length === 1 && jv.perHome[0].home === 'E' && jv.perHome[0].jobs === 1, 'a home prototype is built from its ruled jobs');
+  ok(JSON.stringify(SV.featuresOf('snd#samples', RES['snd#samples'])) === '["member:snd#samples"]' && JSON.stringify(SV.featuresOf('pkg', undefined)) === '["lib:pkg"]',
+     'a resource id becomes features by its row\'s kind: a syntax by its member, an unlisted bare id as a library');
+  const lost = SV.jobVectors(jsig, SV.jobsOf({ resources: RES, jobs: { j: { home: 'E', resources: ['nope'], doors: ['src/x/gone.ts#f'], ruled: '2026-11-05' } } }));
+  ok(lost.perJob.length === 0 && lost.missing.some(m => /door file src\/x\/gone\.ts is not in the program/.test(m)) && lost.missing.some(m => /j: no file touches its resources/.test(m)),
+     `a job with no member file is listed as not built, never built from nothing (${JSON.stringify(lost.missing)})`);
   ok(SV.jobsOf({}).ruled.length === 0, 'a design with no jobs table has no ruled jobs');
 }
 
-const GATED = 24;
+const GATED = 25;
 console.log('\nFEATURES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -127,10 +150,19 @@ console.log('\nFEATURES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names 
     const r4 = run([], ['--settings', bad]);
     ok(r4.code === 0, 'a refused settings file does not stop a run that asks for no signatures');
 
-    const withJobs = put('design-jobs.json', JSON.stringify({ ...D, jobs: { load: { owner: 'engine', members: ['src/engine/audio.ts'], ruled: '2026-11-05' }, pend: { owner: 'ws', members: ['src/ws/assets.ts'] } } }));
+    // A design with a ledger and jobs in the ledger's shape (purposes are required once it has one).
+    const LD = { ...D, components: Object.fromEntries(Object.entries(D.components).map(([n, c]) => [n, { ...c, purpose: `the ${n} part of the fixture` }])),
+      resources: { snd: { kind: 'library', reach: 'process', owner: 'engine', verifiedBy: 'imports', enforcedBy: 'static-guard' } },
+      jobs: { load: { home: 'engine', resources: ['snd'], doors: [], reason: 'ownership', ruled: '2026-11-05' }, pend: { home: 'ws', resources: ['snd'], doors: [], reason: 'ownership' } } };
+    const withJobs = put('design-jobs.json', JSON.stringify(LD));
     const r5 = spawnSync(process.execPath, [TOOL, '--design', withJobs, '--package', P, '--typescript', tsDir, '--placement-reading'], { encoding: 'utf8', timeout: 120000 });
     const o5 = (r5.stdout || '') + (r5.stderr || '');
-    ok(/per job: 1 ruled job · 1 job row not ruled, not used: pend/.test(o5) && /per owner: engine \(1 job\)/.test(o5), 'a ruled job builds a job and an owner prototype; an unruled one is listed, not used');
+    ok(/NOT MEASURED — the design cannot be judged against: job "pend" has no ruling date/.test(o5), 'a jobs table with an undated job is refused by the design check before anything is read');
+    LD.jobs.pend.ruled = '2026-11-05';
+    const r6 = spawnSync(process.execPath, [TOOL, '--design', put('design-jobs2.json', JSON.stringify(LD)), '--package', P, '--typescript', tsDir, '--placement-reading'], { encoding: 'utf8', timeout: 120000 });
+    const o6 = (r6.stdout || '') + (r6.stderr || '');
+    ok(/per job: 2 ruled jobs/.test(o6) && /per home: engine \(1 job\), ws \(1 job\)/.test(o6) && /job load \(home engine\): 1 member file/.test(o6),
+       `ruled jobs build per-job and per-home vectors from the files that touch snd directly (${(o6.match(/job load.*/) || [''])[0]})`);
 
     const ran = pass + fail - before;
     ok(ran + 1 === GATED, `the skip count matches the cases this block runs (${ran + 1} of ${GATED})`);

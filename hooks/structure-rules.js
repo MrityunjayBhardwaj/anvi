@@ -10,10 +10,13 @@
 // THE FAILURE CLASS. An agent can erode structure one import at a time — a shortcut edge
 // here, an upward reach there — and nothing notices until the module graph has knotted.
 // Cycle detection and dependency rules are well served already (dependency-cruiser, ArchUnit,
-// Bazel visibility). Three rules refuse here — divergence from the design's component graph,
-// cycles, and (when the design carries an ownership ledger, #710) a second toucher of a library
-// another component owns — under a RATCHET: existing violations are recorded in a baseline and
-// allowed to stand; only NEW ones are refused.
+// Bazel visibility). Six rules refuse here — divergence from the design's component graph,
+// cycles, and, from the design's ownership ledger and entrances: a second toucher of a library
+// another component owns (#710, #695), an import past a component's entrance (#695), a reference
+// to a door from outside its owner and a read of a tree's fields outside its owner (#696; measured
+// by `structure-symbols.js`, handed in) — under a RATCHET: existing violations are recorded in a
+// baseline and allowed to stand; only NEW ones are refused, and a ledger finding only when its row
+// is RULED (`ruled: YYYY-MM-DD`); one on a proposed row is reported.
 //
 // THE DESIGN IS A COMPONENT GRAPH, NOT A LAYER ORDER (#554). A design names components, maps
 // files to them, and DECLARES the edges allowed between them; the code is checked against it
@@ -61,12 +64,12 @@
 // The rules that REFUSE, and so are ratcheted. The new-module check was never among them (#509).
 // A removed rule that baselines carried a section for is listed in RETIRED, so a baseline still
 // holding one is named, not misread.
-const RULES = ['divergence', 'cycle', 'owner'];
+const RULES = ['divergence', 'cycle', 'owner', 'entrance', 'door', 'reads'];
 // Rules added after baselines were already being written. A baseline that has no section for one
 // did not measure it: grandfathering nothing would refuse every existing toucher as new, and
 // refusing on a measurement nobody made is not a verdict. So the rule is not judged against that
 // baseline, and the report says so; regenerating the baseline measures it.
-const SINCE = { owner: '#710' };
+const SINCE = { owner: '#710', entrance: '#695', door: '#696', reads: '#696' };
 const RETIRED = {
   implied: 'the implied rule was removed (#542): it refused imports a file genuinely uses',
   layer: 'the layer order was replaced by the component graph (#554)',
@@ -122,22 +125,50 @@ const COMPILED_AWAY = ['pre-compilation-only', 'type-only', 'type-import'];
 function designId(design) {
   const d = design || {};
   const comps = isObject(d.components) ? d.components : {};
-  const components = Object.keys(comps).sort().map(name => ({
-    name,
-    dirs: sortedSet(((comps[name] && comps[name].dirs) || []).map(stripSlash)),
-    files: sortedSet(comps[name] && comps[name].files),
-  }));
+  const components = Object.keys(comps).sort().map(name => {
+    const c = {
+      name,
+      dirs: sortedSet(((comps[name] && comps[name].dirs) || []).map(stripSlash)),
+      files: sortedSet(comps[name] && comps[name].files),
+    };
+    // A component's entrance (#695), only when declared: which files outside code may import it
+    // through changes what the entrance rule refuses. Its ruling date and reason are prose — a
+    // finding is recorded either way and only whether it REFUSES follows the date (see `isRuled`),
+    // so a ruling never asks for a new baseline.
+    const ent = comps[name] && comps[name].entrance;
+    if (isObject(ent)) c.entrance = sortedSet(ent.files);
+    return c;
+  });
   const allowed = sortedSet((Array.isArray(d.allowed) ? d.allowed : []).map(e => Array.isArray(e) ? edgeKey(e[0], e[1]) : String(e)));
   const canonical = { root: stripSlash(d.root || ''), excludes: sortedSet(d.excludes), components, allowed };
   // Only when on, so every design written before the key keeps the id its baselines carry.
   if (countsTypeOnly(d)) canonical.typeOnlyImports = 'count';
+  // `hotPaths` (#719) is NOT here, by decision: it changes no verdict of the three rules. An edit on
+  // a hot edge gets a notice and is never refused, and its budget is judged at PR time against a
+  // profiler snapshot, which prints the manifest's own id beside every figure (hotPathsId). Putting
+  // it in this id would make ruling a budget — or recording a new measurement — read as a new
+  // design, withhold every verdict until the baseline was regenerated, and disarm a package armed
+  // under the old id, for a change that refuses nothing. A test holds this both ways.
   // The ledger (#710), only when present, for the same reason. Per row only what changes who may
   // touch it or who refuses: id, kind, reach, owner. Touchers are a measurement, verifiedBy and
   // enforcedBy follow from the row by lookup, purpose and rule are prose.
   if (isObject(d.resources)) canonical.resources = Object.keys(d.resources).sort().map(id => {
     const r = isObject(d.resources[id]) ? d.resources[id] : {};
-    return { id, kind: r.kind === undefined ? null : r.kind, reach: r.reach === undefined ? null : r.reach,
-             owner: r.owner === undefined ? null : r.owner };
+    const row = { id, kind: r.kind === undefined ? null : r.kind, reach: r.reach === undefined ? null : r.reach,
+                  owner: r.owner === undefined ? null : r.owner };
+    // What a row covers and where inside its owner it may be touched (#695, #696), each only when
+    // present so every row written before them keeps its id: the package names it stands for, the
+    // paths inside the owner, the symbols of a door, the fields of a tree.
+    for (const k of ['packages', 'within', 'symbols', 'fields'])
+      if (r[k] !== undefined) row[k] = sortedSet(k === 'within' ? (Array.isArray(r[k]) ? r[k].map(stripSlash) : r[k]) : r[k]);
+    return row;
+  });
+  // Jobs (#710, ledger v1), only when present: a job's home and the resources it holds are a
+  // ruling, and moving either changes what a placement is judged against. Its doors, reason, date,
+  // evidence and any blast radius written beside it are commentary or follow from the rows.
+  if (isObject(d.jobs)) canonical.jobs = Object.keys(d.jobs).sort().map(id => {
+    const j = isObject(d.jobs[id]) ? d.jobs[id] : {};
+    return { id, home: j.home === undefined ? null : j.home, resources: sortedSet(j.resources) };
   });
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
 }
@@ -179,7 +210,8 @@ function designProblem(design) {
   const cyc = [...onCycle(adj)].sort();
   if (cyc.length) return `the declared edges form a cycle (${cyc.join(', ')}) — a cycle between components is a design ` +
     'question with three answers: invert one direction through a port or registry, extract what both need, or merge them';
-  return ledgerProblem(d, names);
+  // An entrance is judged whether or not the design carries a ledger (#695).
+  return entranceProblem(d) || ledgerProblem(d, names) || hotPathsProblem(d);
 }
 
 // ── the ledger (#710) ────────────────────────────────────────────────────────────────
@@ -195,7 +227,10 @@ const KINDS = ['library', 'framework', 'state', 'syntax', 'registry', 'door'];
 const REACHES = ['process', 'shared'];
 const INSTRUMENTS = ['imports', 'symbols', 'grants', 'runtime'];
 // What the static guard would have to see, per kind, for a process row.
-const PREDICATE = { library: 'import', door: 'import', state: 'write', syntax: 'parse-call', registry: 'register' };
+// A door is touched by REFERENCE (a call, or its symbol taken as a value — #696), not by import: a
+// panel calls `wb.replaceRanges` on a callback parameter without ever importing the class. A row that
+// names `fields` (a parse tree's node fields, #696) is touched by READING one.
+const PREDICATE = { library: 'import', door: 'reference', state: 'write', syntax: 'parse-call', registry: 'register' };
 
 // Why the ledger would make verdicts lie, or null. Each is a row the guard could not judge as
 // written: a kind or reach it does not know, an owner that is no component (a typo that owns
@@ -218,13 +253,224 @@ function ledgerProblem(d, names) {
       return `resource "${id}" is shared but enforced by the static guard — something outside the corpus can reach it, so only its own access control sees every access; name that control, or "none"`;
     if (r.verifiedBy !== undefined && r.verifiedBy !== null && !INSTRUMENTS.includes(r.verifiedBy))
       return `resource "${id}" is verified by ${JSON.stringify(r.verifiedBy)} — it is one of ${INSTRUMENTS.join(', ')}, or null (UNVERIFIED)`;
+    const reach = reachProblem(id, r, d);
+    if (reach) return reach;
   }
+  const jobs = jobsProblem(d, names);
+  if (jobs) return jobs;
   for (const [name, c] of Object.entries(d.components)) {
     const purpose = typeof c.purpose === 'string' ? c.purpose.trim() : '';
     if (!purpose) return `component "${name}" has no "purpose" — a design with a ledger needs one sentence per component saying what it is for`;
     if (purpose.toLowerCase() === name.toLowerCase()) return `component "${name}" has its own name as its purpose — say what it is for`;
   }
   return null;
+}
+
+// ── what a row covers, and where inside its owner it may be touched (#695, #696) ──────────
+// `packages`: the package names a library row stands for beside its id, each a name or a pattern
+// with `*` (`acorn-*`), so `acorn`, `acorn-walk` and `acorn/dist/x` are one row. `within`: paths
+// inside the owner (relative to the root, as `dirs` are) where it may be touched — "only
+// codeView/strudelMini/ may import @strudel/mini". `symbols` (a door): `<file or package>#<Name>`,
+// `#<Name>.<member>` or, for a file in the corpus, `#<Name>.*`. `fields` (a tree's node fields):
+// plain property names, read by name. Each is refused here only for the reason a verdict built on
+// it would lie: a pattern that matches nothing nameable, a path outside the owner (it would refuse
+// the owner itself), a symbol in a form the rule cannot resolve.
+const PATTERN = /^(@[a-z0-9._*-]+\/)?[a-z0-9._*-]+$/i;
+const SYMBOL = /^([^#\s]+)#([A-Za-z_$][\w$]*)(?:\.(\*|[A-Za-z_$][\w$]*))?$/;
+const isRuled = x => isObject(x) && typeof x.ruled === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x.ruled);
+const isPackageOrigin = origin => !/\.[cm]?[jt]sx?$/.test(origin);
+
+function reachProblem(id, r, d) {
+  const strings = xs => Array.isArray(xs) && xs.length > 0 && xs.every(x => typeof x === 'string' && x.trim());
+  if (r.packages !== undefined) {
+    if (r.kind !== 'library') return `resource "${id}" names "packages" but is a ${r.kind} — only a library row stands for package names`;
+    if (!strings(r.packages) || !r.packages.every(x => PATTERN.test(x)))
+      return `resource "${id}": "packages" must be a list of package names or patterns with * (as "acorn-*")`;
+  }
+  if (r.within !== undefined) {
+    if (!r.owner) return `resource "${id}" names "within" but has no owner — paths inside an owner need the owner`;
+    if (!strings(r.within)) return `resource "${id}": "within" must be a list of paths inside its owner, relative to the root`;
+    const of = componentOf(d, '');
+    const outside = r.within.filter(w => of(stripSlash(w) + '/x') !== r.owner && of(stripSlash(w)) !== r.owner);
+    if (outside.length) return `resource "${id}": "within" names ${outside.map(w => JSON.stringify(w)).join(', ')}, outside its owner "${r.owner}" — the owner itself would be refused`;
+  }
+  if (r.symbols !== undefined) {
+    if (r.kind !== 'door') return `resource "${id}" names "symbols" but is a ${r.kind} — only a door is touched by reference`;
+    if (!strings(r.symbols)) return `resource "${id}": "symbols" must be a list of "<file or package>#<Name>[.<member>|.*]"`;
+    for (const sym of r.symbols) {
+      const m = SYMBOL.exec(sym);
+      if (!m) return `resource "${id}": the symbol ${JSON.stringify(sym)} is not "<file or package>#<Name>[.<member>|.*]"`;
+      if (m[3] === '*' && isPackageOrigin(m[1])) return `resource "${id}": ${JSON.stringify(sym)} — "every member" is read from a file in the corpus; a package's members are named one by one`;
+    }
+  }
+  if (r.fields !== undefined) {
+    if (r.kind === 'library' || r.kind === 'framework') return `resource "${id}" names "fields" but is a ${r.kind} — fields belong to a tree or a state, read by name`;
+    if (!strings(r.fields) || !r.fields.every(f => /^[A-Za-z_$][\w$]*$/.test(f))) return `resource "${id}": "fields" must be a list of property names`;
+  }
+  if (r.ruled !== undefined && !isRuled(r)) return `resource "${id}" has ruled ${JSON.stringify(r.ruled)} — a ruling is a date, YYYY-MM-DD`;
+  return null;
+}
+
+// A component's entrance (#695): `entrance: { files: [...], ruled?, why? }`, the files (relative to
+// the root, as a component's `files` are) that code outside it may import it through. Each must
+// belong to the component, or the rule would refuse every import of it.
+function entranceProblem(d) {
+  const of = componentOf(d, '');
+  for (const [name, c] of Object.entries(d.components)) {
+    if (c.entrance === undefined) continue;
+    const e = c.entrance;
+    if (!isObject(e) || !Array.isArray(e.files) || !e.files.length || !e.files.every(f => typeof f === 'string' && f.trim()))
+      return `component "${name}": "entrance" must be { "files": [the files outside code may import it through] }`;
+    const stray = e.files.filter(f => of(f) !== name);
+    if (stray.length) return `component "${name}": its entrance names ${stray.map(f => JSON.stringify(f)).join(', ')}, which ${stray.length === 1 ? 'is' : 'are'} not in "${name}"`;
+    if (e.ruled !== undefined && !isRuled(e)) return `component "${name}": the entrance has ruled ${JSON.stringify(e.ruled)} — a ruling is a date, YYYY-MM-DD`;
+  }
+  return null;
+}
+
+// Whether a module (relative to the root) is where the row's owner may touch it: in the owner, and
+// inside `within` when the row narrows it.
+function touchAllowed(row, component, rel) {
+  if (component !== row.owner) return false;
+  if (!Array.isArray(row.within)) return true;
+  return row.within.some(w => { const x = stripSlash(w); return rel === x || rel.startsWith(x + '/'); });
+}
+const whereOwned = row => Array.isArray(row.within) ? `${row.owner} (only ${row.within.map(stripSlash).join(', ')})` : row.owner;
+
+// The row a package belongs to: the one keyed by its name, else the one whose `packages` names it
+// (an exact name before a pattern, then the longest pattern). Patterns hold only `*`.
+const globRe = g => new RegExp('^' + g.split('*').map(x => x.replace(/[.+?^${}()|[\]\\/]/g, '\\$&')).join('.*') + '$');
+function rowFor(resources, pkg) {
+  if (isObject(resources[pkg])) return { id: pkg, row: resources[pkg] };
+  let best = null;
+  for (const [id, r] of Object.entries(resources)) {
+    if (!isObject(r) || !Array.isArray(r.packages)) continue;
+    for (const p of r.packages) {
+      if (typeof p !== 'string' || !globRe(p).test(pkg)) continue;
+      const score = p.includes('*') ? p.replace(/\*/g, '').length : 1e6;
+      if (!best || score > best.score) best = { id, row: r, score };
+    }
+  }
+  return best && { id: best.id, row: best.row };
+}
+
+// The jobs table (#710, ledger v1; design §5.2): `id → { home, resources: [id], doors: [id], reason,
+// ruled, evidence }`. A job is a RULING — the tool never proposes one — so each field is checked
+// for the reason a verdict built on it would lie: a home that is no component, a resource or door
+// the ledger does not hold (a typo that points at nothing), a reason outside the three the design
+// names, a ruling with no date. `blastRadius` is computed from the rows when printed; a stored one
+// is not read.
+const JOB_REASONS = ['ownership', 'rules', 'reference'];
+function jobsProblem(d, names) {
+  if (d.jobs === undefined) return null;
+  if (!isObject(d.jobs)) return 'the design\'s "jobs" is not an object of rows (id → { home, resources, doors, reason, ruled })';
+  const res = isObject(d.resources) ? d.resources : {};
+  for (const [id, j] of Object.entries(d.jobs)) {
+    if (!isObject(j)) return `job "${id}" is not an object with home, resources and doors`;
+    if (!names.has(j.home)) return `job "${id}" has home ${JSON.stringify(j.home)}, which is not a component`;
+    for (const field of ['resources', 'doors']) {
+      if (!Array.isArray(j[field])) return `job "${id}": "${field}" must be a list of resource ids`;
+      const missing = j[field].filter(x => !Object.prototype.hasOwnProperty.call(res, x));
+      if (missing.length) return `job "${id}" names ${field === 'doors' ? 'a door' : 'a resource'} the ledger does not hold: ${missing.map(x => JSON.stringify(x)).join(', ')}`;
+    }
+    if (!JOB_REASONS.includes(j.reason)) return `job "${id}" has reason ${JSON.stringify(j.reason)} — it is one of ${JOB_REASONS.join(', ')}`;
+    if (typeof j.ruled !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(j.ruled)) return `job "${id}" has no ruling date (ruled: YYYY-MM-DD) — a job is a ruling, and an undated one cannot be told from a draft`;
+  }
+  return null;
+}
+
+// The components a job reaches: its home, and the owner of every resource and door it holds
+// (§5.2, computed, never stored). Rows with no owner yet add nothing and are listed, so a radius
+// that looks small because nobody has ruled is never read as small.
+function blastRadius(job, resources) {
+  const res = isObject(resources) ? resources : {};
+  const comps = new Set(job && job.home ? [job.home] : []), unowned = [];
+  for (const id of [...((job && job.resources) || []), ...((job && job.doors) || [])]) {
+    const r = res[id];
+    if (isObject(r) && r.owner) comps.add(r.owner); else unowned.push(id);
+  }
+  return { components: [...comps].sort(), unowned: [...new Set(unowned)].sort() };
+}
+
+// ── hot paths (#719) ─────────────────────────────────────────────────────────────────
+// Machine load enters as a manifest of edges the project's profiler measured hot, never as a
+// refusal (ruling 3): a refusal keyed on a syntactic proxy (a dynamic import on the edge) fires on
+// an `import()` a preload makes harmless and stays silent on a synchronous regression. A row is
+//   { from, to, frame?, budget, unit, metric?, instrument, frequency, frequencyUnit, measured }
+// — `from`/`to` are files as the graph keys them (package-relative, the design's root included);
+// `frame` names the hot root the edge was found under; `budget` is a number in `unit` or null
+// while unruled; `metric` is what the budget test reads from a snapshot ({ section, stat } or
+// { counter, stat }); `frequency` is how often the edge runs, in `frequencyUnit`, as `instrument`
+// measured it on the date `measured` — or `measured: "TO MEASURE"` and no frequency at all, so a
+// frequency nobody measured cannot be written down.
+const TO_MEASURE = 'TO MEASURE';
+const SECTION_STATS = ['count', 'mean', 'p50', 'p95', 'p99', 'max', 'last'];
+const COUNTER_STATS = ['value', 'rate'];
+const isDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(s) && !Number.isNaN(Date.parse(s));
+const nonEmpty = s => typeof s === 'string' && s.trim().length > 0;
+
+// Why the manifest would print something untrue, or null. Each is a row whose notice or budget
+// would mislead: an edge outside the corpus (no edit can ever touch it), a frequency with no
+// measurement behind it, a measurement with no frequency, a budget with no unit or nothing to
+// read it from, the same edge twice (two budgets, one edge).
+function hotPathsProblem(d) {
+  if (d.hotPaths === undefined) return null;
+  if (!Array.isArray(d.hotPaths)) return 'the design\'s "hotPaths" is not a list of edges ({ from, to, budget, unit, instrument, measured })';
+  const root = d.root ? stripSlash(d.root) + '/' : '';
+  const seen = new Set();
+  for (const [i, h] of d.hotPaths.entries()) {
+    const at = isObject(h) && nonEmpty(h.from) && nonEmpty(h.to) ? `hot path ${edgeKey(h.from, h.to)}` : `hot path #${i + 1}`;
+    if (!isObject(h)) return `${at} is not an object with from, to, budget, unit, instrument and measured`;
+    if (!nonEmpty(h.from) || !nonEmpty(h.to)) return `${at} needs "from" and "to", the files at each end as the graph names them`;
+    if (h.from === h.to) return `${at} is a file to itself — a hot path is an import between two files`;
+    for (const f of [h.from, h.to]) if (root && !f.startsWith(root))
+      return `${at} names "${f}", outside the design's root "${root}" — no edit the guard sees could touch it`;
+    const key = edgeKey(h.from, h.to);
+    if (seen.has(key)) return `${at} is listed twice — one edge carries one budget`;
+    seen.add(key);
+    if (!nonEmpty(h.unit)) return `${at} has no "unit" — a budget is read in its own unit (ms per trigger, allocations per frame)`;
+    if (!nonEmpty(h.instrument)) return `${at} has no "instrument" — say what measured it, or what will`;
+    if (h.budget !== null && h.budget !== undefined && !(typeof h.budget === 'number' && Number.isFinite(h.budget) && h.budget > 0))
+      return `${at} has budget ${JSON.stringify(h.budget)} — a positive number in its unit, or null while it is not ruled`;
+    if (h.metric !== undefined && h.metric !== null) {
+      const m = h.metric;
+      const ok = isObject(m) && ((nonEmpty(m.section) && m.counter === undefined && SECTION_STATS.includes(m.stat)) ||
+        (nonEmpty(m.counter) && m.section === undefined && COUNTER_STATS.includes(m.stat)));
+      if (!ok) return `${at} has metric ${JSON.stringify(m)} — { "section": <name>, "stat": one of ${SECTION_STATS.join('|')} } ` +
+        `or { "counter": <name>, "stat": ${COUNTER_STATS.join('|')} }`;
+    }
+    if (typeof h.budget === 'number' && !isObject(h.metric))
+      return `${at} has a budget and no "metric" — the budget test would have nothing in a snapshot to read it against`;
+    if (h.measured === TO_MEASURE) {
+      if (h.frequency !== undefined && h.frequency !== null)
+        return `${at} is "TO MEASURE" yet gives a frequency (${JSON.stringify(h.frequency)}) — a frequency is written only beside the date it was measured`;
+    } else if (isDate(h.measured)) {
+      if (!(typeof h.frequency === 'number' && Number.isFinite(h.frequency) && h.frequency >= 0))
+        return `${at} was measured ${h.measured} but gives no frequency — the number, or "TO MEASURE"`;
+      if (!nonEmpty(h.frequencyUnit)) return `${at} gives a frequency with no "frequencyUnit"`;
+    } else return `${at} has measured ${JSON.stringify(h.measured)} — a date (YYYY-MM-DD) or "${TO_MEASURE}"`;
+  }
+  return null;
+}
+
+// The manifest itself, identified: printed beside every budget figure, so two readings are
+// compared only when they were judged against the same manifest. Every field, ordered by edge.
+function hotPathsId(design) {
+  const rows = Array.isArray(design && design.hotPaths) ? design.hotPaths : [];
+  const canonical = rows.map(h => JSON.stringify(h, Object.keys(h).sort())).sort();
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 12);
+}
+
+// The manifest rows an edit keeps or adds: edges that START in the edited file and are present,
+// as edges that run, in the graph built around the edit. A type-only import compiles away and
+// costs nothing at run time, so it is not a hot edge whatever the manifest says.
+function hotPathsTouched(design, graph, rel) {
+  const rows = Array.isArray(design && design.hotPaths) ? design.hotPaths : [];
+  if (!rows.length || !graph || !graph.adj) return [];
+  const out = graph.adj.get(rel);
+  if (!out) return [];
+  const typeOnly = graph.typeOnly || new Set();
+  return rows.filter(h => isObject(h) && h.from === rel && out.has(h.to) && !typeOnly.has(edgeKey(h.from, h.to)));
 }
 
 // Who refuses a touch of this row, and with what predicate: the lookup in the design (§5.2).
@@ -235,7 +481,8 @@ function gatekeeperOf(row) {
   const noInstrument = !r.verifiedBy;
   if (r.kind === 'framework') return { by: 'none', predicate: null, why: 'a framework is not owned', unverified: false };
   if (r.reach === 'process')
-    return { by: 'static-guard', predicate: PREDICATE[r.kind] || null, why: 'every access is inside the corpus the guard graphs', unverified: noInstrument };
+    return { by: 'static-guard', predicate: Array.isArray(r.fields) && r.fields.length ? 'field-read' : PREDICATE[r.kind] || null,
+             why: 'every access is inside the corpus the guard graphs', unverified: noInstrument };
   if (r.reach === 'shared') {
     const control = typeof r.enforcedBy === 'string' && r.enforcedBy && r.enforcedBy !== 'none' && r.enforcedBy !== 'static-guard' ? r.enforcedBy : null;
     return control
@@ -503,49 +750,122 @@ function owners(graph, design) {
   const { touches, byPackage } = touchersByPackage(graph, design);
   const found = [], couldntTell = new Set(), unlisted = new Set(), elsewhere = new Set(), unmapped = new Set();
   let examined = 0, framework = 0;
+  const rel = m => m.slice((graph.root || '').length);
   for (const { module: m, component: c, package: p } of touches) {
-    const r = res[p];
-    if (!isObject(r)) { unlisted.add(p); continue; }
+    const hit = rowFor(res, p);
+    if (!hit) { unlisted.add(p); continue; }
+    const r = hit.row;
     if (c === undefined) { unmapped.add(m); continue; }
     if (r.kind === 'framework') { examined++; framework++; continue; }
     const gk = gatekeeperOf(r);
     if (r.kind !== 'library' || gk.by !== 'static-guard') { elsewhere.add(p); continue; }
     examined++;
     if (!r.owner) { couldntTell.add(p); continue; }
-    if (r.owner !== c) found.push({ key: edgeKey(m, p), pair: edgeKey(c, r.owner), owner: r.owner, package: p,
-      detail: `${c} imports ${p}, which ${r.owner} owns (${r.verifiedBy ? `verified by ${r.verifiedBy}` : 'UNVERIFIED: no instrument named'})` });
+    if (touchAllowed(r, c, rel(m))) continue;
+    // Under the row's id, so `acorn-walk` and `acorn` are one finding series; the package as named
+    // is in the detail. Only a RULED row refuses (#695/#696): a proposed one is found, held by the
+    // baseline like any other, and reported — so ruling it later needs no new baseline.
+    const inside = c === r.owner;
+    found.push({ key: edgeKey(m, p), pair: edgeKey(c, r.owner), owner: r.owner, package: p, row: hit.id, ruled: isRuled(r),
+      detail: `${inside ? `${c} imports ${p} outside ${r.within.map(stripSlash).join(', ')}` : `${c} imports ${p}`}, which ${whereOwned(r)} owns` +
+        `${hit.id !== p ? ` (row ${hit.id})` : ''} (${r.verifiedBy ? `verified by ${r.verifiedBy}` : 'UNVERIFIED: no instrument named'})` +
+        (isRuled(r) ? '' : ' — PROPOSED, not ruled') });
   }
   const unverified = Object.keys(res).filter(id => isObject(res[id]) && gatekeeperOf(res[id]).unverified).sort();
   return {
     found, examined, framework,
     couldntTell: [...couldntTell].sort().map(pkg => ({ package: pkg, touchers: Object.fromEntries([...byPackage.get(pkg).comps].sort()) })),
+    proposedRows: Object.keys(res).filter(id => isObject(res[id]) && res[id].kind === 'library' && res[id].owner && !isRuled(res[id])).sort(),
     unlisted: [...unlisted].sort(), elsewhere: [...elsewhere].sort(), unmapped: [...unmapped].sort(), unverified,
   };
 }
 
+// ── rule: entrance (#695) ─────────────────────────────────────────────────────────────
+// A component that names an entrance is imported, from outside it, only through those files. An
+// import of any other file of it from another component is a finding keyed `module -> module`,
+// the import itself, so the hook's "starts in the edited file" filter works unchanged. Re-exports
+// count (a re-export of an internal is a reach past the entrance). Type-only imports count only
+// when the design counts them, as for divergences — the graph holds no others. A module no
+// component claims is not examined, and is counted by the divergence rule's list.
+function entrances(graph, design) {
+  const of = componentOf(design, graph.root);
+  const comps = (design && design.components) || {};
+  const doors = new Map(Object.entries(comps).filter(([, c]) => isObject(c) && isObject(c.entrance) && Array.isArray(c.entrance.files))
+    .map(([n, c]) => [n, { files: new Set(c.entrance.files.map(String)), ruled: isRuled(c.entrance) }]));
+  const found = [];
+  let examined = 0;
+  if (!doors.size) return { found, examined, components: [] };
+  const rel = m => m.slice((graph.root || '').length);
+  for (const [a, b] of graph.edges) {
+    const ca = of(a), cb = of(b);
+    if (ca === undefined || cb === undefined || ca === cb || !doors.has(cb)) continue;
+    examined++;
+    const e = doors.get(cb);
+    if (e.files.has(rel(b))) continue;
+    found.push({ key: edgeKey(a, b), pair: edgeKey(ca, cb), component: cb, entrance: [...e.files].sort(), ruled: e.ruled,
+      typeOnly: !!(graph.typeOnly && graph.typeOnly.has(edgeKey(a, b))),
+      detail: `${ca} imports ${rel(b)}, past ${cb}'s entrance (${[...e.files].sort().join(', ')})` + (e.ruled ? '' : ' — PROPOSED, not ruled') });
+  }
+  return { found, examined, components: [...doors.keys()].sort() };
+}
+
+// ── rules: door and reads (#696) ─────────────────────────────────────────────────────
+// Facts about symbols, not files: who calls a door, who reads a tree's fields. The import graph
+// cannot see them, so they are measured by the project's type checker (structure-symbols.js) and
+// handed in. Without that measurement each rule is NOT MEASURED — never "nothing found" — and the
+// ratchet leaves its baseline section alone. A measurement may cover only some files (the hook
+// measures the edited one): `scope` names them, and only their baseline keys are compared.
+const NOT_LOOKED = why => ({ found: [], examined: 0, notMeasured: why });
+function symbolResult(design, symbols, rule) {
+  const res = isObject(design && design.resources) ? design.resources : {};
+  const wants = Object.values(res).some(r => isObject(r) && gatekeeperOf(r).by === 'static-guard' &&
+    (rule === 'door' ? r.kind === 'door' && !(Array.isArray(r.fields) && r.fields.length) : Array.isArray(r.fields) && r.fields.length > 0));
+  if (!wants) return { found: [], examined: 0 };
+  if (!symbols) return NOT_LOOKED('the type checker was not run over the source (a graph alone names no symbols — give the package)');
+  if (symbols.notMeasured) return NOT_LOOKED(symbols.notMeasured);
+  const got = symbols[rule];
+  if (got && got.notMeasured) return NOT_LOOKED(got.notMeasured);
+  return got || NOT_LOOKED(`no ${rule} measurement was handed in`);
+}
+
 // ── the ratchet ──────────────────────────────────────────────────────────────────────
 
-function judge(graph, design) {
-  return { divergence: divergences(graph, design), cycle: cycleEdges(graph), owner: owners(graph, design) };
+function judge(graph, design, symbols) {
+  return { divergence: divergences(graph, design), cycle: cycleEdges(graph), owner: owners(graph, design), entrance: entrances(graph, design),
+           door: symbolResult(design, symbols, 'door'), reads: symbolResult(design, symbols, 'reads') };
 }
+
+// A results object written by hand (tests, older callers) may name fewer rules than RULES: a rule
+// it does not name examined nothing.
+const withEveryRule = results => Object.fromEntries(RULES.map(rule => [rule, (results && results[rule]) || { found: [], examined: 0 }]));
 
 function ratchet(results, baseline) {
   const out = {};
+  results = withEveryRule(results);
   for (const rule of RULES) {
     const found = results[rule].found;
+    if (results[rule].notMeasured) {
+      out[rule] = { total: 0, grandfathered: 0, fresh: [], fixed: [], proposed: [], notMeasured: results[rule].notMeasured };
+      continue;
+    }
     // Only when the rule examined something: a design with no ledger gives it nothing to judge,
     // and saying "not judged" there would ask for a regeneration that changes nothing (#725).
     if (SINCE[rule] && results[rule].examined > 0 && baseline && isObject(baseline.rules) && !(rule in baseline.rules)) {
-      out[rule] = { total: found.length, grandfathered: 0, fresh: [], fixed: [],
+      out[rule] = { total: found.length, grandfathered: 0, fresh: [], fixed: [], proposed: [],
         unbaselined: `the baseline has no "${rule}" section (written before the rule, ${SINCE[rule]}), so ${found.length} ${rule} finding${found.length === 1 ? ' is' : 's are'} not judged — regenerating the baseline measures them` };
       continue;
     }
-    const base = new Set((baseline && baseline.rules && baseline.rules[rule]) || []);
+    // A measurement of some files only compares those files' keys: the rest were not looked at.
+    const scope = Array.isArray(results[rule].scope) ? results[rule].scope.map(m => `${m} -> `) : null;
+    const base = new Set(((baseline && baseline.rules && baseline.rules[rule]) || []).filter(k => !scope || scope.some(p => k.startsWith(p))));
     const now = new Set(found.map(f => f.key));
+    const fresh = found.filter(f => !base.has(f.key));
     out[rule] = {
       total: found.length,
       grandfathered: found.filter(f => base.has(f.key)).length,
-      fresh: found.filter(f => !base.has(f.key)),
+      // Only a finding on a RULED row refuses; one on a proposed row is reported (#695/#696).
+      fresh: fresh.filter(f => f.ruled !== false),
+      proposed: fresh.filter(f => f.ruled === false),
       fixed: [...base].filter(k => !now.has(k)),
     };
   }
@@ -558,7 +878,15 @@ function ratchet(results, baseline) {
 function planBaseline(results, previous, { allowGrowth = false } = {}) {
   const rules = {};
   const grown = {};
+  const carried = [];
+  results = withEveryRule(results);
   for (const rule of RULES) {
+    // A rule that could not look keeps the section it had, unchanged (said by the caller): writing
+    // an empty one would grandfather nothing and refuse every existing finding as new next time.
+    if (results[rule].notMeasured) {
+      if (previous && previous.rules && Array.isArray(previous.rules[rule])) { rules[rule] = [...previous.rules[rule]]; carried.push(rule); }
+      continue;
+    }
     rules[rule] = results[rule].found.map(f => f.key).sort();
     if (previous) {
       const old = new Set((previous.rules && previous.rules[rule]) || []);
@@ -567,11 +895,12 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
     }
   }
   const refused = Object.keys(grown).length > 0 && !allowGrowth;
-  return { baseline: { rules }, grown, refused };
+  return { baseline: { rules }, grown, refused, carried };
 }
 
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
-  KINDS, REACHES, INSTRUMENTS, gatekeeperOf, packageOf,
+  KINDS, REACHES, INSTRUMENTS, JOB_REASONS, gatekeeperOf, blastRadius, packageOf, TO_MEASURE, hotPathsProblem, hotPathsId, hotPathsTouched,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, owners, SINCE, judge, ratchet, planBaseline,
+  isRuled, rowFor, touchAllowed, whereOwned, entrances, SYMBOL, isPackageOrigin,
 };
