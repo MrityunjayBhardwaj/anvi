@@ -676,6 +676,19 @@ console.log('\nTHE PACKAGE MODE — the hook\'s own graph, and whether it agrees
   run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', sbase]);
   ok(JSON.parse(fs.readFileSync(REG, 'utf8')).packages.length === 1, 'arming the same package again replaces its entry rather than adding one');
 
+  // ARMING KEEPS WHAT IT DID NOT MEASURE (#766): the package's own check — and any field arming
+  // does not set — survives a re-arm; the graph half is replaced; an extractor not given is gone.
+  const CHECK = { adapter: '/x/adapter.mjs', root: '../..', files: ['src/check.ts'], mode: 'refuse', node: 23 };
+  const seeded = JSON.parse(fs.readFileSync(REG, 'utf8'));
+  Object.assign(seeded.packages[0], { check: CHECK, someday: 'kept', designId: 'stale0000000' });
+  fs.writeFileSync(REG, JSON.stringify(seeded));
+  const rearm = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', sbase]);
+  const after = JSON.parse(fs.readFileSync(REG, 'utf8')).packages;
+  ok(rearm.status === 0 && after.length === 1 && JSON.stringify(after[0].check) === JSON.stringify(CHECK) && after[0].someday === 'kept',
+     `re-arming keeps the entry's own check and every field arming does not set (got ${rearm.status}: ${JSON.stringify(after[0])})`);
+  ok(after[0].designId === ID && /kept from the entry it replaced: check, someday/.test(rearm.stdout),
+     'the graph half is replaced, and the run names what it kept');
+
   fs.writeFileSync(REG, '{"not":"a registry"}');
   const clobber = run(['--design', d, '--graph', same, '--package', PK, '--extractor', EX, '--arm', '--baseline', sbase]);
   ok(clobber.status === 2 && fs.readFileSync(REG, 'utf8') === '{"not":"a registry"}',

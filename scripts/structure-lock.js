@@ -205,6 +205,16 @@ function main(argv, { isRoot = () => process.getuid && process.getuid() === 0, d
   out(`  in force now: ${current ? 'locked' : 'not locked — judged by the user registry'}`);
   out(changes(current, p.locked, p.files).join('\n'));
   out(`  digest: ${p.digest}`);
+  // A PROMOTE NEVER DROPS A FIELD QUIETLY (#766). The proposal is copied verbatim, so a field the
+  // locked entry has and the proposal lacks — its own `check`, above all — would leave the lock
+  // with it; a proposal armed by a guard that rebuilt the entry did exactly that. Shown as one
+  // line among nine, it is easy to pass. So it is refused here, as root or not, and a removal
+  // that is meant is two steps the owner can read: `remove`, then `promote` the new entry.
+  const dropped = current ? Object.keys(current).filter(k => !(k in p.locked)) : [];
+  if (dropped.length)
+    return stop(`the proposal drops ${dropped.map(k => `"${k}"`).join(', ')}, which the locked entry has` +
+      (dropped.includes('check') ? ` — the package's own check${current.check && current.check.mode ? ` (mode ${current.check.mode})` : ''} would stop running` : '') +
+      `. Keep ${dropped.length === 1 ? 'it' : 'them'} in ${from}; or, to drop ${dropped.length === 1 ? 'it' : 'them'} on purpose, remove the locked entry first (structure-lock.js remove --package ${q(pkg)}) and then promote.`);
   if (current && JSON.stringify(current) === JSON.stringify(p.locked) &&
       Object.entries(p.files).every(([f, b]) => { try { return fs.readFileSync(f).equals(b); } catch { return false; } })) {
     out('structure-lock: nothing to promote — the locked entry already is this one.');

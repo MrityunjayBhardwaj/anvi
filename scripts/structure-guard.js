@@ -137,6 +137,14 @@ const REGISTRY = () => path.join(os.homedir(), '.claude', 'structure-guard.json'
 
 // Add or replace the entry for this package. An unreadable registry is refused, not
 // overwritten: it may hold other packages' entries.
+//
+// ARMING SETS WHAT IT MEASURED, AND KEEPS THE REST (#766). Arming decides the graph half of an
+// entry — dir, design, baseline, designId, extractor — and nothing else. Every other field the
+// entry already carries (the package's own `check` above all, with its refusing mode) was set by
+// someone else and stays. It used to be dropped: the entry was rebuilt from the graph half alone,
+// and a locked package's promote, which copies the proposal verbatim, would then have locked the
+// package without its own check. An `extractor` is arming's to set, so one not given is removed.
+const ARMED_FIELDS = ['dir', 'design', 'baseline', 'designId', 'extractor'];
 function arm(entry) {
   const file = REGISTRY();
   let registry = { packages: [] };
@@ -144,15 +152,18 @@ function arm(entry) {
     registry = readJson(file, 'registry');
     if (!Array.isArray(registry.packages)) throw new Error(`the registry ${file} has no "packages" list — refusing to overwrite it`);
   }
-  registry.packages = registry.packages.filter(p => {
-    try { return fs.realpathSync(p.dir) !== entry.dir; } catch { return p.dir !== entry.dir; }
-  });
-  registry.packages.push(entry);
+  const same = p => { try { return fs.realpathSync(p.dir) === entry.dir; } catch { return p.dir === entry.dir; } };
+  const before = registry.packages.find(p => p && same(p)) || null;
+  const kept = before ? Object.keys(before).filter(k => !ARMED_FIELDS.includes(k)) : [];
+  const next = { ...entry };
+  for (const k of kept) next[k] = before[k];
+  registry.packages = registry.packages.filter(p => !(p && same(p)));
+  registry.packages.push(next);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(registry, null, 1) + '\n');
   fs.renameSync(tmp, file);
-  return file;
+  return { file, kept };
 }
 
 // Every flag this command accepts, and every flag it USED to accept. An unrecognised flag is
@@ -524,13 +535,14 @@ function main(argv) {
         return stop(`--arm needs a baseline measured under the design in force: ${frame.mismatch ||
           'the baseline names no design (written before designs were identified)'} — regenerate it:\n    ` +
           regenerate(false));
-      let file;
+      let file, kept;
       try {
-        file = arm({ dir: built.pkgDir, design: path.resolve(args.design), baseline: path.resolve(args.baseline),
+        ({ file, kept } = arm({ dir: built.pkgDir, design: path.resolve(args.design), baseline: path.resolve(args.baseline),
                      designId: frame.id,
-                     ...(args.extractor ? { extractor: path.resolve(args.extractor) } : {}) });
+                     ...(args.extractor ? { extractor: path.resolve(args.extractor) } : {}) }));
       } catch (e) { return stop(e.message); }
       print(`  armed: ${built.pkgDir} → ${file} (design ${frame.id})`);
+      print(`  kept from the entry it replaced: ${kept.length ? kept.join(', ') : 'nothing — there was no other field'}`);
       // A locked package is judged by its locked entry alone (#680): this one waits for the owner.
       let L = null;
       try { L = loadFromCandidates('structure-lock.js'); } catch { /* no lock module: nothing is locked */ }

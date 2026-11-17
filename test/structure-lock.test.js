@@ -209,6 +209,23 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
      fs.readFileSync(reg2().packages[0].design, 'utf8') === fs.readFileSync(DESIGN, 'utf8'),
      'the old digest no longer installs anything: a change after the review is refused, and the locked design is untouched');
 
+  // A PROMOTE NEVER DROPS A FIELD QUIETLY (#766): a proposal without the locked entry's `check` —
+  // what a guard that rebuilt the entry on arming produced — is refused, as root too, with the
+  // reviewed digest; the same proposal with its check kept is only reviewed (the control).
+  const { check: _gone, ...noCheck } = proposal({ design: loosened });
+  writeJson(FROM, { packages: [noCheck] });
+  const dropReview = run(['promote', '--package', PKG, '--from', FROM], false);
+  const dropDigest = (dropReview.out.match(/digest: ([0-9a-f]{16})/) || [])[1];
+  ok(dropReview.code === 1 && /drops "check", which the locked entry has — the package's own check \(mode refuse\) would stop running/.test(dropReview.out) &&
+     /remove the locked entry first/.test(dropReview.out) && !/sudo /.test(dropReview.out),
+     `a proposal that drops the locked entry's check is refused, says what would stop running, and offers no command (exit ${dropReview.code})`);
+  ok(dropDigest && run(['promote', '--package', PKG, '--from', FROM, '--expect', dropDigest], true).code === 1 &&
+     reg2().packages[0].check && reg2().packages[0].check.mode === 'refuse',
+     'as root with that proposal\'s own digest it is refused too, and the locked check stays');
+  writeJson(FROM, { packages: [proposal({ design: loosened })] });
+  ok(run(['promote', '--package', PKG, '--from', FROM], false).code === 3,
+     'control: the same proposal with its check kept is reviewed as before');
+
   // EVERY FIELD SHOWS (#684): change each leaf of the locked entry's proposal in turn — including
   // one this code has never heard of — and the review must print that field as changing.
   writeJson(FROM, { packages: [proposal({ someday: 'x' })] });
@@ -252,6 +269,9 @@ console.log('\nTHE OWNER\'S COMMAND — review without root, write only what was
   const removed = run(['remove', '--package', PKG, '--expect', rmDigest], true);
   ok(removed.code === 0 && reg2().packages.length === 0 && !fs.existsSync(path.dirname(fs.realpathSync(DESIGN)) + '/lock2/packages/x'),
      `as root with its digest the package leaves the lock (exit ${removed.code})`);
+  writeJson(FROM, { packages: [noCheck] });
+  ok(run(['promote', '--package', PKG, '--from', FROM], false).code === 3,
+     'once removed, an entry without a check can be promoted — dropping it on purpose is remove, then promote (#766)');
   ok(run(['promote', '--bogus', 'x'], false).code === 2 && run(['promote', '--package'], false).code === 2, 'an unknown flag or a flag with no value is a usage error');
 }
 
