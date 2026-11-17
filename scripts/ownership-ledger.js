@@ -92,10 +92,10 @@ const path = require('path');
 
 // The guard's module: its shared rules (`...R`) and its CLI helpers. Requiring it runs nothing.
 const G = require('./structure-guard.js');
-const { loadGraph, notMeasured, componentOf, touchersByPackage, designProblem, designId, designVersions, gatekeeperOf, blastRadius, divergences, edgeKey, onCycle, analyserOptionProblem } = G;
+const { loadGraph, notMeasured, componentOf, touchersByPackage, homesOf, packageUses, designProblem, designId, designVersions, gatekeeperOf, blastRadius, divergences, edgeKey, onCycle, analyserOptionProblem } = G;
 
 const TOOL = 'ownership-ledger.js';
-const FLAGS = new Set(['design', 'graph', 'framework', 'write', 'index', 'members']);
+const FLAGS = new Set(['design', 'graph', 'package', 'framework', 'write', 'index', 'members']);
 const REPEATABLE = new Set(['framework', 'members']);
 const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -139,6 +139,14 @@ function survey(design, graph, frameworks) {
   const packages = [...touch.keys()].sort();
   const touchersOf = pkg => touch.has(pkg) ? [...touch.get(pkg).comps.keys()].sort() : [];
   const touchersObj = pkg => Object.fromEntries(touchersOf(pkg).map(c => [c, touch.get(pkg).comps.get(c)]));
+  // HOMES, NOT TOUCHERS (#765). The owner rule counts a component as a home of a library only when
+  // its import of it runs (#762, #741 row 2): one that takes only types is not a second home. So a
+  // proposal is made from the homes, as the rule judges — every toucher is still listed. From a
+  // graph alone no package import says whether it runs, so each is "couldn't tell" and may be a home.
+  const homesFor = pkg => homesOf(touch.get(pkg));
+  const typesObj = pkg => Object.fromEntries(homesFor(pkg).typesOnly.map(c => [c, touch.get(pkg).uses.types.get(c)]));
+  const useCounts = { runs: 0, types: 0, unknown: 0 };
+  for (const e of touch.values()) for (const k of Object.keys(useCounts)) for (const n of e.uses[k].values()) useCounts[k] += n;
 
   // Classify every package, and propose a row for each that has none.
   const proposed = {};                   // id → row (new rows only)
@@ -147,6 +155,8 @@ function survey(design, graph, frameworks) {
   for (const pkg of packages) {
     const existing = rows[pkg];
     const comps = touchersOf(pkg);
+    const h = homesFor(pkg);
+    const extra = h.typesOnly.length ? { typesOnly: typesObj(pkg) } : {};
     if (existing) {
       if (frameworks.has(pkg) && existing.kind !== 'framework')
         conflicts.push(`${pkg}: --framework given, but the design already rules it ${existing.kind} — the ruled row is kept; change it in the design if the ruling is wrong`);
@@ -159,14 +169,21 @@ function survey(design, graph, frameworks) {
         ruled: today(), rule: 'declared framework on the command line', touchers: touchersObj(pkg) };
     } else if (comps.length === 0) {
       classes.unexamined.push(pkg);
-    } else if (comps.length === 1) {
+    } else if (comps.length === 1 || h.maybe.length === 1) {
       classes.single.push(pkg);
-      proposed[pkg] = { kind: 'library', reach: 'process', owner: comps[0], verifiedBy: 'imports', enforcedBy: 'static-guard',
-        proposed: 'the only component that imports it', touchers: touchersObj(pkg) };
+      const owner = comps.length === 1 ? comps[0] : h.maybe[0];
+      proposed[pkg] = { kind: 'library', reach: 'process', owner, verifiedBy: 'imports', enforcedBy: 'static-guard',
+        proposed: comps.length === 1 ? 'the only component that imports it'
+          : `the only component whose import of it ${h.runs.length ? 'runs' : 'may run'}; ${plural(h.typesOnly.length, 'other component')} take${h.typesOnly.length === 1 ? 's' : ''} only its types (${h.typesOnly.join(', ')}) — not a second home`,
+        touchers: touchersObj(pkg), ...extra };
     } else {
       classes.multi.push(pkg);
+      const homes = h.maybe.length ? h.maybe : comps;
       proposed[pkg] = { kind: 'library', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'static-guard',
-        proposed: `couldn't tell — imported from ${comps.length} components; the owner rules which one owns it`, touchers: touchersObj(pkg) };
+        proposed: !h.maybe.length ? `couldn't tell — ${comps.length} components import only its types; the owner rules which one owns it`
+          : `couldn't tell — ${h.couldntTell.length ? `${homes.length} components may be its homes (${h.couldntTell.length} by imports whose records do not say whether they run)` : `imported, to run, from ${homes.length} components`}; the owner rules which one owns it` +
+            (h.typesOnly.length ? `; ${h.typesOnly.length} more take only its types (${h.typesOnly.join(', ')})` : ''),
+        touchers: touchersObj(pkg), homes, ...extra };
     }
   }
   // A --framework naming a package nothing in the corpus imports: still a ruling, recorded, and stale.
@@ -176,7 +193,10 @@ function survey(design, graph, frameworks) {
     proposed[pkg] = { kind: 'framework', reach: 'process', owner: null, verifiedBy: 'imports', enforcedBy: 'none',
       ruled: today(), rule: 'declared framework on the command line', touchers: {} };
   }
-  const multiHomed = packages.filter(p => touchersOf(p).length >= 2);
+  // Packages with two or more homes, as the owner rule counts them (a couldn't-tell import counts:
+  // it may run); and packages that reach two components only by adding types-only importers.
+  const multiHomed = packages.filter(p => homesFor(p).maybe.length >= 2);
+  const multiByTypesOnly = packages.filter(p => homesFor(p).maybe.length < 2 && touchersOf(p).length >= 2);
   const ledger = { ...rows, ...proposed };   // existing rows win by construction: proposed holds none of their ids
 
   // Derivation of the declared pairs.
@@ -233,7 +253,7 @@ function survey(design, graph, frameworks) {
   });
   const purposeAfter = seeded.filter(x => x.why);
 
-  return { of, div, rows, touch, packages, touchersOf, proposed, classes, conflicts, multiHomed, ledger,
+  return { of, div, rows, touch, packages, touchersOf, homesFor, useCounts, multiByTypesOnly, proposed, classes, conflicts, multiHomed, ledger,
     allowed, derivation, required, pairEdges, stale, notByImports, unverified, purposeNow, seeded, purposeAfter,
     modulesWithPackages, unmappedWithPackages };
 }
@@ -252,9 +272,15 @@ function report(s, ctx, print) {
   print('');
   print('TOUCHERS (per package: the components whose modules import it, with module counts)');
   print(`  ${plural(s.packages.length, 'package')} imported by ${plural(s.modulesWithPackages, 'corpus module')}`);
+  const u = s.useCounts;
+  print(`  package imports by use: ${u.runs + u.types + u.unknown} = ${u.runs} run + ${u.types} types only (never a home, #741 row 2) + ${u.unknown} couldn't tell` +
+    (ctx.uses ? ` — uses read from the project's TypeScript${ctx.uses.at ? ` at ${ctx.uses.at.ref} ${ctx.uses.at.sha.slice(0, 8)}` : ' (on disk)'}, ${ctx.uses.read} modules; ${ctx.uses.missing} of the graph's modules not in it, left couldn't tell`
+      : u.unknown ? ' — a graph alone does not say whether a package import runs, so each may be a home; give --package <dir>' : ''));
   for (const pkg of s.packages) {
     const e = s.touch.get(pkg);
-    const comps = [...e.comps].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([c, n]) => `${c} ${n}`);
+    const h = s.homesFor(pkg);
+    const mark = c => h.typesOnly.includes(c) ? ' (types only)' : h.couldntTell.includes(c) ? " (couldn't tell)" : '';
+    const comps = [...e.comps].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([c, n]) => `${c} ${n}${mark(c)}`);
     print(`  ${pkg}: ${comps.length} component${comps.length === 1 ? '' : 's'}${comps.length ? ' — ' + comps.join(', ') : ''}` +
       (e.unmapped.length ? `; + ${plural(e.unmapped.length, 'unmapped module')} not examined` : ''));
   }
@@ -268,8 +294,9 @@ function report(s, ctx, print) {
     const r = s.ledger[pkg];
     if (s.rows[pkg]) { print(`  ${pkg}: RULED in the design, kept as written — kind ${r.kind}, reach ${r.reach}, owner ${r.owner === undefined ? 'null' : JSON.stringify(r.owner)}`); continue; }
     if (r.kind === 'framework') print(`  ${pkg}: framework — no owner, enforcedBy none (${r.rule}, ${r.ruled}); touchers ${Object.keys(r.touchers).length}`);
-    else if (r.owner) print(`  ${pkg}: library, owner ${r.owner} — the only component that imports it (${plural(r.touchers[r.owner], "module")}); reach process, verifiedBy imports, enforcedBy static-guard`);
-    else print(`  ${pkg}: library, owner null — COULDN'T TELL: imported from ${Object.keys(r.touchers).length} components (${Object.keys(r.touchers).join(', ')}); the owner rules`);
+    else if (r.owner) print(`  ${pkg}: library, owner ${r.owner} — ${r.proposed} (${plural(r.touchers[r.owner], "module")}); reach process, verifiedBy imports, enforcedBy static-guard`);
+    else print(`  ${pkg}: library, owner null — COULDN'T TELL: ${r.homes ? `${r.homes.length} possible homes (${r.homes.join(', ')})` : `imported from ${Object.keys(r.touchers).length} components (${Object.keys(r.touchers).join(', ')})`}` +
+      `${r.typesOnly ? `, + ${Object.keys(r.typesOnly).length} types-only (${Object.keys(r.typesOnly).join(', ')})` : ''}; the owner rules`);
   }
   for (const pkg of classes.unexamined) print(`  ${pkg}: NO ROW — NOT EXAMINED: only unmapped modules import it; map them to a component first`);
   for (const c of s.conflicts) print(`  conflict — ${c}`);
@@ -321,8 +348,9 @@ function report(s, ctx, print) {
   print('SUMMARY');
   print(`  packages imported by corpus modules: ${s.packages.length} = ${classes.single.length} single-toucher (owner proposed) + ${classes.multi.length} multi-toucher (couldn't tell) + ` +
     `${classes.framework.length} framework + ${ruledOwned} already ruled + ${classes.unexamined.length} not examined (unmapped importers only)`);
-  print(`  imported from >= 2 components: ${s.multiHomed.length} of ${s.packages.length} packages = ` +
-    `${s.multiHomed.filter(p => classes.framework.includes(p)).length} framework + ${s.multiHomed.filter(p => classes.multi.includes(p)).length} couldn't tell + ${s.multiHomed.filter(p => classes.ruled.includes(p)).length} already ruled`);
+  print(`  two or more homes (imports that run, or couldn't tell): ${s.multiHomed.length} of ${s.packages.length} packages = ` +
+    `${s.multiHomed.filter(p => classes.framework.includes(p)).length} framework + ${s.multiHomed.filter(p => classes.multi.includes(p)).length} couldn't tell + ${s.multiHomed.filter(p => classes.ruled.includes(p)).length} already ruled` +
+    `; imported from >= 2 components only by counting types-only importers: ${s.multiByTypesOnly.length}${s.multiByTypesOnly.length ? ` (${s.multiByTypesOnly.join(', ')})` : ''}`);
   print(`  rows: ${Object.keys(s.ledger).length} in the ledger = ${Object.keys(s.rows).length} ruled in the design + ${Object.keys(s.proposed).length} proposed`);
   print(`  pairs declared: ${declared} = ${d.derivable.length} derivable + ${d.consumption.length} consumption (pending v1) + ${d.absence.length} absence`);
   print(`  required, not declared: ${s.required.length} (of ${s.required.length + d.derivable.length} consumer -> owner pairs ownership implies, ${d.derivable.length} declared)`);
@@ -623,7 +651,7 @@ function main(argv) {
   const print = s => console.log(s);
   const stop = why => { print(`ownership-ledger: NOT MEASURED — ${why}`); return 2; };
   if (unknown.length) return stop(`unrecognised argument${unknown.length > 1 ? 's' : ''} — ${unknown.join(' · ')}`);
-  if (!args.design || !args.graph) return stop('usage: --design <design.json> --graph <depcruise.json> [--framework <pkg>]... [--write <proposed-design.json>] [--index <ownership-index.json> [--members <pkg>#<m>,…]...]');
+  if (!args.design || !args.graph) return stop('usage: --design <design.json> --graph <depcruise.json> [--package <dir>] [--framework <pkg>]... [--write <proposed-design.json>] [--index <ownership-index.json> [--members <pkg>#<m>,…]...]');
   if (args.members.length && !args.index) return stop('--members reads member uses from the ownership index: give --index <ownership-index.json>');
   if (args.write && samePath(args.write, args.design))
     return stop(`--write names the design itself (${args.design}) — a proposal is never written in place; give another path`);
@@ -638,6 +666,11 @@ function main(argv) {
   const graph = loadGraph(cruise, design);
   const nm = notMeasured(graph);
   if (nm) return stop(nm);
+  let uses = null;
+  if (args.package) {
+    uses = packageUses(graph, design, args.package);
+    if (uses.notMeasured) return stop(`--package: ${uses.notMeasured}`);
+  }
 
   let index = null;
   if (args.index) {
@@ -652,7 +685,7 @@ function main(argv) {
   const versions = designVersions(design);
   const ctx = {
     graphPath: path.resolve(args.graph), designPath: path.resolve(args.design), designId: designId(design), versionNote: versions.note,
-    date: today(), typeOnly: graph.typeOnlyImports, graph, frameworks, design,
+    date: today(), typeOnly: graph.typeOnlyImports, graph, frameworks, design, uses,
     optionUsed: cruise && cruise.summary && cruise.summary.optionsUsed ? cruise.summary.optionsUsed.tsPreCompilationDeps : undefined,
   };
   report(s, ctx, print);

@@ -11,7 +11,8 @@
 //   I   Ce / (Ca + Ce): 0 a stable provider … 1 a pure consumer; n/a when Ca + Ce = 0
 //   edges in / out   cross-component import edges
 // and, beside every row, the readings without which no coupling figure is read (design §7.4a):
-//   libraries   packages the component imports that two or more components import (homes > 1)
+//   libraries   packages the component is a home of that have two or more homes; a home is a component
+//               whose import of it runs (a types-only import is none, #765; from a graph alone, any may be)
 //   states      module states it writes that two or more components write   (from --ownership)
 //   duplicates  top-level function names it defines that another component also defines
 //                                                                            (from --ownership)
@@ -63,10 +64,10 @@ if (require.main === module) {
 const fs = require('fs');
 const path = require('path');
 const G = require('./structure-guard.js');
-const { loadGraph, notMeasured, componentOf, touchersByPackage, designProblem, designId, analyserOptionProblem, countsTypeOnly } = G;
+const { loadGraph, notMeasured, componentOf, touchersByPackage, homesOf, packageUses, designProblem, designId, analyserOptionProblem, countsTypeOnly } = G;
 
 const TOOL = 'coupling-table.js';
-const FLAGS = new Set(['design', 'graph', 'ownership', 'framework', 'previous', 'json']);
+const FLAGS = new Set(['design', 'graph', 'package', 'ownership', 'framework', 'previous', 'json']);
 const REPEATABLE = new Set(['framework']);
 const DRAWS = 10;
 const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -158,11 +159,17 @@ function survey({ design, cruise, graph, ownership, frameworks }) {
     permuted: { I: Object.fromEntries([...permI].map(([n, xs]) => [n, range(xs)])), ...verdictOf(permI) },
   };
 
-  // Homes per library: every package two or more components import, frameworks apart.
+  // Homes per library: every package with two or more HOMES, frameworks apart. A home is a
+  // component whose import of it runs, as the owner rule counts it (#762, #765); one that takes only
+  // types is no home, and is listed apart. From a graph alone no package import says whether it
+  // runs, so each "may be a home": the count is then an upper bound, and says so.
   const { byPackage, unmappedWithPackages } = touchersByPackage(graph, design);
   const libs = [...byPackage.keys()].filter(p => !frameworks.has(p)).sort();
-  const multiLibs = libs.filter(p => byPackage.get(p).comps.size >= 2);
-  const libsOf = n => libs.filter(p => byPackage.get(p).comps.has(n));
+  const homes = new Map(libs.map(p => [p, homesOf(byPackage.get(p))]));
+  const multiLibs = libs.filter(p => homes.get(p).maybe.length >= 2);
+  const libsOf = n => libs.filter(p => homes.get(p).maybe.includes(n));
+  const uses = { runs: 0, types: 0, unknown: 0 };
+  for (const p of libs) for (const k of Object.keys(uses)) for (const n of byPackage.get(p).uses[k].values()) uses[k] += n;
 
   // Homes per state and the duplication reading, from the ownership index when given.
   const sharedStates = ownership ? ownership.findings : null;
@@ -185,7 +192,7 @@ function survey({ design, cruise, graph, ownership, frameworks }) {
     const r = real.get(n), touched = libsOf(n);
     return {
       name: n, ...r,
-      libraries: { touched: touched.length, multiHomed: touched.filter(p => byPackage.get(p).comps.size >= 2) },
+      libraries: { touched: touched.length, multiHomed: touched.filter(p => homes.get(p).maybe.length >= 2) },
       states: sharedStates ? { shared: sharedStates.filter(s => (s.writers || []).includes(n)).map(s => s.state) } : null,
       duplicates: duplicates ? { names: duplicates.filter(d => Object.prototype.hasOwnProperty.call(d.definedIn || {}, n)).map(d => d.name) } : null,
     };
@@ -195,7 +202,9 @@ function survey({ design, cruise, graph, ownership, frameworks }) {
     modules: files.length, edges: E, typeOnlyEdges: graph.typeOnly ? graph.typeOnly.size : 0,
     crossEdges: components.reduce((s, c) => s + c.edgesOut, 0),
     withInstability, components, control, multi,
-    libraries: { packages: byPackage.size, frameworks: [...frameworks].filter(p => byPackage.has(p)).sort(), counted: libs.length, multiHomed: multiLibs.map(p => ({ package: p, touchers: Object.fromEntries([...byPackage.get(p).comps].sort()) })), unmappedWithPackages },
+    libraries: { packages: byPackage.size, frameworks: [...frameworks].filter(p => byPackage.has(p)).sort(), counted: libs.length, multiHomed: multiLibs.map(p => ({ package: p, touchers: Object.fromEntries([...byPackage.get(p).comps].sort()),
+      homes: homes.get(p).maybe, couldntTell: homes.get(p).couldntTell, typesOnly: homes.get(p).typesOnly })),
+      typesOnlyApart: libs.filter(p => homes.get(p).maybe.length < 2 && byPackage.get(p).comps.size >= 2), uses, unmappedWithPackages },
     states: sharedStates, duplicates, topLevelNames: ownership ? ownership.instrument.topLevelNames : null,
   };
 }
@@ -247,7 +256,7 @@ function main(argv) {
     if (v === undefined) return stop(`--${k} needs a value`);
     if (REPEATABLE.has(k)) args[k].push(v); else args[k] = v;
   }
-  if (!args.design || !args.graph) return stop('usage: --design <design.json> --graph <depcruise.json cruised with --metrics> [--ownership <index.json>] [--framework <pkg>]... [--previous <table.json>] [--json <out.json>]');
+  if (!args.design || !args.graph) return stop('usage: --design <design.json> --graph <depcruise.json cruised with --metrics> [--package <dir>] [--ownership <index.json>] [--framework <pkg>]... [--previous <table.json>] [--json <out.json>]');
 
   let design, cruise, ownership = null, previous = null;
   try {
@@ -263,6 +272,11 @@ function main(argv) {
   const graph = loadGraph(cruise, design);
   const empty = notMeasured(graph);
   if (empty) return stop(empty);
+  let usesFrom = null;
+  if (args.package) {
+    usesFrom = packageUses(graph, design, args.package);
+    if (usesFrom.notMeasured) return stop(`--package: ${usesFrom.notMeasured}`);
+  }
   const id = designId(design);
 
   // The recipe check: every in-corpus module carries dependency-cruiser's instability.
@@ -283,12 +297,15 @@ function main(argv) {
   if (isObject(design.resources)) for (const [p, r] of Object.entries(design.resources)) if (isObject(r) && r.kind === 'framework') frameworks.add(p);
 
   const t = survey({ design, cruise, graph, ownership, frameworks });
+  t.usesFrom = usesFrom;
   let deltas = null;
   if (previous) {
     const pi = previous.instrument || {};
     if (!Array.isArray(previous.components)) return stop(`--previous ${args.previous} is not a table this tool wrote (no "components")`);
     if (pi.typeOnlyImports !== graph.typeOnlyImports) return stop(`--previous counted type-only imports as "${pi.typeOnlyImports}", this run as "${graph.typeOnlyImports}": the edge sets differ by policy, so no delta between them is a change in the code`);
     if (pi.root !== graph.root) return stop(`--previous read root "${pi.root}", this run "${graph.root}": not the same corpus`);
+    const usesNow = usesFrom ? 'package' : 'graph', usesThen = (pi.packageUses && pi.packageUses.from) || 'graph';
+    if (usesNow !== usesThen) return stop(`--previous read package uses from the ${usesThen}, this run from the ${usesNow}: library homes are counted differently, so no delta between them is a change in the code`);
     deltas = compare(t, previous);
     if (typeof previous.crossEdges !== 'number') return stop(`--previous ${args.previous} has no "crossEdges": written by an older coupling-table.js — rerun it`);
   }
@@ -300,6 +317,8 @@ function main(argv) {
     tool: TOOL, date, graph: path.resolve(args.graph), graphFileTime: graphTime, design: path.resolve(args.design), designId: id,
     root: graph.root, typeOnlyImports: graph.typeOnlyImports, modules: t.modules, edges: t.edges, typeOnlyEdges: t.typeOnlyEdges,
     ownership: args.ownership ? path.resolve(args.ownership) : null, frameworks: [...frameworks].sort(),
+    // Where each package import's use came from (#765): a graph alone says nothing either way.
+    packageUses: usesFrom ? { from: 'package', ref: usesFrom.at ? usesFrom.at.ref : null, sha: usesFrom.at ? usesFrom.at.sha : null, read: usesFrom.read, missing: usesFrom.missing } : { from: 'graph' },
   };
 
   print('INSTRUMENT');
@@ -344,9 +363,16 @@ function main(argv) {
   }
 
   print('');
-  print(`HOMES PER LIBRARY — packages imported from two or more components: ${t.libraries.multiHomed.length} of ${t.libraries.counted} non-framework packages` +
+  const lu = t.libraries.uses || { runs: 0, types: 0, unknown: 0 };
+  print(`HOMES PER LIBRARY — packages with two or more homes${lu.unknown ? ' (AT MOST: some imports could not be told)' : ''}: ${t.libraries.multiHomed.length} of ${t.libraries.counted} non-framework packages` +
     ` (${t.libraries.packages} packages imported in all; ${t.libraries.frameworks.length} framework${t.libraries.frameworks.length === 1 ? '' : 's'} set apart${t.libraries.frameworks.length ? ': ' + t.libraries.frameworks.join(', ') : ''})`);
-  for (const r of t.libraries.multiHomed) print(`    ${r.package.padEnd(28)} ${Object.entries(r.touchers).map(([c, n]) => `${c}:${n}`).join(' ')}`);
+  print(`  a home is a component whose import runs; package imports: ${lu.runs + lu.types + lu.unknown} = ${lu.runs} run + ${lu.types} types only (no home) + ${lu.unknown} couldn't tell` +
+    (t.usesFrom ? ` — uses read from the project's TypeScript${t.usesFrom.at ? ` at ${t.usesFrom.at.ref} ${t.usesFrom.at.sha.slice(0, 8)}` : ' (on disk)'}, ${t.usesFrom.read} modules; ${t.usesFrom.missing} of the graph's modules not in it`
+      : lu.unknown ? " — a graph alone does not say whether a package import runs, so each may be a home: COULDN'T TELL the home count; give --package <dir>" : ''));
+  const mark = (r, c) => (r.typesOnly || []).includes(c) ? '(types)' : (r.couldntTell || []).includes(c) ? '(?)' : '';
+  for (const r of t.libraries.multiHomed) print(`    ${r.package.padEnd(28)} ${Object.entries(r.touchers).map(([c, n]) => `${c}:${n}${mark(r, c)}`).join(' ')}`);
+  const apart = t.libraries.typesOnlyApart || [];
+  print(`  imported from two or more components only by counting types-only importers (no second home): ${apart.length}${apart.length ? ` — ${apart.join(', ')}` : ''}`);
   if (t.libraries.unmappedWithPackages) print(`  ${t.libraries.unmappedWithPackages} module(s) importing packages belong to no component and are not counted`);
   if (t.states) {
     print(`HOMES PER STATE — module states written from two or more components: ${t.states.length} (ownership index)`);

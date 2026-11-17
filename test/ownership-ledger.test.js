@@ -95,7 +95,10 @@ const summary = section(r.out, 'SUMMARY', 'PROPOSAL');
 ok(/packages imported by corpus modules: 6 = 1 single-toucher \(owner proposed\) \+ 1 multi-toucher \(couldn't tell\) \+ 1 framework \+ 2 already ruled \+ 1 not examined/.test(summary),
    `packages: 6 = 1 single + 1 couldn't tell + 1 framework + 2 ruled + 1 not examined (${line(summary, /packages imported/).trim()})`);
 ok(/pairs declared: 3 = 1 derivable \+ 1 consumption \(pending v1\) \+ 1 absence/.test(summary), `pairs: 3 = 1 + 1 + 1 (${line(summary, /pairs declared/).trim()})`);
-ok(/imported from >= 2 components: 3 of 6 packages = 1 framework \+ 1 couldn't tell \+ 1 already ruled/.test(summary), `multi-homed: 3 of 6 (${line(summary, /imported from/).trim()})`);
+ok(/two or more homes \(imports that run, or couldn't tell\): 3 of 6 packages = 1 framework \+ 1 couldn't tell \+ 1 already ruled; imported from >= 2 components only by counting types-only importers: 0/.test(summary), `multi-homed: 3 of 6 (${line(summary, /two or more homes/).trim()})`);
+// Package imports by use, on every run, its parts summing to its total (#765).
+{ const m = /package imports by use: (\d+) = (\d+) run \+ (\d+) types only \(never a home, #741 row 2\) \+ (\d+) couldn't tell/.exec(r.out);
+  ok(m && +m[1] === +m[2] + +m[3] + +m[4] && +m[1] === 8, `package imports by use print on every run and sum to their total (${line(r.out, /package imports by use/).trim()})`); }
 ok(/rows: 6 in the ledger = 3 ruled in the design \+ 3 proposed/.test(summary), 'rows: 6 = 3 ruled + 3 proposed');
 ok(/required, not declared: 1 /.test(summary), 'required, not declared: 1');
 ok(/rot: 1 stale \(no touchers\) of 6 rows · 1 UNVERIFIED/.test(summary), `rot: 1 stale, 1 UNVERIFIED (${line(summary, /rot:/).trim()})`);
@@ -107,7 +110,7 @@ for (const re of [/packages imported by corpus modules: (\d+) = (.*)$/m, /pairs 
 }
 
 const rows = section(r.out, 'PROPOSED ROWS', 'DERIVATION');
-ok(/multi: library, owner null — COULDN'T TELL: imported from 2 components \(a, b\)/.test(rows), 'the package two components import is "couldn\'t tell" with both named');
+ok(/multi: library, owner null — COULDN'T TELL: 2 possible homes \(a, b\)/.test(rows), 'the package two components import is "couldn\'t tell" with both named');
 ok(/solo: library, owner a — the only component/.test(rows), 'the package one component imports is proposed to that component');
 ok(/fw: framework — no owner/.test(rows), '--framework makes a framework row with no owner');
 ok(/owned: RULED in the design, kept as written/.test(rows), 'a ruled row is shown as ruled');
@@ -280,6 +283,35 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   ok(noFacts.code === 2 && /has no "ledgerFacts"/.test(noFacts.out), 'an index without ledgerFacts is NOT MEASURED, exit 2');
   const membersAlone = run(['--design', v1File, '--graph', graphFile, '--members', 'owned#make']);
   ok(membersAlone.code === 2 && /--members reads member uses from the ownership index/.test(membersAlone.out), '--members without --index is refused');
+}
+
+console.log('\nHOMES, NOT TOUCHERS — a types-only importer is no second home; a graph alone cannot tell (#765):');
+{
+  // Records shaped per use: an import that runs, one compiled away, and dependency-cruiser's own
+  // bare record for a package it could not resolve (every package, on a real archive).
+  const dep = (d, types) => ({ module: d, resolved: d, dependencyTypes: types, coreModule: false, couldNotResolve: true, circular: false, valid: true });
+  const RUNS = ['unknown', 'import'], TYPES = ['unknown', 'type-only'], BARE_REC = ['unknown'];
+  const G2 = { summary: { optionsUsed: { tsPreCompilationDeps: 'specify' } }, modules: [
+    { source: 'src/a/one.ts', dependencies: [dep('mon', RUNS), dep('bare', BARE_REC)] },
+    { source: 'src/b/two.ts', dependencies: [dep('mon', TYPES), dep('bare', BARE_REC),
+      { module: '../a/one', resolved: 'src/a/one.ts', dependencyTypes: ['local', 'import'], coreModule: false, couldNotResolve: false, circular: false, valid: true }] },
+    { source: 'src/c/four.ts', dependencies: [dep('mon', TYPES)] },
+  ] };
+  const D2 = JSON.parse(JSON.stringify(BARE)); D2.components.c.why = 'writes the output';
+  for (const c of Object.values(D2.components)) c.purpose = c.why;
+  const out2 = run(['--design', put('homes-design.json', D2), '--graph', put('homes-graph.json', G2)]).out;
+  ok(/mon: library, owner a — the only component whose import of it runs; 2 other components take only its types \(b, c\) — not a second home/.test(out2),
+     `a library one component runs and two take only types for is proposed to the one (${line(out2, /^  mon: library/).trim()})`);
+  ok(/mon: 3 components — a 1, b 1 \(types only\), c 1 \(types only\)/.test(out2), `every toucher is still listed, its use marked (${line(out2, /^  mon: 3/).trim()})`);
+  ok(/bare: library, owner null — COULDN'T TELL: 2 possible homes \(a, b\)/.test(out2),
+     `a package two components import by records that say nothing is couldn't tell, both possible homes (${line(out2, /^  bare: library/).trim()})`);
+  ok(/package imports by use: 5 = 1 run \+ 2 types only \(never a home, #741 row 2\) \+ 2 couldn't tell — a graph alone does not say whether a package import runs, so each may be a home; give --package <dir>/.test(out2),
+     `the uses are counted, and the couldn't-tell part names the remedy (${line(out2, /package imports by use/).trim()})`);
+  ok(/two or more homes \(imports that run, or couldn't tell\): 1 of 2 packages[^\n]*only by counting types-only importers: 1 \(mon\)/.test(out2),
+     `the summary counts homes, and names the package that reached two components only by types (${line(out2, /two or more homes/).trim()})`);
+  // --package with no TypeScript beside it: NOT MEASURED, never a silent fall back to the graph.
+  const noTs = run(['--design', put('homes-design2.json', D2), '--graph', put('homes-graph2.json', G2), '--package', DIR]);
+  ok(noTs.code === 2 && /NOT MEASURED — --package: /.test(noTs.out), `--package that cannot read the source is NOT MEASURED (exit ${noTs.code}: ${line(noTs.out, /NOT MEASURED/).trim().slice(0, 140)})`);
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

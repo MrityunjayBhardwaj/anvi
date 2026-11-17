@@ -104,7 +104,7 @@ console.log('\n  homes and duplication beside every row:');
 ok(comp(T, 'a').libraries.touched === 1 && comp(T, 'a').libraries.multiHomed.join() === 'lib', 'a touches lib, which b also imports');
 ok(comp(T, 'b').libraries.touched === 1, 'b touches lib only: react is a framework and is set apart');
 ok(comp(T, 'c').libraries.touched === 1 && comp(T, 'c').libraries.multiHomed.length === 0, 'c touches solo, which no one else imports');
-ok(/HOMES PER LIBRARY — packages imported from two or more components: 1 of 2 non-framework packages \(3 packages imported in all; 1 framework set apart: react\)/.test(r.out),
+ok(/HOMES PER LIBRARY — packages with two or more homes(?: \(AT MOST: some imports could not be told\))?: 1 of 2 non-framework packages \(3 packages imported in all; 1 framework set apart: react\)/.test(r.out),
    `library homes with their population (${(r.out.match(/HOMES PER LIBRARY.*/) || [''])[0]})`);
 ok(comp(T, 'a').states.shared.length === 0 && comp(T, 'b').states.shared.length === 1 && comp(T, 'c').states.shared.length === 1, 'the shared state is counted for both writers, b and c');
 ok(comp(T, 'a').duplicates.names.join() === 'helper' && comp(T, 'b').duplicates.names.length === 0 && comp(T, 'c').duplicates.names.join() === 'helper', 'helper is a duplicate of a and c, not of b');
@@ -203,6 +203,34 @@ console.log('\nNOT MEASURED — every input the table cannot be read from exits 
   const policy = run(['--design', counting, '--graph', graphFile, '--previous', base]);
   ok(policy.code === 2 && /--previous counted type-only imports as "ignore", this run as "count"/.test(policy.out), 'a --previous under another type-only policy cannot be compared');
   ok([m, m1, unknown, usage, unreadable, retired, emptyG, other, noDup, policy].every(x => !/^INSTRUMENT/m.test(x.out)), 'none of them prints a table');
+}
+
+console.log('\nHOMES, NOT TOUCHERS — a types-only importer is no home; a graph alone cannot tell (#765):');
+{
+  const g = JSON.parse(fs.readFileSync(graphFile, 'utf8'));
+  const setUse = (pick, types) => { for (const m of g.modules) for (const d of m.dependencies) if (d.couldNotResolve && pick(m.source, d.module)) d.dependencyTypes = types; };
+  // lib: a runs it, b takes only its types → one home, listed apart.
+  setUse((src, mod) => mod === 'lib' && src.includes('/b/'), ['unknown', 'type-only']);
+  const typed = run(['--design', designFile, '--graph', put('graph-typed.json', g), '--framework', 'react']);
+  ok(/HOMES PER LIBRARY — packages with two or more homes: 0 of 2/.test(typed.out) &&
+     /only by counting types-only importers \(no second home\): 1 — lib/.test(typed.out),
+     `a library b imports only for types has one home, and is listed apart (${(typed.out.match(/HOMES PER LIBRARY.*/) || [''])[0]})`);
+  ok(/package imports: (\d+) = (\d+) run \+ 1 types only \(no home\) \+ 0 couldn't tell/.test(typed.out), `the uses print, the types-only import counted (${(typed.out.match(/package imports: .*/) || [''])[0]})`);
+  // dependency-cruiser's own record for an unresolved package says nothing: couldn't tell.
+  setUse(() => true, ['unknown']);
+  const bare = run(['--design', designFile, '--graph', put('graph-bare.json', g), '--framework', 'react']);
+  ok(/HOMES PER LIBRARY — packages with two or more homes \(AT MOST: some imports could not be told\): 1 of 2/.test(bare.out) &&
+     /COULDN'T TELL the home count; give --package <dir>/.test(bare.out) && /lib +a:1\(\?\) b:1\(\?\)/.test(bare.out),
+     `from records that say nothing, the count is an upper bound and says so, each possible home marked (${(bare.out.match(/package imports: .*/) || [''])[0]})`);
+  // A previous table whose uses came from another source is not a delta.
+  const prevFile = path.join(DIR, 'prev-uses.json');
+  run(['--design', designFile, '--graph', graphFile, '--json', prevFile]);
+  const prev = JSON.parse(fs.readFileSync(prevFile, 'utf8'));
+  (prev.instrument || prev).packageUses = { from: 'package' };
+  fs.writeFileSync(prevFile, JSON.stringify(prev));
+  const mixed = run(['--design', designFile, '--graph', graphFile, '--previous', prevFile]);
+  ok(mixed.code === 2 && /read package uses from the package, this run from the graph/.test(mixed.out),
+     `a --previous table that read uses from the package is refused against a graph-only run (exit ${mixed.code})`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

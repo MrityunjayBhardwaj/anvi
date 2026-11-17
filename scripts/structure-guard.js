@@ -712,6 +712,37 @@ function main(argv) {
 }
 
 // Re-exported so the report's tests and the rules' tests import one surface.
-module.exports = { ...R, compareGraphs, analyserOptionProblem, reclassify, checkoutAtRef, main };
+// WHICH PACKAGE IMPORTS RUN, FOR A TOOL THAT READS AN ANALYSER'S GRAPH (#765). dependency-cruiser
+// marks no package import as compiled away (#762), so every package touch in its graph is
+// 'unknown'. A plan-time tool given --package reads the uses off the graph the hook builds (the
+// project's own TypeScript) and lays them over the analyser's graph, module by module. A package
+// inside a git checkout is read from its default branch, as a baseline is (#562), never its
+// working tree. Returns { read, missing, at } — modules whose uses were read, and modules of the
+// analyser's graph the package graph does not hold (left 'unknown', and counted) — or
+// { notMeasured }.
+function packageUses(graph, design, pkg) {
+  let S, pkgDir;
+  try { S = loadFromCandidates('structure-graph.js'); pkgDir = fs.realpathSync(pkg); }
+  catch (e) { return { notMeasured: e.message }; }
+  const at = checkoutAtRef(pkgDir);
+  if (at && at.notMeasured) return { notMeasured: at.notMeasured };
+  let built;
+  try {
+    const dir = at ? at.dir : pkgDir;
+    built = S.buildGraph({ pkgDir: dir, design, extractor: S.loadExtractor({}, dir), cachePath: null, proposed: null });
+  } finally { if (at) at.cleanup(); }
+  if (built.notMeasured) return { notMeasured: built.notMeasured };
+  const theirs = built.graph.externalKinds || new Map();
+  const kinds = new Map();
+  let read = 0, missing = 0;
+  for (const [m, pkgs] of graph.externals || []) {
+    if (!pkgs.size) continue;
+    if (theirs.has(m)) { kinds.set(m, theirs.get(m)); read++; } else missing++;
+  }
+  graph.externalKinds = kinds;
+  return { read, missing, at: at ? { ref: at.ref, sha: at.sha } : null };
+}
+
+module.exports = { ...R, compareGraphs, analyserOptionProblem, reclassify, checkoutAtRef, packageUses, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

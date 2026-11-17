@@ -752,14 +752,29 @@ function touchersByPackage(graph, design) {
     for (const pkg of pkgs) {
       // `use`: 'runs', 'types' or 'unknown' (#762); a graph built before uses were read says 'unknown'.
       touches.push({ module, component, package: pkg, use: (kinds && kinds.get(pkg)) || 'unknown' });
-      if (!byPackage.has(pkg)) byPackage.set(pkg, { comps: new Map(), unmapped: [] });
+      const use = (kinds && kinds.get(pkg)) || 'unknown';
+      if (!byPackage.has(pkg)) byPackage.set(pkg, { comps: new Map(), unmapped: [], uses: { runs: new Map(), types: new Map(), unknown: new Map() } });
       const e = byPackage.get(pkg);
       if (component === undefined) e.unmapped.push(module);
-      else e.comps.set(component, (e.comps.get(component) || 0) + 1);
+      else { e.comps.set(component, (e.comps.get(component) || 0) + 1); e.uses[use].set(component, (e.uses[use].get(component) || 0) + 1); }
     }
   }
   for (const e of byPackage.values()) e.unmapped.sort();
   return { touches, byPackage, modulesWithPackages, unmappedWithPackages };
+}
+
+// A package's homes by use (#765), from one `byPackage` entry: `runs` — components with an import
+// of it that runs (each a home); `couldntTell` — components whose every import of it says nothing
+// either way (a graph alone; each MAY be a home); `typesOnly` — components that only take its types
+// (never a home: the owner's 11-05 ruling, #741 row 2). `maybe` is runs ∪ couldntTell: a count of
+// homes is exact only when couldntTell is empty. One component lands in one list, the strongest.
+function homesOf(entry) {
+  const u = (entry && entry.uses) || {};
+  const keys = m => (m instanceof Map ? [...m.keys()] : []);
+  const runs = keys(u.runs).sort();
+  const couldntTell = keys(u.unknown).filter(c => !runs.includes(c)).sort();
+  const typesOnly = keys(u.types).filter(c => !runs.includes(c) && !couldntTell.includes(c)).sort();
+  return { runs, couldntTell, typesOnly, maybe: [...runs, ...couldntTell].sort() };
 }
 
 // ── rule: owner (#710) ───────────────────────────────────────────────────────────────
@@ -944,6 +959,6 @@ function planBaseline(results, previous, { allowGrowth = false } = {}) {
 module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
   KINDS, REACHES, INSTRUMENTS, JOB_REASONS, gatekeeperOf, blastRadius, packageOf, TO_MEASURE, hotPathsProblem, hotPathsId, hotPathsTouched,
-  componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, owners, SINCE, judge, ratchet, planBaseline,
+  componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, homesOf, owners, SINCE, judge, ratchet, planBaseline,
   isRuled, rowFor, touchAllowed, whereOwned, entrances, SYMBOL, isPackageOrigin,
 };
