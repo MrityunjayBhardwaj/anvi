@@ -1497,6 +1497,13 @@ loosened until it stops firing guards nothing.
   build the package graph, so they always tell. Both counts print on every run, zero included.
   `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
   proposes rows from the graph and classifies each declared pair; it never writes in place.
+  It proposes owners from **homes**, as the owner rule judges (#765): a component whose import
+  of a library runs is a home; one that takes only its types is listed, marked, and is no home.
+  From a graph alone no package import says whether it runs, so each is counted "couldn't tell"
+  and may be a home — said on every run, with the counts; `--package <dir>` reads the uses off the
+  project's own TypeScript (the default branch, for a checkout). `scripts/coupling-table.js`
+  counts library homes the same way, takes the same `--package`, prints an upper bound ("AT MOST")
+  when it could not tell, and refuses a `--previous` table whose uses came from the other source.
   With `--index <ownership-index.json>` (written by `scripts/ownership-index.js --json`, which
   reads the project's own type checker) it also proposes ledger v1 rows: `state` and `registry`
   for module states reached from another file, `entry` for an export that writes one and is
