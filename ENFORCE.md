@@ -1608,6 +1608,11 @@ loosened until it stops firing guards nothing.
   in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
   be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
   option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
+  Frameworks set apart (#758) are read from the design's rows of kind `framework`; a `--framework`
+  the design does not record widens that run only, is printed as WIDENED in the header, and makes
+  a `--previous` built under another framework list a refusal, not a delta. `forceable-share.js`
+  (#700) reads them the same way and prints the widening beside its verdict, so a ruling's figure
+  is reproduced from the design and settings, not from how the command was typed.
 - **What a task did, from the session record (#712).** `node scripts/task-telemetry.js --session <id>
   [--since <t>] [--until <t>] [--package <dir>] [--design <d>] [--radius <components,files>] [--widen <t>=<items>]`
   prints per task: files read and edited (the tool call's operated field, successful calls only),

@@ -361,6 +361,27 @@ function rowFor(resources, pkg) {
   return best && { id: best.id, row: best.row };
 }
 
+// The frameworks a plan-time tool excludes (#758), each with where it came from: the design's
+// `kind: "framework"` rows, then any `--framework` flag. The design is the record a figure is
+// reproduced from. A flag naming a design framework only confirms it; a flag naming anything else
+// WIDENS the run, and carries the row it overrides (if the design has one).
+function frameworksOf(design, flags) {
+  const res = isObject(design && design.resources) ? design.resources : {};
+  const out = new Map();
+  for (const [id, r] of Object.entries(res)) if (r && r.kind === 'framework') out.set(id, { pkg: id, source: 'design' });
+  for (const pkg of flags) {
+    if (out.has(pkg)) { out.get(pkg).alsoFlagged = true; continue; }
+    const hit = rowFor(res, pkg);
+    out.set(pkg, { pkg, source: 'command line', designRow: hit ? { id: hit.id, kind: hit.row.kind, owner: hit.row.owner || null } : null });
+  }
+  return [...out.values()];
+}
+function frameworkLabel(f) {
+  if (f.source === 'design') return `${f.pkg} (design${f.alsoFlagged ? '; also given as --framework' : ''})`;
+  const row = f.designRow;
+  return `${f.pkg} (command line — ${row ? `OVERRIDES the design, which records it as a ${row.kind}${row.owner ? ` owned by ${row.owner}` : ''}${row.id !== f.pkg ? ` (row "${row.id}")` : ''}` : 'NOT in the design'})`;
+}
+
 // The jobs table (#710, ledger v1; design §5.2): `id → { home, resources: [id], doors: [id], reason,
 // ruled, evidence }`. A job is a RULING — the tool never proposes one — so each field is checked
 // for the reason a verdict built on it would lie: a home that is no component, a resource or door
@@ -969,5 +990,5 @@ module.exports = {
   RULES, RETIRED, retiredSections, edgeKey, shellWord, baselineCommand, countsTypeOnly, designId, designProblem, designCheck, designVersions, DESIGN_OWED_AT, loadGraph, notMeasured, onCycle,
   KINDS, REACHES, INSTRUMENTS, JOB_REASONS, gatekeeperOf, blastRadius, packageOf, TO_MEASURE, hotPathsProblem, hotPathsId, hotPathsTouched,
   componentOf, divergences, byPair, allowedFrom, cycleEdges, touchersByPackage, homesOf, owners, SINCE, judge, ratchet, planBaseline,
-  isRuled, rowFor, touchAllowed, whereOwned, entrances, SYMBOL, isPackageOrigin,
+  isRuled, rowFor, frameworksOf, frameworkLabel, touchAllowed, whereOwned, entrances, SYMBOL, isPackageOrigin,
 };

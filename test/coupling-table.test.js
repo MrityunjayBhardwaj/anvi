@@ -119,6 +119,24 @@ ok(/agreement is ONE observation, not several/.test(r.out), 'the note on shared 
 ok(/SMELLS — NOT MEASURED/.test(r.out) && /a reading, never a ratchet/.test(r.out) && /split BY JOB followed by a per-pair re-count, never a target/.test(r.out),
    'the smells are NOT MEASURED, with complexity a reading and exports-per-file a trigger');
 
+console.log('\n  frameworks — where each came from (#758):');
+ok(/framework +react \(command line — NOT in the design\) — excluded from library homes/.test(r.out) && /⚠ WIDENED by --framework: react — the design does not record it/.test(r.out),
+   'a --framework the design does not record is named as the source and printed as WIDENED');
+ok(T.instrument.widenedBy.join() === 'react' && T.instrument.frameworkSources[0].source === 'command line', 'and the JSON records it');
+{
+  const noFlag = run(['--design', designFile, '--graph', graphFile, '--ownership', indexFile, '--previous', base]);
+  ok(noFlag.code === 2 && /--previous set apart the frameworks \[react\], this run \[none\]/.test(noFlag.out),
+     `a --previous built under another framework list is refused, not compared (${noFlag.code}: ${(noFlag.out.match(/--previous set apart.*/) || [''])[0].slice(0, 70)})`);
+  const RECORDED = { ...DESIGN, resources: { react: { kind: 'framework', reach: 'process', owner: null } },
+    components: Object.fromEntries(Object.entries(DESIGN.components).map(([n, c]) => [n, { ...c, purpose: `the ${n} side` }])) };
+  const recorded = put('design-react.json', RECORDED);
+  const rec = run(['--design', recorded, '--graph', graphFile, '--ownership', put('index-react.json', index(RECORDED))]);
+  ok(/framework +react \(design\) — excluded from library homes/.test(rec.out) && !/WIDENED/.test(rec.out),
+     `with react recorded in the design and no flag: source "design", nothing widened (exit ${rec.code}${rec.code ? ': ' + rec.out.slice(0, 160) : ''})`);
+  const homes = o => (o.match(/HOMES PER LIBRARY.*/) || [''])[0];
+  ok(homes(rec.out) !== '' && homes(rec.out) === homes(r.out), 'and the library homes equal the flagged run\'s');
+}
+
 console.log('\n  controls:');
 const said = name => (r.out.match(new RegExp(`^  ${name} .*$`, 'm')) || [''])[0];
 ok(/edges placed 8–8 of 8/.test(said('random DAG')), `the random DAG places all 8 edges in every draw (${said('random DAG').trim().slice(0, 60)})`);

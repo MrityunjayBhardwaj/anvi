@@ -40,8 +40,9 @@
 // Usage:
 //   node scripts/coupling-table.js --design <design.json> --graph <depcruise.json>
 //        [--ownership <index.json>]   from: ownership-index.js --findings --json <index.json>
-//        [--framework <pkg>]...       a package that is a framework, not a library (also read
-//                                     from the design's ledger rows of kind framework)
+//        [--framework <pkg>]...       a package that is a framework, not a library, for this run
+//                                     only: the record is the design's rows of kind framework, and
+//                                     a flag the design does not record is printed as WIDENED (#758)
 //        [--previous <table.json>]    an earlier --json of this tool: print the deltas
 //        [--json <out.json>]          the whole table
 //
@@ -64,6 +65,7 @@ if (require.main === module) {
 const fs = require('fs');
 const path = require('path');
 const G = require('./structure-guard.js');
+const R = require('../hooks/structure-rules.js');
 const { loadGraph, notMeasured, componentOf, touchersByPackage, homesOf, packageUses, designProblem, designId, analyserOptionProblem, countsTypeOnly } = G;
 
 const TOOL = 'coupling-table.js';
@@ -293,8 +295,10 @@ function main(argv) {
     if (!Array.isArray(ownership.findings) || !Array.isArray(ownership.duplicates))
       return stop(`the ownership index ${args.ownership} has no "duplicates" (built without --findings, or by an ownership-index.js older than #722) — rebuild it with ownership-index.js --findings --json`);
   }
-  const frameworks = new Set(args.framework);
-  if (isObject(design.resources)) for (const [p, r] of Object.entries(design.resources)) if (isObject(r) && r.kind === 'framework') frameworks.add(p);
+  // Frameworks come from the design; a flag widens this run only, and says so (#758).
+  const fws = R.frameworksOf(design, args.framework);
+  const wide = fws.filter(f => f.source === 'command line').map(f => f.pkg);
+  const frameworks = new Set(fws.map(f => f.pkg));
 
   const t = survey({ design, cruise, graph, ownership, frameworks });
   t.usesFrom = usesFrom;
@@ -306,6 +310,8 @@ function main(argv) {
     if (pi.root !== graph.root) return stop(`--previous read root "${pi.root}", this run "${graph.root}": not the same corpus`);
     const usesNow = usesFrom ? 'package' : 'graph', usesThen = (pi.packageUses && pi.packageUses.from) || 'graph';
     if (usesNow !== usesThen) return stop(`--previous read package uses from the ${usesThen}, this run from the ${usesNow}: library homes are counted differently, so no delta between them is a change in the code`);
+    const fwThen = Array.isArray(pi.frameworks) ? [...pi.frameworks].sort().join(', ') : null, fwNow = [...frameworks].sort().join(', ');
+    if (fwThen !== null && fwThen !== fwNow) return stop(`--previous set apart the frameworks [${fwThen || 'none'}], this run [${fwNow || 'none'}]: library homes are counted over different packages, so no delta between them is a change in the code — record the frameworks in the design and rerun both`);
     deltas = compare(t, previous);
     if (typeof previous.crossEdges !== 'number') return stop(`--previous ${args.previous} has no "crossEdges": written by an older coupling-table.js — rerun it`);
   }
@@ -316,7 +322,7 @@ function main(argv) {
   const instrument = {
     tool: TOOL, date, graph: path.resolve(args.graph), graphFileTime: graphTime, design: path.resolve(args.design), designId: id,
     root: graph.root, typeOnlyImports: graph.typeOnlyImports, modules: t.modules, edges: t.edges, typeOnlyEdges: t.typeOnlyEdges,
-    ownership: args.ownership ? path.resolve(args.ownership) : null, frameworks: [...frameworks].sort(),
+    ownership: args.ownership ? path.resolve(args.ownership) : null, frameworks: [...frameworks].sort(), frameworkSources: fws, widenedBy: wide,
     // Where each package import's use came from (#765): a graph alone says nothing either way.
     packageUses: usesFrom ? { from: 'package', ref: usesFrom.at ? usesFrom.at.ref : null, sha: usesFrom.at ? usesFrom.at.sha : null, read: usesFrom.read, missing: usesFrom.missing } : { from: 'graph' },
   };
@@ -328,7 +334,8 @@ function main(argv) {
   print(`  corpus    ${t.modules} modules under root '${graph.root}' (the guard's loadGraph: its excludes, its type-only policy) · ${t.edges} internal edges` +
     ` · type-only imports ${countsTypeOnly(design) ? `COUNTED (${t.typeOnlyEdges} edges are types only)` : 'NOT COUNTED (the design does not set "typeOnlyImports": "count")'}`);
   print(`  ownership ${ownership ? `${instrument.ownership} (TypeScript ${ownership.instrument.typescript}; states and duplication read from it)` : 'NOT GIVEN — state homes and duplication are NOT MEASURED; pass --ownership <index.json> from ownership-index.js --findings --json'}`);
-  print(`  framework ${instrument.frameworks.length ? instrument.frameworks.join(', ') : 'none'} (excluded from library homes; --framework or a ledger row of kind framework)`);
+  print(`  framework ${fws.length ? fws.map(R.frameworkLabel).join(', ') : 'none in the design'} — excluded from library homes`);
+  if (wide.length) print(`  ⚠ WIDENED by --framework: ${wide.join(', ')} — the design does not record ${wide.length === 1 ? 'it' : 'them'} as a framework, so this table cannot be reproduced from the design alone; record ${wide.length === 1 ? 'it' : 'each'} as kind "framework" in the design, or drop the flag`);
 
   print('');
   print('COUPLING PER COMPONENT — file grain. Ca: distinct files outside that import a file inside · Ce: distinct files inside that import outside · ' +
