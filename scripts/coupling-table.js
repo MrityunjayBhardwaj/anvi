@@ -72,7 +72,6 @@ const TOOL = 'coupling-table.js';
 const FLAGS = new Set(['design', 'graph', 'package', 'ownership', 'framework', 'previous', 'json']);
 const REPEATABLE = new Set(['framework']);
 const DRAWS = 10;
-const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
 const fix2 = x => x === null ? 'n/a' : x.toFixed(2);
 
 function readJson(file, what) {
