@@ -80,7 +80,8 @@ function ownersOf(sig, design, { exclude = null, seeds = true } = {}) {
   const ruled = all.ruled.filter(j => j.id !== exclude);
   const jv = SV.jobVectors(sig, { ...all, ruled });
   const rows = isObj(design && design.resources) ? design.resources : {};
-  const doorRows = o => Object.entries(rows).filter(([, r]) => isObj(r) && r.kind === 'door' && r.owner === o).map(([id]) => id).sort();
+  // A seeded owner's ways in are its entry rows; an owner-only door is no way in for a split (#763).
+  const doorRows = o => Object.entries(rows).filter(([, r]) => isObj(r) && r.kind === 'entry' && r.owner === o).map(([id]) => id).sort();
   const out = [];
   for (const h of jv.perHome) {
     const jobs = jv.perJob.filter(j => j.home === h.home)
@@ -119,7 +120,7 @@ function taskVector(sig, design, task, { weights }) {
     const row = rows[id];
     if (!row) notes.push(`${id}: not a ledger row — read by its form (${id.includes('#') ? 'file#name: a state' : 'a package: a library'})`);
     if (row && row.kind === 'framework') { notes.push(`${id}: a framework — used everywhere by kind, carries no ownership; left out`); continue; }
-    if (row && row.kind === 'door') { part.calls.set(`calls:${id}`, 1); continue; }
+    if (row && (row.kind === 'door' || row.kind === 'entry')) { part.calls.set(`calls:${id}`, 1); continue; }
     for (const f of SV.featuresOf(id, row)) part.resources.set(f, weights.direct);
   }
   const parts = [];

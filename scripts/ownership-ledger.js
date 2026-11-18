@@ -103,7 +103,10 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 // The kinds whose touchers the import graph can count (v0); the others are measured with --index (v1).
 const IMPORT_KINDS = new Set(['library', 'framework']);
 // The kinds ledger v1 measures from the ownership index.
-const SYMBOL_KINDS = new Set(['state', 'registry', 'door', 'syntax']);
+const SYMBOL_KINDS = new Set(['state', 'registry', 'door', 'entry', 'syntax']);
+// Reached by reference: an `entry` (the way in, called from outside by design) or a `door` (an
+// owner-only path). The tool proposes entries; a door is a ruling (#763).
+const BY_REFERENCE = new Set(['door', 'entry']);
 
 function readJson(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -381,7 +384,9 @@ function surveyV1(design, facts, v0, membersQueries) {
     proposed[st.id] = { kind, reach: 'process', owner: single, verifiedBy: 'symbols', enforcedBy: 'static-guard',
       proposed: why.join('; '), touchers, readers: st.readers, writers: st.writers, throughDoors: doors.map(d => d.id).sort(), ...(st.escapes ? { escapes: st.escapes } : {}) };
   }
-  // Doors: exports writing a ledger state (proposed here, or ruled in the design).
+  // Entries: exports writing a ledger state (proposed here, or ruled in the design), called from
+  // another file — the ways in to that state. Proposed as `entry` rows (#763): a call from outside is
+  // the use they exist for. Whether one is instead an owner-only `door` is the owner's ruling.
   const ruledStateIds = new Set(Object.entries(rows).filter(([, r]) => isObject(r) && (r.kind === 'state' || r.kind === 'registry')).map(([id]) => id));
   const doorCounts = { doors: 0, crossComponent: 0, unmapped: 0, passthroughSkipped: 0 };
   for (const e of facts.exports) {
@@ -393,7 +398,7 @@ function surveyV1(design, facts, v0, membersQueries) {
     doorCounts.doors++;
     if (outside.length) doorCounts.crossComponent++;
     if (rows[e.id]) { kept.push(e.id); continue; }
-    proposed[e.id] = { kind: 'door', reach: 'process', owner: e.component, verifiedBy: 'symbols', enforcedBy: 'static-guard',
+    proposed[e.id] = { kind: 'entry', reach: 'process', owner: e.component, verifiedBy: 'symbols', enforcedBy: 'none',
       proposed: `an export of ${e.file} that writes ${writes.join(', ')} and is called from ${plural(Object.keys(e.callerFiles).length, 'other file')}` +
         (outside.length ? `, ${outside.length} of its calling components outside its own (${outside.join(', ')})` : ', all inside its own component'),
       touchers: e.callers, callerFiles: e.callerFiles, writes };
@@ -418,7 +423,7 @@ function surveyV1(design, facts, v0, membersQueries) {
   const syntaxById = new Map((facts.syntax || []).map(q => [q.id, q]));
   const measuredTouchers = (id, r) => {
     if (r.kind === 'state' || r.kind === 'registry') { const st = statesById.get(id); return st ? { n: sumValues(st.writers), measured: true, escapes: st.escapes } : { n: 0, measured: true, gone: true }; }
-    if (r.kind === 'door') { const e = exportsById.get(id); return { n: e ? sumValues(e.callers) : 0, measured: true }; }
+    if (BY_REFERENCE.has(r.kind)) { const e = exportsById.get(id); return { n: e ? sumValues(e.callers) : 0, measured: true }; }
     if (r.kind === 'syntax') { const q = syntaxById.get(id); return q ? { n: sumValues(q.sites), measured: true } : { n: 0, measured: false }; }
     return { n: 0, measured: false };
   };
@@ -434,7 +439,14 @@ function surveyV1(design, facts, v0, membersQueries) {
   const allRows = { ...v0.ledger, ...proposed };
   const jobs = Object.entries(isObject(design.jobs) ? design.jobs : {}).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([id, j]) => {
     const radius = blastRadius(j, allRows);
-    const doorCallers = (j.doors || []).map(d => ({ id: d, callers: exportsById.has(d) ? sumValues(exportsById.get(d).callers) : 0 }));
+    // Each named way in carries its row's kind (#763): an entry's outside callers are its use; a door's
+    // are findings. Whether a job means to name an owner-only path is a ruling, so it is printed,
+    // never refused — the two cases look the same to a structural check.
+    const doorCallers = (j.doors || []).map(d => {
+      const e = exportsById.get(d), r = isObject(allRows[d]) ? allRows[d] : null;
+      const outside = e && r && r.owner ? Object.entries(e.callers).filter(([c]) => c !== r.owner).reduce((t, [, n]) => t + n, 0) : null;
+      return { id: d, callers: e ? sumValues(e.callers) : 0, kind: r ? r.kind : null, owner: r ? r.owner || null : null, outside };
+    });
     const orphan = !doorCallers.some(d => d.callers > 0);
     return { id, home: j.home, resources: j.resources || [], doors: doorCallers, radius, orphan, noDoors: !(j.doors || []).length };
   });
@@ -465,7 +477,7 @@ function surveyV1(design, facts, v0, membersQueries) {
   const note = (c, o, id) => { if (!isComp(c) || !o || c === o) return; const k = edgeKey(c, o); if (!implied.has(k)) implied.set(k, new Set()); implied.get(k).add(id); };
   for (const [id, r] of Object.entries(allRows)) {
     if (!isObject(r) || !r.owner) continue;
-    if (r.kind === 'door') { const e = exportsById.get(id); for (const c of Object.keys((e && e.callers) || {})) note(c, r.owner, id); }
+    if (BY_REFERENCE.has(r.kind)) { const e = exportsById.get(id); for (const c of Object.keys((e && e.callers) || {})) note(c, r.owner, id); }
     if (r.kind === 'state' || r.kind === 'registry') { const st = statesById.get(id); if (st) for (const c of new Set([...Object.keys(st.readers), ...Object.keys(st.writers)])) note(c, r.owner, id); }
   }
   const pending = v0.derivation.consumption;
@@ -511,10 +523,11 @@ function reportV1(v, s, ctx, print) {
   for (const u of v.unseen) print(`    ${u.id} · escapes ${u.escapes} · readers ${Object.entries(u.readers).map(([cc, n]) => `${cc} ${n}`).join(', ')}`);
 
   print('');
-  print('DOOR ROWS (an export that writes a ledger state or registry, called from another file; owner its file\'s component)');
-  print(`  doors: ${v.doorCounts.doors} = ${v.doorCounts.crossComponent} called from another component + ${v.doorCounts.doors - v.doorCounts.crossComponent} called only from files of their own component` +
-    `; ${v.doorCounts.unmapped} in unmapped files not examined; ${v.doorCounts.passthroughSkipped} in a passthrough file, never doors (rule 7)`);
-  for (const [id, r] of byKind('door')) print(`    ${id}: owner ${r.owner} · writes ${r.writes.join(', ')} · callers ${Object.entries(r.touchers).map(([cc, n]) => `${cc} ${n}`).join(', ')} (${Object.keys(r.callerFiles).length <= 3 ? Object.keys(r.callerFiles).join(', ') : plural(Object.keys(r.callerFiles).length, 'file')}) — ${gk(r)}`);
+  print('ENTRY ROWS (an export that writes a ledger state or registry, called from another file; owner its file\'s component)');
+  print('  an entry is a way in: a call from outside its owner is its use, never a finding. A path only the owner may take is a door, and a door is a ruling (#763)');
+  print(`  entries: ${v.doorCounts.doors} = ${v.doorCounts.crossComponent} called from another component + ${v.doorCounts.doors - v.doorCounts.crossComponent} called only from files of their own component` +
+    `; ${v.doorCounts.unmapped} in unmapped files not examined; ${v.doorCounts.passthroughSkipped} in a passthrough file, never entries (rule 7)`);
+  for (const [id, r] of byKind('entry')) print(`    ${id}: owner ${r.owner} · writes ${r.writes.join(', ')} · callers ${Object.entries(r.touchers).map(([cc, n]) => `${cc} ${n}`).join(', ')} (${Object.keys(r.callerFiles).length <= 3 ? Object.keys(r.callerFiles).join(', ') : plural(Object.keys(r.callerFiles).length, 'file')}) — ${gk(r)}`);
 
   print('');
   print('SYNTAX ROWS (only members the index was given with --syntax: a ruling input, never detected)');
@@ -551,6 +564,9 @@ function reportV1(v, s, ctx, print) {
     print(`    ${j.id}: home ${j.home} · ${plural(j.resources.length, 'resource')} · ${plural(j.doors.length, 'door')} · blast radius ${j.radius.components.join(', ')}` +
       (j.radius.unowned.length ? ` (+ ${plural(j.radius.unowned.length, 'row')} with no owner yet: ${j.radius.unowned.join(', ')})` : '') +
       (j.orphan ? ` · ORPHAN — ${j.noDoors ? 'no door declared' : 'no door it holds has a caller'}` : ''));
+    for (const d of j.doors) print(`      ${d.id}: ` + (d.kind === 'entry' ? `an entry — calls from outside ${d.owner || 'its owner'} are its use (${d.outside !== null ? `${d.outside} now` : 'no caller seen'})`
+      : d.kind === 'door' ? `a DOOR, owner-only — every reference from outside ${d.owner || 'its owner'} is a finding (${d.outside !== null ? `${d.outside} call${d.outside === 1 ? '' : 's'} from outside now` : 'no caller seen'}); if this job's callers are meant to come in here, make the row an entry`
+      : `a ${d.kind || 'row the ledger does not hold'} — not reached by reference`));
   }
 
   print('');
@@ -575,10 +591,10 @@ function reportV1(v, s, ctx, print) {
   const n = k => byKind(k).length;
   print('');
   print('SUMMARY (v1)');
-  print(`  rows proposed: ${Object.keys(v.proposed).length} = ${n('state')} state + ${n('registry')} registry + ${n('door')} door + ${n('syntax')} syntax; ${v.kept.length} v1 rows already ruled, kept`);
+  print(`  rows proposed: ${Object.keys(v.proposed).length} = ${n('state')} state + ${n('registry')} registry + ${n('entry')} entry + ${n('syntax')} syntax; ${v.kept.length} v1 rows already ruled, kept`);
   print(`  states: ${c.states} module states = ${c.private} private (excluded) + ${c.constant} never written + ${c.unseen} no write seen, handed on + ${c.unmapped} unmapped + ${c.state + c.registry} proposed + ${c.ruledReached} ruled`);
   print(`  couldn't tell (owner null: written from 2 or more components): ${c.couldntTell} of ${c.state + c.registry} proposed states and registries · sprawl (reached, no door): ${c.sprawl}`);
-  print(`  doors: ${v.doorCounts.doors} (${v.doorCounts.crossComponent} called from another component) · syntax rows: ${v.syntax.length} · jobs: ${v.jobs.length} (${v.jobs.filter(j => j.orphan).length} orphan)`);
+  print(`  entries: ${v.doorCounts.doors} (${v.doorCounts.crossComponent} called from another component) · syntax rows: ${v.syntax.length} · jobs: ${v.jobs.length} (${v.jobs.filter(j => j.orphan).length} orphan)`);
   print(`  pending pairs: ${s.derivation.consumption.length} = ${v.derivedV1.length} derived in v1 + ${v.stillPending.length} still pending · required, not declared (v1): ${v.requiredV1.length}`);
 }
 

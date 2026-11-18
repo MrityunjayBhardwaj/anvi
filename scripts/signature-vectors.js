@@ -143,7 +143,7 @@ function featuresOf(id, row) {
   const kind = row && row.kind;
   if (kind === 'library' || kind === 'framework' || (!kind && !id.includes('#'))) return [`lib:${id}`];
   if (kind === 'syntax') return [`member:${id}`];
-  if (kind === 'door') return [];
+  if (kind === 'door' || kind === 'entry') return [];
   return [`writes:${id}`, `reads:${id}`];
 }
 

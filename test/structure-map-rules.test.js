@@ -164,12 +164,15 @@ console.log('\nNOT MEASURED — a door or fields row with no source read is neve
   ok(/"every member" is read from a file in the corpus/.test(R.designProblem((x => { x.resources['write-door'].symbols = ['monaco-editor#ITextModel.*']; return x; })(clone(d))) || ''),
      'a package interface\'s members are named one by one');
   ok(R.gatekeeperOf(d.resources['write-door']).predicate === 'reference', 'a door is touched by reference, not by import');
-}
+  // An entry is the way in (#763): nothing refuses a call to it, so no gatekeeper judges it.
+  const entryRow = { ...d.resources['write-door'], kind: 'entry', enforcedBy: 'none' };
+  ok(R.gatekeeperOf(entryRow).by === 'none' && R.gatekeeperOf(d.resources['write-door']).by === 'static-guard',
+     `an entry has no gatekeeper; the same row as a door is the static guard's (${R.gatekeeperOf(entryRow).by} vs ${R.gatekeeperOf(d.resources['write-door']).by})`);}
 
 const from = process.env.STRUCTURE_TS_FROM;
 let tsDir = null;
 try { tsDir = from && path.dirname(require.resolve('typescript/package.json', { paths: [from] })); } catch { tsDir = null; }
-const GATED = 30;
+const GATED = 32;
 console.log('\nDOOR AND READS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 if (!tsDir) console.log(`  – SKIPPED ${GATED} cases, NOT MEASURED here: ${from ? `no TypeScript resolvable from ${from}` : 'STRUCTURE_TS_FROM is not set'}`);
 else {
@@ -252,6 +255,16 @@ else {
   ok(/door write-door — codeView owns it: the work that needs Writeback\.replaceRanges belongs in codeView/.test(plant.reason || '') && /adds 1 reach that erode/.test(plant.reason || ''),
      'the refusal names the owner and the door, and offers both remedies');
   ok(plant.examined.symbolFiles === 1 && typeof plant.examined.symbolMs === 'number', `the checker read the one edited file (${plant.examined.symbolFiles} file, ${plant.examined.symbolMs} ms)`);
+  // THE SAME CALL TO AN ENTRY IS ITS USE (#763): the row unchanged but for its kind, and the call
+  // from outside the owner that a door refuses is no finding at all.
+  const asEntry = JSON.parse(JSON.stringify(design));
+  asEntry.resources['write-door'] = { ...asEntry.resources['write-door'], kind: 'entry', enforcedBy: 'none' };
+  ok(R.designProblem(asEntry) === null, `a row with symbols may be an entry (${R.designProblem(asEntry)})`);
+  const plantedText = fs.readFileSync(path.join(P, 'src/workspace/panel.ts'), 'utf8').replace('void wb;', 'wb.replaceRanges();');
+  const mEntry = SY.measure({ pkgDir: P, design: asEntry, rels, overlay: new Map([['src/workspace/panel.ts', plantedText]]) });
+  const mDoor = SY.measure({ pkgDir: P, design, rels, overlay: new Map([['src/workspace/panel.ts', plantedText]]) });
+  ok(mEntry.door.found.length === 0 && mDoor.door.found.some(f => f.key === 'src/workspace/panel.ts -> door write-door: Writeback.replaceRanges'),
+     `the panel's call of replaceRanges is a finding against a door and none against an entry (door ${mDoor.door.found.length}, entry ${mEntry.door.found.length})`);
   const insideOk = decide(edit('src/codeView/inside.ts', 'wb.replaceRanges();', 'wb.replaceRanges(); wb.replaceRanges();'));
   ok(insideOk.decision === 'allow', `the same call inside codeView passes (${insideOk.decision}: ${insideOk.why})`);
   ok(insideOk.fixed.length === 0, `measuring one file reports no repair for the files it did not look at (${insideOk.fixed.map(f => f.key).join(' | ') || 'none'})`);

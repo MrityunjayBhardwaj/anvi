@@ -1499,11 +1499,20 @@ loosened until it stops firing guards nothing.
   proposes rows from the graph and classifies each declared pair; it never writes in place.
   With `--index <ownership-index.json>` (written by `scripts/ownership-index.js --json`, which
   reads the project's own type checker) it also proposes ledger v1 rows: `state` and `registry`
-  for module states reached from another file, `door` for an export that writes one and is
+  for module states reached from another file, `entry` for an export that writes one and is
   called from another file, and `syntax` only for members passed to the index with `--syntax`.
+  **An `entry` is not a `door` (#763).** An entry is a way in: a call to it from outside its owner
+  is its use, never a finding, and no gatekeeper judges it. A `door` is an owner-only path: every
+  reference to it from outside its owner is a finding. The tool proposes entries; a door is the
+  owner's ruling. One word for both had made a job's entry point a row that reported every caller
+  of it (on stave `3f35ed06`, 71 such rows: 75 door findings as doors, the 4 write-door re-exports
+  as entries).
   A design's `jobs` table (`home`, `resources`, `doors`, `reason`, `ruled`) is a ruling, never
   proposed. `designProblem` validates it, its home and resources enter the design id, and the
-  report prints each job's blast radius, and ORPHAN when no door it holds has a caller. The guard
+  report prints each job's blast radius, and ORPHAN when no door it holds has a caller. A job's
+  `doors` may name an entry or a door, and the report prints the kind of each: for a door, that
+  every call from outside its owner is a finding, with the count — never refused, because a job
+  that names its owner-only path (stave's write door) looks the same as one that misnamed its way in. The guard
   refuses on library rows, entrances, doors and fields rows (below), and **only on a ruled one**.
 - **Only a ruled row refuses (#695/#696).** A row (or an entrance) carrying `ruled: YYYY-MM-DD` is
   the owner's ruling and its NEW findings are refused; one without (`proposed: …`) is found the same

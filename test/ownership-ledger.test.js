@@ -212,7 +212,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   // (job "idle", an orphan, and a stale ruled row), a ruled state that is gone from the code (stale).
   const V1 = JSON.parse(JSON.stringify(DESIGN));
   V1.resources['src/a/one.ts#register'] = { kind: 'door', reach: 'process', owner: 'a', verifiedBy: 'symbols', enforcedBy: 'static-guard', ruled: '2026-11-05' };
-  V1.resources['src/c/four.ts#nocall'] = { kind: 'door', reach: 'process', owner: 'c', verifiedBy: 'symbols', enforcedBy: 'static-guard', ruled: '2026-11-05' };
+  V1.resources['src/c/four.ts#nocall'] = { kind: 'entry', reach: 'process', owner: 'c', verifiedBy: 'symbols', enforcedBy: 'none', ruled: '2026-11-05' };
   V1.resources['src/c/four.ts#gone'] = { kind: 'state', reach: 'process', owner: 'c', verifiedBy: 'symbols', enforcedBy: 'static-guard', ruled: '2026-11-05' };
   V1.jobs = { load: { home: 'a', resources: ['owned', 'src/a/one.ts#reg'.replace('reg', 'register')], doors: ['src/a/one.ts#register'], reason: 'ownership', ruled: '2026-11-05' },
               idle: { home: 'b', resources: ['owned2'], doors: ['src/c/four.ts#nocall'], reason: 'rules', ruled: '2026-11-05' } };
@@ -221,7 +221,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   const v1Out = path.join(DIR, 'proposed-v1.json');
   const v = run(['--design', v1File, '--graph', graphFile, '--framework', 'fw', '--index', indexFile, '--members', 'owned#make', '--write', v1Out]);
   ok(v.code === 0, `a v1 report exits 0 (got ${v.code}${v.code ? ': ' + v.out.slice(0, 400) : ''})`);
-  const V1HEADS = ['LEDGER v1 — INSTRUMENT', 'STATE AND REGISTRY ROWS', 'DOOR ROWS', 'SYNTAX ROWS', 'MEMBER USES', 'DEFINITIONS', 'JOBS', 'DERIVATION UNDER v1', 'ROT (v1)', 'SUMMARY (v1)'];
+  const V1HEADS = ['LEDGER v1 — INSTRUMENT', 'STATE AND REGISTRY ROWS', 'ENTRY ROWS', 'SYNTAX ROWS', 'MEMBER USES', 'DEFINITIONS', 'JOBS', 'DERIVATION UNDER v1', 'ROT (v1)', 'SUMMARY (v1)'];
   let at1 = v.out.search(/^SUMMARY$/m), inOrder1 = at1 >= 0;
   for (const h of V1HEADS) { const i = v.out.indexOf(`\n${h}`); if (i < 0 || i < at1) inOrder1 = false; at1 = i; }
   ok(inOrder1, 'the v1 sections print after the v0 SUMMARY, in order');
@@ -229,7 +229,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   const plain = run(['--design', v1File, '--graph', graphFile, '--framework', 'fw']);
   ok(v.out.startsWith(plain.out.trimEnd() + '\n\nLEDGER v1'), 'everything v0 prints is printed unchanged, then the v1 block');
 
-  const S1 = section(v.out, 'STATE AND REGISTRY ROWS', 'DOOR ROWS');
+  const S1 = section(v.out, 'STATE AND REGISTRY ROWS', 'ENTRY ROWS');
   ok(/module states: 7 = 1 private to their file \(excluded, rule 9\) \+ 6 reached from another file/.test(S1), `private states are counted and excluded (${line(S1, /module states:/).trim()})`);
   ok(/reached: 6 = 4 referenced from another file directly \+ 2 only through an export another file calls/.test(S1), `reach is split direct / through a door (${line(S1, /reached:/).trim()})`);
   ok(/of the reached: 1 never written and never handed on[^+]*\+ 1 with no write seen but handed on[^+]*\+ 0 in a file no component claims[^+]*\+ 4 proposed \+ 0 already ruled/.test(S1), `constants and unseen writes get no row (${line(S1, /of the reached/).trim()})`);
@@ -240,9 +240,9 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   ok(/src\/b\/two\.ts#shared: owner null — COULDN'T TELL · writers a 1, b 1/.test(S1), 'a state written from two components is couldn\'t tell, with its writers');
   ok(!/#priv/.test(v.out.split('\nPROPOSAL')[0].split('\nLEDGER v1')[1]) && !/#TABLE:/.test(S1), 'the private state and the constant get no row');
   ok(/no write seen, handed on — could not tell whether written, no row: 1\n\s+src\/c\/four\.ts#handed · escapes 2/.test(S1), 'the handed-on state with no write seen is listed, not a row');
-  const D1 = section(v.out, 'DOOR ROWS', 'SYNTAX ROWS');
-  ok(/doors: 2 = 1 called from another component \+ 1 called only from files of their own component; 0 in unmapped files not examined; 1 in a passthrough file, never doors/.test(D1), `doors counted with the cross-component subset and the passthrough apart (${line(D1, /doors:/).trim()})`);
-  ok(/src\/b\/two\.ts#setShared: owner b · writes src\/b\/two\.ts#shared · callers b 1 \(src\/b\/three\.ts\)/.test(D1), 'an export that writes a ledger state and another file calls is a door, owner its component, caller files named');
+  const D1 = section(v.out, 'ENTRY ROWS', 'SYNTAX ROWS');
+  ok(/entries: 2 = 1 called from another component \+ 1 called only from files of their own component; 0 in unmapped files not examined; 1 in a passthrough file, never entries/.test(D1), `entries counted with the cross-component subset and the passthrough apart (${line(D1, /entries:/).trim()})`);
+  ok(/src\/b\/two\.ts#setShared: owner b · writes src\/b\/two\.ts#shared · callers b 1 \(src\/b\/three\.ts\)/.test(D1), 'an export that writes a ledger state and another file calls is proposed as an entry, owner its component, caller files named');
   ok(!/#pure/.test(D1) && !/#fwd/.test(D1), 'an export that writes nothing is not a door, and a passthrough re-export is never one');
   const Y = section(v.out, 'SYNTAX ROWS', 'MEMBER USES');
   ok(/p#parse: owner null — COULDN'T TELL · callers a 1, b 1/.test(Y) && /q#read: owner c · callers c 1 · could not tell 1/.test(Y), 'syntax rows: two callers → couldn\'t tell; one caller → that owner, could-not-tell carried');
@@ -253,13 +253,19 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   const J1 = section(v.out, 'JOBS', 'DERIVATION UNDER v1');
   ok(/idle: home b · 1 resource · 1 door · blast radius b, c · ORPHAN — no door it holds has a caller/.test(J1), `a job whose doors have no caller is an ORPHAN, its radius the home plus the owners (${line(J1, /idle:/).trim()})`);
   ok(/load: home a · 2 resources · 1 door · blast radius a, c(?! ·)/.test(J1) && !/load:[^\n]*ORPHAN/.test(J1), `a job whose door has callers is not (${line(J1, /load:/).trim()})`);
+  // EACH WAY IN PRINTS ITS KIND (#763): a door row named by a job says its outside callers are
+  // findings, with the count; an entry says they are its use. Printed, never refused.
+  ok(/load:[^\n]*\n\s+src\/a\/one\.ts#register: a DOOR, owner-only — every reference from outside a is a finding \(2 calls from outside now\); if this job's callers are meant to come in here, make the row an entry/.test(J1),
+     `a job naming a door row is told its outside callers are findings, with the count (${line(J1, /one\.ts#register:/).trim()})`);
+  ok(/idle:[^\n]*\n\s+src\/c\/four\.ts#nocall: an entry — calls from outside c are its use \(no caller seen\)/.test(J1),
+     `a job naming an entry is told calls from outside are its use (${line(J1, /four\.ts#nocall:/).trim()})`);
   const RV = section(v.out, 'DERIVATION UNDER v1', 'ROT (v1)');
   ok(/required, not declared \(v1\): 1[^\n]*\n\s+b -> a — via [^\n]*src\/a\/one\.ts#register/.test(RV), 'calling a door owned elsewhere implies consumer -> owner; undeclared, it is a finding');
   const RT = section(v.out, 'ROT (v1)', 'SUMMARY (v1)');
   ok(/stale — a ruled v1 row with no toucher \(no writer, no caller\): 2\n\s+src\/c\/four\.ts#gone \(the state is no longer in the code\)\n\s+src\/c\/four\.ts#nocall\n/.test(RT), 'a ruled state gone from the code and a ruled door nobody calls are STALE');
   ok(/orphan jobs: 1 of 2/.test(RT), 'orphans counted with their denominator');
   const SV1 = section(v.out, 'SUMMARY (v1)', 'PROPOSAL');
-  ok(/rows proposed: 7 = 3 state \+ 1 registry \+ 1 door \+ 2 syntax; 3 v1 rows already ruled, kept/.test(SV1), `v1 rows by kind (${line(SV1, /rows proposed/).trim()})`);
+  ok(/rows proposed: 7 = 3 state \+ 1 registry \+ 1 entry \+ 2 syntax; 3 v1 rows already ruled, kept/.test(SV1), `v1 rows by kind (${line(SV1, /rows proposed/).trim()})`);
   for (const re of [/rows proposed: (\d+) = ([^;]*);/m, /states: (\d+) module states = (.*)$/m]) {
     const m = SV1.match(re);
     const parts = m ? (m[2].match(/\d+/g) || []).map(Number).reduce((x, y) => x + y, 0) : -1;

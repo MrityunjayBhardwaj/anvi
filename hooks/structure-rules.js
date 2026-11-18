@@ -223,14 +223,21 @@ function designProblem(design) {
 // outside the corpus can touch it — `process` when only this package's code can, `shared` when a
 // migration, a second service or a person can too; VERIFIED BY names the instrument that can
 // confirm the owner is the only toucher. Who refuses is then a lookup, not a judgment (gatekeeperOf).
-const KINDS = ['library', 'framework', 'state', 'syntax', 'registry', 'door'];
+// TWO KINDS ARE REACHED BY REFERENCE, AND THEY MEAN OPPOSITE THINGS (#763). An `entry` is an export
+// other components are MEANT to call — a job's way in (design §5.2: "exactly one exported entry per
+// owned job another component needs"); a reference to it from outside its owner is the expected
+// use, never a finding. A `door` is an owner-only path — stave's write door, whose symbols are the
+// document writes only codeView may make; a reference to it from outside its owner is a finding.
+// One word for both made a job's entry point a row that reported every caller of it.
+const KINDS = ['library', 'framework', 'state', 'syntax', 'registry', 'door', 'entry'];
+const BY_REFERENCE = new Set(['door', 'entry']);
 const REACHES = ['process', 'shared'];
 const INSTRUMENTS = ['imports', 'symbols', 'grants', 'runtime'];
 // What the static guard would have to see, per kind, for a process row.
 // A door is touched by REFERENCE (a call, or its symbol taken as a value — #696), not by import: a
 // panel calls `wb.replaceRanges` on a callback parameter without ever importing the class. A row that
 // names `fields` (a parse tree's node fields, #696) is touched by READING one.
-const PREDICATE = { library: 'import', door: 'reference', state: 'write', syntax: 'parse-call', registry: 'register' };
+const PREDICATE = { library: 'import', door: 'reference', entry: 'reference', state: 'write', syntax: 'parse-call', registry: 'register' };
 
 // Why the ledger would make verdicts lie, or null. Each is a row the guard could not judge as
 // written: a kind or reach it does not know, an owner that is no component (a typo that owns
@@ -295,7 +302,7 @@ function reachProblem(id, r, d) {
     if (outside.length) return `resource "${id}": "within" names ${outside.map(w => JSON.stringify(w)).join(', ')}, outside its owner "${r.owner}" — the owner itself would be refused`;
   }
   if (r.symbols !== undefined) {
-    if (r.kind !== 'door') return `resource "${id}" names "symbols" but is a ${r.kind} — only a door is touched by reference`;
+    if (!BY_REFERENCE.has(r.kind)) return `resource "${id}" names "symbols" but is a ${r.kind} — only a door or an entry is reached by reference`;
     if (!strings(r.symbols)) return `resource "${id}": "symbols" must be a list of "<file or package>#<Name>[.<member>|.*]"`;
     for (const sym of r.symbols) {
       const m = SYMBOL.exec(sym);
@@ -480,6 +487,8 @@ function gatekeeperOf(row) {
   const r = isObject(row) ? row : {};
   const noInstrument = !r.verifiedBy;
   if (r.kind === 'framework') return { by: 'none', predicate: null, why: 'a framework is not owned', unverified: false };
+  // An entry is the way in: a call from outside its owner is its use, so nothing refuses one (#763).
+  if (r.kind === 'entry') return { by: 'none', predicate: null, why: 'an entry is meant to be called from outside its owner — nothing refuses a call', unverified: false };
   if (r.reach === 'process')
     return { by: 'static-guard', predicate: Array.isArray(r.fields) && r.fields.length ? 'field-read' : PREDICATE[r.kind] || null,
              why: 'every access is inside the corpus the guard graphs', unverified: noInstrument };
