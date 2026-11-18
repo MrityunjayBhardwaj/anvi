@@ -1649,6 +1649,9 @@ loosened until it stops firing guards nothing.
   registry of any other shape. Agreement was measured on one package before the hook was
   built; arming is how every other package earns that trust instead of inheriting it. For a
   package that is LOCKED (below), the entry `--arm` writes is only a proposal, and it says so.
+  Arming sets only the graph half of the entry — dir, design, baseline, design id, extractor —
+  and keeps every other field it finds, the package's own `check` above all, naming what it kept
+  (#766); it used to rebuild the entry and drop them.
 - **A package can be LOCKED where only the owner can change it (#680).** Everything that decides
   a refusal — the registry entry (mode, design, baseline, check adapter) and a go for the check's
   own files — is otherwise a file the agent's tools can write. `scripts/structure-lock.js promote
@@ -1656,7 +1659,9 @@ loosened until it stops firing guards nothing.
   root-owned lock directory (`/Library/Application Support/anvi` on macOS, `/etc/anvi` on Linux).
   Run without root it changes nothing: it prints what would change — mode, design id, each file's
   hash — every field of the entry, flattened, so nothing changes without a line (#684) — and the `sudo` command carrying the digest of what it showed (on the lock's own node and installed copy, below; until both exist it prints what is missing instead); run as root it installs
-  only on that digest, so anything changed after the review is refused. `remove` works the same
+  only on that digest, so anything changed after the review is refused. A proposal that drops a
+  field the locked entry has — its `check` above all — is refused, as root too; dropping one on
+  purpose is `remove`, then `promote` (#766). `remove` works the same
   way; `go` records a go for a locked check's file in the lock directory; `status` reads it. The
   hooks (`hooks/structure-lock.js`) judge a locked package by its locked entry alone: a user entry
   for it, a deeper user entry, or a go in the user's state directory changes nothing. Every other
@@ -2061,6 +2066,7 @@ grows a second home (#716; design document `architecture-ownership-2026-11-02.md
   HOME, a refusal whose printed radius equals the ledger's member files, a write inside not
   refused, a mutant hook whose radius predicate always answers "inside" that the outside case
   catches; the PLACE-driven half on real TypeScript runs when `STRUCTURE_TS_FROM` names one.
+
 ## Structural instruments on a cadence — each figure beside its control, behind the guard's counts
 
 `scripts/structure-instruments.js` (#714) runs the structural instruments of the architecture
