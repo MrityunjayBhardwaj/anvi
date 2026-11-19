@@ -66,6 +66,12 @@ const REGISTRATIONS = [
   // away is metered as `skipped`, why `not-a-merge`, so the meter's runs are not read as merges. 60s: a
   // `gh pr view`, at worst a fetch of the head, and a whole-package judgement (~1.5s on stave).
   ['PreToolUse',       'Bash',       'structure-merge-hook.js',       60, 'Bash(gh pr merge:*)'],
+  // Not enforcing — it cannot be: the command has run. After a shell command, a registered package's
+  // files that changed since the guard last read them are judged as they now stand, and a new
+  // violation is said in the same turn (#744). The edit-time guard sees only Write and Edit; a
+  // heredoc or `sed -i` landing the import it just refused was observed passing in silence. 10s,
+  // like the guard: nothing changed costs one directory walk; a rebuild ~0.8s cold on stave.
+  ['PostToolUse',      'Bash',       'structure-bash-hook.js',        10],
   // The same matcher as the guard above, and it should stay so for COVERAGE: the guard is
   // registered for MultiEdit — a multi-edit mutates the tree exactly as a Write does (it
   // reports one NOT MEASURED rather than judging it: the tool is not offered on current

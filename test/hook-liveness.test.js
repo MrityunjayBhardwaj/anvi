@@ -124,6 +124,7 @@ const COVERED = new Set([
   'tree-lock-guard.js',           // section 8 — a REFUSAL witness, not an injection one
   'structure-guard-hook.js',      // section 9 — a REFUSAL witness, plus test/structure-guard-hook.test.js
   'structure-merge-hook.js',      // test/structure-merge-hook.test.js drives it through real stdin: refuses, allows, not measured
+  'structure-bash-hook.js',       // test/structure-bash-hook.test.js drives it through real stdin: says, stays quiet, not measured
   'write-scope-guard.js',         // test/write-scope.test.js drives it through real stdin: refuses outside, allows inside, each other outcome in its own words
 ]);
 const uncovered = [...new Set(registered)].filter(h => !COVERED.has(h));
@@ -409,7 +410,7 @@ const ALL = ['ground-truth-session-start.js', 'session-area-start.js', 'debug-gr
   // exit non-zero, which makes it the one hook where a crash is indistinguishable from
   // a refusal — so 'fails open on its own bugs' has to be witnessed, not asserted in
   // prose. A guard that blocked whenever it threw would brick a session.
-  'tree-lock-guard.js', 'structure-guard-hook.js', 'structure-merge-hook.js', 'write-scope-guard.js'];
+  'tree-lock-guard.js', 'structure-guard-hook.js', 'structure-merge-hook.js', 'write-scope-guard.js', 'structure-bash-hook.js'];
 for (const h of ALL) {
   const bad = spawnSync('node', [path.join(HOOKS, h)], { input: 'not json at all{{', encoding: 'utf8', timeout: 20000 });
   ok(bad.status === 0, `${h}: malformed stdin → exit 0, no crash`);
