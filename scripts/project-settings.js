@@ -108,6 +108,11 @@ const SCHEMA = {
     about: 'below this share of corpus files called by the suite, every co-execution finding is labelled partial (#713 done-when: "below half")',
     readBy: '#713 (runtime co-execution)',
   },
+  'judge.smallestEffect': {
+    type: 'integer', min: 1,
+    about: 'the smallest change in a per-task count (files, components, attempts) worth acting on; until ruled, every difference inside a task\'s spread prints "underpowered", never "no change"',
+    readBy: '#715 (the judge)',
+  },
   'signatures.vocabulary.minTokenLength': {
     type: 'integer', min: 1, default: 3,
     about: 'identifier tokens shorter than this are dropped from the vocabulary view',
