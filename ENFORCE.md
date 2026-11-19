@@ -1813,7 +1813,8 @@ loosened until it stops firing guards nothing.
   record cannot tell them apart) is counted where it can be seen, not called drift.
 - **The default branch is judged whole, because the edit tools are not the only door (#667).**
   The hook judges Write, Edit and MultiEdit. A file changed through Bash (a patch script, `sed`,
-  `git mv`), a merge or a person's editor is never judged and leaves no record, so the report's
+  `git mv`), a merge or a person's editor is never refused and leaves no refusal record (since #744
+  a shell write is said in the same turn, which records nothing either), so the report's
   "missed chances" counted only the edit tools: on stave, imports the design does not allow reached
   the default branch during the trial through `python3` scripts run in Bash while the reading said
   0 missed. So `structure-refusals.js` also measures the package at the default branch (or
@@ -1985,8 +1986,9 @@ loosened until it stops firing guards nothing.
   spelling it was given — there is nothing stored to compare it with.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
-  judged at edit time. The report over the package — `--package <dir> --design <d>
-  --baseline <b>` — is what catches those, after they land. That is a stated blind spot, not
+  judged at edit time. A shell write is judged right after it lands and said in the same turn
+  (`structure-bash-hook.js`, #744), but not refused; the report over the package —
+  `--package <dir> --design <d> --baseline <b>` — catches the rest, after they land. That is a stated blind spot, not
   a bypass to use: the refusal tells an agent a deliberate edge is the user's decision.
 - **New means added by THIS edit, not merely absent from the baseline (#544).** A violation
   that landed outside the hook is on disk but not in the baseline, so judging the proposed graph
