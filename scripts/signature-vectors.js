@@ -154,13 +154,17 @@ function featuresOf(id, row) {
 // such row: the part before `#` is the file. Reading a row id as a file found a file called
 // "codeView", so the job had no member and was never built.
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+// The corpus symbols a door stands for: a door row's own symbols that name a source file, or the
+// door itself when it is written as <file>#<name>. write-scope's --changes-door reads it too.
+function doorSymbolsOf(d, resources) {
+  const row = resources && resources[d];
+  if (row && row.kind === 'door' && Array.isArray(row.symbols))
+    return { symbols: row.symbols.map(String).filter(s => SOURCE_FILE.test(s.split('#')[0])), row: true };
+  return { symbols: [String(d)], row: false };
+}
 function doorFilesOf(d, resources) {
-  const row = resources[d];
-  if (row && row.kind === 'door' && Array.isArray(row.symbols)) {
-    const files = [...new Set(row.symbols.map(s => String(s).split('#')[0]).filter(f => SOURCE_FILE.test(f)))];
-    return { files, row: true };
-  }
-  return { files: [String(d).split('#')[0]], row: false };
+  const { symbols, row } = doorSymbolsOf(d, resources);
+  return { files: [...new Set(symbols.map(s => s.split('#')[0]))], row };
 }
 function jobMembers(sig, job, resources) {
   const wanted = new Set(job.resources.flatMap(id => featuresOf(id, resources[id])));
@@ -236,4 +240,4 @@ function jobVectors(sig, jobs) {
 
 const vecJSON = v => Object.fromEntries([...v].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, x]) => [k, +x.toFixed(4)]));
 
-module.exports = { VIEWS, tokens, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, jobVectors, reading, cosineDistance, unit, vecJSON };
+module.exports = { VIEWS, tokens, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, doorSymbolsOf, jobVectors, reading, cosineDistance, unit, vecJSON };

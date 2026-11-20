@@ -95,14 +95,25 @@ function radiusFor({ p, sig, design, task, ix, changesDoors, pkgDir }) {
   const jobs = ids.map(id => ({ id, ...ruledJobs[id] }));
   const notes = [];
   const doorCallers = [];
+  // A door is named as a job names it (a door row's id) or as one of that row's symbols
+  // (<file>#<Name>, <file>#<Class>.<member>), #779. The callers are those of every export the
+  // named door stands for: a row id stands for each of its symbols; a member stands for its class.
   for (const door of changesDoors) {
-    const owner = jobs.find(j => j.doors.includes(door));
+    const owner = jobs.find(j => j.doors.some(d => d === door || SV.doorSymbolsOf(d, rows).symbols.includes(door)));
     if (!owner) { notes.push(`--changes-door ${door}: not a door of a job in the radius — its callers are NOT added (a door the task does not own is not the task's to change)`); continue; }
-    const [file, name] = door.split('#');
-    const c = ix.callersOf(file);
-    const e = c && !c.noModule ? c.exports.find(x => x.name === name) : null;
-    if (!e) { notes.push(`--changes-door ${door}: COULD NOT LOOK — ${c ? 'no export of that name' : 'the file is not in the program'}; its callers are NOT added`); continue; }
-    doorCallers.push({ door, job: owner.id, files: [...new Set(e.by.map(b => b.file))].sort() });
+    const targets = [...new Set(SV.doorSymbolsOf(door, rows).symbols.map(s => { const [file, rest = ''] = s.split('#'); return `${file}#${rest.split('.')[0]}`; }))];
+    if (!targets.length) { notes.push(`--changes-door ${door}: COULD NOT LOOK — the door row names no corpus file; its callers are NOT added`); continue; }
+    const files = new Set();
+    let looked = 0;
+    for (const t of targets) {
+      const [file, name] = t.split('#');
+      const c = ix.callersOf(file);
+      const e = c && !c.noModule ? c.exports.find(x => x.name === name) : null;
+      if (!e) { notes.push(`--changes-door ${door}${t === door ? '' : ` (${t})`}: COULD NOT LOOK — ${c ? 'no export of that name' : 'the file is not in the program'}; its callers are NOT added`); continue; }
+      looked++;
+      for (const b of e.by) files.add(b.file);
+    }
+    if (looked) doorCallers.push({ door, job: owner.id, files: [...files].sort() });
   }
   const homes = p.outcome === 'home' ? [p.home] : p.outcome === 'split' ? p.split.map(s => s.owner) : [];
   const newFiles = [];
