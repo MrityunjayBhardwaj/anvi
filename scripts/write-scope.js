@@ -164,7 +164,7 @@ function place(a, out) {
   if (!ix.files.length) return stop(out, `0 corpus files read under ${pkgDir}`);
   const weights = { direct: opt('signatures.weight.direct'), viaDoor: opt('signatures.weight.viaDoor') };
   const sig = SV.fileSignatures(ix, { weights, minTokenLength: opt('signatures.vocabulary.minTokenLength') });
-  const opts = { far: opt('placement.farDistance'), central: opt('placement.centralDistance'), band: opt('signatures.nearTwoBand') };
+  const opts = PL.placeOpts(settings);
   const ow = PL.ownersOf(sig, design, { seeds: true });
   const tv = PL.taskVector(sig, design, task, { weights });
   const p = ow.owners.length ? PL.place(tv.vec, ow.owners, opts) : { outcome: 'not placed', why: 'no owner has a prototype (0 ruled jobs with a member file, 0 seeded owners)', views: [] };

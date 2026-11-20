@@ -110,7 +110,7 @@ function compute({ pkgDir, design, task, settings, tsFrom }) {
   const buildMs = Date.now() - t0;
 
   const weights = { direct: opt('signatures.weight.direct'), viaDoor: opt('signatures.weight.viaDoor') };
-  const opts = { far: opt('placement.farDistance'), central: opt('placement.centralDistance'), band: opt('signatures.nearTwoBand'), weight: opt('placement.blend.weight') };
+  const opts = PL.placeOpts(settings);
   const sig = SV.fileSignatures(ix, { weights, minTokenLength: opt('signatures.vocabulary.minTokenLength') });
   const ow = PL.ownersOf(sig, design, { seeds: true });
   const meta = { ...base, buildMs, files: ix.files.length, typescript: T.ts.version,
@@ -128,8 +128,11 @@ function compute({ pkgDir, design, task, settings, tsFrom }) {
 function readingOf(p, owners, opts, notes = [], meta = {}) {
   const byName = new Map(owners.map(o => [o.owner, o]));
   const lead = p.views.find(v => v.view === p.lead);
-  const dOf = (o, view) => { const v = p.views.find(x => x.view === view); const hit = v && v.ds ? v.ds.find(x => x.owner === o) : null; return hit ? hit.d : null; };
-  const ranked = lead && lead.ds ? lead.ds.filter(x => x.d < opts.far) : [];
+  // Distances printed and the far bound are RAW cosine distances; with owner spread ruled, the ORDER
+  // is the scaled one PLACE ranked by (place.js, SPREAD), and the header says so.
+  const raw = x => x.raw !== undefined ? x.raw : x.d;
+  const dOf = (o, view) => { const v = p.views.find(x => x.view === view); const hit = v && v.ds ? v.ds.find(x => x.owner === o) : null; return hit ? raw(hit) : null; };
+  const ranked = lead && lead.ds ? lead.ds.filter(x => raw(x) < opts.far) : [];
   const candidates = ranked.slice(0, TOP).map(x => ({ owner: x.owner, source: x.source, doors: (byName.get(x.owner) || {}).doors || [],
     d: Object.fromEntries(p.views.map(v => [v.view, v.featured ? dOf(x.owner, v.view) : null])) }));
   const views = p.views.map(v => ({ view: v.view, featured: !!v.featured, verdict: v.verdict || null, owners: v.owners || [], d: v.d === undefined ? null : v.d, why: v.why || null }));
@@ -137,7 +140,7 @@ function readingOf(p, owners, opts, notes = [], meta = {}) {
     home: p.home || null, homeSource: p.source || null, job: p.job || null, jobD: p.jobD === undefined ? null : p.jobD, jobNote: p.jobNote || null,
     split: p.split ? p.split.map(s => ({ owner: s.owner, source: s.source, doors: s.doors, doorFrom: s.doorFrom })) : null,
     candidates, more: Math.max(0, ranked.length - TOP), views, disagreement: (p.disagreement || []).map(x => ({ view: x.view, verdict: x.verdict, owners: x.owners, d: x.d, lead: x.lead })),
-    notes, nearestD: lead && lead.ds && lead.ds.length ? lead.ds[0].d : null };
+    spreadWeighted: !!p.spreadWeighted, notes, nearestD: lead && lead.ds && lead.ds.length ? raw(lead.ds[0]) : null };
   if (p.outcome === 'not placed') return { ...out, outcome: "couldn't tell", reason: 'could not look', detail: p.why };
   if (p.outcome === "couldn't tell") return { ...out, reason: /disagree/.test(p.why) ? 'views disagree' : 'three or more owners', detail: p.why };
   return out;
@@ -169,7 +172,7 @@ function render(r, ctx = {}) {
     L.push(`  outcome: COULDN'T TELL (${r.reason}) — ${r.detail}`);
   }
   if (r.outcome !== 'no existing home' && r.candidates && r.candidates.length) {
-    L.push(`  top candidate homes (cosine distance, 0 = same, far at ${r.opts.far}+; ranked under ${r.lead}):`);
+    L.push(`  top candidate homes (cosine distance, 0 = same, far at ${r.opts.far}+; ranked under ${r.lead}${r.spreadWeighted ? `, in the order scaled by owner spread (β ${r.opts.beta})` : ''}):`);
     r.candidates.forEach((c, i) => {
       L.push(`    ${i + 1}. ${owner(c.owner, c.source).padEnd(18)} ${Object.entries(c.d).filter(([, d]) => d !== null).map(([v, d]) => `${v} ${f3(d)}`).join(' · ')} · doors: ${doorList(c.doors)}`);
     });

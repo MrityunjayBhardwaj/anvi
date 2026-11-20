@@ -639,7 +639,7 @@ function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
 
 // PLACE (#723): the algorithm is scripts/place.js; this prints it over the index's signatures.
 function placeReport({ print, sig, design, settings, task, args, json, weights, band, opt }) {
-  const opts = { far: opt('placement.farDistance'), central: opt('placement.centralDistance'), band, weight: opt('placement.blend.weight') };
+  const opts = PL.placeOpts(settings);
   const floor = { minRate: PS.need(settings, 'placement.leaveOneOut.minRate').value, minJobs: PS.need(settings, 'placement.leaveOneOut.minJobs').value };
   const ow = PL.ownersOf(sig, design, { seeds: true });
   json.place = { settingsId: settings.id, opts };
@@ -649,6 +649,12 @@ function placeReport({ print, sig, design, settings, task, args, json, weights, 
   print(`  owners: ${ow.owners.length} = ${ruledOwners.length} from ruled jobs (${ruledOwners.map(o => `${o.owner} ${o.jobs.length}`).join(', ') || 'none'}) + ` +
     `${seedOwners.length} seeded from ledger rows, marked * (${seedOwners.map(o => `${o.owner}: ${o.files.length} files touching ${o.resources.length} rows`).join(', ') || 'none'})`);
   const noFiles = ow.seeded.filter(s => !s.files);
+  // Spread per owner under each view, every time: "not measured" says why, never a silent 1.
+  print(`  spread weighting: ${opts.beta === null ? `OFF — ${opts.betaWhy}; every distance is raw` : `β = ${opts.beta}: a distance to an owner × (β + its spread) / (β + the mean spread of the measured owners in that view)`}`);
+  for (const o of ow.owners) {
+    const why = o.source === 'seed' ? 'a seed has no ruled jobs' : o.jobs.length < 2 ? 'one ruled job has no spread' : null;
+    print(`    ${o.owner}${o.source === 'seed' ? '*' : ''} spread: ${why ? `not measured (${why}; treated as average)` : SV.VIEWS.map(v => `${v} ${o.spread[v] === null ? 'not measured' : o.spread[v].toFixed(3)}`).join(' · ')}`);
+  }
   if (noFiles.length) print(`  ledger owners with no seed (no file of the component touches its rows): ${noFiles.map(s => s.owner).join(', ')}`);
   if (ow.missing.length) print(`  jobs not built: ${ow.missing.join('; ')}`);
   if (!ow.owners.length) print('  NOT PLACED — no owner has a prototype: 0 ruled jobs with a member file and 0 seeded owners');
@@ -679,8 +685,10 @@ function placeReport({ print, sig, design, settings, task, args, json, weights, 
     print(`  acceptance (ruled prototypes only): ${j.line}`);
     print(`  of the ${lo.n}: ${lo.sole} held out from a home with no other ruled job (unrecoverable from ruled code by construction); ${lo.unbuilt} not built`);
     print(`  with ledger seeds (a reading, not the acceptance): ${lo.kSeeded} of ${lo.n}`);
-    json.place.leaveOneOut = { n: lo.n, k: lo.k, kSeeded: lo.kSeeded, sole: lo.sole, unbuilt: lo.unbuilt, verdict: j.verdict, floor,
-      rows: lo.rows.map(r => r.built ? { id: r.id, home: r.home, ruled: { ...r.ruled, place: undefined }, seeded: { ...r.seeded, place: undefined } } : r) };
+    print(`  spread weighting: ${lo.kRaw === null ? 'OFF (placement.spread.beta unruled) — no comparison run' : `with β = ${opts.beta} ${lo.k} of ${lo.n}; the same run with raw distances ${lo.kRaw} of ${lo.n} (${lo.k > lo.kRaw ? 'weighting recovers more' : lo.k < lo.kRaw ? 'weighting recovers FEWER' : 'no difference'})`}`);
+    for (const r of lo.rows) if (r.built && r.raw && r.raw.recovered !== r.ruled.recovered) print(`    ${r.id}: ${r.raw.recovered ? 'recovered raw, lost with weighting' : 'lost raw, recovered with weighting'} (raw ${r.raw.outcome}${r.raw.placed ? ` ${r.raw.placed}` : ''} → weighted ${r.ruled.outcome}${r.ruled.placed ? ` ${r.ruled.placed}` : ''})`);
+    json.place.leaveOneOut = { n: lo.n, k: lo.k, kSeeded: lo.kSeeded, kRaw: lo.kRaw, sole: lo.sole, unbuilt: lo.unbuilt, verdict: j.verdict, floor,
+      rows: lo.rows.map(r => r.built ? { id: r.id, home: r.home, ruled: { ...r.ruled, place: undefined }, seeded: { ...r.seeded, place: undefined }, ...(r.raw ? { raw: { ...r.raw, place: undefined } } : {}) } : r) };
   }
 
   if (args.blend) {
