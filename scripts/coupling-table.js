@@ -222,9 +222,10 @@ function survey({ design, cruise, graph, ownership, frameworks }) {
 //                     in components beyond its home
 //   divergent change  a file that is a member of two or more ruled jobs (read per FILE: the index
 //                     says which resources a file touches, not which export touches them)
-//   god file          exports referenced from another file, and ruled jobs, per file — the largest
+//   god file          value exports referenced from another file (types apart), and ruled jobs, per
+//                     file — the largest
 //                     listed as a TRIGGER for a split by job and a per-pair re-count, never a target
-//   surface per job   exports referenced from another COMPONENT, per ruled job homed in the
+//   surface per job   value exports referenced from another COMPONENT (types apart), per ruled job homed in the
 //                     component (§7.4a rule 6: a barrel satisfies a raw surface share)
 // CONTROL: the files' components shuffled (sizes kept, the same seeded draws as the coupling
 // control). Envy and shotgun totals are told apart only when the real one lies BELOW every draw.
@@ -277,17 +278,22 @@ function smells({ design, ownership }) {
 
   const jobsOfFile = new Map();
   for (const j of shotgun) for (const f of j.members) { if (!jobsOfFile.has(f)) jobsOfFile.set(f, []); jobsOfFile.get(f).push(j.job); }
-  const exportsByFile = new Map(), surface = new Map();
+  // Value exports and type exports counted apart: a file of forty interfaces is a vocabulary, not a
+  // god file. An index older than the typeOnly field leaves every export's kind unknown, and says so.
+  const kindKnown = (lf.exports || []).every(e => typeof e.typeOnly === 'boolean');
+  const exportsByFile = new Map(), typesByFile = new Map(), surface = new Map(), surfaceTypes = new Map();
+  const inc = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   for (const e of lf.exports || []) {
     if (e.passthroughFile) continue;
-    exportsByFile.set(e.file, (exportsByFile.get(e.file) || 0) + 1);
-    if (Object.keys(e.callers || {}).some(c => c !== e.component)) surface.set(e.component, (surface.get(e.component) || 0) + 1);
+    const isType = e.typeOnly === true;
+    inc(isType ? typesByFile : exportsByFile, e.file);
+    if (Object.keys(e.callers || {}).some(c => c !== e.component)) inc(isType ? surfaceTypes : surface, e.component);
   }
   const jobsHomed = new Map();
   for (const j of jobs.ruled) jobsHomed.set(j.home, (jobsHomed.get(j.home) || 0) + 1);
   const comps = [...new Set([...files.map(t => t.component), ...surface.keys()])].filter(c => c && c !== '(unmapped)').sort();
   const godRows = [...new Set([...exportsByFile.keys(), ...jobsOfFile.keys()])]
-    .map(f => ({ file: f, exports: exportsByFile.get(f) || 0, jobs: (jobsOfFile.get(f) || []).slice().sort() }))
+    .map(f => ({ file: f, exports: exportsByFile.get(f) || 0, types: typesByFile.get(f) || 0, jobs: (jobsOfFile.get(f) || []).slice().sort() }))
     .sort((a, b) => b.exports - a.exports || b.jobs.length - a.jobs.length || (a.file < b.file ? -1 : 1));
 
   return {
@@ -304,7 +310,8 @@ function smells({ design, ownership }) {
     shotgun, shotgunTotal: shotgunTotal(shotgun),
     divergent: [...jobsOfFile].filter(([, js]) => js.length >= 2).map(([file, js]) => ({ file, jobs: js.slice().sort() })).sort((a, b) => b.jobs.length - a.jobs.length || (a.file < b.file ? -1 : 1)),
     god: godRows.slice(0, 10),
-    surface: comps.map(c => ({ component: c, doors: surface.get(c) || 0, jobs: jobsHomed.get(c) || 0, perJob: jobsHomed.get(c) ? (surface.get(c) || 0) / jobsHomed.get(c) : null })),
+    exportKinds: kindKnown ? 'known' : 'UNKNOWN (an index older than the typeOnly field: types are counted as values)',
+    surface: comps.map(c => ({ component: c, doors: surface.get(c) || 0, types: surfaceTypes.get(c) || 0, jobs: jobsHomed.get(c) || 0, perJob: jobsHomed.get(c) ? (surface.get(c) || 0) / jobsHomed.get(c) : null })),
     control: { draws: DRAWS, seed: 722, envy: { ...range(draws.envy), verdict: told(envyTotal(envy), range(draws.envy)) }, shotgun: { ...range(draws.shotgun), verdict: told(shotgunTotal(shotgun), range(draws.shotgun)) } },
   };
 }
@@ -524,11 +531,12 @@ function main(argv) {
     print(`  DIVERGENT CHANGE — files that are members of two or more ruled jobs: ${sm.divergent.length} (per file: the index names the resources a file touches, not which export touches them)`);
     for (const d of sm.divergent) print(`    ${d.file.padEnd(48)} ${d.jobs.length} jobs: ${d.jobs.join(', ')}`);
     print('');
-    print('  GOD FILE — the 10 files with the most exports referenced from another file, with their ruled jobs. A TRIGGER for a split by job followed by a per-pair re-count, never a target');
-    for (const g of sm.god) print(`    ${g.file.padEnd(48)} exports ${String(g.exports).padStart(3)} · jobs ${g.jobs.length}${g.jobs.length >= 2 ? ' · two or more jobs: split by job, then re-count per pair' : ''}`);
+    print('  GOD FILE — the 10 files with the most VALUE exports referenced from another file (types counted apart), with their ruled jobs. A TRIGGER for a split by job followed by a per-pair re-count, never a target');
+    if (sm.exportKinds !== 'known') print(`    export kinds: ${sm.exportKinds}`);
+    for (const g of sm.god) print(`    ${g.file.padEnd(48)} exports ${String(g.exports).padStart(3)} (+${g.types} types) · jobs ${g.jobs.length}${g.jobs.length >= 2 ? ' · two or more jobs: split by job, then re-count per pair' : ''}`);
     print('');
-    print('  SURFACE PER OWNED JOB — exports referenced from another component ÷ ruled jobs homed here (a barrel satisfies a raw surface share, so the raw share is not printed)');
-    for (const s of sm.surface) print(`    ${s.component.padEnd(12)} exports used outside ${String(s.doors).padStart(3)} · jobs ${s.jobs} · ${s.perJob === null ? 'no owned job — not read' : `${s.perJob.toFixed(1)} per job`}`);
+    print('  SURFACE PER OWNED JOB — value exports referenced from another component ÷ ruled jobs homed here (types counted apart; a barrel satisfies a raw surface share, so the raw share is not printed)');
+    for (const s of sm.surface) print(`    ${s.component.padEnd(12)} exports used outside ${String(s.doors).padStart(3)} (+${s.types} types) · jobs ${s.jobs} · ${s.perJob === null ? 'no owned job — not read' : `${s.perJob.toFixed(1)} per job`}`);
   }
   print('  cognitive complexity per function: NOT MEASURED (not built); when built, a reading, never a ratchet (a ratchet rewards fragmenting functions)');
 

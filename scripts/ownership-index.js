@@ -66,7 +66,7 @@
 //               [file#fn] }, writerFiles, readers: { component: count }, readerFiles, escapes }
 //   exports     every export DECLARED in its file and referenced from another corpus file:
 //               { id, file, name, component, callers: { component: count }, callerFiles,
-//               writesStates: [state id], passthroughFile }. A write counts for an export when it
+//               writesStates: [state id], passthroughFile, typeOnly (an interface or type alias: no value) }. A write counts for an export when it
 //               lies inside the export's own declaration (a nested closure included; a private
 //               helper it calls is not — so a door through a helper reads as no door, never as a
 //               false one). Callers through a barrel are the origin's callers: references resolve
@@ -557,7 +557,9 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       const rs = all.filter(r => r.sf !== sf);
       const by = new Map();
       for (const r of rs) { const c = compOf(r.sf); const k = `${c}|${relOf(r.sf.fileName)}`; by.set(k, (by.get(k) || 0) + 1); }
-      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(), declaredIn, lines: span,
+      // A type-only export (an interface, a type alias) carries no value: no call, no write (#722).
+      const typeOnly = !!target && !(target.flags & ts.SymbolFlags.Value);
+      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(), declaredIn, lines: span, typeOnly,
         by: [...by].map(([k, n]) => { const [component, file] = k.split('|'); return { component, file, n }; }).sort((a, b) => a.component < b.component ? -1 : a.component > b.component ? 1 : a.file < b.file ? -1 : 1) };
     }).sort((a, b) => b.refs - a.refs || (a.name < b.name ? -1 : 1)) };
   };
@@ -614,7 +616,7 @@ function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
       for (const b of e.by) { inc(callers, b.component, b.n); inc(callerFiles, b.file, b.n); }
       const writes = e.lines ? (writesIn.get(rel) || []).filter(w => w.line >= e.lines[0] && w.line <= e.lines[1]).map(w => w.id) : [];
       exportsOut.push({ id: `${rel}#${e.name}`, file: rel, name: e.name, component: ix.compOfRel(rel), callers: sortObj(callers), callerFiles: sortObj(callerFiles),
-        writesStates: [...new Set(writes)].sort(), passthroughFile: ix.passthrough.has(rel), lines: e.lines });
+        writesStates: [...new Set(writes)].sort(), passthroughFile: ix.passthrough.has(rel), lines: e.lines, typeOnly: e.typeOnly });
     }
   }
   const packages = {};

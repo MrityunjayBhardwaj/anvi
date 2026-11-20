@@ -262,7 +262,8 @@ console.log('\nTHE SMELLS — from the index\'s touches and the design\'s ruled 
   //   jobs  b/lib-job members a1 b1 → beyond a 1 · b/reg-job members b1 c1 c2 → beyond c 2 ·
   //         c/solo-job members c1 → none                 → 2 of 3 jobs, 2 (job, component) pairs
   //   divergent  b1 (b/lib-job, b/reg-job) · c1 (b/reg-job, c/solo-job)
-  //   exports    b1#f used by a and b · b1#g used by b only · c1#h used by b · index#f forwards only
+  //   exports    b1#f used by a and b · b1#g used by b only · b1#Opts a TYPE used by a · c1#h used by b ·
+  //              index#f forwards only (types are counted apart from value exports)
   //   surface    b 1 export used outside ÷ 2 jobs = 0.5 · c 1 ÷ 1 = 1.0 · a none, no job
   const SM = { ...DESIGN, components: Object.fromEntries(Object.entries(DESIGN.components).map(([n, c]) => [n, { ...c, purpose: `the ${n} side` }])),
     resources: { lib: { kind: 'library', reach: 'process', owner: 'b' }, solo: { kind: 'library', reach: 'process', owner: 'c' }, 'src/b/b1.ts#reg': { kind: 'state', reach: 'process', owner: 'b' } },
@@ -273,10 +274,11 @@ console.log('\nTHE SMELLS — from the index\'s touches and the design\'s ruled 
     T0('src/b/b1.ts', 'b', ['lib:lib', 'writes:src/b/b1.ts#reg']), T0('src/b/b2.ts', 'b', []), T0('src/b/index.ts', 'b', ['lib:solo'], true),
     T0('src/c/c1.ts', moveC1To || 'c', ['lib:solo', 'writes:src/b/b1.ts#reg']), T0('src/c/c2.ts', 'c', ['reads:src/b/b1.ts#reg'])];
   const EXPORTS = [
-    { id: 'src/b/b1.ts#f', file: 'src/b/b1.ts', name: 'f', component: 'b', callers: { a: 2, b: 1 }, passthroughFile: false },
-    { id: 'src/b/b1.ts#g', file: 'src/b/b1.ts', name: 'g', component: 'b', callers: { b: 1 }, passthroughFile: false },
-    { id: 'src/c/c1.ts#h', file: 'src/c/c1.ts', name: 'h', component: 'c', callers: { b: 1 }, passthroughFile: false },
-    { id: 'src/b/index.ts#f', file: 'src/b/index.ts', name: 'f', component: 'b', callers: { a: 1, c: 1 }, passthroughFile: true }];
+    { id: 'src/b/b1.ts#f', file: 'src/b/b1.ts', name: 'f', component: 'b', callers: { a: 2, b: 1 }, passthroughFile: false, typeOnly: false },
+    { id: 'src/b/b1.ts#g', file: 'src/b/b1.ts', name: 'g', component: 'b', callers: { b: 1 }, passthroughFile: false, typeOnly: false },
+    { id: 'src/b/b1.ts#Opts', file: 'src/b/b1.ts', name: 'Opts', component: 'b', callers: { a: 1 }, passthroughFile: false, typeOnly: true },
+    { id: 'src/c/c1.ts#h', file: 'src/c/c1.ts', name: 'h', component: 'c', callers: { b: 1 }, passthroughFile: false, typeOnly: false },
+    { id: 'src/b/index.ts#f', file: 'src/b/index.ts', name: 'f', component: 'b', callers: { a: 1, c: 1 }, passthroughFile: true, typeOnly: false }];
   const withFacts = (design, touches) => ({ ...index(design), ledgerFacts: { states: [], exports: EXPORTS, reexports: 0, couldNotLook: 0, packages: {}, syntax: [], definitions: [], touches } });
   const smDesign = put('smells-design.json', SM);
   const out = path.join(DIR, 'smells.json');
@@ -298,10 +300,17 @@ console.log('\nTHE SMELLS — from the index\'s touches and the design\'s ruled 
   ok(X.shotgunTotal === 2 && /SHOTGUN SURGERY — ruled jobs whose member files lie beyond their home: 2 of 3 jobs, 2 \(job, component\) pairs/.test(sm.out), 'shotgun: 2 of 3 jobs, 2 pairs');
   ok(X.divergent.map(d => d.file).join() === 'src/b/b1.ts,src/c/c1.ts' && X.divergent.every(d => d.jobs.length === 2), 'divergent: b1 and c1, each in two jobs');
   ok(X.god[0].file === 'src/b/b1.ts' && X.god[0].exports === 2 && !X.god.some(g => g.file === 'src/b/index.ts'), 'god file: b1 first with 2 exports; the forwarding file is not counted');
-  ok(/src\/b\/b1\.ts +exports +2 · jobs 2 · two or more jobs: split by job, then re-count per pair/.test(sm.out), 'b1 is printed as a trigger for a split by job, not a target');
+  ok(X.god[0].types === 1 && X.exportKinds === 'known', 'b1\'s type export is counted apart from its 2 value exports');
+  ok(/src\/b\/b1\.ts +exports +2 \(\+1 types\) · jobs 2 · two or more jobs: split by job, then re-count per pair/.test(sm.out), 'b1 is printed as a trigger for a split by job, not a target');
   const surf = n => X.surface.find(s => s.component === n);
   ok(surf('b').doors === 1 && surf('b').jobs === 2 && surf('b').perJob === 0.5, `surface b: 1 export used outside ÷ 2 jobs = 0.5 (b1#g is used only inside, index#f only forwards) — got ${JSON.stringify(surf('b'))}`);
-  ok(surf('c').perJob === 1 && surf('a').perJob === null && /^ {4}a +exports used outside +0 · jobs 0 · no owned job — not read$/m.test(sm.out), 'c 1.0 per job; a has no owned job and is not read');
+  ok(surf('b').types === 1, 'b\'s type used from a is counted apart, not in its surface');
+  {
+    const legacy = withFacts(SM, touchesOf()); legacy.ledgerFacts.exports = EXPORTS.map(({ typeOnly, ...e }) => e);
+    const lg = run(['--design', smDesign, '--graph', graphFile, '--ownership', put('smells-legacy-index.json', legacy), '--framework', 'react']);
+    ok(/export kinds: UNKNOWN \(an index older than the typeOnly field: types are counted as values\)/.test(lg.out), 'an index without export kinds says types are counted as values');
+  }
+  ok(surf('c').perJob === 1 && surf('a').perJob === null && /^ {4}a +exports used outside +0 \(\+0 types\) · jobs 0 · no owned job — not read$/m.test(sm.out), 'c 1.0 per job; a has no owned job and is not read');
   ok(X.control.draws === 10 && X.control.envy.n === 10 && /^ {4}control: \d+…\d+ \(median \d+\) · (told apart|NOT told apart)/m.test(sm.out), 'each total prints beside its shuffled-membership control');
   ok(!/SMELLS — NOT MEASURED/.test(sm.out) && /cognitive complexity per function: NOT MEASURED \(not built\)/.test(sm.out), 'complexity alone stays NOT MEASURED');
 
