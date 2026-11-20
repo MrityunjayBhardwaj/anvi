@@ -33,7 +33,8 @@
 //
 // WHAT IT CANNOT SEE. Only Write and Edit tool calls are judged (MultiEdit is said, not judged). A file changed through Bash (a
 // heredoc, `sed -i`, `cp`, `git checkout`), by another program or by hand is never judged here;
-// a merge carrying one is refused by structure-merge-hook.js (#667), and the report over the
+// a shell write is judged right after it lands and said in the same turn by structure-bash-hook.js
+// (#744), a merge carrying one is refused by structure-merge-hook.js (#667), and the report over the
 // package counts what lands by a door no hook sees. A stated blind spot, not a bypass:
 // the refusal tells the agent a deliberate edge is the user's decision.
 //
@@ -361,6 +362,15 @@ const UNJUDGED_TOOLS = {
 };
 
 // The whole decision, with every effect injected: { decision: 'allow'|'deny'|'unmeasured', ... }
+// Where one checkout's graph cache lives. A cache is one checkout's: a worktree's tree differs, and
+// sharing the registered checkout's file would make each rebuild the other's (#546). So a
+// registry's `cache` names only its own. Shared with the after-Bash pass (#744), which reads this
+// cache as "what the guard last saw" — two paths here would make it compare against the wrong one.
+function cacheFor(owner, stateDir) {
+  return (owner.checkout === 'registered' && owner.entry.cache) ||
+    path.join(stateDir, crypto.createHash('sha1').update(owner.dir).digest('hex').slice(0, 16) + '.json');
+}
+
 function evaluate(payload, deps) {
   const { registry, readFile, rules: R, graph: S, stateDir } = deps;
   const tool = payload && payload.tool_name;
@@ -410,10 +420,7 @@ function evaluate(payload, deps) {
     : null;
 
   const extractor = S.loadExtractor(owner.entry, owner.dir);
-  // A cache is one checkout's: a worktree's tree differs, and sharing the registered checkout's
-  // file would make each rebuild the other's (#546). So a registry's `cache` names only its own.
-  const cachePath = (owner.checkout === 'registered' && owner.entry.cache) ||
-    path.join(stateDir, crypto.createHash('sha1').update(owner.dir).digest('hex').slice(0, 16) + '.json');
+  const cachePath = cacheFor(owner, stateDir);
   const built = S.buildGraph({ pkgDir: owner.dir, design, extractor, cachePath, proposed: { rel: owner.rel, content } });
   if (built.notMeasured) return { decision: 'unmeasured', why: `${pkgName}: ${built.notMeasured}` };
   const why = R.notMeasured(built.graph);
@@ -805,29 +812,34 @@ function noticeOnce(sessionId, text, stateDir, kind) {
   return noticesOnce(sessionId, [[kind, text]], stateDir);
 }
 
+// Claim the once-per-session marker for `kind`: true when this call is the first to claim it. An
+// unwritable marker claims anyway — the notice may repeat, louder, never quieter.
+function claimOnce(sessionId, kind, stateDir) {
+  const id = String(sessionId || 'no-session').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'no-session';
+  const name = kind ? `${id}.${kind}` : id;
+  const marker = path.join(stateDir, 'notices', name);
+  try {
+    if (fs.existsSync(marker)) return false;
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, new Date().toISOString() + '\n');
+    pruneNotices(path.dirname(marker), name);
+  } catch { /* unwritable: claimed anyway */ }
+  return true;
+}
+
 // Several notices, one output: a hook prints ONE JSON object, so two notices due on the same
 // edit (a repair and a landed violation, #544) are joined rather than written one after another.
-function noticesOnce(sessionId, notices, stateDir) {
-  const id = String(sessionId || 'no-session').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || 'no-session';
-  const due = notices.filter(([kind]) => {
-    const name = kind ? `${id}.${kind}` : id;
-    const marker = path.join(stateDir, 'notices', name);
-    try {
-      if (fs.existsSync(marker)) return false;
-      fs.mkdirSync(path.dirname(marker), { recursive: true });
-      fs.writeFileSync(marker, new Date().toISOString() + '\n');
-      pruneNotices(path.dirname(marker), name);
-    } catch { /* an unwritable marker means the notice may repeat — louder, never quieter */ }
-    return true;
-  });
+// `event` names the hook event the output answers (the after-Bash pass speaks for PostToolUse).
+function noticesOnce(sessionId, notices, stateDir, event = 'PreToolUse') {
+  const due = notices.filter(([kind]) => claimOnce(sessionId, kind, stateDir));
   if (!due.length) return false;
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse',
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event,
     additionalContext: due.map(([, text]) => text).join('\n\n') } }));
   // Truthy as before; also names the kinds told, so a caller can tell which notices went out.
   return due.map(([kind]) => kind);
 }
 
-module.exports = { realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, hotNoticeKind, hotNoticeText, hotAdviceText, recordHotFires, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
+module.exports = { stored, gitRootOf, cacheFor, baselineCommand, claimOnce, realNear, checkoutOf, checkoutMatch, packageFor, proposedContent, refusalText, evaluate, unmappedKind, hotNoticeKind, hotNoticeText, hotAdviceText, recordHotFires, JUDGED_TOOLS, UNJUDGED_TOOLS, noticeOnce, noticesOnce, pruneNotices, recordFailure,
   shadowCheck, shadowLogPath, recordShadow, checkVersion, goPath, liveGo, recordGo, CHECK_MODES, GO_TTL_MS, REGISTRY, STATE_DIR,
   registryInForce: LOCK.registryInForce, LOCKED: LOCK.LOCKED, NOTICE_TTL_MS, LOG_MAX_BYTES, CHECK_TIMEOUT_MS, HOOK_BUDGET_MS, EXIT_MARGIN_MS, CHECK_MIN_MS };
 

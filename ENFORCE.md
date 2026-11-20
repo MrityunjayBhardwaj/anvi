@@ -142,6 +142,7 @@ User message
 | Structure guard — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a Write or Edit that adds a NEW divergence from the design's component graph, or a NEW cycle, starting in the edited file, judged against the package's baseline). **MultiEdit is registered but NOT judged** — the tool is not offered on Claude Code 2.1.270 or 2.1.282, so its shape has never been observed; one in a registered package is reported NOT MEASURED once per session. Inert for a package with no entry in `~/.claude/structure-guard.json` or the root-owned lock directory (#680) | `~/.claude/hooks/structure-guard-hook.js` |
 | Write scope — **ENFORCING, may refuse a call** | PreToolUse:Write\|Edit\|MultiEdit (a write, by `file_path`, outside the radius of the task this session placed with `scripts/write-scope.js --place`: the ruled jobs PLACE names, their member files from the ledger, callers of a door the task changes, declared new files in a named home, and what was widened). An answer that needs the owner's ruling ("couldn't tell", no existing home, a home with no ruled job near the task) refuses outside those files; no placed task, a stale or unreadable record, or a file outside the ledger's corpus allows and says so once per session (#716) | `~/.claude/hooks/write-scope-guard.js` |
 | Structure merge check — **ENFORCING, may refuse a call** | PreToolUse:Bash, registered with `"if": "Bash(gh pr merge:*)"` — but on Claude Code 2.1.314 that filter still starts the hook for about 28% of Bash calls, nearly all of them not merges (measured 2026-10-16..10-30 from the hook meter: 7,303 runs against 25,898 for an unfiltered Bash hook; #706), so the script's own `gh … merge` test is what keeps it to merges. For a merge it judges the pull request's head commit with `scripts/structure-guard.js --ref`, and refuses the merge when the branch ADDS a violation the design does not allow and the baseline does not hold, whichever door wrote it (#667) — the commit it branched from is judged too, and what the default branch already carried is said beside the merge, never held against it. Could not look (no network, unknown pull request, a design edited since arming, a guard that crashed) allows the merge and says so on it. A merge belongs to every registered package whose checkout's `origin` is the same repository — the same one, not the same spelling: a name spelled as the `origin` is matched with no network call, and any other is compared by GitHub's numeric id for both sides (`gh api repos/<owner>/<name>`, remembered for a week in `~/.claude/structure-guard-cache/repo-identity.json`), so a repository renamed on GitHub whose checkout still names the old one is judged under either name (#705). When that id cannot be looked up the merge is allowed NOT MEASURED, said and recorded; only a repository GitHub says is a different one, or does not exist, passes in silence | `~/.claude/hooks/structure-merge-hook.js` |
+| Structure after a shell command — **reports, cannot refuse** | PostToolUse:Bash (#744). The edit-time guard judges Write and Edit only; a heredoc or `sed -i` landing the import it had just refused was observed passing in silence (Claude Code 2.1.318, bypass-permissions mode). After every shell command, each registered package — as registered, and its copy in the worktree the command ran in — is compared with the guard's graph cache: a corpus file whose size or mtime differs from the cached entry has changed since the guard last read it. Nothing changed ends after one directory walk. Otherwise the graph is rebuilt through the same cache and judged against the baseline, and each violation the baseline lacks whose edge starts in a changed file is said in the same turn, once per session per violation, with the remedy and the baseline command. A checkout the guard never read has no cache to compare with, so everything the baseline lacks is said once, marked as possibly older than the command. It cannot undo a write: the merge check stays the refusal. Not judged here, and said when it applies: the symbol rules (door, reads), which need the type checker; the project's own check (#600); a third worktree the command wrote into. Could not look (an unreadable design or baseline, a design edited since arming, no TypeScript, a crash) is said once per session | `~/.claude/hooks/structure-bash-hook.js` |
 | GT session status | SessionStart | `~/.claude/hooks/ground-truth-session-start.js` |
 | Task area | SessionStart (a registered package in the session's checkout, or a declared task): the task's top candidate homes with their distances, the doors into them, and the view disagreements — or NO EXISTING HOME, or COULDN'T TELL with the reason (#718) | `~/.claude/hooks/session-area-start.js` |
 | Debug grounding gate | UserPromptSubmit (debugging keywords) | `~/.claude/hooks/debug-grounding-gate.js` |
@@ -579,6 +580,7 @@ event and matcher, held to its `REGISTRATIONS` in both directions by `test/hook-
 - `PreToolUse:Bash`: tree-lock-guard.js (enforcing), structure-merge-hook.js (enforcing, only for `gh pr merge`), experiment-protocol-guard.js, catalogue-id-leak-guard.js, shell-rewrite-guard.js
 - `PreToolUse:Write|Edit|MultiEdit`: tree-lock-guard.js (enforcing), structure-guard-hook.js (enforcing), write-scope-guard.js (enforcing), catalogue-context-injector.js
 - `PreToolUse:Read`: catalogue-context-injector.js
+- `PostToolUse:Bash`: structure-bash-hook.js
 - `PostToolUse:Read`: anvi-route-logger.js
 - `PostToolUse:Artifact`: provenance-guard.js
 - `PostToolUse:WebFetch|WebSearch`: provenance-guard.js
@@ -1741,6 +1743,14 @@ loosened until it stops firing guards nothing.
   TypeScript 5, a per-file cache) and judges it with the same rules as the report
   (`hooks/structure-rules.js`). **Only a new violation whose edge starts in the edited file
   is refused**; one it causes in another file's edge is counted, not refused.
+- **After a shell command: `hooks/structure-bash-hook.js`** (PostToolUse:Bash, reports, #744). A shell
+  command writes where no edit-time hook looks. After each one, a registered package's corpus files
+  are compared with the guard's graph cache (size and mtime per file, the cache the edit-time guard
+  reads); the files that differ changed since the guard last read them. The graph is rebuilt through
+  that cache and judged with the same rules and baseline, and a violation the baseline lacks whose
+  edge starts in a changed file is said in the same turn — once per session per violation. Owner's
+  choice on #744, over reading the command's text first: the disk says what landed however it was
+  written, where a guess from the text passes every shape it does not know in silence.
 - **At merge: `hooks/structure-merge-hook.js`** (PreToolUse:Bash, ENFORCING, #667). The edit-time
   hook judges only Write and Edit, and on stave three imports nobody refused reached the default
   branch through Bash in one trial window — each by `gh pr merge`. So the merge is judged too:
@@ -1808,7 +1818,8 @@ loosened until it stops firing guards nothing.
   record cannot tell them apart) is counted where it can be seen, not called drift.
 - **The default branch is judged whole, because the edit tools are not the only door (#667).**
   The hook judges Write, Edit and MultiEdit. A file changed through Bash (a patch script, `sed`,
-  `git mv`), a merge or a person's editor is never judged and leaves no record, so the report's
+  `git mv`), a merge or a person's editor is never refused and leaves no refusal record (since #744
+  a shell write is said in the same turn, which records nothing either), so the report's
   "missed chances" counted only the edit tools: on stave, imports the design does not allow reached
   the default branch during the trial through `python3` scripts run in Bash while the reading said
   0 missed. So `structure-refusals.js` also measures the package at the default branch (or
@@ -1824,7 +1835,9 @@ loosened until it stops firing guards nothing.
   borrows them from another worktree of the same repository and the run says whose; that applies
   to every measurement from a ref, a baseline write included. This reports; it refuses nothing.
   Ruled on #667: Bash is not judged at edit time; the merge is (`hooks/structure-merge-hook.js`, below,
-  under "At merge"), and this report still counts what lands by a door no hook sees.
+  under "At merge"), and this report still counts what lands by a door no hook sees. Since #744 a shell
+  write is also judged right after it lands and said in the same turn (`hooks/structure-bash-hook.js`,
+  below, under "After a shell command"); it reports, and the merge still refuses.
 - **A design changes on evidence, in a fixed order (#536).** Once the guard refuses, a refusal
   means one of three things: the import is wrong (fix it), the design is right and this edge is a
   deliberate exception (record the one-import exception), or the design is wrong (change the
@@ -1978,8 +1991,9 @@ loosened until it stops firing guards nothing.
   spelling it was given — there is nothing stored to compare it with.
 - **It sees only Write and Edit tool calls.** A file changed through Bash (a heredoc,
   `sed -i`, `cp`, `git checkout`/`apply`/`pull`), by another program, or by hand is never
-  judged at edit time. The report over the package — `--package <dir> --design <d>
-  --baseline <b>` — is what catches those, after they land. That is a stated blind spot, not
+  judged at edit time. A shell write is judged right after it lands and said in the same turn
+  (`structure-bash-hook.js`, #744), but not refused; the report over the package —
+  `--package <dir> --design <d> --baseline <b>` — catches the rest, after they land. That is a stated blind spot, not
   a bypass to use: the refusal tells an agent a deliberate edge is the user's decision.
 - **New means added by THIS edit, not merely absent from the baseline (#544).** A violation
   that landed outside the hook is on disk but not in the baseline, so judging the proposed graph
