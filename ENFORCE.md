@@ -2172,3 +2172,39 @@ the store with their frame: instrument, date, design id, the commit measured, th
   nothing written; exit 0 with the frame), every registry state, the swap mutation moving the
   divergence count, the borrowed control's three outcomes (the real-TypeScript case runs when
   `STRUCTURE_TS_FROM` names a TypeScript 5 directory).
+
+## The judge — after a ruling, the live test decides whether to reopen it, by exit code
+
+`scripts/live-judge.js` (#715) compares two live-test reports: one under the design before an
+admitted ruling, one under the design after it. It flags the ruling, or the guard, for reopening.
+Its exit code is the flag, so nobody has to read the numbers for it to fire.
+
+- **Placement first.** An edit that writes a task's job outside the home the ledger names is a flag
+  whatever it did to cost. A fall in files edited that comes with one is **SPRAWL**: a refusal
+  that failed to fire. It reopens the guard, not the ruling, and is never printed as a fall.
+  Otherwise it is **MISPLACED** and reopens the ruling.
+- **A refusal answered by a rewrite** is sprawl caused by the guard, and reopens the guard.
+  Refusals are counted with their outcomes (reuse, rewrite, abandon) and never summed into cost.
+- **Principled cost only against principled cost.** A task misplaced before and placed now is a
+  **BASELINE**, the first placed measurement, and is compared to nothing, even if it costs more.
+- **Cost, range against range** over the replays: files read, files edited, components touched,
+  attempts, edits outside the radius (with the radius size and widenings beside it).
+  - After's range entirely above before's, by at least the smallest effect: **RISE**, which
+    reopens the ruling.
+  - Overlapping ranges: **"underpowered, n replays"**. They read "no change" only once
+    `judge.smallestEffect` is ruled in the project's settings and both spreads are narrower than
+    it. The key has no default, so until it is ruled no difference inside a spread can read as
+    "no change".
+- **Not measured is never a pass.** A task missing from either report (the task set is fixed), a
+  task with one replay, or a replay missing a field is NOT MEASURED.
+- **Exit:**
+  - 0: every task judged, nothing flagged.
+  - 1: a flag, with REOPEN THE RULING / REOPEN THE GUARD naming the tasks.
+  - 2: NOT MEASURED.
+  - 3: nothing flagged, but a verdict was underpowered.
+- **Its input** is the live-test report that #711's runner is to write; the schema is in the
+  script's header. Until #711 exists, nothing produces that report and the judge has nothing real
+  to read. Re-running the live test on every admitted ruling is likewise #711's.
+- **Tests:** `node test/live-judge.test.js`. Every case runs the shipped command and reads its exit
+  code: a seeded regression, a seeded out-of-home edit, sprawl, underpowered against no change,
+  rewrite, baseline, and the NOT MEASURED cases.
