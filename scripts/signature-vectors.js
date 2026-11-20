@@ -155,11 +155,33 @@ function featuresOf(id, row) {
 }
 
 // A job's member files: direct touchers of its resources, and the files declaring its doors.
+// A door is named one of two ways (#779). By a ROW id (`codeView#write-door`, a row of kind door):
+// its files are the corpus files its `symbols` name — `src/x.ts#Name` names a file, while
+// `monaco-editor#ITextModel.setValue` names a package and adds none. Or as `<file>#<name>` with no
+// such row: the part before `#` is the file. Reading a row id as a file found a file called
+// "codeView", so the job had no member and was never built.
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+// The corpus symbols a door stands for: a door row's own symbols that name a source file, or the
+// door itself when it is written as <file>#<name>. write-scope's --changes-door reads it too.
+function doorSymbolsOf(d, resources) {
+  const row = resources && resources[d];
+  if (row && row.kind === 'door' && Array.isArray(row.symbols))
+    return { symbols: row.symbols.map(String).filter(s => SOURCE_FILE.test(s.split('#')[0])), row: true };
+  return { symbols: [String(d)], row: false };
+}
+function doorFilesOf(d, resources) {
+  const { symbols, row } = doorSymbolsOf(d, resources);
+  return { files: [...new Set(symbols.map(s => s.split('#')[0]))], row };
+}
 function jobMembers(sig, job, resources) {
   const wanted = new Set(job.resources.flatMap(id => featuresOf(id, resources[id])));
-  const doorFiles = new Set(job.doors.map(d => String(d).split('#')[0]));
+  const doorFiles = new Set(), missingDoors = [];
+  for (const d of job.doors) {
+    const { files, row } = doorFilesOf(d, resources);
+    if (row && !files.length) missingDoors.push(`${d} (its symbols name no corpus file)`);
+    for (const f of files) { doorFiles.add(f); if (!sig.has(f)) missingDoors.push(row ? `${f} (a symbol of ${d})` : f); }
+  }
   const members = [...sig.values()].filter(s => doorFiles.has(s.file) || [...s.direct].some(f => wanted.has(f)));
-  const missingDoors = [...doorFiles].filter(f => !sig.has(f));
   return { members, missingDoors };
 }
 
@@ -225,4 +247,4 @@ function jobVectors(sig, jobs) {
 
 const vecJSON = v => Object.fromEntries([...v].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, x]) => [k, +x.toFixed(4)]));
 
-module.exports = { VIEWS, tokens, eachDirect, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, jobVectors, reading, cosineDistance, unit, vecJSON };
+module.exports = { VIEWS, tokens, eachDirect, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, doorSymbolsOf, jobVectors, reading, cosineDistance, unit, vecJSON };

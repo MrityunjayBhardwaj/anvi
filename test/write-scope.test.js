@@ -238,7 +238,7 @@ console.log('\nMUTANTS — the radius predicate forced each way must turn these 
   ok(fire('home-1', 'src/engine/audio.ts', { hook: never }).denied, 'never-inside: the inside write IS refused — the inside case above would go red');
 }
 
-const GATED = 8;
+const GATED = 10;
 console.log('\nTHE COMMAND ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -277,6 +277,18 @@ console.log('\nTHE COMMAND ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM nam
     ok(r2.code === 3 && /NO EXISTING HOME/.test(r2.out), `a task far from every owner: exit 3, NO EXISTING HOME (${(r2.out.match(/outcome: .*/) || ['none'])[0]})`);
     const r3 = runScript(['--place', ...base, '--session', 'ts-3']);
     ok(r3.code === 2 && /names no resource and no file/.test(r3.out), 'a task naming nothing: NOT MEASURED, exit 2');
+    // A job naming its door by a ROW id (#779): the row's symbols say which export it is.
+    const RD = { ...TD, resources: { ...TD.resources, 'engine#load-door': { kind: 'door', reach: 'process', owner: 'engine', symbols: ['src/engine/audio.ts#loadSound', 'snd#samples'] } },
+      jobs: { ...TD.jobs, load: job('engine', ['snd'], ['engine#load-door']) } };
+    const rd = path.join(DIR, 'ts-design-rowdoor.json');
+    fs.writeFileSync(rd, JSON.stringify(RD));
+    const rbase = ['--design', rd, '--package', Q, '--typescript', tsDir];
+    const byId = runScript(['--place', ...rbase, '--task-resources', 'snd', '--changes-door', 'engine#load-door', '--session', 'ts-4']);
+    ok(byId.code === 0 && /callers of changed door engine#load-door: src\/viz\/player\.ts/.test(byId.out) && !/COULD NOT LOOK/.test(byId.out),
+      `--changes-door by the row id adds the callers of the export its symbols name (${(byId.out.match(/callers of changed door.*|--changes-door.*/) || ['none'])[0]})`);
+    const bySym = runScript(['--place', ...rbase, '--task-resources', 'snd', '--changes-door', 'src/engine/audio.ts#loadSound', '--session', 'ts-5']);
+    ok(bySym.code === 0 && /callers of changed door src\/engine\/audio\.ts#loadSound: src\/viz\/player\.ts/.test(bySym.out),
+      `--changes-door by one of the row's symbols is a door of the job too (${(bySym.out.match(/callers of changed door.*|--changes-door.*/) || ['none'])[0]})`);
     const ran = pass + fail - before;
     ok(ran + 1 === GATED, `the skip count matches the cases this block runs (${ran + 1} of ${GATED})`);
   }
