@@ -116,8 +116,8 @@ ok(/FILES IMPORTED FROM TWO OR MORE OTHER COMPONENTS: 1 of 8 files/.test(r.out),
 ok(/^ {4}b\/index\.ts +\[b\] +comps 2 +files +2 +← a,c +· forwards only$/m.test(r.out), 'b/index.ts, imported from a and c, is marked forwards only');
 ok(/of which forwards only: 1/.test(r.out), 'and counted as the one passthrough');
 ok(/agreement is ONE observation, not several/.test(r.out), 'the note on shared inputs is printed');
-ok(/SMELLS — NOT MEASURED/.test(r.out) && /a reading, never a ratchet/.test(r.out) && /split BY JOB followed by a per-pair re-count, never a target/.test(r.out),
-   'the smells are NOT MEASURED, with complexity a reading and exports-per-file a trigger');
+ok(/SMELLS — NOT MEASURED: the ownership index has no ledgerFacts\.touches/.test(r.out) && /a reading, never a ratchet/.test(r.out),
+   'with an index that carries no touches, the smells are NOT MEASURED and say why; complexity is a reading');
 
 console.log('\n  frameworks — where each came from (#758):');
 ok(/framework +react \(command line — NOT in the design\) — excluded from library homes/.test(r.out) && /⚠ WIDENED by --framework: react — the design does not record it/.test(r.out),
@@ -249,6 +249,77 @@ console.log('\nHOMES, NOT TOUCHERS — a types-only importer is no home; a graph
   const mixed = run(['--design', designFile, '--graph', graphFile, '--previous', prevFile]);
   ok(mixed.code === 2 && /read package uses from the package, this run from the graph/.test(mixed.out),
      `a --previous table that read uses from the package is refused against a graph-only run (exit ${mixed.code})`);
+}
+
+console.log('\nTHE SMELLS — from the index\'s touches and the design\'s ruled jobs, every count by hand:');
+{
+  // Rows: lib (owner b), solo (owner c), state src/b/b1.ts#reg (owner b). Ruled jobs: b/lib-job
+  // {lib}, b/reg-job {reg}, c/solo-job {solo}. (An undated job is refused by the design's own check.)
+  // Touches (direct): a1 lib · b1 lib + writes reg · c1 solo + writes reg · c2 reads reg ·
+  // b/index FORWARDS ONLY and touches solo (must not count: a passthrough is no toucher).
+  //   envy  a: lib (library) in a1                       → 1 row, 1 file
+  //         c: reg as writes (c1), reg as reads (c2)     → 2 rows, 2 files      total 3
+  //   jobs  b/lib-job members a1 b1 → beyond a 1 · b/reg-job members b1 c1 c2 → beyond c 2 ·
+  //         c/solo-job members c1 → none                 → 2 of 3 jobs, 2 (job, component) pairs
+  //   divergent  b1 (b/lib-job, b/reg-job) · c1 (b/reg-job, c/solo-job)
+  //   exports    b1#f used by a and b · b1#g used by b only · c1#h used by b · index#f forwards only
+  //   surface    b 1 export used outside ÷ 2 jobs = 0.5 · c 1 ÷ 1 = 1.0 · a none, no job
+  const SM = { ...DESIGN, components: Object.fromEntries(Object.entries(DESIGN.components).map(([n, c]) => [n, { ...c, purpose: `the ${n} side` }])),
+    resources: { lib: { kind: 'library', reach: 'process', owner: 'b' }, solo: { kind: 'library', reach: 'process', owner: 'c' }, 'src/b/b1.ts#reg': { kind: 'state', reach: 'process', owner: 'b' } },
+    jobs: { 'b/lib-job': { home: 'b', resources: ['lib'], doors: [], reason: 'ownership', ruled: '2026-11-21' }, 'b/reg-job': { home: 'b', resources: ['src/b/b1.ts#reg'], doors: [], reason: 'ownership', ruled: '2026-11-21' },
+      'c/solo-job': { home: 'c', resources: ['solo'], doors: [], reason: 'ownership', ruled: '2026-11-21' } } };
+  const T0 = (file, component, direct, passthrough = false) => ({ file, component, passthrough, direct });
+  const touchesOf = moveC1To => [T0('src/a/a1.ts', 'a', ['lib:lib']), T0('src/a/a2.ts', 'a', []), T0('src/a/a3.ts', 'a', []),
+    T0('src/b/b1.ts', 'b', ['lib:lib', 'writes:src/b/b1.ts#reg']), T0('src/b/b2.ts', 'b', []), T0('src/b/index.ts', 'b', ['lib:solo'], true),
+    T0('src/c/c1.ts', moveC1To || 'c', ['lib:solo', 'writes:src/b/b1.ts#reg']), T0('src/c/c2.ts', 'c', ['reads:src/b/b1.ts#reg'])];
+  const EXPORTS = [
+    { id: 'src/b/b1.ts#f', file: 'src/b/b1.ts', name: 'f', component: 'b', callers: { a: 2, b: 1 }, passthroughFile: false },
+    { id: 'src/b/b1.ts#g', file: 'src/b/b1.ts', name: 'g', component: 'b', callers: { b: 1 }, passthroughFile: false },
+    { id: 'src/c/c1.ts#h', file: 'src/c/c1.ts', name: 'h', component: 'c', callers: { b: 1 }, passthroughFile: false },
+    { id: 'src/b/index.ts#f', file: 'src/b/index.ts', name: 'f', component: 'b', callers: { a: 1, c: 1 }, passthroughFile: true }];
+  const withFacts = (design, touches) => ({ ...index(design), ledgerFacts: { states: [], exports: EXPORTS, reexports: 0, couldNotLook: 0, packages: {}, syntax: [], definitions: [], touches } });
+  const smDesign = put('smells-design.json', SM);
+  const out = path.join(DIR, 'smells.json');
+  const sm = run(['--design', smDesign, '--graph', graphFile, '--ownership', put('smells-index.json', withFacts(SM, touchesOf())), '--framework', 'react', '--json', out]);
+  ok(sm.code === 0, `the table with smells is printed (exit ${sm.code})`);
+  if (sm.code !== 0) console.log(sm.out);
+  const X = table(out).smells;
+  ok(X.measured && X.files === 8 && X.passthrough === 1 && X.ruledJobs === 3,
+     `8 files, 1 forwarding left out, 3 ruled jobs (${X.files}/${X.passthrough}/${X.ruledJobs})`);
+  const envy = n => X.envy.find(e => e.component === n);
+  ok(X.envyTotal === 3 && X.envy.map(e => e.component).join() === 'a,c', `envy: 3 readings in a and c only — b's forwarding file touching solo is not one (${X.envy.map(e => e.component)})`);
+  ok(envy('a').rows === 1 && envy('a').library === 1 && envy('a').files === 1, 'a: lib, as a library, in a1');
+  ok(envy('c').rows === 2 && envy('c').writes === 1 && envy('c').reads === 1 && envy('c').library === 0 && envy('c').files === 2, 'c: reg written in c1 and read in c2, counted apart');
+  ok(/^ {4}c +rows +2 \(writes 1 · reads 1 · library 0; 0 on ruled rows\) in 2 files$/m.test(sm.out), 'and printed with its parts');
+  const job = id => X.shotgun.find(j => j.job === id);
+  ok(job('b/lib-job').members.join() === 'src/a/a1.ts,src/b/b1.ts' && JSON.stringify(job('b/lib-job').beyond) === '{"a":["src/a/a1.ts"]}', 'b/lib-job reaches a');
+  ok(job('b/reg-job').members.length === 3 && job('b/reg-job').beyond.c.length === 2, 'b/reg-job reaches c in two files');
+  ok(Object.keys(job('c/solo-job').beyond).length === 0 && !job('c/solo-job').members.includes('src/b/index.ts'), 'c/solo-job stays home: the forwarding file is no member');
+  ok(X.shotgunTotal === 2 && /SHOTGUN SURGERY — ruled jobs whose member files lie beyond their home: 2 of 3 jobs, 2 \(job, component\) pairs/.test(sm.out), 'shotgun: 2 of 3 jobs, 2 pairs');
+  ok(X.divergent.map(d => d.file).join() === 'src/b/b1.ts,src/c/c1.ts' && X.divergent.every(d => d.jobs.length === 2), 'divergent: b1 and c1, each in two jobs');
+  ok(X.god[0].file === 'src/b/b1.ts' && X.god[0].exports === 2 && !X.god.some(g => g.file === 'src/b/index.ts'), 'god file: b1 first with 2 exports; the forwarding file is not counted');
+  ok(/src\/b\/b1\.ts +exports +2 · jobs 2 · two or more jobs: split by job, then re-count per pair/.test(sm.out), 'b1 is printed as a trigger for a split by job, not a target');
+  const surf = n => X.surface.find(s => s.component === n);
+  ok(surf('b').doors === 1 && surf('b').jobs === 2 && surf('b').perJob === 0.5, `surface b: 1 export used outside ÷ 2 jobs = 0.5 (b1#g is used only inside, index#f only forwards) — got ${JSON.stringify(surf('b'))}`);
+  ok(surf('c').perJob === 1 && surf('a').perJob === null && /^ {4}a +exports used outside +0 · jobs 0 · no owned job — not read$/m.test(sm.out), 'c 1.0 per job; a has no owned job and is not read');
+  ok(X.control.draws === 10 && X.control.envy.n === 10 && /^ {4}control: \d+…\d+ \(median \d+\) · (told apart|NOT told apart)/m.test(sm.out), 'each total prints beside its shuffled-membership control');
+  ok(!/SMELLS — NOT MEASURED/.test(sm.out) && /cognitive complexity per function: NOT MEASURED \(not built\)/.test(sm.out), 'complexity alone stays NOT MEASURED');
+
+  // The seeded mutation: c1 moved into b. Its write of reg is now the owner's own, so c's envy
+  // falls to the one read, and b/reg-job reaches c in one file instead of two.
+  const moved = { ...SM, components: { ...SM.components, b: { ...SM.components.b, files: ['c/c1.ts'] } } };
+  const mOut = path.join(DIR, 'smells-moved.json');
+  const mv = run(['--design', put('smells-moved-design.json', moved), '--graph', graphFile, '--ownership', put('smells-moved-index.json', withFacts(moved, touchesOf('b'))), '--framework', 'react', '--json', mOut]);
+  const M = table(mOut).smells;
+  ok(mv.code === 0 && M.envyTotal === 3 && M.envy.find(e => e.component === 'c').rows === 1 && M.envy.find(e => e.component === 'b').rows === 1,
+     `moving c1 into b moves envy: c 2 → 1 row, b 0 → 1 (b now touches solo, c's) — got ${M.envy.map(e => `${e.component} ${e.rows}`).join(', ')}`);
+  ok(M.shotgun.find(j => j.job === 'b/reg-job').beyond.c.length === 1 && Object.keys(M.shotgun.find(j => j.job === 'c/solo-job').beyond).join() === 'b',
+     'and the shotgun pairs move with it: b/reg-job reaches c in one file, c/solo-job now reaches b');
+
+  // Not measured: an index with no touches says so and names the rebuild, never prints zeros.
+  const bare = run(['--design', smDesign, '--graph', graphFile, '--ownership', put('smells-old-index.json', index(SM)), '--framework', 'react']);
+  ok(bare.code === 0 && /SMELLS — NOT MEASURED: the ownership index has no ledgerFacts\.touches .* rebuild it\./.test(bare.out) && !/FEATURE ENVY/.test(bare.out),
+     'an index without touches: SMELLS NOT MEASURED with the rebuild named, and no zero counts');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

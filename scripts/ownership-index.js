@@ -74,6 +74,10 @@
 //   packages    per package: member uses by component, so a library row can name second homes
 //   syntax      per --syntax query: call and reference sites by component, and the could-not-tell
 //   definitions per --define name: defining sites by component, package members of that name apart
+//   touches     every corpus file: { file, component, passthrough, direct: [feature] } — the
+//               resources it touches ITSELF, by the signatures' predicate (signature-vectors.js
+//               eachDirect): lib:/member: of a package, writes:/reads: of a module state. The
+//               coupling table reads its smells from these (#722).
 //
 // Exit: 0 report printed · 2 NOT MEASURED (no TypeScript 5, an unreadable input, a design the
 //       guard cannot judge against, an empty corpus).
@@ -634,7 +638,13 @@ function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
     for (const d of ix.definitions.get(name) || []) (by[d.component] = by[d.component] || []).push(d.site);
     return { name, definedIn: sortObj(by), fromPackages: ix.uses.filter(u => u.member === name).map(u => ({ site: u.site, component: u.component, pkg: u.pkg, kind: u.kind })) };
   });
-  return { states, exports: exportsOut.sort((a, b) => a.id < b.id ? -1 : 1), reexports, couldNotLook, packages: sortObj(packages), syntax: syntaxOut, definitions };
+  // What every file touches itself (#722): the signatures' own predicate (SV.eachDirect), so a
+  // smell read from these facts and a job's members in the placer are the same files.
+  const touch = new Map(ix.files.map(sf => { const rel = ix.relOf(sf.fileName); return [rel, new Set()]; }));
+  SV.eachDirect(ix, (file, fn, feature) => { const s = touch.get(file); if (s) s.add(feature); });
+  const touches = [...touch].map(([file, s]) => ({ file, component: ix.compOfRel(file), passthrough: ix.passthrough.has(file), direct: [...s].sort() }))
+    .sort((a, b) => a.file < b.file ? -1 : 1);
+  return { states, exports: exportsOut.sort((a, b) => a.id < b.id ? -1 : 1), reexports, couldNotLook, packages: sortObj(packages), syntax: syntaxOut, definitions, touches };
 }
 
 // PLACE (#723): the algorithm is scripts/place.js; this prints it over the index's signatures.

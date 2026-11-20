@@ -66,6 +66,7 @@ const fs = require('fs');
 const path = require('path');
 const G = require('./structure-guard.js');
 const R = require('../hooks/structure-rules.js');
+const SV = require('./signature-vectors.js');
 const { loadGraph, notMeasured, componentOf, touchersByPackage, homesOf, packageUses, designProblem, designId, analyserOptionProblem, countsTypeOnly } = G;
 
 const TOOL = 'coupling-table.js';
@@ -207,6 +208,104 @@ function survey({ design, cruise, graph, ownership, frameworks }) {
       homes: homes.get(p).maybe, couldntTell: homes.get(p).couldntTell, typesOnly: homes.get(p).typesOnly })),
       typesOnlyApart: libs.filter(p => homes.get(p).maybe.length < 2 && byPackage.get(p).comps.size >= 2), uses, unmappedWithPackages },
     states: sharedStates, duplicates, topLevelNames: ownership ? ownership.instrument.topLevelNames : null,
+    smells: smells({ design, ownership }),
+  };
+}
+
+// THE SMELLS (#722), from the ownership index's `touches` (what each file touches itself, by the
+// signatures' predicate) and `exports`, the design's resource rows and its RULED jobs. Never from
+// history. A file that only forwards (a passthrough) is no toucher and no member: the rules do not
+// live there. Each is read as the issue defines it:
+//   feature envy      a component touching a resource whose row names ANOTHER owner: per component,
+//                     the rows it touches, writes / reads of state and uses of a library counted apart
+//   shotgun surgery   a ruled job whose member files (SV.jobMembers, the placer's own membership) lie
+//                     in components beyond its home
+//   divergent change  a file that is a member of two or more ruled jobs (read per FILE: the index
+//                     says which resources a file touches, not which export touches them)
+//   god file          exports referenced from another file, and ruled jobs, per file — the largest
+//                     listed as a TRIGGER for a split by job and a per-pair re-count, never a target
+//   surface per job   exports referenced from another COMPONENT, per ruled job homed in the
+//                     component (§7.4a rule 6: a barrel satisfies a raw surface share)
+// CONTROL: the files' components shuffled (sizes kept, the same seeded draws as the coupling
+// control). Envy and shotgun totals are told apart only when the real one lies BELOW every draw.
+function smells({ design, ownership }) {
+  const lf = ownership && ownership.ledgerFacts;
+  if (!lf || !Array.isArray(lf.touches)) return { measured: false, why: ownership ? 'the ownership index has no ledgerFacts.touches (built by an ownership-index.js older than #722, or without --json) — rebuild it' : 'no --ownership' };
+  const jobs = SV.jobsOf(design);
+  const resources = jobs.resources;
+  const files = lf.touches.filter(t => !t.passthrough);
+  // feature → the owned row it stands for (rows with no owner own nothing; a door row has no feature).
+  const ownerOf = new Map();
+  for (const [id, row] of Object.entries(resources)) {
+    if (!row || typeof row !== 'object' || !row.owner) continue;
+    for (const f of SV.featuresOf(id, row)) ownerOf.set(f, { id, owner: row.owner, kind: row.kind, ruled: R.isRuled(row) });
+  }
+  const kindOf = f => f.startsWith('writes:') ? 'writes' : f.startsWith('reads:') ? 'reads' : 'library';
+  const envyOf = compOf => {
+    const by = new Map();
+    files.forEach((t, i) => {
+      const c = compOf[i];
+      for (const f of t.direct) {
+        const o = ownerOf.get(f); if (!o || o.owner === c) continue;
+        if (!by.has(c)) by.set(c, { rows: new Map(), files: new Set() });
+        const e = by.get(c); e.files.add(t.file);
+        const k = `${o.id}|${kindOf(f)}`;
+        if (!e.rows.has(k)) e.rows.set(k, { row: o.id, owner: o.owner, as: kindOf(f), ruled: o.ruled, files: new Set() });
+        e.rows.get(k).files.add(t.file);
+      }
+    });
+    return by;
+  };
+  const sigOf = compOf => new Map(files.map((t, i) => [t.file, { file: t.file, component: compOf[i], direct: new Set(t.direct) }]));
+  const shotgunOf = compOf => jobs.ruled.map(j => {
+    const { members, missingDoors } = SV.jobMembers(sigOf(compOf), j, resources);
+    const beyond = {};
+    for (const m of members) if (m.component !== j.home) (beyond[m.component] = beyond[m.component] || []).push(m.file);
+    return { job: j.id, home: j.home, members: members.map(m => m.file).sort(), beyond, missingDoors };
+  });
+  const realComp = files.map(t => t.component);
+  const envy = envyOf(realComp);
+  const shotgun = shotgunOf(realComp);
+  const envyTotal = by => [...by.values()].reduce((s, e) => s + e.rows.size, 0);
+  const shotgunTotal = sg => sg.reduce((s, j) => s + Object.keys(j.beyond).length, 0);
+
+  const rnd = rng(722);
+  const draws = { envy: [], shotgun: [] };
+  for (let k = 0; k < DRAWS; k++) { const p = shuffle(realComp, rnd); draws.envy.push(envyTotal(envyOf(p))); draws.shotgun.push(shotgunTotal(shotgunOf(p))); }
+  const range = xs => { const s = xs.slice().sort((a, b) => a - b); return { min: s[0], median: s[Math.floor(s.length / 2)], max: s[s.length - 1], n: s.length }; };
+  const told = (x, r) => r.n ? (x < r.min ? 'told apart (below every draw)' : 'NOT told apart (a shuffled partition does as well)') : 'NOT MEASURED';
+
+  const jobsOfFile = new Map();
+  for (const j of shotgun) for (const f of j.members) { if (!jobsOfFile.has(f)) jobsOfFile.set(f, []); jobsOfFile.get(f).push(j.job); }
+  const exportsByFile = new Map(), surface = new Map();
+  for (const e of lf.exports || []) {
+    if (e.passthroughFile) continue;
+    exportsByFile.set(e.file, (exportsByFile.get(e.file) || 0) + 1);
+    if (Object.keys(e.callers || {}).some(c => c !== e.component)) surface.set(e.component, (surface.get(e.component) || 0) + 1);
+  }
+  const jobsHomed = new Map();
+  for (const j of jobs.ruled) jobsHomed.set(j.home, (jobsHomed.get(j.home) || 0) + 1);
+  const comps = [...new Set([...files.map(t => t.component), ...surface.keys()])].filter(c => c && c !== '(unmapped)').sort();
+  const godRows = [...new Set([...exportsByFile.keys(), ...jobsOfFile.keys()])]
+    .map(f => ({ file: f, exports: exportsByFile.get(f) || 0, jobs: (jobsOfFile.get(f) || []).slice().sort() }))
+    .sort((a, b) => b.exports - a.exports || b.jobs.length - a.jobs.length || (a.file < b.file ? -1 : 1));
+
+  return {
+    measured: true,
+    files: lf.touches.length, passthrough: lf.touches.length - files.length,
+    ruledJobs: jobs.ruled.length, unruledJobs: jobs.unruled,
+    envy: comps.filter(c => envy.has(c)).map(c => {
+      const e = envy.get(c), rows = [...e.rows.values()];
+      const count = as => rows.filter(r => r.as === as).length;
+      return { component: c, rows: rows.length, files: e.files.size, writes: count('writes'), reads: count('reads'), library: count('library'), ruledRows: rows.filter(r => r.ruled).length,
+        detail: rows.map(r => ({ row: r.row, owner: r.owner, as: r.as, ruled: r.ruled, files: [...r.files].sort() })).sort((a, b) => a.row < b.row ? -1 : a.row > b.row ? 1 : a.as < b.as ? -1 : 1) };
+    }),
+    envyTotal: envyTotal(envy),
+    shotgun, shotgunTotal: shotgunTotal(shotgun),
+    divergent: [...jobsOfFile].filter(([, js]) => js.length >= 2).map(([file, js]) => ({ file, jobs: js.slice().sort() })).sort((a, b) => b.jobs.length - a.jobs.length || (a.file < b.file ? -1 : 1)),
+    god: godRows.slice(0, 10),
+    surface: comps.map(c => ({ component: c, doors: surface.get(c) || 0, jobs: jobsHomed.get(c) || 0, perJob: jobsHomed.get(c) ? (surface.get(c) || 0) / jobsHomed.get(c) : null })),
+    control: { draws: DRAWS, seed: 722, envy: { ...range(draws.envy), verdict: told(envyTotal(envy), range(draws.envy)) }, shotgun: { ...range(draws.shotgun), verdict: told(shotgunTotal(shotgun), range(draws.shotgun)) } },
   };
 }
 
@@ -397,11 +496,41 @@ function main(argv) {
   print(`  of which forwards only: ${t.multi.filter(r => r.forwardsOnly).length}`);
 
   print('');
-  print('SMELLS — NOT MEASURED: they need the extractor\'s per-export and per-job map (#647).');
-  print('  shotgun surgery (blast radius beyond owners) · divergent change (a file whose exports serve several jobs) · feature envy (a non-owner touching an owned');
-  print('  resource; a passthrough door is not an owner) · god file (exports and jobs per file — a trigger for a split BY JOB followed by a per-pair re-count, never a target)');
-  print('  cognitive complexity per function: when built, a reading, never a ratchet (a ratchet rewards fragmenting functions)');
-  print('  surface share: read as doors per owned job (ledger v1), since a barrel satisfies the raw share');
+  const sm = t.smells;
+  if (!sm.measured) {
+    print(`SMELLS — NOT MEASURED: ${sm.why}.`);
+    print('  feature envy · shotgun surgery · divergent change · god file · surface per owned job are read from the ownership index (ownership-index.js --json, ledgerFacts.touches)');
+  } else {
+    print(`SMELLS — from the ownership index's touches (${sm.files} files, ${sm.passthrough} that only forward left out) and the design's ${sm.ruledJobs} ruled jobs` +
+      `${sm.unruledJobs.length ? ` (${sm.unruledJobs.length} unruled, not read: ${sm.unruledJobs.join(', ')})` : ''}; never from history`);
+    print(`  control: components shuffled over the files, sizes kept, ${sm.control.draws} draws, seed ${sm.control.seed}`);
+    print('');
+    print(`  FEATURE ENVY — a component touching a resource whose row names another owner: ${sm.envyTotal} (component, row, as) readings in ${sm.envy.length} components`);
+    print(`    control: ${sm.control.envy.min}…${sm.control.envy.max} (median ${sm.control.envy.median}) · ${sm.control.envy.verdict}`);
+    for (const e of sm.envy) {
+      print(`    ${e.component.padEnd(12)} rows ${String(e.rows).padStart(3)} (writes ${e.writes} · reads ${e.reads} · library ${e.library}; ${e.ruledRows} on ruled rows) in ${e.files} files`);
+      for (const d of e.detail) print(`      ${d.as.padEnd(7)} ${d.row} (owner ${d.owner}${d.ruled ? ', ruled' : ', proposed'}) ← ${d.files.join(', ')}`);
+    }
+    if (!sm.envy.length) print('    none: no component touches a resource another owns');
+    print('');
+    print(`  SHOTGUN SURGERY — ruled jobs whose member files lie beyond their home: ${sm.shotgun.filter(j => Object.keys(j.beyond).length).length} of ${sm.shotgun.length} jobs, ${sm.shotgunTotal} (job, component) pairs`);
+    print(`    control: ${sm.control.shotgun.min}…${sm.control.shotgun.max} (median ${sm.control.shotgun.median}) pairs · ${sm.control.shotgun.verdict}`);
+    for (const j of sm.shotgun) {
+      const b = Object.entries(j.beyond).sort((x, y) => x[0] < y[0] ? -1 : 1);
+      print(`    ${j.job.padEnd(28)} home ${j.home.padEnd(10)} members ${String(j.members.length).padStart(3)} · beyond: ${b.length ? b.map(([c, fs]) => `${c} ${fs.length}`).join(', ') : 'none'}` +
+        `${j.missingDoors.length ? ` · door file not in the corpus: ${j.missingDoors.join(', ')}` : ''}${j.members.length ? '' : ' · NO MEMBER FILE (nothing touches its resources directly)'}`);
+    }
+    print('');
+    print(`  DIVERGENT CHANGE — files that are members of two or more ruled jobs: ${sm.divergent.length} (per file: the index names the resources a file touches, not which export touches them)`);
+    for (const d of sm.divergent) print(`    ${d.file.padEnd(48)} ${d.jobs.length} jobs: ${d.jobs.join(', ')}`);
+    print('');
+    print('  GOD FILE — the 10 files with the most exports referenced from another file, with their ruled jobs. A TRIGGER for a split by job followed by a per-pair re-count, never a target');
+    for (const g of sm.god) print(`    ${g.file.padEnd(48)} exports ${String(g.exports).padStart(3)} · jobs ${g.jobs.length}${g.jobs.length >= 2 ? ' · two or more jobs: split by job, then re-count per pair' : ''}`);
+    print('');
+    print('  SURFACE PER OWNED JOB — exports referenced from another component ÷ ruled jobs homed here (a barrel satisfies a raw surface share, so the raw share is not printed)');
+    for (const s of sm.surface) print(`    ${s.component.padEnd(12)} exports used outside ${String(s.doors).padStart(3)} · jobs ${s.jobs} · ${s.perJob === null ? 'no owned job — not read' : `${s.perJob.toFixed(1)} per job`}`);
+  }
+  print('  cognitive complexity per function: NOT MEASURED (not built); when built, a reading, never a ratchet (a ratchet rewards fragmenting functions)');
 
   if (deltas) {
     print('');
