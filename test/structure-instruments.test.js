@@ -130,6 +130,53 @@ console.log('\nTHE REGISTRY — every instrument prints on every run, with its s
   ok(l.code === 0 && (l.out.match(/^  \S/mg) || []).length === I.REGISTRY.length, '--list prints every entry');
 }
 
+console.log('\nTHE WIRED TOOLS — each run as its author ships it, read-only, its state said every time');
+{
+  const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-instruments-home-'));   // no transcripts, no meter
+  const runH = (argv) => { const r = spawnSync(process.execPath, [CMD, ...argv], { encoding: 'utf8', env: { ...process.env, HOME } }); return { code: r.status, out: r.stdout }; };
+  const section = (out, name) => (out.split(/^── /m).find(s => s.startsWith(name + ' ')) || '');
+  const WIRED = ['coupling-table', 'forceable-share', 'task-telemetry', 'coexecution', 'hot-paths'];
+  for (const n of WIRED) ok(I.stateOf(I.REGISTRY.find(e => e.name === n)).state === 'READY', `${n} is wired: READY, not INSTALLED, NOT WIRED`);
+
+  const before = new Set(fs.readdirSync(DIR));
+  const r = runH([...common, '--baseline', baseline, '--dry-run']);
+  ok(r.code === 0, `a run with none of their inputs still measures: exit 0 (got ${r.code})`);
+  ok(/NOT MEASURED\s+coupling-table\.js exited 2:[\s\S]*instability/.test(section(r.out, 'coupling-table')),
+     'coupling-table on a cruise without instability: NOT MEASURED, in the tool\'s own words');
+  ok(/NOT MEASURED\s+forceable-share\.js reads the TypeScript program, so it needs --package/.test(section(r.out, 'forceable-share')), 'forceable-share given a graph file only: NOT MEASURED, and why');
+  ok(/NOT ASKED\s+give --telemetry-since/.test(section(r.out, 'task-telemetry')), 'task-telemetry with no window: NOT ASKED — the window is never assumed');
+  ok(/NOT ASKED\s+give --coverage/.test(section(r.out, 'coexecution')), 'coexecution with no coverage record: NOT ASKED');
+  ok(/NOT ASKED\s+give --hot-snapshot/.test(section(r.out, 'hot-paths')), 'hot-paths with no snapshot: NOT ASKED');
+
+  // With the inputs: the cruise carries instability, so the table is read.
+  const withI = cruise(SPEC); withI.modules.forEach(m => { m.instability = 0.5; });
+  const gI = put('graph-instability.json', withI);
+  const r2 = runH(['--project', 'demo', '--design', design, '--graph', gI, '--settings', settings, '--subject-ref', 'abc1234', '--baseline', baseline, '--dry-run',
+    '--telemetry-since', '2026-01-01', '--coverage', path.join(DIR, 'no-coverage'), '--hot-snapshot', path.join(DIR, 'no-snap.json')]);
+  ok(r2.code === 0, `a run with every input: exit 0 (got ${r2.code}${r2.code ? `: ${r2.out.split('\n')[0]}` : ''})`);
+  const ct = section(r2.out, 'coupling-table');
+  ok(/^\S.*\n\s+RAN\n/.test(ct) && /low|mid|top/.test(ct), `coupling-table on a cruise with instability: RAN, its table printed (got: ${ct.split('\n').slice(1, 4).join(' | ')})`);
+  ok(/NOT MEASURED\s+task-telemetry\.js exited 2:[\s\S]*no transcripts under/.test(section(r2.out, 'task-telemetry')), 'task-telemetry with nothing to read: NOT MEASURED, with the tool\'s reason — "could not look" never prints as a report');
+  ok(/NOT MEASURED\s+--coverage was given without --source-root/.test(section(r2.out, 'coexecution')), 'coverage without its source root: NOT MEASURED, the runner says which input is missing');
+  ok(/NOT MEASURED\s+hot-paths\.js exited 2:/.test(section(r2.out, 'hot-paths')), 'a snapshot that cannot be read: NOT MEASURED, the tool\'s exit and words');
+  const r3 = runH([...common, '--baseline', baseline, '--dry-run', '--coverage', path.join(DIR, 'no-coverage'), '--source-root', DIR]);
+  ok(/NOT MEASURED\s+coexecution\.js exited 2:/.test(section(r3.out, 'coexecution')), 'a coverage directory with no record: NOT MEASURED, the tool\'s exit and words');
+  // One session with one tool call in the window: the tool reports it (exit 3, no radius).
+  const HOME2 = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-instruments-home2-'));
+  const proj = path.join(HOME2, '.claude', 'projects', 'demo'); fs.mkdirSync(proj, { recursive: true });
+  fs.writeFileSync(path.join(proj, 's1.jsonl'), [
+    { type: 'assistant', timestamp: '2026-11-05T10:00:00Z', sessionId: 's1', message: { content: [{ type: 'tool_use', id: 'u1', name: 'Read', input: { file_path: '/x/a.ts' } }] } },
+    { type: 'user', timestamp: '2026-11-05T10:00:01Z', sessionId: 's1', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'ok' }] } },
+  ].map(x => JSON.stringify(x)).join('\n') + '\n');
+  const r4 = spawnSync(process.execPath, [CMD, ...common, '--baseline', baseline, '--dry-run', '--telemetry-since', '2026-11-01'], { encoding: 'utf8', env: { ...process.env, HOME: HOME2 } });
+  const tt = section(r4.stdout, 'task-telemetry');
+  ok(/RAN\s+task-telemetry\.js exited 3: reported; out-of-radius NOT MEASURED/.test(tt) && /task s1 /.test(tt),
+     `task-telemetry with a session in the window: RAN, the exit-3 caveat said, the session reported (got: ${tt.split('\n').slice(1, 3).join(' | ')})`);
+  const after = fs.readdirSync(DIR).filter(f => !before.has(f));
+  ok(after.length === 1 && after[0] === 'graph-instability.json', `the tools wrote nothing beside the run (new files: ${after.join(', ') || 'none'} — only the fixture)`);
+  ok(fs.readdirSync(HOME).length === 0, 'and nothing under the home they ran with');
+}
+
 console.log('\nTHE MUTATION — swapping two components\' files moves the divergence count');
 {
   // Swap low/c.ts (imports mid/d) into mid and mid/a.ts (imports low/b) into low.

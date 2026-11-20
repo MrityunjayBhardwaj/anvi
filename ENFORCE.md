@@ -2120,6 +2120,24 @@ the store with their frame: instrument, date, design id, the commit measured, th
   NOT WIRED (the script is here, the runner does not know its arguments — never run with guessed
   ones), or NOT SHIPPED BY RULING. `--list` prints the registry. Commit history is in it as NOT
   SHIPPED BY RULING: since 2026-11-02 it derives no coupling, homes or boundaries.
+- **The tools that came with their own PRs are wired** (#714): each is spawned with only the
+  arguments its usage names and never `--json`, so a scheduled run reads and reports and writes
+  none of their files. Exits that mean "reported" (over budget, an edit outside a radius) print as
+  RAN with the tool's own caveat line; every other exit is NOT MEASURED with the tool's first lines.
+  - `coupling-table` (#722) and `coexecution` (#713) read a dependency-cruiser graph, so they run
+    only with `--graph`; a `--package` run prints NOT MEASURED and says so. `coupling-table` also
+    needs the cruise made with `--metrics` on the command line, or it says the graph has no
+    instability.
+  - `forceable-share` (#700) reads the TypeScript program, so it runs only with `--package`; its
+    threshold comes from the project's settings.
+  - `task-telemetry` (#712) runs only when asked for a window (`--telemetry-since`, optionally
+    `--telemetry-until`), never an assumed one; it reads `~/.claude/projects`. A window has no
+    single radius, so it reports with "out-of-radius NOT MEASURED" (its exit 3).
+  - `coexecution` needs `--coverage <dir> --source-root <dir>`; `hot-paths` (#719) needs
+    `--hot-snapshot <snap.json>` (and `--hot-before`). Without them, NOT ASKED.
+  - `--typescript <dir>` is a directory TypeScript resolves FROM (as the guard and
+    `ownership-index.js` read it), not TypeScript's own directory. A stave checkout with no
+    `node_modules` needs one, or the extractor and `forceable-share` print NOT MEASURED.
 - **Controls.** Propagation cost beside a random digraph and a random DAG with the same N and E
   (10 draws, seed 7) — the DAG is a floor, not a bar. Component figures beside the same figures
   with the files' component labels shuffled (sizes kept, seed 11). A **borrowed** control:
@@ -2140,7 +2158,8 @@ the store with their frame: instrument, date, design id, the commit measured, th
   ```
   0 6 1 * * cd ~/anvi && node scripts/structure-instruments.js --project stave \
       --design <design.json> --baseline <baseline.json> \
-      --package ~/stave/packages/editor --ref origin/main >> ~/.anvideck/projects/stave/instances/structure-instruments/cron.log 2>&1
+      --package ~/stave/packages/editor --ref origin/main --typescript <dir with TypeScript 5> \
+      --telemetry-since "$(date -v-1m +%Y-%m-01)" >> ~/.anvideck/projects/stave/instances/structure-instruments/cron.log 2>&1
   ```
 
   `--ref` measures the ref through `git archive` (as the guard's baseline writer does), so the

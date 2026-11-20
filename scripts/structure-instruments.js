@@ -42,6 +42,9 @@
 //        [--subject-ref <label>]          the commit measured; derived from --ref or the checkout when it can be
 //        [--moves <moves.json>]...        a reassignment { "<file under root>": "<component>" }: its predicted effect
 //        [--borrowed <pkg dir> --borrowed-root <dir> [--borrowed-name <label>] [--borrowed-exclude <s>]...]
+//        [--telemetry-since <ISO> [--telemetry-until <ISO>]]   the sessions in a window (task-telemetry)
+//        [--coverage <dir> --source-root <dir>]               a coverage record of a run (NODE_V8_COVERAGE output) (coexecution)
+//        [--hot-snapshot <snap.json> [--hot-before <snap.json>]]   a profiler snapshot (hot-paths budget)
 //        [--settings <file>]              else ~/.anvideck/projects/<project>/settings.json
 //        [--store <dir>]                  else ~/.anvideck/projects/<project>/instances/structure-instruments
 //        [--dry-run]                      print, write nothing
@@ -89,11 +92,11 @@ const REGISTRY = [
   { name: 'graph-structure', issue: '#714', what: 'edges by class, component surfaces, two-way pairs, propagation cost, hubs, homes per library', run: graphStructure },
   { name: 'moves-overlay', issue: '#714', what: 'the predicted structural effect of a reassignment, before anyone rules', run: movesOverlay },
   { name: 'ownership-findings', issue: '#647', script: 'scripts/ownership-index.js', what: 'module state written from two or more components (the extractor\'s report)', run: ownershipFindings },
-  { name: 'coupling-table', issue: '#722', pr: '#746', script: 'scripts/coupling-table.js', what: 'Martin Ca/Ce/I per component, multi-component imports' },
-  { name: 'forceable-share', issue: '#700', pr: '#745', script: 'scripts/forceable-share.js', what: 'the share of duplicated jobs refusal could force' },
-  { name: 'task-telemetry', issue: '#712', pr: '#749', script: 'scripts/task-telemetry.js', what: 'per-task reads, edits and refusals' },
-  { name: 'coexecution', issue: '#713', pr: '#752', script: 'scripts/coexecution.js', what: 'runtime co-execution and hidden coupling' },
-  { name: 'hot-paths', issue: '#719', pr: '#753', script: 'scripts/hot-paths.js', what: 'the hot-path manifest and its budget' },
+  { name: 'coupling-table', issue: '#722', pr: '#746', script: 'scripts/coupling-table.js', what: 'Martin Ca/Ce/I per component, multi-component imports', run: couplingTable },
+  { name: 'forceable-share', issue: '#700', pr: '#745', script: 'scripts/forceable-share.js', what: 'the share of duplicated jobs refusal could force', run: forceableShare },
+  { name: 'task-telemetry', issue: '#712', pr: '#749', script: 'scripts/task-telemetry.js', what: 'per-task reads, edits and refusals', run: taskTelemetry },
+  { name: 'coexecution', issue: '#713', pr: '#752', script: 'scripts/coexecution.js', what: 'runtime co-execution and hidden coupling', run: coexecution },
+  { name: 'hot-paths', issue: '#719', pr: '#753', script: 'scripts/hot-paths.js', what: 'the hot-path manifest and its budget', run: hotPaths },
   { name: 'duplication', issue: '#698 item 15', what: 'a textual-clone reading (jscpd)', absent: 'the jscpd reading is a one-off in the store (instances/architecture-2026-11-02/out/jscpd-*); anvi ships no clone detector' },
   { name: 'cochange', what: 'files that changed in the same commit', ruling: 'ruled 2026-11-02 — commit history derives no coupling, homes or boundaries; cochange.js, neighbours.js and support.js stay in the store as a descriptive record of how past work landed' },
 ];
@@ -370,6 +373,68 @@ function ownershipFindings(ctx) {
   return { state: 'RAN', lines, figures: { exit: r.status, lineCount: lines.length } };
 }
 
+// ── the tools that came with their own pull requests, run as their authors ship them ─────────
+// Each is spawned with only the arguments its usage names and none that write (no --json), so a
+// scheduled run reads and reports and leaves their files alone. `ran` lists the exits that mean
+// the tool reported — a finding (over budget, a plan incomplete) is a report, not a failure, and
+// its words print; every other exit is NOT MEASURED with the tool's own first lines.
+function runTool(script, argv, ran, note = {}) {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', script), ...argv], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const lines = (r.stdout || '').trimEnd() ? (r.stdout || '').trimEnd().split('\n') : [];
+  const said = `${script} exited ${r.status}${r.signal ? ` (${r.signal})` : ''}`;
+  if (!ran.includes(r.status)) return { state: 'NOT MEASURED', lines: [`${said}:`, ...lines.slice(0, 5), ...((r.stderr || '').trim() ? [`stderr: ${(r.stderr || '').trim().split('\n')[0]}`] : [])], figures: { exit: r.status } };
+  return { state: 'RAN', lines: [...(note[r.status] ? [`${said}: ${note[r.status]}`] : []), ...lines], figures: { exit: r.status, lineCount: lines.length } };
+}
+const settingsArgs = a => a.settings ? ['--settings', a.settings] : ['--project', a.project];
+const notAsked = why => ({ state: 'NOT ASKED', lines: [why], figures: null });
+const needsCruise = (tool, a) => a.graph ? null
+  : { state: 'NOT MEASURED', lines: [`${tool} reads a dependency-cruiser graph (--graph); this run built its graph from the package's TypeScript, so there is none to give it`], figures: null };
+
+// #722: Martin Ca/Ce/I per component. Instability comes from the cruise, so --graph only.
+function couplingTable(ctx) {
+  const a = ctx.args;
+  return needsCruise('coupling-table.js', a) || runTool('coupling-table.js', ['--design', a.design, '--graph', a.graph], [0]);
+}
+
+// #700: the share of duplicated jobs refusal could force. Reads the TypeScript program; its
+// threshold must be ruled in the project's settings, or it says so (exit 2).
+function forceableShare(ctx) {
+  const a = ctx.args;
+  if (!a.package) return { state: 'NOT MEASURED', lines: ['forceable-share.js reads the TypeScript program, so it needs --package; this run was given --graph only'], figures: null };
+  return runTool('forceable-share.js', ['--design', a.design, '--package', ctx.measuredDir, ...(a.typescript ? ['--typescript', a.typescript] : []), ...settingsArgs(a)], [0]);
+}
+
+// #712: every session with a tool call in the window is one task. The window is asked for
+// (--telemetry-since), never assumed: a month's transcripts are the owner's to point it at. The
+// package given is the live one, not an archive: the sessions edited the checkout.
+function taskTelemetry(ctx) {
+  const a = ctx.args;
+  if (!a['telemetry-since']) return notAsked('give --telemetry-since <ISO> (and --telemetry-until) to read the sessions in a window');
+  const argv = ['--since', a['telemetry-since'], ...(a['telemetry-until'] ? ['--until', a['telemetry-until']] : [])];
+  // The design maps a package's files to components, so it goes only with a package.
+  if (a.package) argv.push('--package', fs.realpathSync(a.package), '--design', a.design);
+  return runTool('task-telemetry.js', argv, [0, 1, 3], { 1: 'an edit outside the radius — a person reads it', 3: 'reported; out-of-radius NOT MEASURED, because a window has no single radius' });
+}
+
+// #713: runtime co-execution. Needs a coverage record of a run (--coverage) and the root its
+// paths are under, and the cruise the guard judges.
+function coexecution(ctx) {
+  const a = ctx.args;
+  if (!a.coverage) return notAsked('give --coverage <dir> --source-root <dir> — a coverage record of a run, NODE_V8_COVERAGE output — to read co-execution');
+  if (!a['source-root']) return { state: 'NOT MEASURED', lines: ['--coverage was given without --source-root, the directory its paths are under'], figures: null };
+  return needsCruise('coexecution.js', a) || runTool('coexecution.js', ['--coverage', a.coverage, '--source-root', a['source-root'], '--graph', a.graph, '--design', a.design, ...settingsArgs(a)], [0, 1], { 1: 'the plan omits a co-executing or required file' });
+}
+
+// #719: the hot-path budget, read off a profiler snapshot (--hot-snapshot, optionally
+// --hot-before). Over budget is a report (exit 1); a row the snapshot cannot answer is not (3).
+function hotPaths(ctx) {
+  const a = ctx.args;
+  if (!a['hot-snapshot']) return notAsked('give --hot-snapshot <snap.json> (and --hot-before) to read the hot-path budget');
+  const argv = ['budget', '--design', a.design, '--snapshot', a['hot-snapshot'], ...(a['hot-before'] ? ['--before', a['hot-before']] : [])];
+  if (a.package) argv.push('--package', fs.realpathSync(a.package));
+  return runTool('hot-paths.js', argv, [0, 1], { 1: 'a row is over budget' });
+}
+
 // ── the gate: the shipped guard on the same inputs ───────────────────────────────────────────
 function runGuard(args) {
   const argv = [GUARD, '--design', args.design, '--baseline', args.baseline];
@@ -417,7 +482,8 @@ function git(cwd, ...a) {
 }
 
 // ── arguments ────────────────────────────────────────────────────────────────────────────────
-const VALUED = new Set(['project', 'design', 'baseline', 'graph', 'package', 'ref', 'extractor', 'typescript', 'subject-ref', 'moves', 'borrowed', 'borrowed-root', 'borrowed-name', 'borrowed-exclude', 'settings', 'store']);
+const VALUED = new Set(['project', 'design', 'baseline', 'graph', 'package', 'ref', 'extractor', 'typescript', 'subject-ref', 'moves', 'borrowed', 'borrowed-root', 'borrowed-name', 'borrowed-exclude', 'settings', 'store',
+  'telemetry-since', 'telemetry-until', 'coverage', 'source-root', 'hot-snapshot', 'hot-before']);
 const BOOLEAN = new Set(['dry-run', 'list']);
 const REPEATABLE = new Set(['moves', 'borrowed-exclude']);
 
