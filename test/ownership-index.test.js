@@ -250,7 +250,7 @@ console.log('\nTHE FOUR AXES ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM n
 
 // LEDGER FACTS (#710, ledger v1): what --json writes for the ledger to propose state, registry,
 // door and syntax rows from. Its own small package, so the counts above do not move.
-const GATED_FACTS = 14;
+const GATED_FACTS = 18;
 console.log('\nLEDGER FACTS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 {
   const from = process.env.STRUCTURE_TS_FROM;
@@ -268,8 +268,9 @@ console.log('\nLEDGER FACTS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM na
       'export function register(k: string) {\n  editors.set(k, 1);\n}\n' +
       'export function unregister(k: string) {\n  const drop = () => editors.delete(k);\n  drop();\n}\n' +
       'export function size() { return editors.size; }\n' +
-      'let counter = 0;\nfunction bump() { counter++; }\nexport function viaHelper() { bump(); }\n');
-    put('src/ws/view.ts', "import { register, unregister, viaHelper } from './registry';\nexport function mount() { register('a'); unregister('a'); viaHelper(); }\n");
+      'let counter = 0;\nfunction bump() { counter++; }\nexport function viaHelper() { bump(); }\n' +
+      'export interface Opts { k: string }\n');
+    put('src/ws/view.ts', "import { register, unregister, viaHelper, type Opts } from './registry';\nexport function mount(o?: Opts) { register('a'); unregister('a'); viaHelper(); return o; }\n");
     put('src/ws/index.ts', "export { register } from './registry';\n");
     put('src/viz/use.ts', "import { register } from '../ws/index';\nexport function v() { register('b'); }\n");
     put('src/viz/p.ts', "import { parse } from 'acorn';\nexport function p(s: string) { return parse(s); }\n");
@@ -297,6 +298,13 @@ console.log('\nLEDGER FACTS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM na
     ok(sx.id === 'acorn#parse' && JSON.stringify(Object.keys(sx.sites)) === '["viz"]' && sx.sites.viz.length === 1, `--syntax acorn#parse: its call sites by component (${JSON.stringify(sx.sites)})`);
     ok(/SYNTAX — acorn#parse \(a ruling input: the member is named, never detected\): called or referenced from 1 component/.test(r.out), 'the report prints the syntax query');
     ok(lf.definitions[0] && JSON.stringify(Object.keys(lf.definitions[0].definedIn)) === '["ws"]', '--define names travel into the facts');
+    const tf = f => (lf.touches || []).find(t => t.file === f);
+    ok(Array.isArray(lf.touches) && lf.touches.length === 5 && tf('src/viz/p.ts').component === 'viz' && JSON.stringify(tf('src/viz/p.ts').direct) === '["lib:acorn","member:acorn#parse"]',
+       `touches: every corpus file, with what it touches itself — p.ts binds acorn and uses parse (${JSON.stringify(tf('src/viz/p.ts'))})`);
+    ok(tf('src/ws/registry.ts').direct.includes('writes:src/ws/registry.ts#editors') && tf('src/ws/registry.ts').direct.includes('writes:src/ws/registry.ts#counter') && tf('src/ws/registry.ts').direct.includes('reads:src/ws/registry.ts#editors') && !tf('src/ws/view.ts').direct.some(f => f.startsWith('writes:')),
+       'the registry writes and reads its own states; view.ts reaches them only through calls, so it touches none itself');
+    ok(ex('src/ws/registry.ts#Opts') && ex('src/ws/registry.ts#Opts').typeOnly === true && reg.typeOnly === false, 'an interface export is marked typeOnly; a function is not');
+    ok(tf('src/ws/index.ts').passthrough === true && tf('src/ws/view.ts').passthrough === false, 'the barrel is marked as forwarding only');
     const ran = pass + fail - before;
     ok(ran + 1 === GATED_FACTS, `the skip count matches the cases this block runs (${ran + 1} of ${GATED_FACTS})`);
   }
