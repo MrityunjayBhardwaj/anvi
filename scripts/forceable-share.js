@@ -15,7 +15,7 @@
 // it, and the fold is printed):
 //   resource    a module state written from 2+ components; a package's members used from 2+
 //               components, one candidate per set of components sharing members (frameworks
-//               named with --framework excluded and listed)
+//               excluded and listed — see FRAMEWORKS)
 //   same-name   a MODULE-LEVEL function name defined in 2+ components (a nested closure or a
 //               method is part of its enclosing job; those collisions are listed); handler and
 //               lifecycle names (on*, handle*, render, constructor, …) are listed apart and left
@@ -34,6 +34,14 @@
 // The three sum to the total. The share is printed as a bound [forceable, forceable + couldn't
 // tell] / total; the verdict holds only when the whole bound is on one side of the threshold,
 // and reads UNDECIDED when it straddles.
+//
+// FRAMEWORKS (#758). A framework (React) is used everywhere by kind, so its members are not a
+// duplicated job. The list is read from the design: every resource of `kind: "framework"`. That is
+// the record a figure can be reproduced from; the settings file holds numbers only. `--framework
+// <pkg>` still widens one run, but the header names the source of every framework, and a flag that
+// adds one the design does not record (or overrides a row of another kind) is printed beside the
+// verdict and written to the JSON: the same design and settings would give a different share
+// without it.
 //
 // Usage:
 //   node scripts/forceable-share.js --design <design.json> --package <dir> [--typescript <dir>]
@@ -248,7 +256,9 @@ function main(argv) {
   const ix = OI.build({ ts: T.ts, pkgDir, design, cache: new Map() });
   if (ix.notMeasured) return stop(ix.notMeasured);
   if (!ix.files.length) return stop(`0 corpus files read under ${pkgDir}`);
-  const frameworks = new Set([...a.framework, ...Object.entries(design.resources || {}).filter(([, r]) => r && r.kind === 'framework').map(([k]) => k)]);
+  const fws = R.frameworksOf(design, a.framework);
+  const wide = fws.filter(f => f.source === 'command line');
+  const frameworks = new Set(fws.map(f => f.pkg));
   const m = measure({ ts: T.ts, ix, frameworks, minStatements });
   const ms = Date.now() - t0;
   const s = shareOf(m.kept);
@@ -258,7 +268,9 @@ function main(argv) {
   print(`  design      ${a.design} — id ${R.designId(design)}`);
   print('  ' + PS.headline(settings).trimStart());
   print(`  threshold   refusal.forceableShareFloor = ${settings.entries['refusal.forceableShareFloor'].written} (${floor.source}${settings.entries['refusal.forceableShareFloor'].ruled ? ' ' + settings.entries['refusal.forceableShareFloor'].ruled : ''})`);
-  print(`  frameworks  ${frameworks.size ? [...frameworks].join(', ') : 'none'} (excluded as resources)`);
+  print(`  frameworks  ${fws.length ? fws.map(R.frameworkLabel).join(', ') : 'none in the design'} — excluded as resources`);
+  const wideLine = wide.length ? `WIDENED by --framework: ${wide.map(f => f.pkg).join(', ')} — the design does not record ${wide.length === 1 ? 'it' : 'them'} as a framework, so this share cannot be reproduced from the design and settings alone; record ${wide.length === 1 ? 'it' : 'each'} as kind "framework" in the design, or drop the flag` : null;
+  if (wideLine) print(`  ⚠ ${wideLine}`);
   print(`  BLIND SPOT  a job written again DIFFERENTLY matches none of the three instruments; "pure logic" counts only the copies they can see`);
   print('');
   print('CANDIDATES BY INSTRUMENT (before de-duplication)');
@@ -273,6 +285,7 @@ function main(argv) {
   const withConv = shareOf([...m.kept, ...m.conventions.map(() => ({ group: 'pure logic' }))]);
   if (m.conventions.length) print(`  with the ${m.conventions.length} convention names counted as pure logic: [${pct(withConv.low)}, ${pct(withConv.high)}] of ${withConv.n}`);
   print(`  VERDICT: ${verdictOf(s, floor.value)}`);
+  if (wideLine) print(`  ⚠ ${wideLine}`);
   const margin = marginOf(s, floor.value);
   if (margin !== null) print(`  MARGIN: ${margin} candidate${margin === 1 ? '' : 's'} moved across the forceable line would flip this verdict (of ${s.n}) — ${margin <= 2 ? 'FRAGILE: read the candidates before acting on it' : 'not within a few candidates'}`);
   for (const g of ['forceable', 'pure logic', "couldn't tell"]) {
@@ -287,7 +300,7 @@ function main(argv) {
   }
   if (a.json) {
     fs.writeFileSync(a.json, JSON.stringify({ designId: R.designId(design), settingsId: settings.id, floor: floor.value, share: s, verdict: verdictOf(s, floor.value), margin: marginOf(s, floor.value),
-      perInstrument: m.perInstrument, folded: m.folded, conventions: m.conventions, frameworks: [...frameworks], nestedSameName: m.nestedSameName,
+      perInstrument: m.perInstrument, folded: m.folded, conventions: m.conventions, frameworks: fws, widenedBy: wide.map(f => f.pkg), nestedSameName: m.nestedSameName,
       candidates: m.kept.map(c => ({ instrument: c.instrument, label: c.label, components: c.comps, group: c.group, sharedResource: c.sharedResource, alsoFoundBy: c.alsoFoundBy, homes: c.homes })) }, null, 1) + '\n');
     print(''); print(`written: ${a.json}`);
   }

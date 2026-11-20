@@ -20,6 +20,7 @@ let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, console.log(`  ✓ ${msg}`)) : (fail++, console.log(`  ✗ ${msg}`));
 const ROOT = path.join(__dirname, '..');
 const F = require(path.join(ROOT, 'scripts', 'forceable-share.js'));
+const R = require(path.join(ROOT, 'hooks', 'structure-rules.js'));
 const TOOL = path.join(ROOT, 'scripts', 'forceable-share.js');
 const DIR = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-forceable-')));
 const put = (rel, text) => { const f = path.join(DIR, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); return f; };
@@ -37,7 +38,26 @@ console.log('\nARITHMETIC — runs everywhere:');
   ok(/NOT MEASURED/.test(F.verdictOf(mk(0, 0, 0), 1 / 3)), 'no candidates: NOT MEASURED, never a share of 0');
 }
 
-const GATED = 13;
+console.log('\nFRAMEWORKS — where each excluded framework came from (#758), runs everywhere:');
+{
+  const design = { resources: {
+    react: { kind: 'framework', reach: 'process', owner: null },
+    'react-dom': { kind: 'library', reach: 'process', owner: 'visualEdit' },
+    acorn: { kind: 'library', reach: 'process', owner: 'codeView', packages: ['acorn', 'acorn-*'] },
+  } };
+  const by = fws => Object.fromEntries(fws.map(f => [f.pkg, f]));
+  const none = by(R.frameworksOf(design, []));
+  ok(Object.keys(none).join() === 'react' && none.react.source === 'design', 'with no flag, the list is the design\'s framework rows, marked "design"');
+  const same = by(R.frameworksOf(design, ['react']));
+  ok(Object.keys(same).join() === 'react' && same.react.source === 'design' && same.react.alsoFlagged === true, 'a flag naming a design framework confirms it: still "design", nothing widened');
+  const wide = by(R.frameworksOf(design, ['react', 'react-dom', 'vue', 'acorn-walk']));
+  ok(wide.vue.source === 'command line' && wide.vue.designRow === null, 'a flag the design does not record at all is "command line", with no row');
+  ok(wide['react-dom'].source === 'command line' && wide['react-dom'].designRow.kind === 'library' && wide['react-dom'].designRow.owner === 'visualEdit', 'a flag overriding a library row carries the row it overrides (kind and owner)');
+  ok(wide['acorn-walk'].designRow && wide['acorn-walk'].designRow.id === 'acorn', 'a flag matched by a row\'s package pattern is found as that row, not as "not in the design"');
+  ok(R.frameworksOf({}, []).length === 0 && R.frameworksOf({ resources: {} }, ['x'])[0].source === 'command line', 'a design without resources has no frameworks; a flag on it is command line');
+}
+
+const GATED = 22;
 console.log('\nINSTRUMENTS ON REAL TYPESCRIPT — run when STRUCTURE_TS_FROM names a directory TypeScript 5 resolves from:');
 const from = process.env.STRUCTURE_TS_FROM;
 let tsDir = null;
@@ -81,6 +101,40 @@ else {
   ok(u.code === 2 && /NOT MEASURED — refusal\.forceableShareFloor is not ruled/.test(u.out), 'an unruled threshold is NOT MEASURED, exit 2 — never a default');
   const n = run([]);
   ok(n.code === 2 && /the threshold is a ruling, never a default/.test(n.out), 'no project and no settings: NOT MEASURED, exit 2');
+
+  // FRAMEWORKS (#758): a package 'fw' used from a and b, beside one forceable state and one copied
+  // function. Counted, fw is a forceable candidate (3 = 2 forceable + 1 pure); excluded, 2 = 1 + 1.
+  const FW = path.join(DIR, 'fwpkg');
+  const fput = (rel, text) => put(path.join('fwpkg', rel), text);
+  fput('tsconfig.json', JSON.stringify({ compilerOptions: { target: 'ESNext', module: 'ESNext', moduleResolution: 'bundler', strict: true, noEmit: true }, include: ['src'] }));
+  fput('src/a/s.ts', 'export const reg = new Map<string, number>();\nexport function addA(k: string) { reg.set(k, 1); }\n');
+  fput('src/b/z.ts', "import { reg } from '../a/s';\nexport function addB(k: string) { reg.set(k, 2); }\n");
+  fput('src/a/x.ts', "import { useThing } from 'fw';\nexport function fa() { return useThing(1); }\n");
+  fput('src/b/y.ts', "import { useThing } from 'fw';\nexport function fb() { return useThing(2); }\n");
+  fput('src/a/clamp.ts', body('xs'));
+  fput('src/b/clamp.ts', body('values'));
+  const comps = { a: { dirs: ['a'], purpose: 'the a side' }, b: { dirs: ['b'], purpose: 'the b side' } };
+  const bare = fput('bare.json', JSON.stringify({ root: 'src', components: comps, allowed: [] }));
+  const recorded = fput('recorded.json', JSON.stringify({ root: 'src', components: comps, allowed: [], resources: { fw: { kind: 'framework', reach: 'process', owner: null } } }));
+  const asLib = fput('library.json', JSON.stringify({ root: 'src', components: comps, allowed: [], resources: { fw: { kind: 'library', reach: 'process', owner: 'a' } } }));
+  const frun = (d, extra) => { const r = spawnSync(process.execPath, [TOOL, '--design', d, '--package', FW, '--typescript', tsDir, '--settings', settings, ...extra], { encoding: 'utf8', timeout: 120000 }); return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }; };
+  const shareLine = o => (o.match(/SHARE — [^\n]*\n[^\n]*/) || [''])[0];
+  const A = frun(bare, []);
+  ok(/SHARE — 3 candidate duplicated jobs = 2 forceable \+ 1 pure logic/.test(A.out), `the control: with no framework, the package used from two components is a forceable candidate (${shareLine(A.out).split('\n')[0]})`);
+  ok(/frameworks\s+none in the design/.test(A.out) && !/WIDENED/.test(A.out), 'and the header says the design names none, with nothing widened');
+  const jsonB = path.join(DIR, 'b.json');
+  const B = frun(bare, ['--framework', 'fw', '--json', jsonB]);
+  ok(/SHARE — 2 candidate duplicated jobs = 1 forceable \+ 1 pure logic/.test(B.out), 'a --framework flag excludes it (2 candidates)');
+  ok(/frameworks\s+fw \(command line — NOT in the design\)/.test(B.out) && (B.out.match(/⚠ WIDENED by --framework: fw/g) || []).length === 2, 'the header names the flag as the source, and the widening is printed in the header AND beside the verdict');
+  const jb = JSON.parse(fs.readFileSync(jsonB, 'utf8'));
+  ok(jb.widenedBy.join() === 'fw' && jb.frameworks[0].source === 'command line', 'the JSON records what widened the run');
+  const C = frun(recorded, []);
+  ok(/frameworks\s+fw \(design\)/.test(C.out) && !/WIDENED/.test(C.out), 'once the design records it: source "design", no widening notice');
+  ok(shareLine(C.out) !== '' && shareLine(C.out) === shareLine(B.out), 'and the share with no flag equals the share with the flag');
+  const C2 = frun(recorded, ['--framework', 'fw']);
+  ok(shareLine(C2.out) === shareLine(C.out) && /fw \(design; also given as --framework\)/.test(C2.out) && !/WIDENED/.test(C2.out), 'a flag repeating the design changes nothing and widens nothing');
+  const D = frun(asLib, ['--framework', 'fw']);
+  ok(/fw \(command line — OVERRIDES the design, which records it as a library owned by a\)/.test(D.out) && /WIDENED by --framework: fw/.test(D.out), 'a flag overriding a library row names the row it overrides');
   const ran = pass + fail - before;
   ok(ran + 1 === GATED, `the skip count matches the cases this block runs (${ran + 1} of ${GATED})`);
 }
