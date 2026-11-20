@@ -57,6 +57,23 @@
 // when one is held out: the hold-out is per job, not per file, and a shared file is counted once
 // for each job it serves.
 //
+// SPREAD (the paper's equation 7, read for a placer that recomputes instead of training). An
+// owner's spread under a view is the mean cosine distance of its ruled jobs from its prototype,
+// measured only with two or more ruled jobs in that view (one job has no spread; a seed has no
+// jobs). With `placement.spread.beta` ruled, a distance to an owner is scaled by
+//   (β + spread of that owner) / (β + mean spread of the owners measured in that view)
+// so an owner of average spread is unchanged, a noisy owner counts for less (its distances grow)
+// and a consistent one for more; an owner whose spread is not measured is treated as average.
+// The scale ranks only: whether an owner is far, and the central bound, read the raw distance,
+// so weighting can never bring in an owner that shares nothing with the task.
+// The direction is deliberate. The other reading, a scattered owner admitting more because its
+// members are far apart (a Mahalanobis-style normalisation), makes sprawl an attractor: an owner
+// grows noisier by absorbing misplaced code and would then absorb more. That is a measure that
+// improves under the behaviour the ledger exists to stop (§7.4a), so it is rejected. Unruled β
+// leaves every distance raw and the report says so. The prototype itself is always the exact
+// mean of the ruled jobs: the paper's moving average exists because it trains on batches and
+// cannot revisit its data; this can, so nothing here has an update rate.
+//
 // BLENDED BOUNDARY (test 14). For each owner, its nearest other owner (mean distance over views
 // both have); each such pair once. An owner sharing no feature with any other has no nearest and is
 // listed apart, never paired by name order. The synthetic task per view is w·unit(A) + (1−w)·unit(B),
@@ -67,11 +84,22 @@
 'use strict';
 
 const SV = require('./signature-vectors.js');
+const PS = require('./project-settings.js');
 const { VIEWS, prototype, unit, cosineDistance } = SV;
 
 const SEED_KINDS = new Set(['library', 'state', 'registry', 'syntax']);
 const RAW = [[/^(lib|member|writes|reads):/, 'resources'], [/^calls:/, 'calls'], [/^type:/, 'types'], [/^word:/, 'vocabulary']];
 const isObj = x => !!x && typeof x === 'object' && !Array.isArray(x);
+
+// PLACE's options from a project's settings: the one reading every caller uses, so the report,
+// the session-start reading and the write scope never place one task two ways. β unruled → null
+// (raw distances), with the reason kept for the report.
+function placeOpts(settings) {
+  const v = k => PS.need(settings, k).value;
+  const beta = PS.need(settings, 'placement.spread.beta');
+  return { far: v('placement.farDistance'), central: v('placement.centralDistance'), band: v('signatures.nearTwoBand'),
+    weight: v('placement.blend.weight'), beta: beta.value === undefined ? null : beta.value, betaWhy: beta.notMeasured || null };
+}
 
 // The owners a task can be placed in, each with a prototype per view (null where it has none).
 // `exclude`: a ruled job id held out. `seeds`: seed owners with no ruled job from ledger rows.
@@ -86,7 +114,7 @@ function ownersOf(sig, design, { exclude = null, seeds = true } = {}) {
   for (const h of jv.perHome) {
     const jobs = jv.perJob.filter(j => j.home === h.home)
       .map(j => ({ id: j.id, vec: j.vec, doors: (ruled.find(r => r.id === j.id) || {}).doors || [] }));
-    out.push({ owner: h.home, source: 'ruled', jobs, vec: h.vec, doors: [...new Set(jobs.flatMap(j => j.doors))].sort() });
+    out.push({ owner: h.home, source: 'ruled', jobs, vec: h.vec, spread: spreadOf(jobs, h.vec), doors: [...new Set(jobs.flatMap(j => j.doors))].sort() });
   }
   const seeded = [];
   if (seeds) {
@@ -102,11 +130,32 @@ function ownersOf(sig, design, { exclude = null, seeds = true } = {}) {
       const own = members.filter(s => s.component === o);
       if (!own.length) { seeded.push({ owner: o, resources: ids.length, files: 0 }); continue; }
       out.push({ owner: o, source: 'seed', jobs: [], resources: ids.sort(), files: own.map(s => s.file).sort(),
-        vec: Object.fromEntries(VIEWS.map(v => [v, prototype(own, v, null)])), doors: doorRows(o) });
+        vec: Object.fromEntries(VIEWS.map(v => [v, prototype(own, v, null)])), spread: Object.fromEntries(VIEWS.map(v => [v, null])), doors: doorRows(o) });
       seeded.push({ owner: o, resources: ids.length, files: own.length });
     }
   }
   return { owners: out.sort((a, b) => a.owner < b.owner ? -1 : 1), missing: jv.missing, perJob: jv.perJob, seeded };
+}
+
+// An owner's spread per view: the mean distance of its ruled jobs from its prototype, or null
+// with fewer than two jobs that have a vector in the view.
+function spreadOf(jobs, vec) {
+  return Object.fromEntries(VIEWS.map(v => {
+    const ds = jobs.filter(j => j.vec[v] && vec[v]).map(j => cosineDistance(j.vec[v], vec[v])).filter(d => d !== null);
+    return [v, ds.length >= 2 ? ds.reduce((a, b) => a + b, 0) / ds.length : null];
+  }));
+}
+
+// The scale on each owner's distance under a view (see SPREAD above). Unruled β: every factor 1.
+function spreadFactors(owners, view, beta) {
+  const measured = owners.map(o => o.spread && o.spread[view]).filter(x => x !== null && x !== undefined);
+  const ref = measured.length ? measured.reduce((a, b) => a + b, 0) / measured.length : null;
+  const on = beta !== null && beta !== undefined && ref !== null;
+  const f = new Map(owners.map(o => {
+    const s = o.spread ? o.spread[view] : null;
+    return [o.owner, on && s !== null && s !== undefined ? (beta + s) / (beta + ref) : 1];
+  }));
+  return { on, ref, measured: measured.length, factor: o => f.get(o) };
 }
 
 // A task's vector per view, and what of it could not be read.
@@ -135,17 +184,25 @@ function taskVector(sig, design, task, { weights }) {
 }
 
 // The reading under one view: owners sorted by distance, and far / one / two.
-function viewReading(tv, owners, view, { far, band }) {
+function viewReading(tv, owners, view, { far, band, beta }) {
   if (!tv || !tv.size) return { view, featured: false, why: 'the task has no feature in this view' };
-  const ds = owners.map(o => ({ owner: o.owner, source: o.source, d: o.vec[view] ? cosineDistance(tv, o.vec[view]) : null }))
-    .filter(x => x.d !== null).sort((a, b) => a.d - b.d || (a.owner < b.owner ? -1 : 1));
+  const sf = spreadFactors(owners, view, beta);
+  const ds = owners.map(o => {
+    const raw = o.vec[view] ? cosineDistance(tv, o.vec[view]) : null;
+    const k = sf.factor(o.owner);
+    return { owner: o.owner, source: o.source, raw, factor: k, d: raw === null ? null : raw * k };
+  }).filter(x => x.d !== null).sort((a, b) => a.d - b.d || (a.owner < b.owner ? -1 : 1));
   if (!ds.length) return { view, featured: false, why: 'no owner has a prototype in this view' };
-  const first = ds[0];
-  if (first.d >= far) return { view, featured: true, verdict: 'far', owners: [], ds, d: first.d };
+  // Far is decided on the RAW distance: the spread scale re-ranks owners the task is near, and
+  // never makes an owner that shares little or nothing with the task near (nor a near one far).
+  const open = ds.filter(x => x.raw < far);
+  if (!open.length) { const byRaw = [...ds].sort((a, b) => a.raw - b.raw || (a.owner < b.owner ? -1 : 1)); return { view, featured: true, verdict: 'far', owners: [], ds: byRaw, d: byRaw[0].raw }; }
+  const first = open[0];
   // Every owner within the band of the nearest, not only the second: three at one distance are
   // three, never a split of whichever two sorted first.
-  const near = ds.filter(x => x.d < far && (x.d - first.d) <= band * first.d).map(x => x.owner);
-  return { view, featured: true, verdict: near.length === 1 ? 'one' : near.length === 2 ? 'two' : 'many', owners: near, ds, d: first.d };
+  const near = open.filter(x => (x.d - first.d) <= band * first.d).map(x => x.owner);
+  // `d` is the nearest owner's raw distance (the central and far bounds read it); `dw` the scaled one.
+  return { view, featured: true, verdict: near.length === 1 ? 'one' : near.length === 2 ? 'two' : 'many', owners: near, ds, d: first.raw, dw: first.d };
 }
 
 const compatible = (a, b) => {
@@ -164,9 +221,9 @@ function nearestJob(owner, tv, view, far) {
 // PLACE(task) on a task vector (per view) and a list of owners.
 function place(taskVec, owners, opts) {
   const { far, band, central } = opts;
-  const views = VIEWS.map(v => viewReading(taskVec[v], owners, v, { far, band }));
+  const views = VIEWS.map(v => viewReading(taskVec[v], owners, v, { far, band, beta: opts.beta }));
   const featured = views.filter(v => v.featured);
-  const res = { views, runtime: 'NOT MEASURED' };
+  const res = { views, runtime: 'NOT MEASURED', spreadWeighted: opts.beta !== null && opts.beta !== undefined };
   if (!featured.length) return { ...res, outcome: 'not placed', why: 'could not look: no view has both a task feature and an owner prototype' };
   const lead = featured.find(v => v.view === 'resources') || featured[0];
   const odd = featured.filter(v => v !== lead && !compatible(v, lead));
@@ -204,19 +261,23 @@ function leaveOneOut(sig, design, opts) {
     const own = full.perJob.find(j => j.id === id);
     if (!own) { rows.push({ id, built: false }); continue; }
     const r = { id, home: own.home, built: true };
-    for (const seeds of [false, true]) {
+    const weighted = opts.beta !== null && opts.beta !== undefined;
+    for (const [key, seeds, o] of [['ruled', false, opts], ['seeded', true, opts], ...(weighted ? [['raw', false, { ...opts, beta: null }]] : [])]) {
       const ow = ownersOf(sig, design, { exclude: id, seeds });
-      const p = place(own.vec, ow.owners, opts);
-      const homeProto = ow.owners.find(o => o.owner === own.home);
-      r[seeds ? 'seeded' : 'ruled'] = { outcome: p.outcome, placed: p.home || (p.split ? p.split.map(s => s.owner).join('+') : null),
+      const p = place(own.vec, ow.owners, o);
+      const homeProto = ow.owners.find(x => x.owner === own.home);
+      r[key] = { outcome: p.outcome, placed: p.home || (p.split ? p.split.map(s => s.owner).join('+') : null),
         recovered: p.outcome === 'home' && p.home === own.home, homeHas: homeProto ? homeProto.source : 'nothing', place: p };
     }
     rows.push(r);
   }
   const n = rows.length;
-  const k = key => rows.filter(r => r.built && r[key].recovered).length;
+  const k = key => rows.filter(r => r.built && r[key] && r[key].recovered).length;
   const sole = rows.filter(r => r.built && r.ruled.homeHas === 'nothing').length;
-  return { rows, n, k: k('ruled'), kSeeded: k('seeded'), sole, unbuilt: rows.filter(r => !r.built).length };
+  // kRaw: the same run with every distance raw — printed beside the acceptance when β is ruled,
+  // so whether spread weighting helps is read from recovery, not assumed.
+  const weighted = opts.beta !== null && opts.beta !== undefined;
+  return { rows, n, k: k('ruled'), kSeeded: k('seeded'), kRaw: weighted ? k('raw') : null, sole, unbuilt: rows.filter(r => !r.built).length };
 }
 
 // The judgment of a leave-one-out count against the ruled floor.
@@ -282,7 +343,7 @@ function viewLines(p, indent = '    ') {
   for (const v of p.views) {
     if (!v.featured) { out.push(`${indent}${v.view.padEnd(11)} not featured — ${v.why}`); continue; }
     out.push(`${indent}${v.view.padEnd(11)} ${v.verdict === 'far' ? 'far from every owner' : v.verdict === 'two' ? `near two: ${v.owners.join(', ')}` : v.verdict === 'many' ? `near ${v.owners.length}: ${v.owners.join(', ')}` : `near one: ${v.owners[0]}`}${v.view === p.lead ? ' (lead)' : ''} — ` +
-      v.ds.map(x => `${x.owner}${x.source === 'seed' ? '*' : ''} ${f3(x.d)}`).join(' · '));
+      v.ds.map(x => `${x.owner}${x.source === 'seed' ? '*' : ''} ${f3(x.d)}${x.factor !== 1 && x.raw !== null && x.raw !== undefined ? ` (raw ${f3(x.raw)} ×${x.factor.toFixed(3)})` : ''}`).join(' · '));
   }
   out.push(`${indent}${'runtime'.padEnd(11)} NOT MEASURED (no co-execution yet, #712/#713)`);
   if (p.disagreement && p.disagreement.length) {
@@ -291,4 +352,4 @@ function viewLines(p, indent = '    ') {
   return out;
 }
 
-module.exports = { ownersOf, taskVector, viewReading, place, leaveOneOut, judge, blend, describe, viewLines, meanDistance, SEED_KINDS };
+module.exports = { placeOpts, ownersOf, taskVector, viewReading, place, leaveOneOut, judge, blend, describe, viewLines, meanDistance, spreadOf, spreadFactors, SEED_KINDS };

@@ -88,6 +88,11 @@ const SCHEMA = {
     about: 'a task the lead view puts within this distance of its owner keeps that answer when another view disagrees; farther, the disagreement makes it "couldn\'t tell"',
     readBy: '#723 (PLACE)',
   },
+  'placement.spread.beta': {
+    type: 'number', min: 0, exclusiveMin: true,
+    about: 'with it ruled, a distance to an owner is scaled by (β + its spread) / (β + the mean spread), so a noisy owner counts for less; unruled, distances stay raw',
+    readBy: '#723 (PLACE, owner spread)',
+  },
   'placement.blend.weight': {
     type: 'fraction', min: 0, max: 1, exclusiveMin: true, default: 0.5,
     about: 'the first owner\'s share of a blended boundary task (the second gets the rest)',

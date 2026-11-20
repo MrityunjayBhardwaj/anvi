@@ -197,6 +197,48 @@ console.log('\nBLENDED BOUNDARY — runs everywhere:');
   ok(PL.blend([PL.ownersOf(sig, design).owners[0]], OPTS).length === 0, 'one owner: no pair, nothing blended');
 }
 
+console.log('\nOWNER SPREAD — the paper\'s equation 7 read for a placer that recomputes — runs everywhere:');
+{
+  // A is consistent: two jobs whose files share a heavy feature (k). N is noisy: two jobs with
+  // nothing in common. T is one job alone (no spread). The task leans to N raw, and to A once a
+  // noisy owner counts for less.
+  const rows = { a1: lib(), a2: lib(), k: lib(), n1: lib(), n2: lib(), t: lib() };
+  const sig = sigOf([F('a1.ts', 'A', { 'lib:a1': 1, 'lib:k': 3 }), F('a2.ts', 'A', { 'lib:a2': 1, 'lib:k': 3 }),
+    F('n1.ts', 'N', { 'lib:n1': 1 }), F('n2.ts', 'N', { 'lib:n2': 1 }), F('t.ts', 'T', { 'lib:t': 1 })]);
+  const design = { resources: rows, jobs: { A1: job('A', ['a1']), A2: job('A', ['a2']), N1: job('N', ['n1']), N2: job('N', ['n2']), T1: job('T', ['t']) } };
+  const { owners } = PL.ownersOf(sig, design);
+  const by = o => owners.find(x => x.owner === o);
+  ok(by('A').spread.resources < 0.05 && by('N').spread.resources > 0.25, `spread is the mean distance of an owner's ruled jobs from its prototype (A ${by('A').spread.resources.toFixed(3)}, N ${by('N').spread.resources.toFixed(3)})`);
+  ok(by('T').spread.resources === null && by('A').spread.types === null, 'one ruled job has no spread, and neither has a view no job carries (null, never 0)');
+
+  const lean = TV({ resources: { 'lib:k': 1, 'lib:n1': 1.5 } });
+  const raw = PL.place(lean, owners, OPTS);
+  const wt = PL.place(lean, owners, { ...OPTS, beta: 0.1 });
+  ok(raw.outcome === 'home' && raw.home === 'N' && !raw.spreadWeighted, `β unruled: raw distances, HOME N (${PL.describe(raw)})`);
+  ok(wt.outcome === 'home' && wt.home === 'A' && wt.spreadWeighted, `β ruled: the noisy owner counts for less, HOME A (${PL.describe(wt)})`);
+  const ds = wt.views[0].ds, dn = ds.find(x => x.owner === 'N'), da = ds.find(x => x.owner === 'A'), dt = ds.find(x => x.owner === 'T');
+  ok(dn.factor > 1 && da.factor < 1 && Math.abs(dn.d - dn.raw * dn.factor) < 1e-12, `the scale is (β + spread) / (β + mean spread): N ×${dn.factor.toFixed(3)}, A ×${da.factor.toFixed(3)}`);
+  ok(dt.factor === 1, 'an owner whose spread is not measured is treated as average (×1), not as tight');
+  ok(Math.abs((da.factor + dn.factor) / 2 - 1) < 1e-12, 'the reference is the mean spread of the measured owners: their factors average to 1');
+  ok(PL.viewLines(wt).some(l => /N [\d.]+ \(raw [\d.]+ ×1\.\d+\)/.test(l)) && !PL.viewLines(raw).some(l => /raw/.test(l)), 'the report prints raw distance and factor beside a weighted one, and nothing extra when raw');
+  const nearN = PL.place(TV({ resources: { 'lib:n1': 1 } }), owners, { ...OPTS, beta: 0.1 });
+  ok(nearN.outcome === 'home' && nearN.home === 'N', `must-not: a task that is plainly N's stays in N under weighting (${PL.describe(nearN)})`);
+  const keep = PL.place(TV({ resources: { 'lib:n1': 1 } }), owners, { ...OPTS, beta: 0.1, far: 0.4 });
+  ok(keep.outcome === 'home' && keep.home === 'N' && keep.views[0].ds.find(x => x.owner === 'N').d >= 0.4,
+     `must-not: a near owner the scale pushes past the far bound is still near — far reads the raw distance (${PL.describe(keep)})`);
+  // Large β fades the weighting toward raw.
+  const big = PL.place(lean, owners, { ...OPTS, beta: 1000 });
+  ok(big.home === 'N' && Math.abs(big.views[0].ds[0].factor - 1) < 0.001, 'a large β leaves distances near raw');
+
+  // Leave-one-out prints the raw run beside the weighted one only when β is ruled.
+  const loRaw = PL.leaveOneOut(sig, design, OPTS);
+  const loWt = PL.leaveOneOut(sig, design, { ...OPTS, beta: 0.1 });
+  ok(loRaw.kRaw === null && !loRaw.rows.some(r => r.raw), 'β unruled: no comparison run, kRaw null');
+  ok(typeof loWt.kRaw === 'number' && loWt.rows.filter(r => r.built).every(r => r.raw && typeof r.raw.recovered === 'boolean') && loWt.kRaw === loRaw.k &&
+     loWt.rows.filter(r => r.built).every(r => r.raw.place.spreadWeighted === false && r.ruled.place.spreadWeighted === true),
+     `β ruled: the raw run is beside it and equals the unweighted acceptance (weighted ${loWt.k}, raw ${loWt.kRaw} of ${loWt.n})`);
+}
+
 console.log('\nSETTINGS — every tuning number is a key:');
 {
   const s = PS.load({ defaultsOnly: true });
@@ -204,6 +246,23 @@ console.log('\nSETTINGS — every tuning number is a key:');
   const src = fs.readFileSync(path.join(ROOT, 'scripts', 'place.js'), 'utf8').replace(/\/\/.*$/gm, '');
   const consts = (src.match(/\b0\.\d+\b/g) || []);
   ok(consts.length === 0, `place.js holds no fractional constant of its own (found: ${consts.join(', ') || 'none'})`);
+}
+
+console.log('\nONE READING OF THE OPTIONS — every caller of PLACE:');
+{
+  const none = PL.placeOpts(PS.load({ defaultsOnly: true }));
+  ok(none.beta === null && /placement\.spread\.beta is not ruled/.test(none.betaWhy) && none.far === 0.8 && none.band === 0.1, `β unruled: placeOpts gives beta null with the reason (far ${none.far}, band ${none.band})`);
+  const sf = path.join(DIR, 'settings-beta.json');
+  fs.writeFileSync(sf, JSON.stringify({ settings: { 'placement.spread.beta': { value: 0.25, ruled: '2026-11-20', why: 'fixture' } } }));
+  const ruled = PL.placeOpts(PS.load({ file: sf }));
+  ok(ruled.beta === 0.25 && ruled.betaWhy === null, `β ruled: placeOpts gives ${ruled.beta}`);
+  // The door set, derived: every script that calls PL.place builds its options with PL.placeOpts and
+  // reads no placement key itself — a caller with its own reading would place one task two ways.
+  const dir = path.join(ROOT, 'scripts');
+  const callers = fs.readdirSync(dir).filter(f => f.endsWith('.js') && f !== 'place.js')
+    .filter(f => /\bPL\.(place|leaveOneOut|blend)\(/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  const bad = callers.filter(f => { const t = fs.readFileSync(path.join(dir, f), 'utf8'); return !/PL\.placeOpts\(settings\)/.test(t) || /'placement\.(farDistance|centralDistance|spread\.beta)'/.test(t) || /beta: null/.test(t); });
+  ok(callers.length >= 3 && bad.length === 0, `${callers.length} callers of PLACE (${callers.join(', ')}), each reads its options through placeOpts${bad.length ? ` — NOT: ${bad.join(', ')}` : ''}`);
 }
 
 const GATED = 9;

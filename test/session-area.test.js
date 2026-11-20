@@ -106,6 +106,25 @@ console.log('\n1. THE READING AND ITS BLOCK — runs everywhere:');
   ok(SA.MAX_CHARS < 10000, 'the cap sits under Claude Code\'s 10,000-character hook-output limit');
 }
 
+console.log('\n1b. OWNER SPREAD IN THE READING — runs everywhere:');
+{
+  // A consistent owner A (two near-identical jobs) and a noisy N (two disjoint jobs): raw, the task
+  // is N's; with β ruled it is A's. The block prints raw distances and says the order is scaled.
+  const sp = sigOf([F('a1.ts', 'A', { 'lib:a1': 1, 'lib:k': 3 }), F('a2.ts', 'A', { 'lib:a2': 1, 'lib:k': 3 }), F('n1.ts', 'N', { 'lib:n1': 1 }), F('n2.ts', 'N', { 'lib:n2': 1 })]);
+  const L = () => ({ kind: 'library', reach: 'process', owner: null });
+  const J = (home, r) => ({ home, resources: [r], doors: [], reason: 'x', ruled: '2026-11-05' });
+  const dsg = { resources: { a1: L(), a2: L(), k: L(), n1: L(), n2: L() }, jobs: { A1: J('A', 'a1'), A2: J('A', 'a2'), N1: J('N', 'n1'), N2: J('N', 'n2') } };
+  const ow = PL.ownersOf(sp, dsg).owners;
+  const tv = TV({ resources: { 'lib:k': 1, 'lib:n1': 1.5 } });
+  const wo = { ...OPTS, beta: 0.1 };
+  const rw = SA.readingOf(PL.place(tv, ow, wo), ow, wo, [], META), rr = SA.readingOf(PL.place(tv, ow, OPTS), ow, OPTS, [], META);
+  const bw = SA.render(rw), br = SA.render(rr);
+  const cand = rw.candidates.map(c => `${c.owner} ${c.d.resources.toFixed(3)}`).join(', ');
+  ok(rw.home === 'A' && rr.home === 'N', `the reading follows PLACE: raw HOME ${rr.home}, weighted HOME ${rw.home}`);
+  ok(rw.candidates[0].owner === 'A' && rw.candidates[0].d.resources > rw.candidates[1].d.resources, `weighted: ranked A first, distances printed raw (${cand})`);
+  ok(/in the order scaled by owner spread \(β 0\.1\)/.test(bw) && !/scaled by owner spread/.test(br), 'the block says the order is scaled only when it is');
+}
+
 console.log('\n2. THE READER\'S OWN COULDN\'T-TELLS — runs everywhere:');
 const put = (base, rel, text) => { const f = path.join(base, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); return f; };
 const purpose = n => ({ dirs: [n], purpose: `the ${n} part of the fixture` });
