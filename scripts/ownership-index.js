@@ -66,7 +66,7 @@
 //               [file#fn] }, writerFiles, readers: { component: count }, readerFiles, escapes }
 //   exports     every export DECLARED in its file and referenced from another corpus file:
 //               { id, file, name, component, callers: { component: count }, callerFiles,
-//               writesStates: [state id], passthroughFile }. A write counts for an export when it
+//               writesStates: [state id], passthroughFile, typeOnly (an interface or type alias: no value) }. A write counts for an export when it
 //               lies inside the export's own declaration (a nested closure included; a private
 //               helper it calls is not — so a door through a helper reads as no door, never as a
 //               false one). Callers through a barrel are the origin's callers: references resolve
@@ -74,6 +74,10 @@
 //   packages    per package: member uses by component, so a library row can name second homes
 //   syntax      per --syntax query: call and reference sites by component, and the could-not-tell
 //   definitions per --define name: defining sites by component, package members of that name apart
+//   touches     every corpus file: { file, component, passthrough, direct: [feature] } — the
+//               resources it touches ITSELF, by the signatures' predicate (signature-vectors.js
+//               eachDirect): lib:/member: of a package, writes:/reads: of a module state. The
+//               coupling table reads its smells from these (#722).
 //
 // Exit: 0 report printed · 2 NOT MEASURED (no TypeScript 5, an unreadable input, a design the
 //       guard cannot judge against, an empty corpus).
@@ -553,7 +557,9 @@ function build({ ts, pkgDir, design, oldProgram, cache }) {
       const rs = all.filter(r => r.sf !== sf);
       const by = new Map();
       for (const r of rs) { const c = compOf(r.sf); const k = `${c}|${relOf(r.sf.fileName)}`; by.set(k, (by.get(k) || 0) + 1); }
-      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(), declaredIn, lines: span,
+      // A type-only export (an interface, a type alias) carries no value: no call, no write (#722).
+      const typeOnly = !!target && !(target.flags & ts.SymbolFlags.Value);
+      return { name: e.name, refs: rs.length, inFile: all.length - rs.length, reexportedBy: [...(reexportedBy.get(target) || [])].sort(), declaredIn, lines: span, typeOnly,
         by: [...by].map(([k, n]) => { const [component, file] = k.split('|'); return { component, file, n }; }).sort((a, b) => a.component < b.component ? -1 : a.component > b.component ? 1 : a.file < b.file ? -1 : 1) };
     }).sort((a, b) => b.refs - a.refs || (a.name < b.name ? -1 : 1)) };
   };
@@ -610,7 +616,7 @@ function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
       for (const b of e.by) { inc(callers, b.component, b.n); inc(callerFiles, b.file, b.n); }
       const writes = e.lines ? (writesIn.get(rel) || []).filter(w => w.line >= e.lines[0] && w.line <= e.lines[1]).map(w => w.id) : [];
       exportsOut.push({ id: `${rel}#${e.name}`, file: rel, name: e.name, component: ix.compOfRel(rel), callers: sortObj(callers), callerFiles: sortObj(callerFiles),
-        writesStates: [...new Set(writes)].sort(), passthroughFile: ix.passthrough.has(rel), lines: e.lines });
+        writesStates: [...new Set(writes)].sort(), passthroughFile: ix.passthrough.has(rel), lines: e.lines, typeOnly: e.typeOnly });
     }
   }
   const packages = {};
@@ -634,7 +640,13 @@ function ledgerFacts(ix, { syntax = [], define = [] } = {}) {
     for (const d of ix.definitions.get(name) || []) (by[d.component] = by[d.component] || []).push(d.site);
     return { name, definedIn: sortObj(by), fromPackages: ix.uses.filter(u => u.member === name).map(u => ({ site: u.site, component: u.component, pkg: u.pkg, kind: u.kind })) };
   });
-  return { states, exports: exportsOut.sort((a, b) => a.id < b.id ? -1 : 1), reexports, couldNotLook, packages: sortObj(packages), syntax: syntaxOut, definitions };
+  // What every file touches itself (#722): the signatures' own predicate (SV.eachDirect), so a
+  // smell read from these facts and a job's members in the placer are the same files.
+  const touch = new Map(ix.files.map(sf => { const rel = ix.relOf(sf.fileName); return [rel, new Set()]; }));
+  SV.eachDirect(ix, (file, fn, feature) => { const s = touch.get(file); if (s) s.add(feature); });
+  const touches = [...touch].map(([file, s]) => ({ file, component: ix.compOfRel(file), passthrough: ix.passthrough.has(file), direct: [...s].sort() }))
+    .sort((a, b) => a.file < b.file ? -1 : 1);
+  return { states, exports: exportsOut.sort((a, b) => a.id < b.id ? -1 : 1), reexports, couldNotLook, packages: sortObj(packages), syntax: syntaxOut, definitions, touches };
 }
 
 // PLACE (#723): the algorithm is scripts/place.js; this prints it over the index's signatures.

@@ -57,6 +57,18 @@ const cosineDistance = (a, b) => {
   return 1 - dot / (na * nb);
 };
 
+// The one predicate for "this file touches that resource itself" (not through a door): a binding
+// of a package, a member used, a module state written or read. Signatures, job membership and the
+// index's `touches` facts (#722's smells) all read it, so the three cannot drift apart.
+function eachDirect(ix, cb) {
+  for (const b of ix.bindings.values()) cb(b.site.replace(/:\d+$/, ''), null, `lib:${b.pkg}`);
+  for (const u of ix.uses) { cb(u.file, u.fn, `lib:${u.pkg}`); cb(u.file, u.fn, `member:${u.pkg}#${u.member}`); }
+  for (const st of ix.states) {
+    for (const w of st.writes) cb(w.file, w.fn, `writes:${st.file}#${st.name}`);
+    for (const f of Object.keys(st.readers || {})) cb(f, null, `reads:${st.file}#${st.name}`);
+  }
+}
+
 // Per-file vectors, by view, with the facts behind them.
 function fileSignatures(ix, { weights, minTokenLength }) {
   const files = ix.files.map(sf => ix.relOf(sf.fileName));
@@ -73,12 +85,7 @@ function fileSignatures(ix, { weights, minTokenLength }) {
     s.direct.add(feature);                            // touched here, not through a door: job membership reads this
     if (fn) { const k = `${file}|${fn}`; if (!byFn.has(k)) byFn.set(k, new Set()); byFn.get(k).add(feature); }
   };
-  for (const b of ix.bindings.values()) { const f = b.site.replace(/:\d+$/, ''); direct(f, null, `lib:${b.pkg}`); }
-  for (const u of ix.uses) { direct(u.file, u.fn, `lib:${u.pkg}`); direct(u.file, u.fn, `member:${u.pkg}#${u.member}`); }
-  for (const st of ix.states) {
-    for (const w of st.writes) direct(w.file, w.fn, `writes:${st.file}#${st.name}`);
-    for (const f of Object.keys(st.readers || {})) direct(f, null, `reads:${st.file}#${st.name}`);
-  }
+  eachDirect(ix, direct);
   for (const s of sig.values()) for (const k of s.views.resources.keys()) s.views.resources.set(k, weights.direct);
 
   // Through a door: a call into another file's function that itself touches a resource.
@@ -240,4 +247,4 @@ function jobVectors(sig, jobs) {
 
 const vecJSON = v => Object.fromEntries([...v].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, x]) => [k, +x.toFixed(4)]));
 
-module.exports = { VIEWS, tokens, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, doorSymbolsOf, jobVectors, reading, cosineDistance, unit, vecJSON };
+module.exports = { VIEWS, tokens, eachDirect, fileSignatures, prototype, jobsOf, featuresOf, jobMembers, doorSymbolsOf, jobVectors, reading, cosineDistance, unit, vecJSON };
