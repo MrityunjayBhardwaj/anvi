@@ -148,11 +148,29 @@ function featuresOf(id, row) {
 }
 
 // A job's member files: direct touchers of its resources, and the files declaring its doors.
+// A door is named one of two ways (#779). By a ROW id (`codeView#write-door`, a row of kind door):
+// its files are the corpus files its `symbols` name — `src/x.ts#Name` names a file, while
+// `monaco-editor#ITextModel.setValue` names a package and adds none. Or as `<file>#<name>` with no
+// such row: the part before `#` is the file. Reading a row id as a file found a file called
+// "codeView", so the job had no member and was never built.
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+function doorFilesOf(d, resources) {
+  const row = resources[d];
+  if (row && row.kind === 'door' && Array.isArray(row.symbols)) {
+    const files = [...new Set(row.symbols.map(s => String(s).split('#')[0]).filter(f => SOURCE_FILE.test(f)))];
+    return { files, row: true };
+  }
+  return { files: [String(d).split('#')[0]], row: false };
+}
 function jobMembers(sig, job, resources) {
   const wanted = new Set(job.resources.flatMap(id => featuresOf(id, resources[id])));
-  const doorFiles = new Set(job.doors.map(d => String(d).split('#')[0]));
+  const doorFiles = new Set(), missingDoors = [];
+  for (const d of job.doors) {
+    const { files, row } = doorFilesOf(d, resources);
+    if (row && !files.length) missingDoors.push(`${d} (its symbols name no corpus file)`);
+    for (const f of files) { doorFiles.add(f); if (!sig.has(f)) missingDoors.push(row ? `${f} (a symbol of ${d})` : f); }
+  }
   const members = [...sig.values()].filter(s => doorFiles.has(s.file) || [...s.direct].some(f => wanted.has(f)));
-  const missingDoors = [...doorFiles].filter(f => !sig.has(f));
   return { members, missingDoors };
 }
 

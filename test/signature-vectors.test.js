@@ -86,6 +86,20 @@ console.log('\nARITHMETIC — runs everywhere:');
   ok(lost.perJob.length === 0 && lost.missing.some(m => /door file src\/x\/gone\.ts is not in the program/.test(m)) && lost.missing.some(m => /j: no file touches its resources/.test(m)),
      `a job with no member file is listed as not built, never built from nothing (${JSON.stringify(lost.missing)})`);
   ok(SV.jobsOf({}).ruled.length === 0, 'a design with no jobs table has no ruled jobs');
+
+  // A door named by its ROW id (#779): its files come from the row's symbols. A symbol naming a
+  // package adds no file; a row naming no corpus file says so; a symbol's file missing says which.
+  const DR = { ...RES, 'E#write-door': { kind: 'door', owner: 'E', symbols: ['src/e/door.ts#Writer', 'src/e/door.ts#Writer.*', 'snd#Model.setValue'] },
+    'E#pkg-door': { kind: 'door', owner: 'E', symbols: ['snd#Model.setValue'] }, 'E#lost-door': { kind: 'door', owner: 'E', symbols: ['src/e/gone.ts#f'] } };
+  const byRow = SV.jobMembers(jsig, { resources: [], doors: ['E#write-door'] }, DR);
+  ok(JSON.stringify(byRow.members.map(s => s.file)) === '["src/e/door.ts"]' && byRow.missingDoors.length === 0,
+     `a door named by its row id: the file its symbols name is the member, the package symbol adds none (${JSON.stringify(byRow.members.map(s => s.file))}, missing ${JSON.stringify(byRow.missingDoors)})`);
+  const pkgOnly = SV.jobMembers(jsig, { resources: [], doors: ['E#pkg-door'] }, DR);
+  ok(pkgOnly.members.length === 0 && JSON.stringify(pkgOnly.missingDoors) === '["E#pkg-door (its symbols name no corpus file)"]', `a door row naming only package symbols adds no file and says so (${JSON.stringify(pkgOnly.missingDoors)})`);
+  const lostRow = SV.jobMembers(jsig, { resources: [], doors: ['E#lost-door'] }, DR);
+  ok(JSON.stringify(lostRow.missingDoors) === '["src/e/gone.ts (a symbol of E#lost-door)"]', `a symbol's file not in the program is named with its row (${JSON.stringify(lostRow.missingDoors)})`);
+  const plain = SV.jobMembers(jsig, { resources: [], doors: ['src/e/door.ts#load'] }, DR);
+  ok(JSON.stringify(plain.members.map(s => s.file)) === '["src/e/door.ts"]', 'a door written as file#name keeps its reading (its row has no symbols)');
 }
 
 const GATED = 25;
