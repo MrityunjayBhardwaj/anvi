@@ -1609,7 +1609,14 @@ loosened until it stops firing guards nothing.
   a function is copied instead of imported: against `--previous`, a fall in coupling with no fall
   in duplication prints SUSPECT, and one with duplication unmeasured prints UNREAD. The graph must
   be cruised with `--metrics` on the dependency-cruiser command line (17.4.3 ignores the config
-  option); a graph without `instability` is NOT MEASURED. Nothing in it is read from commit history.
+  option); a graph without `instability` is NOT MEASURED. With an index that carries
+  `ledgerFacts.touches` (what each file touches itself, by the placer's own predicate), it also
+  reads five smells from the design's ruled jobs: feature envy per component (writes, reads and
+  library uses apart), shotgun surgery per job (member files beyond its home), divergent change
+  (files in two or more jobs), god-file triggers (a split by job, never a target) and exports used
+  outside per owned job. Files that only forward are left out, and the envy and shotgun totals
+  print beside the shuffled-membership control. Cognitive complexity is not built. Nothing in it
+  is read from commit history.
   Frameworks set apart (#758) are read from the design's rows of kind `framework`; a `--framework`
   the design does not record widens that run only, is printed as WIDENED in the header, and makes
   a `--previous` built under another framework list a refusal, not a delta. `forceable-share.js`
