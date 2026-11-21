@@ -1499,6 +1499,10 @@ loosened until it stops firing guards nothing.
   build the package graph, so they always tell. Both counts print on every run, zero included.
   `node scripts/ownership-ledger.js --design <d> --graph <g> [--framework <pkg>] [--write <out>]`
   proposes rows from the graph and classifies each declared pair; it never writes in place.
+  A row the design already carries is kept as written, but it is called **ruled** only when the
+  guard would refuse by it: the tool reads the guard's own `isRuled` (a `ruled: YYYY-MM-DD`
+  date), so a row in the design without one prints "proposed: reported, never refused" and the
+  summary splits `in the design (R ruled + P proposed)` (#784).
   It proposes owners from **homes**, as the owner rule judges (#765): a component whose import
   of a library runs is a home; one that takes only its types is listed, marked, and is no home.
   From a graph alone no package import says whether it runs, so each is counted "couldn't tell"

@@ -92,7 +92,10 @@ const path = require('path');
 
 // The guard's module: its shared rules (`...R`) and its CLI helpers. Requiring it runs nothing.
 const G = require('./structure-guard.js');
-const { loadGraph, notMeasured, componentOf, touchersByPackage, homesOf, packageUses, designProblem, designId, designVersions, gatekeeperOf, blastRadius, divergences, edgeKey, onCycle, analyserOptionProblem } = G;
+const { loadGraph, notMeasured, componentOf, touchersByPackage, homesOf, packageUses, designProblem, designId, designVersions, gatekeeperOf, blastRadius, divergences, edgeKey, onCycle, analyserOptionProblem, isRuled } = G;
+// A row the design carries is kept as written, but it is RULED only by the guard's own predicate
+// (`isRuled`: a `ruled: YYYY-MM-DD` date) — the same word the guard refuses by, so the two cannot drift (#784).
+const standing = r => isRuled(r) ? `ruled ${r.ruled}` : 'proposed: reported, never refused';
 
 const TOOL = 'ownership-ledger.js';
 const FLAGS = new Set(['design', 'graph', 'package', 'framework', 'write', 'index', 'members']);
@@ -295,7 +298,7 @@ function report(s, ctx, print) {
   print('PROPOSED ROWS');
   for (const pkg of Object.keys(s.ledger).sort()) {
     const r = s.ledger[pkg];
-    if (s.rows[pkg]) { print(`  ${pkg}: RULED in the design, kept as written — kind ${r.kind}, reach ${r.reach}, owner ${r.owner === undefined ? 'null' : JSON.stringify(r.owner)}`); continue; }
+    if (s.rows[pkg]) { print(`  ${pkg}: in the design (${standing(r)}), kept as written — kind ${r.kind}, reach ${r.reach}, owner ${r.owner === undefined ? 'null' : JSON.stringify(r.owner)}`); continue; }
     if (r.kind === 'framework') print(`  ${pkg}: framework — no owner, enforcedBy none (${r.rule}, ${r.ruled}); touchers ${Object.keys(r.touchers).length}`);
     else if (r.owner) print(`  ${pkg}: library, owner ${r.owner} — ${r.proposed} (${plural(r.touchers[r.owner], "module")}); reach process, verifiedBy imports, enforcedBy static-guard`);
     else print(`  ${pkg}: library, owner null — COULDN'T TELL: ${r.homes ? `${r.homes.length} possible homes (${r.homes.join(', ')})` : `imported from ${Object.keys(r.touchers).length} components (${Object.keys(r.touchers).join(', ')})`}` +
@@ -341,7 +344,7 @@ function report(s, ctx, print) {
   print('GATEKEEPERS (the lookup per row: who refuses a touch, with what predicate)');
   for (const id of Object.keys(s.ledger).sort()) {
     const g = gatekeeperOf(s.ledger[id]);
-    print(`  ${id}: by ${g.by}, predicate ${g.predicate || 'none'}${g.parity ? `, parity ${g.parity}` : ''}${g.unverified ? ', UNVERIFIED' : ''} — ${g.why}${s.rows[id] ? ' [ruled]' : ' [proposed]'}`);
+    print(`  ${id}: by ${g.by}, predicate ${g.predicate || 'none'}${g.parity ? `, parity ${g.parity}` : ''}${g.unverified ? ', UNVERIFIED' : ''} — ${g.why}${s.rows[id] ? (isRuled(s.rows[id]) ? ' [in the design, ruled]' : ' [in the design, proposed]') : ' [proposed here]'}`);
   }
 
   const d = s.derivation;
@@ -350,11 +353,12 @@ function report(s, ctx, print) {
   print('');
   print('SUMMARY');
   print(`  packages imported by corpus modules: ${s.packages.length} = ${classes.single.length} single-toucher (owner proposed) + ${classes.multi.length} multi-toucher (couldn't tell) + ` +
-    `${classes.framework.length} framework + ${ruledOwned} already ruled + ${classes.unexamined.length} not examined (unmapped importers only)`);
+    `${classes.framework.length} framework + ${ruledOwned} already in the design + ${classes.unexamined.length} not examined (unmapped importers only)`);
   print(`  two or more homes (imports that run, or couldn't tell): ${s.multiHomed.length} of ${s.packages.length} packages = ` +
-    `${s.multiHomed.filter(p => classes.framework.includes(p)).length} framework + ${s.multiHomed.filter(p => classes.multi.includes(p)).length} couldn't tell + ${s.multiHomed.filter(p => classes.ruled.includes(p)).length} already ruled` +
+    `${s.multiHomed.filter(p => classes.framework.includes(p)).length} framework + ${s.multiHomed.filter(p => classes.multi.includes(p)).length} couldn't tell + ${s.multiHomed.filter(p => classes.ruled.includes(p)).length} already in the design` +
     `; imported from >= 2 components only by counting types-only importers: ${s.multiByTypesOnly.length}${s.multiByTypesOnly.length ? ` (${s.multiByTypesOnly.join(', ')})` : ''}`);
-  print(`  rows: ${Object.keys(s.ledger).length} in the ledger = ${Object.keys(s.rows).length} ruled in the design + ${Object.keys(s.proposed).length} proposed`);
+  const inDesign = Object.values(s.rows), ruledN = inDesign.filter(isRuled).length;
+  print(`  rows: ${Object.keys(s.ledger).length} in the ledger = ${inDesign.length} in the design (${ruledN} ruled + ${inDesign.length - ruledN} proposed) + ${Object.keys(s.proposed).length} proposed here`);
   print(`  pairs declared: ${declared} = ${d.derivable.length} derivable + ${d.consumption.length} consumption (pending v1) + ${d.absence.length} absence`);
   print(`  required, not declared: ${s.required.length} (of ${s.required.length + d.derivable.length} consumer -> owner pairs ownership implies, ${d.derivable.length} declared)`);
   print(`  rot: ${s.stale.length} stale (no touchers) of ${Object.keys(s.ledger).length} rows · ${s.unverified.length} UNVERIFIED · ` +
@@ -495,7 +499,7 @@ function surveyV1(design, facts, v0, membersQueries) {
     const by = {};
     for (const m of want) for (const [c, n] of Object.entries((p && p.members[m]) || {})) by[c] = (by[c] || 0) + n;
     const owner = isObject(v0.ledger[pkg]) ? v0.ledger[pkg].owner || null : null;
-    const ruled = !!(rows[pkg] && rows[pkg].ruled);
+    const ruled = isRuled(rows[pkg]);
     return { q, pkg, want, homes: Object.entries(by).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)), owner, ruled, known: !!p };
   });
 
@@ -536,7 +540,7 @@ function reportV1(v, s, ctx, print) {
   print('STATE AND REGISTRY ROWS (module states reached from another file; a state private to its file is not a resource)');
   print(`  module states: ${c.states} = ${c.private} private to their file (excluded, rule 9) + ${c.reached} reached from another file`);
   print(`  reached: ${c.reached} = ${c.direct} referenced from another file directly + ${c.viaDoorOnly} only through an export another file calls`);
-  print(`  of the reached: ${c.constant} never written and never handed on (a constant read across files, no row) + ${c.unseen} with no write seen but handed on (could not tell whether written, no row) + ${c.unmapped} in a file no component claims (not examined) + ${c.state + c.registry} proposed + ${c.ruledReached} already ruled`);
+  print(`  of the reached: ${c.constant} never written and never handed on (a constant read across files, no row) + ${c.unseen} with no write seen but handed on (could not tell whether written, no row) + ${c.unmapped} in a file no component claims (not examined) + ${c.state + c.registry} proposed + ${c.ruledReached} already in the design`);
   for (const k of ['registry', 'state']) {
     const xs = byKind(k);
     print(`  ${k} rows proposed: ${xs.length}`);
@@ -562,7 +566,7 @@ function reportV1(v, s, ctx, print) {
   print(`  ${plural(v.syntax.length, 'syntax query', 'syntax queries')}`);
   for (const q of v.syntax) {
     const r = v.proposed[q.id] || s.rows[q.id];
-    print(`    ${q.id}: ${v.proposed[q.id] ? owner(r) : `RULED in the design, kept as written — owner ${r.owner === undefined ? 'null' : JSON.stringify(r.owner)}`} · callers ${Object.entries(q.touchers).map(([cc, n]) => `${cc} ${n}`).join(', ') || 'none'}${q.couldNotTell ? ` · could not tell ${q.couldNotTell}` : ''}`);
+    print(`    ${q.id}: ${v.proposed[q.id] ? owner(r) : `in the design (${standing(r)}), kept as written — owner ${r.owner === undefined ? 'null' : JSON.stringify(r.owner)}`} · callers ${Object.entries(q.touchers).map(([cc, n]) => `${cc} ${n}`).join(', ') || 'none'}${q.couldNotTell ? ` · could not tell ${q.couldNotTell}` : ''}`);
   }
 
   print('');
@@ -608,19 +612,19 @@ function reportV1(v, s, ctx, print) {
   print('');
   print('ROT (v1)');
   const staleRuled = v.stale.filter(x => x.ruled), staleNew = v.stale.filter(x => !x.ruled);
-  print(`  stale — a ruled v1 row with no toucher (no writer, no caller): ${staleRuled.length}`);
+  print(`  stale — a v1 row in the design with no toucher (no writer, no caller): ${staleRuled.length}`);
   for (const x of staleRuled) print(`    ${x.id}${x.gone ? ' (the state is no longer in the code)' : ''}`);
   print(`  stale — a proposed v1 row with no toucher: ${staleNew.length}`);
   for (const x of staleNew) print(`    ${x.id}`);
-  print(`  ruled v1 rows not measured by this index (a syntax row the index was not given with --syntax): ${v.notMeasuredRows.length}`);
+  print(`  v1 rows in the design not measured by this index (a syntax row the index was not given with --syntax): ${v.notMeasuredRows.length}`);
   for (const id of v.notMeasuredRows) print(`    ${id}`);
   print(`  orphan jobs: ${v.jobs.filter(j => j.orphan).length} of ${v.jobs.length}`);
 
   const n = k => byKind(k).length;
   print('');
   print('SUMMARY (v1)');
-  print(`  rows proposed: ${Object.keys(v.proposed).length} = ${n('state')} state + ${n('registry')} registry + ${n('entry')} entry + ${n('syntax')} syntax; ${v.kept.length} v1 rows already ruled, kept`);
-  print(`  states: ${c.states} module states = ${c.private} private (excluded) + ${c.constant} never written + ${c.unseen} no write seen, handed on + ${c.unmapped} unmapped + ${c.state + c.registry} proposed + ${c.ruledReached} ruled`);
+  print(`  rows proposed: ${Object.keys(v.proposed).length} = ${n('state')} state + ${n('registry')} registry + ${n('entry')} entry + ${n('syntax')} syntax; ${v.kept.length} v1 rows already in the design, kept`);
+  print(`  states: ${c.states} module states = ${c.private} private (excluded) + ${c.constant} never written + ${c.unseen} no write seen, handed on + ${c.unmapped} unmapped + ${c.state + c.registry} proposed + ${c.ruledReached} in the design`);
   print(`  couldn't tell (owner null: written from 2 or more components): ${c.couldntTell} of ${c.state + c.registry} proposed states and registries · sprawl (reached, no door): ${c.sprawl}`);
   print(`  entries: ${v.doorCounts.doors} (${v.doorCounts.crossComponent} called from another component) · syntax rows: ${v.syntax.length} · jobs: ${v.jobs.length} (${v.jobs.filter(j => j.orphan).length} orphan)`);
   print(`  pending pairs: ${s.derivation.consumption.length} = ${v.derivedV1.length} derived in v1 + ${v.stillPending.length} still pending · required, not declared (v1): ${v.requiredV1.length}`);

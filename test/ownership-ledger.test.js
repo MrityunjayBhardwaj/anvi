@@ -92,14 +92,15 @@ ok(inOrder, 'the sections print in the specified order');
 ok(/type-only\s+a package named only by types is a toucher under every design[^\n]*internal type-only edges are not counted/.test(r.out) && r.out.includes(`id ${R.designId(DESIGN)}`), 'INSTRUMENT names the type-only policy and the design id');
 
 const summary = section(r.out, 'SUMMARY', 'PROPOSAL');
-ok(/packages imported by corpus modules: 6 = 1 single-toucher \(owner proposed\) \+ 1 multi-toucher \(couldn't tell\) \+ 1 framework \+ 2 already ruled \+ 1 not examined/.test(summary),
-   `packages: 6 = 1 single + 1 couldn't tell + 1 framework + 2 ruled + 1 not examined (${line(summary, /packages imported/).trim()})`);
+ok(/packages imported by corpus modules: 6 = 1 single-toucher \(owner proposed\) \+ 1 multi-toucher \(couldn't tell\) \+ 1 framework \+ 2 already in the design \+ 1 not examined/.test(summary),
+   `packages: 6 = 1 single + 1 couldn't tell + 1 framework + 2 in the design + 1 not examined (${line(summary, /packages imported/).trim()})`);
 ok(/pairs declared: 3 = 1 derivable \+ 1 consumption \(pending v1\) \+ 1 absence/.test(summary), `pairs: 3 = 1 + 1 + 1 (${line(summary, /pairs declared/).trim()})`);
-ok(/two or more homes \(imports that run, or couldn't tell\): 3 of 6 packages = 1 framework \+ 1 couldn't tell \+ 1 already ruled; imported from >= 2 components only by counting types-only importers: 0/.test(summary), `multi-homed: 3 of 6 (${line(summary, /two or more homes/).trim()})`);
+ok(/two or more homes \(imports that run, or couldn't tell\): 3 of 6 packages = 1 framework \+ 1 couldn't tell \+ 1 already in the design; imported from >= 2 components only by counting types-only importers: 0/.test(summary), `multi-homed: 3 of 6 (${line(summary, /two or more homes/).trim()})`);
 // Package imports by use, on every run, its parts summing to its total (#765).
 { const m = /package imports by use: (\d+) = (\d+) run \+ (\d+) types only \(never a home, #741 row 2\) \+ (\d+) couldn't tell/.exec(r.out);
   ok(m && +m[1] === +m[2] + +m[3] + +m[4] && +m[1] === 8, `package imports by use print on every run and sum to their total (${line(r.out, /package imports by use/).trim()})`); }
-ok(/rows: 6 in the ledger = 3 ruled in the design \+ 3 proposed/.test(summary), 'rows: 6 = 3 ruled + 3 proposed');
+// "In the design" is not "ruled": only a row with a ruling date is, by the guard's own predicate (#784).
+ok(/rows: 6 in the ledger = 3 in the design \(1 ruled \+ 2 proposed\) \+ 3 proposed here/.test(summary), `rows: 6 = 3 in the design (1 ruled + 2 proposed) + 3 proposed here (${line(summary, /rows:/).trim()})`);
 ok(/required, not declared: 1 /.test(summary), 'required, not declared: 1');
 ok(/rot: 1 stale \(no touchers\) of 6 rows · 1 UNVERIFIED/.test(summary), `rot: 1 stale, 1 UNVERIFIED (${line(summary, /rot:/).trim()})`);
 // Parts sum to the totals, read back from the printed numbers, not from the fixture.
@@ -113,7 +114,12 @@ const rows = section(r.out, 'PROPOSED ROWS', 'DERIVATION');
 ok(/multi: library, owner null — COULDN'T TELL: 2 possible homes \(a, b\)/.test(rows), 'the package two components import is "couldn\'t tell" with both named');
 ok(/solo: library, owner a — the only component/.test(rows), 'the package one component imports is proposed to that component');
 ok(/fw: framework — no owner/.test(rows), '--framework makes a framework row with no owner');
-ok(/owned: RULED in the design, kept as written/.test(rows), 'a ruled row is shown as ruled');
+ok(/owned: in the design \(ruled 2026-10-01\), kept as written/.test(rows) && R.isRuled(DESIGN.resources.owned), 'a row with a ruling date is shown ruled, and the guard agrees');
+ok(/owned2: in the design \(proposed: reported, never refused\), kept as written/.test(rows) && !R.isRuled(DESIGN.resources.owned2), 'a design row with no ruling date is shown proposed, and the guard agrees');
+ok(!/RULED in the design/.test(r.out), 'no row is called ruled for being in the design');
+{ const gk = section(r.out, 'GATEKEEPERS', 'SUMMARY');
+  ok(/^  owned: [^\n]*\[in the design, ruled\]$/m.test(gk) && /^  owned2: [^\n]*\[in the design, proposed\]$/m.test(gk) && /^  solo: [^\n]*\[proposed here\]$/m.test(gk),
+     'each gatekeeper line says whether its row is ruled, proposed in the design, or proposed here'); }
 ok(/lonely: NO ROW — NOT EXAMINED/.test(rows), 'a package only unmapped modules import gets no row, and says NOT EXAMINED');
 const touchers = section(r.out, 'TOUCHERS', 'PROPOSED ROWS');
 ok(/src\/x\/loose\.ts imports lonely/.test(touchers) && /src\/x\/loose\.ts imports solo/.test(touchers), 'the unmapped module is listed as not examined, per package');
@@ -235,7 +241,7 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   const S1 = section(v.out, 'STATE AND REGISTRY ROWS', 'ENTRY ROWS');
   ok(/module states: 7 = 1 private to their file \(excluded, rule 9\) \+ 6 reached from another file/.test(S1), `private states are counted and excluded (${line(S1, /module states:/).trim()})`);
   ok(/reached: 6 = 4 referenced from another file directly \+ 2 only through an export another file calls/.test(S1), `reach is split direct / through a door (${line(S1, /reached:/).trim()})`);
-  ok(/of the reached: 1 never written and never handed on[^+]*\+ 1 with no write seen but handed on[^+]*\+ 0 in a file no component claims[^+]*\+ 4 proposed \+ 0 already ruled/.test(S1), `constants and unseen writes get no row (${line(S1, /of the reached/).trim()})`);
+  ok(/of the reached: 1 never written and never handed on[^+]*\+ 1 with no write seen but handed on[^+]*\+ 0 in a file no component claims[^+]*\+ 4 proposed \+ 0 already in the design/.test(S1), `constants and unseen writes get no row (${line(S1, /of the reached/).trim()})`);
   ok(/registry rows proposed: 1\n\s+src\/a\/one\.ts#reg: owner a/.test(S1), 'a container written only inside a door another file calls is a registry, owner a');
   ok(/state rows proposed: 3/.test(S1) && /\n\s+src\/a\/one\.ts#mixed: owner a · writers a 2/.test(S1) && !/registry rows proposed: 1\n[^\n]*\n\s+src\/a\/one\.ts#mixed/.test(S1),
      'a container with one write inside a door and one outside is a state, not a registry');
@@ -265,10 +271,10 @@ console.log('ownership-ledger: ledger v1 from the ownership index (--index)');
   const RV = section(v.out, 'DERIVATION UNDER v1', 'ROT (v1)');
   ok(/required, not declared \(v1\): 1[^\n]*\n\s+b -> a — via [^\n]*src\/a\/one\.ts#register/.test(RV), 'calling a door owned elsewhere implies consumer -> owner; undeclared, it is a finding');
   const RT = section(v.out, 'ROT (v1)', 'SUMMARY (v1)');
-  ok(/stale — a ruled v1 row with no toucher \(no writer, no caller\): 2\n\s+src\/c\/four\.ts#gone \(the state is no longer in the code\)\n\s+src\/c\/four\.ts#nocall\n/.test(RT), 'a ruled state gone from the code and a ruled door nobody calls are STALE');
+  ok(/stale — a v1 row in the design with no toucher \(no writer, no caller\): 2\n\s+src\/c\/four\.ts#gone \(the state is no longer in the code\)\n\s+src\/c\/four\.ts#nocall\n/.test(RT), 'a ruled state gone from the code and a ruled door nobody calls are STALE');
   ok(/orphan jobs: 1 of 2/.test(RT), 'orphans counted with their denominator');
   const SV1 = section(v.out, 'SUMMARY (v1)', 'PROPOSAL');
-  ok(/rows proposed: 7 = 3 state \+ 1 registry \+ 1 entry \+ 2 syntax; 3 v1 rows already ruled, kept/.test(SV1), `v1 rows by kind (${line(SV1, /rows proposed/).trim()})`);
+  ok(/rows proposed: 7 = 3 state \+ 1 registry \+ 1 entry \+ 2 syntax; 3 v1 rows already in the design, kept/.test(SV1), `v1 rows by kind (${line(SV1, /rows proposed/).trim()})`);
   for (const re of [/rows proposed: (\d+) = ([^;]*);/m, /states: (\d+) module states = (.*)$/m]) {
     const m = SV1.match(re);
     const parts = m ? (m[2].match(/\d+/g) || []).map(Number).reduce((x, y) => x + y, 0) : -1;
