@@ -12,6 +12,7 @@
 //   - files edited are read from disk, so a shell write counts; attempts are the applied edit calls;
 //     refusals carry an outcome (rewrite / reuse / abandon);
 //   - a threshold inside the spread, or over one replay, is "underpowered, n replays", never read;
+//   - a slot's project memory is swept before and after each replay, so no note reaches the next;
 //   - the report's replays carry every field scripts/live-judge.js requires, so the judge reads it.
 
 'use strict';
@@ -162,6 +163,20 @@ const score = (o) => LT.scoreReplay({ calls: [], changed: [], componentOf: of, h
   const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'live-judge.js'), '--before', b, '--after', a, '--settings', path.join(DIR, 'none.json')], { encoding: 'utf8' });
   ok(r.status === 3 && /0 NOT MEASURED/.test(r.stdout) && /before: 3 of 3 replays placed · after: 3 of 3 placed/.test(r.stdout),
     `the judge reads two live-test reports: every replay placed, no task NOT MEASURED, identical spreads underpowered (exit ${r.status})`);
+}
+
+// A note one replay saves in the slot's project memory must not reach the next replay in that slot.
+{
+  const { sweepSlotMemory } = require('../scripts/live-test.js');
+  const projects = path.join(DIR, 'projects'), slot = '/private/tmp/lt-test/slots/s1';
+  const mem = path.join(projects, '-private-tmp-lt-test-slots-s1', 'memory');
+  ok(sweepSlotMemory(slot, path.join(DIR, 'keep0'), projects).length === 0, 'no memory folder: nothing found');
+  fs.mkdirSync(mem, { recursive: true });
+  fs.writeFileSync(path.join(mem, 'MEMORY.md'), '- [note](note.md)\n'); fs.writeFileSync(path.join(mem, 'note.md'), 'x');
+  const found = sweepSlotMemory(slot, path.join(DIR, 'keep1'), projects);
+  ok(found.sort().join(',') === 'MEMORY.md,note.md' && fs.readdirSync(mem).length === 0 && fs.existsSync(path.join(DIR, 'keep1', 'note.md')),
+    'the slot memory is moved out of the slot and kept in the replay record');
+  ok(sweepSlotMemory(slot, path.join(DIR, 'keep2'), projects).length === 0, 'the next replay in the slot starts with no memory');
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }

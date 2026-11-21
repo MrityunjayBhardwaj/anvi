@@ -185,6 +185,22 @@ function fingerprint(dir) {
   return head.status === 0 && st.status === 0 ? sha(head.stdout + st.stdout) : `unreadable: ${(head.stderr || st.stderr).trim()}`;
 }
 
+// Claude Code keeps a project memory per working directory (~/.claude/projects/<cwd slug>/memory).
+// A slot is reused, so a note one replay saves there would reach the next replay in the same slot
+// and the replays would stop being independent (seen 2026-11-21: one note reached 7 replays).
+// Sweep it before and after every replay; what was found is moved into the replay's record.
+function slotSlug(slot) { return slot.replace(/[^A-Za-z0-9]/g, '-'); }
+function sweepSlotMemory(slot, keepIn, projectsRoot = path.join(os.homedir(), '.claude', 'projects')) {
+  const dir = path.join(projectsRoot, slotSlug(slot), 'memory');
+  if (!fs.existsSync(dir)) return [];
+  const found = fs.readdirSync(dir);
+  if (found.length) {
+    fs.mkdirSync(keepIn, { recursive: true });
+    for (const f of found) fs.renameSync(path.join(dir, f), path.join(keepIn, f));
+  }
+  return found;
+}
+
 function slotSetup({ slot, tpl, registry, packageDir, pkgRel, home }) {
   fs.rmSync(slot, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(slot), { recursive: true });
@@ -216,6 +232,7 @@ function runOne({ t, r, slotIndex, o, work }) {
   const pkgRel = t.package || 'packages/editor';
   const { settingsFile, entry } = slotSetup({ slot, tpl, registry: o.registry, packageDir: o.packageDir, pkgRel, home });
   fs.mkdirSync(out, { recursive: true });
+  const memoryBefore = sweepSlotMemory(slot, path.join(out, 'slot-memory-before'), o.projectsRoot);
   const watched = list(o.watch).map(d => ({ dir: d, before: fingerprint(d) }));
   const started = new Date().toISOString();
   const cliArgs = ['-p', '--model', o.model, '--output-format', 'json', '--permission-mode', 'bypassPermissions',
@@ -237,8 +254,7 @@ function runOne({ t, r, slotIndex, o, work }) {
       let res = null; try { res = JSON.parse(stdout); } catch { /* recorded below */ }
       const sid = res && res.session_id;
       // The transcripts: Claude Code keeps each session under ~/.claude/projects/<cwd slug>/.
-      const slug = slot.replace(/[^A-Za-z0-9]/g, '-');
-      const tdir = path.join(os.homedir(), '.claude', 'projects', slug);
+      const tdir = path.join(o.projectsRoot || path.join(os.homedir(), '.claude', 'projects'), slotSlug(slot));
       const copied = [];
       if (sid && fs.existsSync(tdir)) {
         for (const f of fs.readdirSync(tdir)) {
@@ -256,12 +272,13 @@ function runOne({ t, r, slotIndex, o, work }) {
       const finalDir = path.join(out, 'final');
       fs.rmSync(finalDir, { recursive: true, force: true });
       must(sh('bash', ['-c', `mkdir -p "$2" && tar -C "$1" --exclude=node_modules --exclude=.git -cf - . | tar -C "$2" -xf -`, '_', slot, finalDir]), 'keep final tree');
+      const memoryWritten = sweepSlotMemory(slot, path.join(out, 'slot-memory-written'), o.projectsRoot);
       const changedWatch = watched.map(w => ({ dir: w.dir, before: w.before, after: fingerprint(w.dir) })).filter(w => w.before !== w.after);
       const result = { task: t.id, replay: r, slot, started, ended, exit: code, signal, model: o.model,
         sessionId: sid || null, transcripts: copied, designId: entry.designId || null,
         cost: res && res.total_cost_usd, turns: res && res.num_turns, subtype: res && res.subtype, isError: res ? !!res.is_error : true,
         durationMs: res && res.duration_ms, modelUsage: res && res.modelUsage ? Object.keys(res.modelUsage) : null,
-        watchedChanged: changedWatch };
+        watchedChanged: changedWatch, memoryBefore, memoryWritten };
       writeJSON(path.join(out, 'result.json'), result);
       resolve(result);
     });
@@ -280,9 +297,9 @@ async function run(o) {
       const job = queue.shift();
       const res = await runOne({ ...job, slotIndex: i + 1, o, work });
       if (res.skipped) { console.log(`exists, not re-run: ${job.t.id} r${job.r}`); continue; }
-      const bad = res.exit !== 0 || res.isError || !res.sessionId || res.watchedChanged.length;
+      const bad = res.exit !== 0 || res.isError || !res.sessionId || res.watchedChanged.length || res.memoryBefore.length;
       if (bad) failed++;
-      console.log(`${bad ? 'FAIL' : 'ok  '} ${job.t.id} r${job.r} exit=${res.exit}${res.signal ? ` signal=${res.signal}` : ''} turns=${res.turns} cost=$${res.cost} transcripts=${res.transcripts.length}${res.watchedChanged.length ? ` WATCHED CHECKOUT CHANGED: ${res.watchedChanged.map(w => w.dir).join(', ')}` : ''}`);
+      console.log(`${bad ? 'FAIL' : 'ok  '} ${job.t.id} r${job.r} exit=${res.exit}${res.signal ? ` signal=${res.signal}` : ''} turns=${res.turns} cost=$${res.cost} transcripts=${res.transcripts.length}${res.watchedChanged.map(w => /^unreadable/.test(w.after) ? ` WATCHED CHECKOUT UNREADABLE (not proof of a change): ${w.dir}: ${w.after}` : ` WATCHED CHECKOUT CHANGED: ${w.dir}`).join('')}${res.memoryBefore.length ? ` SLOT MEMORY WAS PRESENT: ${res.memoryBefore.join(', ')}` : ''}${res.memoryWritten.length ? ` (saved a slot memory, swept: ${res.memoryWritten.join(', ')})` : ''}`);
       if (res.watchedChanged.length) { queue.length = 0; }
     }
   });
@@ -527,4 +544,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).then(c => process.exit(c));
-module.exports = { scoreReplay, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };
+module.exports = { scoreReplay, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };
