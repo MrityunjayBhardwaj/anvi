@@ -2205,7 +2205,16 @@ never read.
     slot and allowing a benign write.
   - **Isolation.** The session gets no GitHub token, the slot has no remote, and `gh` and
     `git push` are disallowed. Each watched checkout (`--watch`) is fingerprinted before and
-    after every replay; a change stops the run.
+    after every replay; a change stops the run. A checkout that can't be read (a macOS privacy
+    block, say) also stops it, and the log says "unreadable", not "changed".
+  - **Independence.** Claude Code keeps a project memory per working directory, and a slot is
+    reused, so a note one replay saves would reach the next replay in that slot. The slot's memory
+    folder is swept before and after every replay, and what was there is kept in the replay's
+    record. A replay that started with a memory present counts as failed. (The first baseline run
+    found one note that had reached 7 replays; those were re-run.)
+  - **What the slot does not run.** The shell-write report (`structure-bash-hook.js`, #744) runs
+    only once it is installed. A slot runs the hooks installed on the machine, so a replay measures
+    the enforcement actually in force.
 - **`score`**, placement first:
   - **in home:** files changed on disk in the home's components.
   - **out of home:** changes that write a **ruled** job outside its home. That is a new direct
@@ -2214,6 +2223,11 @@ never read.
   - **The cost, among placed replays:** files read, files changed (read from disk, so a shell write
     counts), components, attempts (applied edit calls), edits outside the home, refusals with
     their outcomes, shell calls.
+  - **Guard NEW:** for every replay, the violations `scripts/structure-guard.js` reports in the
+    final tree and not in the base tree. It is a separate witness, not part of placement. A
+    violation with no refusal beside it landed by a write the edit-time guard never met.
+  - **None in home:** a replay with out of home 0 and no change in the home prints "PLACED, NONE
+    IN HOME". The design asks for both halves; the scorer and the judge read only the second (#782).
   - **Thresholds:** `--threshold <metric>=<delta>` prints "underpowered, n replays" for any task
     whose spread is at least that wide, and exits 1.
 - **What it cannot see:**
@@ -2227,6 +2241,7 @@ never read.
 - **Tests:** `node test/live-test.test.js` covers:
   - out of home: new against already there, inside the home, proposed rows, a second copy;
   - the seeded pair, a shell write, attempts, refusal outcomes;
+  - the slot-memory sweep;
   - thresholds inside and outside the spread;
   - task-file validation;
   - the judge reading the report.

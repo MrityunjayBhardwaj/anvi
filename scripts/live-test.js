@@ -427,6 +427,7 @@ function score(o) {
   lines.push(`LIVE TEST — design ${designId} · scored ${report.date}`);
   lines.push('  placement first: inHome = files changed in the home the ledger names; outOfHome = a ruled job written outside its home (a new direct touch of its resource, or a second copy of a name the home defines) — must be 0');
   lines.push('  NOT SEEN by outOfHome: a reimplementation that touches no ruled resource and copies no name. Correctness of the change: NOT MEASURED (no test is run by the scorer).');
+  lines.push('  guard NEW = violations the guard reports in the final tree and not in the base tree (by scripts/structure-guard.js); a separate witness, not part of placement');
   lines.push(`  ${features.size} resource features from ${SV.jobsOf(design).ruled.length} ruled jobs; a proposed row has no home and is never counted`);
   for (const t of tasks) {
     const baseSlim = readJSON(path.join(work, 'index', t.id, 'base.slim.json'));
@@ -435,6 +436,7 @@ function score(o) {
     const rs = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter(d => /^r\d+$/.test(d)).sort((a, b) => a.slice(1) - b.slice(1)) : [];
     const pkgRel = t.package || 'packages/editor';
     const comp = rel => of(rel) || null;
+    const guardBase = new Map();
     for (const rdir of rs) {
       const dir = path.join(runsDir, rdir);
       const res = fs.existsSync(path.join(dir, 'result.json')) ? readJSON(path.join(dir, 'result.json')) : null;
@@ -465,20 +467,26 @@ function score(o) {
         writeJSON(path.join(dir, 'final.slim.json'), final);
       }
       const radiusSize = Object.values(baseSlim.touches).filter(x => t.home.components.includes(x.component)).length;
-      // A refusal's outcome needs the violations the final tree added; asked only when one was refused.
-      let newViolation = false, violationNote = null;
-      if (calls.some(c => c.outcome === 'guard' || c.outcome === 'other')) {
-        if (!o.registry || !o.packageDir) violationNote = 'refusal outcome: rewrite NOT MEASURED (score needs --registry and --package-dir)';
+      // What the guard reports NEW in the final tree that the base tree did not carry, for every
+      // replay: a shell write never meets the edit-time guard (design §5.3 correction, #744), so a
+      // replay can be PLACED and still land a violation. Printed beside placement, never inside it.
+      // The same comparison tells a refusal's outcome (rewrite = landed by another door).
+      let newViolation = false, violationNote = null, guardAdded = null;
+      if (!o.registry || !o.packageDir) violationNote = 'guard additions NOT MEASURED (score needs --registry and --package-dir)';
+      else {
+        const entry = (readJSON(o.registry).packages || []).find(e => path.resolve(e.dir) === path.resolve(o.packageDir));
+        if (!guardBase.has(t.id)) guardBase.set(t.id, newViolationsOf(path.join(work, 'templates', t.id, pkgRel), entry));
+        const b = guardBase.get(t.id), f = newViolationsOf(path.join(dir, 'final', pkgRel), entry);
+        if (b.notMeasured || f.notMeasured) violationNote = `guard additions NOT MEASURED (${b.notMeasured || f.notMeasured})`;
         else {
-          const entry = (readJSON(o.registry).packages || []).find(e => path.resolve(e.dir) === path.resolve(o.packageDir));
-          const b = newViolationsOf(path.join(work, 'templates', t.id, pkgRel), entry), f = newViolationsOf(path.join(dir, 'final', pkgRel), entry);
-          if (b.notMeasured || f.notMeasured) violationNote = `refusal outcome: rewrite NOT MEASURED (${b.notMeasured || f.notMeasured})`;
-          else { const added = [...f.keys].filter(k => !b.keys.has(k)); newViolation = added.length > 0; if (added.length) violationNote = `landed after a refusal: ${added.join('; ')}`; }
+          guardAdded = [...f.keys].filter(k => !b.keys.has(k));
+          newViolation = guardAdded.length > 0;
+          if (guardAdded.length) violationNote = `${calls.some(c => c.outcome === 'guard' || c.outcome === 'other') ? 'landed after a refusal' : 'the guard reports NEW in the final tree, no refusal seen (a write the edit-time guard never met)'}: ${guardAdded.join('; ')}`;
         }
       }
       const sc = scoreReplay({ calls, changed, componentOf: comp, home: t.home.components, base: baseSlim, final, features,
         pkgRoot: path.join(res.slot, pkgRel), slotRoot: res.slot, radiusSize, newViolation });
-      sc.violationNote = violationNote;
+      sc.violationNote = violationNote; sc.guardAdded = guardAdded;
       sc.replay = rdir; sc.testsChanged = testsChanged; sc.place = final.place; sc.cost = res.cost; sc.turns = res.turns; sc.minutes = res.durationMs ? +(res.durationMs / 60e3).toFixed(1) : null;
       sc.placed = sc.outOfHome === 0 && sc.filesEdited > 0;
       replays.push(sc);
@@ -494,9 +502,10 @@ function score(o) {
     if (t.seeded) lines.push(`  SEEDED: ${t.seeded.why}`);
     lines.push(`  replays scored ${replays.length} of ${rs.length}${notes.length ? ' · ' + notes.join(' · ') : ''}`);
     for (const r of replays)
-      lines.push(`    ${r.replay}: ${r.placed ? 'PLACED' : r.filesEdited === 0 ? 'NO CHANGE MADE' : 'MISPLACED'} · in home ${r.inHome} · out of home ${r.outOfHome}${r.outOfHome ? ' (' + r.outOfHomeDetail.map(d => d.kind === 'touch' ? `${d.file} touches ${d.feature} of ${d.job}, home ${d.home}` : `${d.file} copies ${d.name}`).join('; ') + ')' : ''} · read ${r.filesRead} · changed ${r.filesEdited} (by a tool ${r.editedByTool}) · components ${r.componentsTouched} · attempts ${r.attempts} · outside radius ${r.outsideRadius} of radius ${r.radiusSize} · refusals ${r.refusalCount}${r.refusalCount ? ' [' + r.refusals.map(x => `${x.by}:${x.outcome}`).join(', ') + ']' : ''} · shell ${r.shellCalls} · tests changed ${r.testsChanged} · PLACE of what changed: ${r.place ? `${r.place.outcome} ${r.place.owners.join('+')}` : 'none'} · ${r.turns} turns, ${r.minutes} min, $${r.cost == null ? '?' : r.cost.toFixed(2)}`);
+      lines.push(`    ${r.replay}: ${r.placed ? (r.inHome ? 'PLACED' : 'PLACED, NONE IN HOME') : r.filesEdited === 0 ? 'NO CHANGE MADE' : 'MISPLACED'} · in home ${r.inHome} · out of home ${r.outOfHome}${r.outOfHome ? ' (' + r.outOfHomeDetail.map(d => d.kind === 'touch' ? `${d.file} touches ${d.feature} of ${d.job}, home ${d.home}` : `${d.file} copies ${d.name}`).join('; ') + ')' : ''} · read ${r.filesRead} · changed ${r.filesEdited} (by a tool ${r.editedByTool}) · components ${r.componentsTouched} · attempts ${r.attempts} · outside radius ${r.outsideRadius} of radius ${r.radiusSize} · guard NEW ${r.guardAdded == null ? '?' : r.guardAdded.length} · refusals ${r.refusalCount}${r.refusalCount ? ' [' + r.refusals.map(x => `${x.by}:${x.outcome}`).join(', ') + ']' : ''} · shell ${r.shellCalls} · tests changed ${r.testsChanged} · PLACE of what changed: ${r.place ? `${r.place.outcome} ${r.place.owners.join('+')}` : 'none'} · ${r.turns} turns, ${r.minutes} min, $${r.cost == null ? '?' : r.cost.toFixed(2)}`);
     for (const r of replays) if (r.violationNote) lines.push(`    ${r.replay}: ${r.violationNote}`);
-    lines.push(`  placement: ${placed.length} of ${replays.length} placed`);
+    const noneIn = placed.filter(r => !r.inHome).length;
+    lines.push(`  placement: ${placed.length} of ${replays.length} placed${noneIn ? ` — ${noneIn} of them with no edit in the home: the design asks for both halves, the scorer and the judge read only "none out of home" (#782)` : ''}`);
     for (const m of METRICS) {
       const sp = spreads[m];
       lines.push(`  ${m.padEnd(18)} ${sp ? `${sp.min}–${sp.max} (width ${sp.width}) over ${placed.length} placed: ${sp.values.join(', ')}` : 'NOT MEASURED (no placed replay)'}`);
