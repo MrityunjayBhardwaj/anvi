@@ -94,8 +94,8 @@ const COLUMNS = [
   ['files_read', 'distinct files with at least one successful Read'],
   ['files_edited', 'distinct files with at least one successful Edit/Write/MultiEdit/NotebookEdit'],
   ['components_touched', 'distinct design components among edited files inside the package'],
-  ['outside_radius', 'distinct package files edited while outside the radius in force (applied edit calls beside)'],
-  ['radius_size', 'components + files in the radius at the end of the task (start beside)'],
+  ['outside_radius', 'distinct package files in a design component, edited while outside the radius in force (applied edit calls beside); a file in no component is counted apart, never as outside'],
+  ['radius_size', 'package source files in the radius at the end of the task: the files of its components plus the files it names (start beside)'],
   ['widenings', 'times the radius was widened during the task'],
   ['refusals', 'tool calls refused: structure guard + another hook or permission rule'],
   ['design_id', '12-character id of the design components were read from'],
@@ -221,6 +221,95 @@ function parseItems(list, design, pkgDir) {
   return out;
 }
 
+// The package's source files the design root holds, package-relative ('src/…'): the population a
+// radius is sized in, so a radius of one component and a radius of its files read the same size
+// (#785). Declaration files compile to nothing and node_modules is never the package's own code.
+const SOURCE = /\.[cm]?[jt]sx?$/, DECLARATION = /\.d\.[cm]?ts$/;
+function packageFiles(pkgDir, root) {
+  const out = [];
+  if (!pkgDir) return out;
+  const walk = d => {
+    let names;
+    try { names = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of names) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (SOURCE.test(e.name) && !DECLARATION.test(e.name)) out.push(path.relative(pkgDir, p).split(path.sep).join('/'));
+    }
+  };
+  walk(root ? path.join(pkgDir, root) : pkgDir);
+  return out.sort();
+}
+
+// The columns one task's tool calls give, by one definition (#712, #785). The live test (#711)
+// calls this on each replay's transcript, so its telemetry columns and this report's are the same
+// numbers by construction, not by two implementations agreeing.
+//   calls     [{ tool, file, outcome, at }] (readCalls)
+//   locate    abs → { rel } | { outside: true } | { unconfirmed: true, rel }  (rel package-relative)
+//   norm      abs → the path compared (the guard's realNear); identity when absent
+//   of        rel → component | undefined (the design's componentOf), or null with no design
+//   root      the design root with its slash ('src/'), '' for none
+//   radius    { start: { components:Set, files:Set }, widenings: [{ at, components, files }] } | null
+//             (files as 'pkg:<rel>' or 'abs:<path>')
+//   pkgFiles  package source files (packageFiles) — the population radius_size counts
+function taskColumns({ calls, locate, norm = x => x, of, root = '', radius, pkgFiles, pkgKnown = true }) {
+  const by = (set, outcome) => calls.filter(c => set.has(c.tool) && (!outcome || c.outcome === outcome));
+  const readFiles = new Set(by(READ_TOOLS, 'applied').filter(c => c.file).map(c => norm(c.file)));
+  const applied = by(EDIT_TOOLS, 'applied').filter(c => c.file);
+  const editFiles = new Set(applied.map(c => norm(c.file)));
+  const where = c => { const abs = norm(c.file); return { abs, ...locate(abs) }; };
+  const comp = rel => (of && rel.startsWith(root) ? of(rel) : undefined);
+  const components = new Map();
+  const unmapped = [], outsideRoot = [], outsidePkg = new Set(), unconfirmed = new Set();
+  for (const f of editFiles) {
+    const hit = locate(f);
+    if (hit.outside) { outsidePkg.add(f); continue; }
+    if (hit.unconfirmed) { unconfirmed.add(f); continue; }
+    if (!of || !pkgKnown) continue;
+    if (!hit.rel.startsWith(root)) { outsideRoot.push(hit.rel); continue; }
+    const k = comp(hit.rel);
+    if (k === undefined) unmapped.push(hit.rel); else components.set(k, (components.get(k) || 0) + 1);
+  }
+  // Out-of-radius: every applied edit judged at its own time against the radius then in force.
+  // A file the design maps to no component (or outside its root) cannot be in or out of a radius of
+  // components: it is listed apart, so a scratch file cannot read as an edit outside the task.
+  let outside = null;
+  if (radius) {
+    const radiusAt = ts => {
+      const comps = new Set(radius.start.components), files = new Set(radius.start.files);
+      for (const w of radius.widenings) if (w.at <= ts) { w.components.forEach(x => comps.add(x)); w.files.forEach(x => files.add(x)); }
+      return { comps, files };
+    };
+    const sizeOf = r => {
+      const inside = new Set((pkgFiles || []).filter(f => r.comps.has(comp(f))).map(f => `pkg:${f}`));
+      for (const x of r.files) inside.add(x);
+      return inside.size;
+    };
+    const files = new Set(), list = [], unjudged = [], seenUnjudged = new Set();
+    let calls = 0;
+    for (const c of applied) {
+      const { abs, rel, outside: out, unconfirmed: gone } = where(c);
+      if (out || gone) continue;                          // outside the package, or unconfirmed: printed apart
+      const r = radiusAt(c.at);
+      const named = (rel !== null && rel !== undefined && r.files.has(`pkg:${rel}`)) || r.files.has(`abs:${abs}`);
+      if (named) continue;
+      const k = rel === null || rel === undefined ? undefined : !rel.startsWith(root) ? 'outside the design root' : comp(rel);
+      if (k === undefined || k === 'outside the design root') {
+        if (!seenUnjudged.has(abs)) { seenUnjudged.add(abs); unjudged.push({ file: rel || abs, at: c.at, component: k || 'in no component' }); }
+        continue;
+      }
+      if (!r.comps.has(k)) { calls++; if (!files.has(abs)) list.push({ file: rel, at: c.at, component: k }); files.add(abs); }
+    }
+    outside = { files: files.size, calls, list, unjudged, startSize: sizeOf(radiusAt('')), endSize: sizeOf(radiusAt('9999')), widenings: radius.widenings.length,
+      judged: applied.filter(c => { const w = where(c); return !w.outside && !w.unconfirmed; }).length };
+  }
+  return { readFiles, applied, editFiles, components, unmapped, outsideRoot, outsidePkg, unconfirmed, outside,
+    columns: { files_read: readFiles.size, files_edited: editFiles.size, components_touched: of ? components.size : null,
+      outside_radius: outside ? outside.files : null, radius_size: outside ? outside.endSize : null, widenings: outside ? outside.widenings : null,
+      refusals: calls.filter(c => c.outcome === 'guard' || c.outcome === 'other').length } };
+}
+
 function main(argv) {
   const single = new Set(['session', 'since', 'until', 'package', 'design', 'radius', 'transcripts', 'meter', 'json']);
   const args = { widen: [] };
@@ -276,12 +365,8 @@ function main(argv) {
     widenings.sort((a, b) => a.at.localeCompare(b.at));
     radius = { start, widenings };
   }
-  const radiusAt = ts => {
-    const comps = new Set(radius.start.components), files = new Set(radius.start.files);
-    for (const w of radius.widenings) if (w.at <= ts) { w.components.forEach(x => comps.add(x)); w.files.forEach(x => files.add(x)); }
-    return { comps, files };
-  };
-  const sizeOf = r => r.comps.size + r.files.size;
+  let pkgFilesMemo = null;
+  const pkgFiles = () => pkgFilesMemo || (pkgFilesMemo = packageFiles(pkgDir, root));
 
   const tdir = path.resolve(args.transcripts || path.join(os.homedir(), '.claude', 'projects'));
   let files = listTranscripts(tdir);
@@ -316,9 +401,6 @@ function main(argv) {
     const calls = [...s.calls.values()];
     const by = (set, outcome) => calls.filter(c => set.has(c.tool) && (!outcome || c.outcome === outcome));
     const reads = by(READ_TOOLS), edits = by(EDIT_TOOLS);
-    const readFiles = new Set(by(READ_TOOLS, 'applied').filter(c => c.file).map(c => GUARD.realNear(c.file)));
-    const applied = by(EDIT_TOOLS, 'applied').filter(c => c.file);
-    const editFiles = new Set(applied.map(c => GUARD.realNear(c.file)));
     // Which package file an edit is, in any checkout of the package's repository. A path in a
     // checkout that no longer exists cannot be confirmed to be this repository: the guard's rule
     // accepts it by its path inside the repository alone, and on this machine that matched another
@@ -332,38 +414,9 @@ function main(argv) {
       }
       return located.get(abs);
     };
-    const where = c => { const abs = GUARD.realNear(c.file); return { abs, ...locate(abs) }; };
-    const components = new Map();
-    const unmapped = [], outsideRoot = [], outsidePkg = new Set(), unconfirmed = new Set();
-    const comp = rel => (frame && rel.startsWith(root) ? frame.of(rel) : undefined);
-    for (const f of editFiles) {
-      const hit = locate(f);
-      if (hit.outside) { outsidePkg.add(f); continue; }
-      if (hit.unconfirmed) { unconfirmed.add(f); continue; }
-      if (!frame || !pkgDir) continue;
-      if (!hit.rel.startsWith(root)) { outsideRoot.push(hit.rel); continue; }
-      const k = comp(hit.rel);
-      if (k === undefined) unmapped.push(hit.rel); else components.set(k, (components.get(k) || 0) + 1);
-    }
-    // Out-of-radius: every applied edit judged at its own time against the radius then in force.
-    let outside = null;
-    if (radius) {
-      const files = new Set(), list = [];
-      let calls = 0;
-      for (const c of applied) {
-        const { abs, rel, outside: out, unconfirmed: gone } = where(c);
-        if (out || gone) continue;                          // outside the package, or unconfirmed: printed apart
-        const r = radiusAt(c.at);
-        const inside = (rel !== null && r.files.has(`pkg:${rel}`)) || r.files.has(`abs:${abs}`) ||
-          (rel !== null && r.comps.size && r.comps.has(comp(rel)));
-        if (!inside) { calls++; if (!files.has(abs)) list.push({ file: rel || abs, at: c.at, component: rel === null ? null : !rel.startsWith(root) ? 'outside the design root' : (comp(rel) || 'in no component') }); files.add(abs); }
-      }
-      const startSize = sizeOf(radiusAt(''));
-      const endSize = sizeOf(radiusAt('9999'));
-      outside = { files: files.size, calls, list, startSize, endSize, widenings: radius.widenings.length,
-        judged: applied.filter(c => { const w = where(c); return !w.outside && !w.unconfirmed; }).length };
-      if (files.size) anyOutside = true;
-    }
+    const tc = taskColumns({ calls, locate, norm: GUARD.realNear, of: frame ? frame.of : null, root, radius, pkgFiles: radius ? pkgFiles() : null, pkgKnown: !!pkgDir });
+    const { readFiles, applied, editFiles, components, unmapped, outsideRoot, outsidePkg, unconfirmed, outside } = tc;
+    if (outside && outside.files) anyOutside = true;
     const refusals = { guard: 0, other: 0, user: 0, interrupted: 0, errored: 0, noResult: 0 };
     for (const c of calls) {
       if (c.outcome === 'no result') refusals.noResult++;
@@ -381,7 +434,7 @@ function main(argv) {
       unmapped_list: frame ? unmapped.sort() : null, outside_root_list: frame ? outsideRoot.sort() : null,
       edited_outside_package: pkgDir ? outsidePkg.size : null, edited_unconfirmed_checkout: pkgDir ? unconfirmed.size : null,
       outside_radius: outside ? outside.files : null, outside_radius_edit_calls: outside ? outside.calls : null,
-      outside_radius_list: outside ? outside.list : null,
+      outside_radius_list: outside ? outside.list : null, outside_radius_unjudged: outside ? outside.unjudged.length : null, outside_radius_unjudged_list: outside ? outside.unjudged : null,
       radius_size: outside ? outside.endSize : null, radius_size_at_start: outside ? outside.startSize : null,
       widenings: outside ? outside.widenings : null,
       refusals: refusals.guard + refusals.other, refusals_by: refusals,
@@ -402,7 +455,9 @@ function main(argv) {
     if (!radius) print('    radius: none given — out-of-radius NOT MEASURED');
     else {
       print(`    outside_radius: ${outside.files} files (${outside.calls} applied edit calls) of ${outside.judged} applied edits judged` +
-            ` · radius_size ${outside.endSize} (${outside.startSize} at start) · widenings ${outside.widenings}`);
+            ` · radius_size ${outside.endSize} files (${outside.startSize} at start) · widenings ${outside.widenings}` +
+            ` · in no component ${outside.unjudged.length} (not judged against the radius)`);
+      for (const o of outside.unjudged) print(`      ∘ ${o.at} ${o.file} [${o.component}]`);
       for (const o of outside.list) print(`      · ${o.at} ${o.file}${o.component ? ` [${o.component}]` : ''}`);
     }
     print(`    refusals: ${row.refusals} (structure guard ${refusals.guard} · another hook or permission rule ${refusals.other})` +
@@ -427,5 +482,5 @@ function main(argv) {
   return anyOutside ? 1 : 0;
 }
 
-module.exports = { COLUMNS, readCalls, denialOf, operatedFile, parseItems, meterFor, main };
+module.exports = { COLUMNS, readCalls, denialOf, operatedFile, parseItems, meterFor, packageFiles, taskColumns, main };
 if (require.main === module) process.exit(main(process.argv.slice(2)));

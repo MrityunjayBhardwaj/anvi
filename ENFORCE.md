@@ -1634,7 +1634,13 @@ loosened until it stops firing guards nothing.
   design id. A task is one session with its subagents, optionally narrowed by time. The radius is
   never defaulted: without one, out-of-radius prints NOT MEASURED. Files changed through Bash are
   not visible to it, and the count of Bash calls prints as that door. The columns and units in its
-  header are the contract the live test (#711) reuses.
+  header are the contract the live test (#711) reuses, and they are computed in one place,
+  `taskColumns`, which the live test calls on every replay's transcript, so the two print the same
+  numbers by construction (#785). `radius_size` counts **files** at the end of the task: the
+  source files of the radius's components on the tree in front of it, plus the files it names,
+  the same unit as the write-scope guard. An edit to a file the design maps to no component (a
+  scratch file under the root) is listed apart as "in no component" and is never counted as
+  outside the radius.
 - **A hot-path manifest (#719) is told, never refused.** A design may carry `hotPaths`: one row
   per import edge the project's profiler measured hot — `from`, `to`, `frame`, `budget` (a number
   in `unit`, or `null` while unruled), `metric` (what a snapshot answers it with), `instrument`,
@@ -2226,7 +2232,11 @@ never read.
     defines. Rows that are only proposed are never counted.
   - **The cost, among placed replays:** files read, files changed (read from disk, so a shell write
     counts), components, attempts (applied edit calls), edits outside the home, refusals with
-    their outcomes, shell calls.
+    their outcomes, shell calls. These are the final tree's figures; the judge reads them.
+  - **Telemetry:** a line per replay with `scripts/task-telemetry.js`'s columns, computed by its
+    own `taskColumns` from the replay's tool calls with the home as the radius, so a real session
+    of the same task can be set beside it column for column (#785). `radius_size` is in files on
+    the replay's final tree; the report's `radiusSize` is the same number.
   - **Guard NEW:** for every replay, the violations `scripts/structure-guard.js` reports in the
     final tree and not in the base tree. It is a separate witness, not part of placement. A
     violation with no refusal beside it landed by a write the edit-time guard never met.
