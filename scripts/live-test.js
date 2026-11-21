@@ -81,6 +81,7 @@ const TT = require('./task-telemetry.js');
 const SV = require('./signature-vectors.js');
 
 const METRICS = ['filesRead', 'filesEdited', 'componentsTouched', 'attempts', 'outsideRadius', 'refusalCount', 'shellCalls'];
+const RADIUS_UNIT = 'files at the end of the task (task-telemetry radius_size)';
 const JUDGE_FIELDS = ['inHome', 'outOfHome', 'filesRead', 'filesEdited', 'componentsTouched', 'attempts', 'outsideRadius', 'radiusSize', 'widenings'];
 
 // ── small helpers ───────────────────────────────────────────────────────────────────────────
@@ -432,7 +433,9 @@ function score(o) {
   const of = componentOf(design, designRoot);
   const thresholds = list(o.threshold).map(s => { const [m, d] = String(s).split('='); return { metric: m, delta: Number(d) }; });
   for (const t of thresholds) if (!METRICS.includes(t.metric) || !(t.delta > 0)) throw new Error(`--threshold ${t.metric}=${t.delta}: metric one of ${METRICS.join(', ')}, delta > 0`);
-  const report = { designId, date: new Date().toISOString(), tasks: {} };
+  // The unit radiusSize is in, so the judge never sets two units side by side (#785; before it the
+  // radius was the home's files in the base index, and a report carried no unit).
+  const report = { designId, date: new Date().toISOString(), radiusUnit: RADIUS_UNIT, tasks: {} };
   const lines = [];
   let underpowered = 0;
   lines.push(`LIVE TEST — design ${designId} · scored ${report.date}`);
@@ -569,4 +572,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).then(c => process.exit(c));
-module.exports = { scoreReplay, telemetryOf, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };
+module.exports = { RADIUS_UNIT, scoreReplay, telemetryOf, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };

@@ -2275,7 +2275,10 @@ Its exit code is the flag, so nobody has to read the numbers for it to fire.
 - **Principled cost only against principled cost.** A task misplaced before and placed now is a
   **BASELINE**, the first placed measurement, and is compared to nothing, even if it costs more.
 - **Cost, range against range** over the replays: files read, files edited, components touched,
-  attempts, edits outside the radius (with the radius size and widenings beside it).
+  attempts, edits outside the radius (with the radius size and widenings beside it). Each report
+  names the unit its radius is in (`radiusUnit`); when the two reports differ, as a report scored
+  before #785 does, the radius prints NOT COMPARABLE instead of two numbers in two units. It
+  changes no verdict.
   - After's range entirely above before's, by at least the smallest effect: **RISE**, which
     reopens the ruling.
   - Overlapping ranges: **"underpowered, n replays"**. They read "no change" only once
