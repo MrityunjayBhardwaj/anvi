@@ -2180,6 +2180,57 @@ the store with their frame: instrument, date, design id, the commit measured, th
   divergence count, the borrowed control's three outcomes (the real-TypeScript case runs when
   `STRUCTURE_TS_FROM` names a TypeScript 5 directory).
 
+## The live test — fixed tasks, replayed by real sessions, scored placement first
+
+`scripts/live-test.js` (#711) replays a fixed set of tasks, each several times, as real Claude
+Code sessions on scratch copies of the project under the design in force. It scores each replay
+placement first, then the principled cost. An agent isn't deterministic, so each task's spread
+across replays is printed beside every figure. A threshold whose margin sits inside the spread is
+never read.
+
+- **The task set** lives in the store: one directory per task, holding `task.json` (base commit,
+  source issue and PR, home) and `prompt.md` (the issue as filed). A task's **home comes from the
+  ledger**: PLACE of the files the merged change had to modify, on the base tree. Where the ledger
+  and the merged PR disagree, the task records it for the owner to rule. Where the ledger can't
+  tell, the merged PR's component stands in and the report marks it **PROVISIONAL**.
+- **`prepare`** archives each base commit from a read-only clone, never the project's own
+  checkout. It installs dependencies offline from the package manager's store, makes a one-commit
+  git repository, and indexes the base tree.
+- **`run`** clones the template into a slot and starts one `claude -p` session with the task's
+  prompt.
+  - **The guard.** Your user settings load as usual. The installed guard only guards a checkout
+    of the project's own repository, so a scratch settings file runs the same guard hooks with
+    `HOME` pointed at a scratch registry. That registry names the slot with the design, baseline
+    and project check in force. A control in the store shows it refusing a forbidden import in a
+    slot and allowing a benign write.
+  - **Isolation.** The session gets no GitHub token, the slot has no remote, and `gh` and
+    `git push` are disallowed. Each watched checkout (`--watch`) is fingerprinted before and
+    after every replay; a change stops the run.
+- **`score`**, placement first:
+  - **in home:** files changed on disk in the home's components.
+  - **out of home:** changes that write a **ruled** job outside its home. That is a new direct
+    touch of the job's resource from another component, or a second copy of a name the home
+    defines. Rows that are only proposed are never counted.
+  - **The cost, among placed replays:** files read, files changed (read from disk, so a shell write
+    counts), components, attempts (applied edit calls), edits outside the home, refusals with
+    their outcomes, shell calls.
+  - **Thresholds:** `--threshold <metric>=<delta>` prints "underpowered, n replays" for any task
+    whose spread is at least that wide, and exits 1.
+- **What it cannot see:**
+  - A reimplementation that touches no ruled resource and copies no name.
+  - Whether the change is correct (the scorer runs no tests).
+  - What a session read through shell commands: files read counts Read calls only, and the shell
+    calls print beside it.
+- **The seeded task** (cheapest path in the consumer, ledger home in the provider) is scored on
+  real trees by a witness in the store. The consumer-local path scores misplaced; files edited
+  and components touched both prefer it, so neither judges placement.
+- **Tests:** `node test/live-test.test.js` covers:
+  - out of home: new against already there, inside the home, proposed rows, a second copy;
+  - the seeded pair, a shell write, attempts, refusal outcomes;
+  - thresholds inside and outside the spread;
+  - task-file validation;
+  - the judge reading the report.
+
 ## The judge — after a ruling, the live test decides whether to reopen it, by exit code
 
 `scripts/live-judge.js` (#715) compares two live-test reports: one under the design before an
@@ -2209,9 +2260,9 @@ Its exit code is the flag, so nobody has to read the numbers for it to fire.
   - 1: a flag, with REOPEN THE RULING / REOPEN THE GUARD naming the tasks.
   - 2: NOT MEASURED.
   - 3: nothing flagged, but a verdict was underpowered.
-- **Its input** is the live-test report that #711's runner is to write; the schema is in the
-  script's header. Until #711 exists, nothing produces that report and the judge has nothing real
-  to read. Re-running the live test on every admitted ruling is likewise #711's.
+- **Its input** is the report `scripts/live-test.js score --json` writes (next section); the
+  schema is in the judge's header. Nothing re-runs the live test on an admitted ruling by itself
+  yet: a ruling's after-report is a `run` and a `score` under the new design, started by hand.
 - **Tests:** `node test/live-judge.test.js`. Every case runs the shipped command and reads its exit
   code: a seeded regression, a seeded out-of-home edit, sprawl, underpowered against no change,
   rewrite, baseline, and the NOT MEASURED cases.
