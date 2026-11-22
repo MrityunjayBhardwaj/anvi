@@ -2218,7 +2218,24 @@ never read.
     found one note that had reached 7 replays; those were re-run.)
   - **What the slot does not run.** The shell-write report (`structure-bash-hook.js`, #744) runs
     only once it is installed. A slot runs the hooks installed on the machine, so a replay measures
-    the enforcement actually in force.
+    the enforcement actually in force. Without `--declare`, that includes the write-scope guard with
+    **no radius** (it allows every write) and no session-start reading. Both need a declared task,
+    and a replay declares none.
+  - **`--declare` (#788)** puts both in force:
+    - Each replay writes its task beside the run (`task-declared.json`: the files its home was
+      placed from). That's the merged change's files, an *ideal* declaration, so the figures are an
+      upper bound on what a real declaration gives.
+    - The session id is chosen up front, and `write-scope.js --place` draws the radius for it.
+    - `session-area-start.js` runs at session start with `ANVI_TASK` set.
+    - The slot mirrors a real checkout in three places: the project's `settings.json` is copied into
+      the scratch home; `.anvi` links into a scratch store project bound with `bind-store.js`; and
+      the scratch scope directory is the real one, so a widening the agent runs from its own shell
+      reaches the guard. Each replay's scope records are then moved into its run folder, and the
+      machine keeps none.
+    - `score` prints a `declared` line per replay: what was declared and placed, the radius size,
+      the injection's outcome and owners, and the first applied edit. That line says whether the edit
+      landed in an injected owner, and whether the assistant's text before it names one, which is
+      the block's own ask ("cite the owner"). It reads the words, not understanding.
 - **`score`**, placement first:
   - **in home:** files changed on disk in the home's components.
   - **out of home:** changes that write a **ruled** job outside its home. That is a new direct
