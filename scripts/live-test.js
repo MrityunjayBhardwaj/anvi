@@ -81,6 +81,7 @@ const TT = require('./task-telemetry.js');
 const SV = require('./signature-vectors.js');
 
 const METRICS = ['filesRead', 'filesEdited', 'componentsTouched', 'attempts', 'outsideRadius', 'refusalCount', 'shellCalls'];
+const RADIUS_UNIT = 'files at the end of the task (task-telemetry radius_size)';
 const JUDGE_FIELDS = ['inHome', 'outOfHome', 'filesRead', 'filesEdited', 'componentsTouched', 'attempts', 'outsideRadius', 'radiusSize', 'widenings'];
 
 // ── small helpers ───────────────────────────────────────────────────────────────────────────
@@ -466,6 +467,16 @@ function injectionReading(files, comp) {
 //   features   jobFeatures(design)
 //   pkgRoot    absolute package dir in the slot (to read the transcript's paths)
 //   newViolation  true when the final tree carries a violation the base did not
+// A replay's task-telemetry columns, by task-telemetry's own taskColumns, with the home as the
+// radius (#785). The transcript names files in the slot; the radius is sized in the replay's final
+// tree, because radius_size is "at the end of the task" and task-telemetry counts it on the tree in
+// front of it (a test the replay added is in the radius).
+function telemetryOf({ calls, slotPkg, finalPkg, of, root, home }) {
+  return TT.taskColumns({ calls, of, root, pkgFiles: TT.packageFiles(finalPkg, root),
+    locate: abs => abs.startsWith(slotPkg + path.sep) ? { rel: path.relative(slotPkg, abs).split(path.sep).join('/') } : { outside: true },
+    radius: { start: { components: new Set(home), files: new Set() }, widenings: [] } });
+}
+
 function scoreReplay({ calls, changed, componentOf, home, base, final, features, pkgRoot, slotRoot, radiusSize, newViolation }) {
   const homeSet = new Set(home);
   const inSlot = f => f && (f === slotRoot || f.startsWith(slotRoot + path.sep));
@@ -535,15 +546,19 @@ function score(o) {
   const features = jobFeatures(design);
   const { componentOf } = require('../hooks/structure-rules.js');
   // Components are keyed below the design's root ("src"), and the paths here are package-relative.
-  const of = componentOf(design, design.root ? String(design.root).replace(/\/?$/, '/') : '');
+  const designRoot = design.root ? String(design.root).replace(/\/?$/, '/') : '';
+  const of = componentOf(design, designRoot);
   const thresholds = list(o.threshold).map(s => { const [m, d] = String(s).split('='); return { metric: m, delta: Number(d) }; });
   for (const t of thresholds) if (!METRICS.includes(t.metric) || !(t.delta > 0)) throw new Error(`--threshold ${t.metric}=${t.delta}: metric one of ${METRICS.join(', ')}, delta > 0`);
-  const report = { designId, date: new Date().toISOString(), tasks: {} };
+  // The unit radiusSize is in, so the judge never sets two units side by side (#785; before it the
+  // radius was the home's files in the base index, and a report carried no unit).
+  const report = { designId, date: new Date().toISOString(), radiusUnit: RADIUS_UNIT, tasks: {} };
   const lines = [];
   let underpowered = 0;
   lines.push(`LIVE TEST — design ${designId} · scored ${report.date}`);
   lines.push('  placement first: inHome = files changed in the home the ledger names; outOfHome = a ruled job written outside its home (a new direct touch of its resource, or a second copy of a name the home defines) — must be 0');
   lines.push('  NOT SEEN by outOfHome: a reimplementation that touches no ruled resource and copies no name. Correctness of the change: NOT MEASURED (no test is run by the scorer).');
+  lines.push('  telemetry = the columns scripts/task-telemetry.js prints, computed by its own taskColumns from each replay\'s tool calls with the home as the radius (#785): the same numbers a real session of this task would show. The radius is sized in files on both sides; changed/outside the home above are the final tree\'s, not the tool calls\'');
   lines.push('  guard NEW = violations the guard reports in the final tree and not in the base tree (by scripts/structure-guard.js); a separate witness, not part of placement');
   lines.push(`  ${features.size} resource features from ${SV.jobsOf(design).ruled.length} ruled jobs; a proposed row has no home and is never counted`);
   for (const t of tasks) {
@@ -583,7 +598,9 @@ function score(o) {
         final = indexTree({ pkg: finalPkg, design: o.design, typescript: path.join(tplMods, 'typescript'), project: o.project, taskFiles: changed.length ? changed : null, out: finalIx });
         writeJSON(path.join(dir, 'final.slim.json'), final);
       }
-      const radiusSize = Object.values(baseSlim.touches).filter(x => t.home.components.includes(x.component)).length;
+      // The task-telemetry columns, by its own definition, with the home as the radius (#785).
+      const telemetry = telemetryOf({ calls, slotPkg: path.join(res.slot, pkgRel), finalPkg: path.join(dir, 'final', pkgRel), of, root: designRoot, home: t.home.components });
+      const radiusSize = telemetry.columns.radius_size;
       // What the guard reports NEW in the final tree that the base tree did not carry, for every
       // replay: a shell write never meets the edit-time guard (design §5.3 correction, #744), so a
       // replay can be PLACED and still land a violation. Printed beside placement, never inside it.
@@ -603,7 +620,8 @@ function score(o) {
       }
       const sc = scoreReplay({ calls, changed, componentOf: comp, home: t.home.components, base: baseSlim, final, features,
         pkgRoot: path.join(res.slot, pkgRel), slotRoot: res.slot, radiusSize, newViolation });
-      sc.violationNote = violationNote; sc.guardAdded = guardAdded;
+      sc.violationNote = violationNote; sc.guardAdded = guardAdded; sc.telemetry = telemetry.columns;
+      sc.telemetryUnjudged = telemetry.outside ? telemetry.outside.unjudged.map(u => u.file) : [];
       // A declared replay (#788): what was declared and placed, what the injection said, what the first edit did.
       if (res.declared) {
         const slotPkg = path.join(res.slot, pkgRel);
@@ -616,7 +634,7 @@ function score(o) {
     }
     const placed = replays.filter(r => r.placed);
     const spreads = Object.fromEntries(METRICS.map(m => [m, spreadOf(placed.map(r => r[m]))]));
-    report.tasks[t.id] = { home: t.home.components, replays: replays.map(r => ({ ...Object.fromEntries(JUDGE_FIELDS.map(k => [k, r[k]])), refusals: r.refusals.map(x => ({ outcome: x.outcome })), ...(r.declared ? { declared: r.declared, injection: r.injection } : {}) })) };
+    report.tasks[t.id] = { home: t.home.components, replays: replays.map(r => ({ ...Object.fromEntries(JUDGE_FIELDS.map(k => [k, r[k]])), refusals: r.refusals.map(x => ({ outcome: x.outcome })), telemetry: r.telemetry, ...(r.declared ? { declared: r.declared, injection: r.injection } : {}) })) };
     lines.push('');
     lines.push(`TASK ${t.id} — ${t.title || ''}`);
     lines.push(`  base ${t.base} · home: ${t.home.components.join(' + ')} — ${t.home.method || ''}${t.home.ledgerPlace ? ` · the ledger's PLACE: ${t.home.ledgerPlace.outcome} ${t.home.ledgerPlace.owners.join('+')}` : ''}`);
@@ -625,8 +643,9 @@ function score(o) {
     if (t.seeded) lines.push(`  SEEDED: ${t.seeded.why}`);
     lines.push(`  replays scored ${replays.length} of ${rs.length}${notes.length ? ' · ' + notes.join(' · ') : ''}`);
     for (const r of replays)
-      lines.push(`    ${r.replay}: ${r.placed ? (r.inHome ? 'PLACED' : 'PLACED, NONE IN HOME') : r.filesEdited === 0 ? 'NO CHANGE MADE' : 'MISPLACED'} · in home ${r.inHome} · out of home ${r.outOfHome}${r.outOfHome ? ' (' + r.outOfHomeDetail.map(d => d.kind === 'touch' ? `${d.file} touches ${d.feature} of ${d.job}, home ${d.home}` : `${d.file} copies ${d.name}`).join('; ') + ')' : ''} · read ${r.filesRead} · changed ${r.filesEdited} (by a tool ${r.editedByTool}) · components ${r.componentsTouched} · attempts ${r.attempts} · outside radius ${r.outsideRadius} of radius ${r.radiusSize} · guard NEW ${r.guardAdded == null ? '?' : r.guardAdded.length} · refusals ${r.refusalCount}${r.refusalCount ? ' [' + r.refusals.map(x => `${x.by}:${x.outcome}`).join(', ') + ']' : ''} · shell ${r.shellCalls} · tests changed ${r.testsChanged} · PLACE of what changed: ${r.place ? `${r.place.outcome} ${r.place.owners.join('+')}` : 'none'} · ${r.turns} turns, ${r.minutes} min, $${r.cost == null ? '?' : r.cost.toFixed(2)}`);
+      lines.push(`    ${r.replay}: ${r.placed ? (r.inHome ? 'PLACED' : 'PLACED, NONE IN HOME') : r.filesEdited === 0 ? 'NO CHANGE MADE' : 'MISPLACED'} · in home ${r.inHome} · out of home ${r.outOfHome}${r.outOfHome ? ' (' + r.outOfHomeDetail.map(d => d.kind === 'touch' ? `${d.file} touches ${d.feature} of ${d.job}, home ${d.home}` : `${d.file} copies ${d.name}`).join('; ') + ')' : ''} · read ${r.filesRead} · changed ${r.filesEdited} (by a tool ${r.editedByTool}) · components ${r.componentsTouched} · attempts ${r.attempts} · outside the home ${r.outsideRadius} (final tree) · radius ${r.radiusSize} files · guard NEW ${r.guardAdded == null ? '?' : r.guardAdded.length} · refusals ${r.refusalCount}${r.refusalCount ? ' [' + r.refusals.map(x => `${x.by}:${x.outcome}`).join(', ') + ']' : ''} · shell ${r.shellCalls} · tests changed ${r.testsChanged} · PLACE of what changed: ${r.place ? `${r.place.outcome} ${r.place.owners.join('+')}` : 'none'} · ${r.turns} turns, ${r.minutes} min, $${r.cost == null ? '?' : r.cost.toFixed(2)}`);
     for (const r of replays) if (r.violationNote) lines.push(`    ${r.replay}: ${r.violationNote}`);
+    for (const r of replays) if (r.telemetry) { const c = r.telemetry; lines.push(`    ${r.replay} telemetry: files_read ${c.files_read} · files_edited ${c.files_edited} · components_touched ${c.components_touched} · outside_radius ${c.outside_radius} · radius_size ${c.radius_size} · widenings ${c.widenings} · refusals ${c.refusals}${r.telemetryUnjudged.length ? ` · in no component ${r.telemetryUnjudged.length} (${r.telemetryUnjudged.join(', ')})` : ''}`); }
     for (const r of replays) if (r.declared) { const d = r.declared, j = r.injection;
       lines.push(`    ${r.replay} declared: ${d.files.length} file(s) (the files the home was placed from: an ideal declaration, an upper bound) · write-scope place exit ${d.placeExit}${d.outcome ? ` · ${d.outcome}` : ''} · radius ${d.radiusSize === null ? 'NOT DRAWN' : `${d.radiusSize} files`} · injection ${j.outcome}${j.owners.length ? ` ${j.owners.join('+')}` : ''} · first edit ${j.firstEdit ? `${j.firstEdit.file ? path.basename(j.firstEdit.file) : '?'} [${j.firstEdit.component || 'no component'}]${j.inOwner === null ? '' : ` in an injected owner: ${j.inOwner ? 'yes' : 'no'}`}${j.textNamesOwner === null ? '' : ` · text before it names the owner: ${j.textNamesOwner ? 'yes' : 'no'}`}` : 'none'}`); }
     const noneIn = placed.filter(r => !r.inHome).length;
@@ -679,4 +698,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).then(c => process.exit(c));
-module.exports = { injectionReading, placeDeclared, slotSetup, moveScopeRecords, scoreReplay, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };
+module.exports = { RADIUS_UNIT, injectionReading, placeDeclared, slotSetup, moveScopeRecords, scoreReplay, telemetryOf, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };

@@ -124,6 +124,19 @@ console.log('\nTHE RECORD');
   ok(J.tasks[0].flags.some(f => f.reopen === 'ruling' && f.why === 'filesEdited ROSE'), 'and the flag with its reason');
 }
 
+console.log('\nA RADIUS IN TWO UNITS IS NEVER SET SIDE BY SIDE (#785)');
+{
+  const unit = require('../scripts/live-test.js').RADIUS_UNIT;
+  const now = (id, replays) => ({ ...report(id, { t1: { replays } }), radiusUnit: unit });
+  const same = runJ(now('d0', steady), now('d1', steady));
+  ok(/outsideRadius[^\n]*radius 4 → 4,/.test(task(same.out, 't1')), 'two reports in the same unit print the radius before and after');
+  const mixed = runJ(report('d0', { t1: { replays: steady } }), now('d1', steady.map(r => ({ ...r, radiusSize: 107 }))));
+  const t = task(mixed.out, 't1');
+  ok(/radius NOT COMPARABLE \(the two reports size it in different units\)/.test(t) && !/4 → 107/.test(t),
+     `a report scored before the unit was recorded beside one after: NOT COMPARABLE, never 4 → 107 (${(t.match(/outsideRadius[^\n]*/) || [''])[0].trim()})`);
+  ok(mixed.code === same.code, `and it changes no verdict (exit ${mixed.code} vs ${same.code})`);
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

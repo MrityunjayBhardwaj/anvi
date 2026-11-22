@@ -213,6 +213,43 @@ console.log('a declared replay: what the injection said, and what the first edit
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
+console.log('the telemetry columns: the live test and task-telemetry give the same numbers on one recorded session (#785)');
+{
+  const TT = require('../scripts/task-telemetry.js');
+  const R = require('../hooks/structure-rules.js');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-lt-tel-')));
+  const PKG = path.join(root, 'repo', 'pkg');
+  // home holds three files, so a radius sized in components (1) and in files (3) differ.
+  for (const f of ['src/home/a.ts', 'src/home/b.ts', 'src/home/c.tsx', 'src/away/x.ts', 'src/scratch.ts']) { fs.mkdirSync(path.dirname(path.join(PKG, f)), { recursive: true }); fs.writeFileSync(path.join(PKG, f), 'export const x = 1;\n'); }
+  spawnSync('git', ['init', '-q', path.join(root, 'repo')]);
+  const design = { root: 'src', components: { home: { dirs: ['home'], purpose: 'holds the job' }, away: { dirs: ['away'], purpose: 'holds another job' } }, allowed: [] };
+  const designFile = path.join(root, 'design.json'); fs.writeFileSync(designFile, JSON.stringify(design));
+  const SID = 'cccccccc-0000-4000-8000-000000000003';
+  const tdir = path.join(root, 'projects', '-slot'); fs.mkdirSync(tdir, { recursive: true });
+  const recs = []; let k = 0;
+  const call = (ts, name, input, err, content = 'ok') => { const id = `u${++k}`;
+    recs.push({ type: 'assistant', timestamp: ts, sessionId: SID, message: { content: [{ type: 'tool_use', id, name, input }] } });
+    recs.push({ type: 'user', timestamp: ts, sessionId: SID, message: { content: [{ type: 'tool_result', tool_use_id: id, ...(err ? { is_error: true } : {}), content }] } }); };
+  call('2026-11-21T10:00:00Z', 'Read', { file_path: path.join(PKG, 'src/home/a.ts') });
+  call('2026-11-21T10:01:00Z', 'Edit', { file_path: path.join(PKG, 'src/home/a.ts') });
+  call('2026-11-21T10:02:00Z', 'Edit', { file_path: path.join(PKG, 'src/away/x.ts') });          // outside the radius
+  call('2026-11-21T10:03:00Z', 'Write', { file_path: path.join(PKG, 'src/scratch.ts') });        // in no component
+  call('2026-11-21T10:04:00Z', 'Edit', { file_path: path.join(PKG, 'src/away/x.ts') }, true, 'PreToolUse:Edit hook error: BLOCKED: no');
+  fs.writeFileSync(path.join(tdir, `${SID}.jsonl`), recs.map(r => JSON.stringify(r)).join('\n') + '\n');
+  const out = path.join(root, 'tel.json');
+  const cli = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'task-telemetry.js'), '--session', SID, '--transcripts', path.join(root, 'projects'),
+    '--meter', path.join(root, 'meter'), '--package', PKG, '--design', designFile, '--radius', 'home', '--json', out], { encoding: 'utf8' });
+  const row = JSON.parse(fs.readFileSync(out, 'utf8')).tasks[0];
+  const { sessions } = TT.readCalls([path.join(tdir, `${SID}.jsonl`)], sid => sid === SID, '', null, SID);
+  const live = LT.telemetryOf({ calls: [...sessions.get(SID).calls.values()], slotPkg: PKG, finalPkg: PKG, of: R.componentOf(design, 'src/'), root: 'src/', home: ['home'] }).columns;
+  const shared = ['files_read', 'files_edited', 'components_touched', 'outside_radius', 'radius_size', 'widenings', 'refusals'];
+  ok(cli.status === 1, `task-telemetry sees the edit outside the radius (exit ${cli.status})`);
+  ok(shared.every(c => live[c] === row[c]), `every shared column is equal (live ${JSON.stringify(shared.map(c => live[c]))} · telemetry ${JSON.stringify(shared.map(c => row[c]))})`);
+  ok(live.radius_size === 3 && live.outside_radius === 1 && live.refusals === 1 && row.outside_radius_unjudged === 1,
+     `and the numbers are the ones that separate the units: radius 3 files, 1 outside, 1 refusal, the scratch file apart (${live.radius_size}, ${live.outside_radius}, ${live.refusals}, ${row.outside_radius_unjudged})`);
+  try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
