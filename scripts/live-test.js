@@ -201,7 +201,7 @@ function sweepSlotMemory(slot, keepIn, projectsRoot = path.join(os.homedir(), '.
   return found;
 }
 
-function slotSetup({ slot, tpl, registry, packageDir, pkgRel, home }) {
+function slotSetup({ slot, tpl, registry, packageDir, pkgRel, home, taskFile, project }) {
   fs.rmSync(slot, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(slot), { recursive: true });
   // APFS clone where it exists (macOS cp -c), a plain copy elsewhere; the template is never written.
@@ -218,9 +218,69 @@ function slotSetup({ slot, tpl, registry, packageDir, pkgRel, home }) {
   writeJSON(path.join(home, '.claude', 'structure-guard.json'), { packages: [slotEntry] });
   const hooks = ['structure-guard-hook.js', 'write-scope-guard.js'].map(h => path.join(os.homedir(), '.claude', 'hooks', h));
   const settings = { hooks: { PreToolUse: [{ matcher: 'Write|Edit|MultiEdit', hooks: hooks.map(h => ({ type: 'command', command: `HOME=${JSON.stringify(home)} node ${JSON.stringify(h)}` })) }] } };
+  // A declared task (--declare, #788): the session-start injection runs as in a real session, reading
+  // the task from ANVI_TASK. Its timeout sits above the hook's own 10 s budget, so a slow reading
+  // says "timed out" instead of being killed into silence.
+  if (taskFile) {
+    // The agent widens with `node ~/.claude/anvi/scripts/write-scope.js --widen …` from its own shell,
+    // whose HOME is the real one; the slot's guard reads the scratch home. So the scratch home's scope
+    // directory IS the real one (a link), and each replay's records are moved out of it after the run
+    // (moveScopeRecords) — the real machine keeps none. The project's settings are the ones in force.
+    const realScope = path.join(os.homedir(), '.claude', 'structure-guard-cache', 'write-scope');
+    fs.mkdirSync(realScope, { recursive: true });
+    const linkAt = path.join(home, '.claude', 'structure-guard-cache', 'write-scope');
+    fs.mkdirSync(path.dirname(linkAt), { recursive: true });
+    fs.rmSync(linkAt, { recursive: true, force: true });
+    fs.symlinkSync(realScope, linkAt);
+    const settingsSrc = project && path.join(os.homedir(), '.anvideck', 'projects', project, 'settings.json');
+    if (settingsSrc && fs.existsSync(settingsSrc)) {
+      const dst = path.join(home, '.anvideck', 'projects', project, 'settings.json');
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(settingsSrc, dst);
+    }
+    // A checkout of the project carries `.anvi` linked into its store project, which is how the
+    // session-start hook finds the project's settings; the slot gets the same link, into the scratch
+    // store (stave ignores `.anvi`, so the link is never a change of the replay's).
+    if (project) {
+      const anvi = path.join(home, '.anvideck', 'projects', project, '.anvi');
+      fs.mkdirSync(anvi, { recursive: true });
+      fs.rmSync(path.join(slot, '.anvi'), { recursive: true, force: true });
+      fs.symlinkSync(anvi, path.join(slot, '.anvi'));
+      // The store serves only a directory with a provenance record; a real checkout has one. Bound
+      // in the scratch home with the shipped command, so the real store is never touched.
+      must(sh(process.execPath, [path.join(__dirname, 'bind-store.js'), '--apply', slot], { env: { ...process.env, HOME: home } }), 'bind the slot to the scratch store');
+    }
+  }
+  if (taskFile) settings.hooks.SessionStart = [{ hooks: [{ type: 'command', timeout: 20,
+    command: `HOME=${JSON.stringify(home)} ANVI_TASK=${JSON.stringify(taskFile)} node ${JSON.stringify(path.join(os.homedir(), '.claude', 'hooks', 'session-area-start.js'))}` }] }];
   const settingsFile = path.join(home, 'settings.json');
   writeJSON(settingsFile, settings);
   return { settingsFile, entry: slotEntry };
+}
+
+// Draw the declared task's radius for the chosen session, in the slot's scratch home, with the
+// shipped command (scripts/write-scope.js --place). Its output and exit are kept beside the run; a
+// placement that could not be made is recorded, never retried into a different answer.
+function placeDeclared({ taskFile, sid, slot, pkgRel, entry, home, out, project }) {
+  const pkg = path.join(slot, pkgRel);
+  const args = [path.join(__dirname, 'write-scope.js'), '--place', '--design', entry.design, '--package', pkg,
+    '--typescript', path.join(slot, 'node_modules', 'typescript'), '--task', taskFile, '--session', sid, ...(project ? ['--project', project] : [])];
+  const r = sh(process.execPath, args, { env: { ...process.env, HOME: home } });
+  const text = (r.stdout || '') + (r.stderr || '');
+  fs.writeFileSync(path.join(out, 'write-scope-place.txt'), text);
+  const size = (text.match(/radius_size (\d+) file/) || [])[1];
+  return { taskFile: path.basename(taskFile), files: readJSON(taskFile).files, sessionId: sid, placeExit: r.status,
+    radiusSize: size === undefined ? null : +size, outcome: (text.match(/outcome: ([^\n]+)/) || [])[1] || null };
+}
+
+// A declared replay's scope records (its placement, widenings and the guard's events) leave the real
+// scope directory for the run's own folder, so the machine's state holds nothing of a replay.
+function moveScopeRecords(sid, keepIn, scopeDir = path.join(os.homedir(), '.claude', 'structure-guard-cache', 'write-scope')) {
+  if (!sid || !fs.existsSync(scopeDir)) return [];
+  const mine = fs.readdirSync(scopeDir).filter(f => f.startsWith(sid));
+  if (mine.length) fs.mkdirSync(keepIn, { recursive: true });
+  for (const f of mine) fs.renameSync(path.join(scopeDir, f), path.join(keepIn, f));
+  return mine;
 }
 
 function runOne({ t, r, slotIndex, o, work }) {
@@ -230,13 +290,21 @@ function runOne({ t, r, slotIndex, o, work }) {
   const slot = path.join(o.slotRoot, `s${slotIndex}`);
   const home = path.join(work, 'homes', `s${slotIndex}`);
   const pkgRel = t.package || 'packages/editor';
-  const { settingsFile, entry } = slotSetup({ slot, tpl, registry: o.registry, packageDir: o.packageDir, pkgRel, home });
   fs.mkdirSync(out, { recursive: true });
+  // --declare (#788): the task is declared before the session starts, as a person would write it, and
+  // its radius drawn for the session id chosen here. The files are the ones the home was placed from
+  // (the merged change's): the best declaration a person could write, so what this measures is the
+  // mechanism under an ideal declaration — an upper bound, said in the report.
+  const sid = o.declare ? crypto.randomUUID() : null;
+  const taskFile = o.declare ? path.join(out, 'task-declared.json') : null;
+  if (taskFile) writeJSON(taskFile, { id: t.id, about: t.title || t.id, resources: [], files: (t.home && t.home.placedFrom) || [] });
+  const { settingsFile, entry } = slotSetup({ slot, tpl, registry: o.registry, packageDir: o.packageDir, pkgRel, home, taskFile, project: o.project });
+  const declared = taskFile ? placeDeclared({ taskFile, sid, slot, pkgRel, entry, home, out, project: o.project }) : null;
   const memoryBefore = sweepSlotMemory(slot, path.join(out, 'slot-memory-before'), o.projectsRoot);
   const watched = list(o.watch).map(d => ({ dir: d, before: fingerprint(d) }));
   const started = new Date().toISOString();
   const cliArgs = ['-p', '--model', o.model, '--output-format', 'json', '--permission-mode', 'bypassPermissions',
-    '--settings', settingsFile, '--disallowedTools', 'Bash(gh:*)', 'Bash(git push:*)'];
+    '--settings', settingsFile, '--disallowedTools', 'Bash(gh:*)', 'Bash(git push:*)', ...(sid ? ['--session-id', sid] : [])];
   const env = { ...process.env, GH_TOKEN: 'live-test-no-github', GITHUB_TOKEN: 'live-test-no-github' };
   delete env.CLAUDECODE;
   return new Promise(resolve => {
@@ -273,12 +341,13 @@ function runOne({ t, r, slotIndex, o, work }) {
       fs.rmSync(finalDir, { recursive: true, force: true });
       must(sh('bash', ['-c', `mkdir -p "$2" && tar -C "$1" --exclude=node_modules --exclude=.git -cf - . | tar -C "$2" -xf -`, '_', slot, finalDir]), 'keep final tree');
       const memoryWritten = sweepSlotMemory(slot, path.join(out, 'slot-memory-written'), o.projectsRoot);
+      if (declared) declared.scopeRecords = moveScopeRecords(sid, path.join(out, 'write-scope'));
       const changedWatch = watched.map(w => ({ dir: w.dir, before: w.before, after: fingerprint(w.dir) })).filter(w => w.before !== w.after);
       const result = { task: t.id, replay: r, slot, started, ended, exit: code, signal, model: o.model,
         sessionId: sid || null, transcripts: copied, designId: entry.designId || null,
         cost: res && res.total_cost_usd, turns: res && res.num_turns, subtype: res && res.subtype, isError: res ? !!res.is_error : true,
         durationMs: res && res.duration_ms, modelUsage: res && res.modelUsage ? Object.keys(res.modelUsage) : null,
-        watchedChanged: changedWatch, memoryBefore, memoryWritten };
+        watchedChanged: changedWatch, memoryBefore, memoryWritten, declared };
       writeJSON(path.join(out, 'result.json'), result);
       resolve(result);
     });
@@ -338,6 +407,54 @@ function jobFeatures(design) {
       byFeature.get(f).push({ job: j.id, home: j.home, resource: id });
     }
   return byFeature;
+}
+
+// What the session-start injection told a declared replay, and what its first edit did with it (#788).
+// PREDICATES, named: `outcome`/`owners` are read from the TASK AREA block the transcript carries;
+// `firstEdit` is the first Edit/Write/MultiEdit/NotebookEdit whose result came back without an error;
+// `inOwner` = that file's component is one the block named; `textNamesOwner` = the assistant's text
+// before that edit (the same message included) names one of those owners as a word. Naming is what
+// the block asks ("cite the owner"); it is not a check that the agent understood it.
+const EDIT_NAMES = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+function injectionReading(files, comp) {
+  const recs = [];
+  for (const f of files) for (const l of fs.readFileSync(f, 'utf8').split('\n')) { if (!l) continue; try { recs.push(JSON.parse(l)); } catch { /* a torn line */ } }
+  const contents = r => (r.message && Array.isArray(r.message.content) ? r.message.content : []);
+  // The block arrives inside the hook's stdout, itself JSON inside the record: strings that hold JSON
+  // are opened until a string carrying the head is found.
+  const find = v => {
+    if (typeof v === 'string') {
+      if (/^\s*[{[]/.test(v)) { try { return find(JSON.parse(v)); } catch { /* not JSON */ } }
+      return v.includes('TASK AREA') ? v.slice(v.indexOf('TASK AREA')) : null;
+    }
+    if (v && typeof v === 'object') for (const x of Object.values(v)) { const hit = find(x); if (hit) return hit; }
+    return null;
+  };
+  let block = null;
+  for (const r of recs) if ((block = find(r))) break;
+  if (!block) return { outcome: 'NO BLOCK', owners: [], firstEdit: null, inOwner: null, textNamesOwner: null };
+  const m = /outcome: (HOME|SPLIT|NO EXISTING HOME|COULDN'T TELL)([^\n]*)/.exec(block);
+  const outcome = m ? m[1] : 'UNREADABLE';
+  const owners = !m ? [] : outcome === 'HOME' ? [(/^\s*([A-Za-z][\w-]*)/.exec(m[2]) || [])[1]].filter(Boolean)
+    : outcome === 'SPLIT' ? [...m[2].matchAll(/([A-Za-z][\w-]*)(?: \([^)]*\))?: door/g)].map(x => x[1]) : [];
+  const ok = new Map();
+  for (const r of recs) for (const c of contents(r)) if (c && c.type === 'tool_result') ok.set(c.tool_use_id, !c.is_error);
+  let text = '', firstEdit = null;
+  outer: for (const r of recs) {
+    if (r.type !== 'assistant') continue;
+    for (const c of contents(r)) {
+      if (c.type === 'text') text += c.text + '\n';
+      if (c.type === 'tool_use' && EDIT_NAMES.includes(c.name) && ok.get(c.id)) {
+        const file = (c.input && (c.input.file_path || c.input.notebook_path)) || null;
+        firstEdit = { file, component: file ? comp(file) : null };
+        break outer;
+      }
+    }
+  }
+  const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return { outcome, owners, firstEdit,
+    inOwner: firstEdit && owners.length ? owners.includes(firstEdit.component) : null,
+    textNamesOwner: firstEdit && owners.length ? owners.some(o => new RegExp(`\\b${esc(o)}\\b`).test(text)) : null };
 }
 
 // One replay's figures from its parts. Pure: every input is data, so the rules can be tested alone.
@@ -487,13 +604,19 @@ function score(o) {
       const sc = scoreReplay({ calls, changed, componentOf: comp, home: t.home.components, base: baseSlim, final, features,
         pkgRoot: path.join(res.slot, pkgRel), slotRoot: res.slot, radiusSize, newViolation });
       sc.violationNote = violationNote; sc.guardAdded = guardAdded;
+      // A declared replay (#788): what was declared and placed, what the injection said, what the first edit did.
+      if (res.declared) {
+        const slotPkg = path.join(res.slot, pkgRel);
+        sc.declared = res.declared;
+        sc.injection = injectionReading(files, abs => abs.startsWith(slotPkg + path.sep) ? comp(path.relative(slotPkg, abs).split(path.sep).join('/')) : null);
+      }
       sc.replay = rdir; sc.testsChanged = testsChanged; sc.place = final.place; sc.cost = res.cost; sc.turns = res.turns; sc.minutes = res.durationMs ? +(res.durationMs / 60e3).toFixed(1) : null;
       sc.placed = sc.outOfHome === 0 && sc.filesEdited > 0;
       replays.push(sc);
     }
     const placed = replays.filter(r => r.placed);
     const spreads = Object.fromEntries(METRICS.map(m => [m, spreadOf(placed.map(r => r[m]))]));
-    report.tasks[t.id] = { home: t.home.components, replays: replays.map(r => ({ ...Object.fromEntries(JUDGE_FIELDS.map(k => [k, r[k]])), refusals: r.refusals.map(x => ({ outcome: x.outcome })) })) };
+    report.tasks[t.id] = { home: t.home.components, replays: replays.map(r => ({ ...Object.fromEntries(JUDGE_FIELDS.map(k => [k, r[k]])), refusals: r.refusals.map(x => ({ outcome: x.outcome })), ...(r.declared ? { declared: r.declared, injection: r.injection } : {}) })) };
     lines.push('');
     lines.push(`TASK ${t.id} — ${t.title || ''}`);
     lines.push(`  base ${t.base} · home: ${t.home.components.join(' + ')} — ${t.home.method || ''}${t.home.ledgerPlace ? ` · the ledger's PLACE: ${t.home.ledgerPlace.outcome} ${t.home.ledgerPlace.owners.join('+')}` : ''}`);
@@ -504,6 +627,8 @@ function score(o) {
     for (const r of replays)
       lines.push(`    ${r.replay}: ${r.placed ? (r.inHome ? 'PLACED' : 'PLACED, NONE IN HOME') : r.filesEdited === 0 ? 'NO CHANGE MADE' : 'MISPLACED'} · in home ${r.inHome} · out of home ${r.outOfHome}${r.outOfHome ? ' (' + r.outOfHomeDetail.map(d => d.kind === 'touch' ? `${d.file} touches ${d.feature} of ${d.job}, home ${d.home}` : `${d.file} copies ${d.name}`).join('; ') + ')' : ''} · read ${r.filesRead} · changed ${r.filesEdited} (by a tool ${r.editedByTool}) · components ${r.componentsTouched} · attempts ${r.attempts} · outside radius ${r.outsideRadius} of radius ${r.radiusSize} · guard NEW ${r.guardAdded == null ? '?' : r.guardAdded.length} · refusals ${r.refusalCount}${r.refusalCount ? ' [' + r.refusals.map(x => `${x.by}:${x.outcome}`).join(', ') + ']' : ''} · shell ${r.shellCalls} · tests changed ${r.testsChanged} · PLACE of what changed: ${r.place ? `${r.place.outcome} ${r.place.owners.join('+')}` : 'none'} · ${r.turns} turns, ${r.minutes} min, $${r.cost == null ? '?' : r.cost.toFixed(2)}`);
     for (const r of replays) if (r.violationNote) lines.push(`    ${r.replay}: ${r.violationNote}`);
+    for (const r of replays) if (r.declared) { const d = r.declared, j = r.injection;
+      lines.push(`    ${r.replay} declared: ${d.files.length} file(s) (the files the home was placed from: an ideal declaration, an upper bound) · write-scope place exit ${d.placeExit}${d.outcome ? ` · ${d.outcome}` : ''} · radius ${d.radiusSize === null ? 'NOT DRAWN' : `${d.radiusSize} files`} · injection ${j.outcome}${j.owners.length ? ` ${j.owners.join('+')}` : ''} · first edit ${j.firstEdit ? `${j.firstEdit.file ? path.basename(j.firstEdit.file) : '?'} [${j.firstEdit.component || 'no component'}]${j.inOwner === null ? '' : ` in an injected owner: ${j.inOwner ? 'yes' : 'no'}`}${j.textNamesOwner === null ? '' : ` · text before it names the owner: ${j.textNamesOwner ? 'yes' : 'no'}`}` : 'none'}`); }
     const noneIn = placed.filter(r => !r.inHome).length;
     lines.push(`  placement: ${placed.length} of ${replays.length} placed${noneIn ? ` — ${noneIn} of them with no edit in the home: the design asks for both halves, the scorer and the judge read only "none out of home" (#782)` : ''}`);
     for (const m of METRICS) {
@@ -537,7 +662,8 @@ async function main(argv) {
     if (cmd === 'run') {
       for (const k of ['tasks', 'work', 'registry', 'package-dir', 'replays']) if (!a[k]) throw new Error(`run needs --${k}`);
       return await run({ tasks: a.tasks, work: a.work, registry: a.registry, packageDir: a['package-dir'], replays: Number(a.replays),
-        slots: Number(a.slots || 1), model: a.model || 'opus', only: a.only, watch: a.watch, minutes: Number(a.minutes || 45), slotRoot: a['slot-root'] });
+        slots: Number(a.slots || 1), model: a.model || 'opus', only: a.only, watch: a.watch, minutes: Number(a.minutes || 45), slotRoot: a['slot-root'],
+        declare: a.declare === true, project: a.project });
     }
     if (cmd === 'score') {
       for (const k of ['tasks', 'work', 'design']) if (!a[k]) throw new Error(`score needs --${k}`);
@@ -553,4 +679,4 @@ async function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2)).then(c => process.exit(c));
-module.exports = { scoreReplay, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };
+module.exports = { injectionReading, placeDeclared, slotSetup, moveScopeRecords, scoreReplay, sweepSlotMemory, thresholdVerdict, spreadOf, jobFeatures, loadTasks, METRICS, main };

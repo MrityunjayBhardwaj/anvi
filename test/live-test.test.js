@@ -179,6 +179,40 @@ const score = (o) => LT.scoreReplay({ calls: [], changed: [], componentOf: of, h
   ok(sweepSlotMemory(slot, path.join(DIR, 'keep2'), projects).length === 0, 'the next replay in the slot starts with no memory');
 }
 
+console.log('a declared replay: what the injection said, and what the first edit did with it (#788)');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anvi-lt-inj-'));
+  const PKG = '/slot/packages/editor';
+  const comp = abs => abs.startsWith(PKG + '/src/engine/') ? 'engine' : abs.startsWith(PKG + '/src/visualizers/') ? 'visualizers' : null;
+  // The block as Claude Code records it: the hook's stdout, JSON, inside an attachment record.
+  const hookRec = block => ({ type: 'attachment', attachment: { type: 'hook_success', hookEvent: 'SessionStart',
+    stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: block } }) } });
+  let n = 0;
+  const say = text => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+  const edit = (file, err) => { const id = `e${++n}`; return [{ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Edit', input: { file_path: file } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, ...(err ? { is_error: true } : {}), content: err ? 'BLOCKED' : 'ok' }] } }]; };
+  const put = (name, recs) => { const f = path.join(dir, name); fs.writeFileSync(f, recs.map(r => JSON.stringify(r)).join('\n') + '\n'); return f; };
+  const HOME = 'TASK AREA — t11 — a sketch reads the loaded sounds\n  outcome: HOME engine under the resources view — nearest ruled job sound/load-samples at 0.120\n  Cite the owner and door you use in your first edit of this area.';
+
+  const cited = LT.injectionReading([put('a.jsonl', [hookRec(HOME), say('The engine owns sound loading, so I add a door there.'), ...edit(PKG + '/src/engine/loaded.ts')])], comp);
+  ok(cited.outcome === 'HOME' && cited.owners.join() === 'engine', `the block is found inside the hook's stdout and read as HOME engine (${cited.outcome} ${cited.owners})`);
+  ok(cited.inOwner === true && cited.textNamesOwner === true, 'a first edit in the owner, after text naming it: in owner yes, names the owner yes');
+
+  const away = LT.injectionReading([put('b.jsonl', [hookRec(HOME), say('I will read soundMap from the sketch.'), ...edit(PKG + '/src/engine/x.ts', true), ...edit(PKG + '/src/visualizers/s.ts')])], comp);
+  ok(away.firstEdit && away.firstEdit.component === 'visualizers' && away.inOwner === false && away.textNamesOwner === false,
+     `a refused edit is not the first edit; the first applied one, elsewhere, with no owner named: no and no (${JSON.stringify(away)})`);
+
+  const split = LT.injectionReading([put('c.jsonl', [hookRec('TASK AREA — t\n  outcome: SPLIT along ownership — engine: door src/engine/load.ts#load · visualizers (seeded): door NONE RULED'), ...edit(PKG + '/src/visualizers/s.ts')])], comp);
+  ok(split.outcome === 'SPLIT' && split.owners.join() === 'engine,visualizers' && split.inOwner === true, `SPLIT names both owners, and an edit in either is in an owner (${split.owners})`);
+
+  const tell = LT.injectionReading([put('d.jsonl', [hookRec("TASK AREA — couldn't tell\n  outcome: COULDN'T TELL (no task) — nothing declared"), ...edit(PKG + '/src/engine/a.ts')])], comp);
+  ok(tell.outcome === "COULDN'T TELL" && tell.owners.length === 0 && tell.inOwner === null && tell.textNamesOwner === null, "couldn't tell names no owner, and the first edit is not judged against one (null, not no)");
+
+  const none = LT.injectionReading([put('e.jsonl', [say('hello'), ...edit(PKG + '/src/engine/a.ts')])], comp);
+  ok(none.outcome === 'NO BLOCK', 'a transcript with no block says NO BLOCK, never HOME or a silent pass');
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
