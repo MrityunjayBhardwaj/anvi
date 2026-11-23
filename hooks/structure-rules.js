@@ -93,11 +93,32 @@ const shellWord = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // to lock in) and by the hook (a refusal to grandfather, or a repair to lock in), and built here
 // once so the two remedies cannot drift apart. `script` is inserted as given — the hook names
 // the installed copy through `~`, which must stay unquoted for the shell to expand it.
-function baselineCommand({ script, source, design, extractor, baseline, allowGrowth = false, ref }) {
-  return `node ${script} ${source[0]} ${shellWord(source[1])} --design ${shellWord(design)}` +
+//
+// NEVER OVER A LOCKED BASELINE (#791). A baseline in the root-owned lock directory is the one the
+// owner reviewed and promoted; a runnable line writing over it would put re-baselining one paste
+// (or one agent following printed advice) away, with root ownership the only thing left in the
+// way. So when `lock` is given and the baseline lies inside it, the command writes a PROPOSAL
+// outside the lock (`proposalDir`), and a second line names the owner's step that puts it in
+// force: `structure-lock.js promote`, which shows a digest and installs only as root. `real`
+// resolves symlinks when the caller can (the rules stay free of the filesystem).
+const insideDir = (file, dir, real = p => p) => {
+  if (!file || !dir) return false;
+  const rel = require('path').relative(real(dir), real(file));
+  return rel !== '' && !rel.startsWith('..') && !require('path').isAbsolute(rel);
+};
+function baselineCommand({ script, source, design, extractor, baseline, allowGrowth = false, ref, lock = null, proposalDir = null, real }) {
+  const locked = insideDir(baseline, lock, real);
+  const out = locked
+    ? require('path').join(proposalDir || require('path').join(require('os').homedir(), '.claude', 'structure-guard-cache', 'baseline-proposals'), `${require('path').basename(require('path').dirname(baseline))}-baseline.json`)
+    : baseline;
+  const cmd = `node ${script} ${source[0]} ${shellWord(source[1])} --design ${shellWord(design)}` +
     (extractor ? ` --extractor ${shellWord(extractor)}` : '') + (ref ? ` --ref ${shellWord(ref)}` : '') +
-    ` --baseline ${shellWord(baseline)} --write-baseline ${shellWord(baseline)}` +
+    ` --baseline ${shellWord(baseline)} --write-baseline ${shellWord(out)}` +
     (allowGrowth ? ' --allow-growth' : '');
+  if (!locked) return cmd;
+  return cmd + `\n    (The baseline in force is in the root-owned lock, ${lock}: this writes a proposal outside it, never over it. ` +
+    `To put the proposal in force, point the user registry's entry for this package at it; the owner then runs ` +
+    `structure-lock.js promote --package ${shellWord(source[0] === '--package' ? source[1] : '<package dir>')}, which shows a digest and installs only as root.)`;
 }
 
 // ── the design id (#535) ─────────────────────────────────────────────────────────────

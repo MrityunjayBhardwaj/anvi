@@ -210,7 +210,8 @@ function proposedContent(toolName, input, readFile) {
 function baselineCommand(pkgDir, entry, allowGrowth, worktree) {
   const cmd = require('./structure-rules.js').baselineCommand({
     script: '~/.claude/anvi/scripts/structure-guard.js', source: ['--package', pkgDir],
-    design: entry.design, extractor: entry.extractor, baseline: entry.baseline, allowGrowth });
+    design: entry.design, extractor: entry.extractor, baseline: entry.baseline, allowGrowth,
+    lock: LOCK.lockDir(), real: p => { try { return fs.realpathSync(p); } catch { return p; } } });
   return worktreeNote(worktree) + `  ${cmd}`;
 }
 

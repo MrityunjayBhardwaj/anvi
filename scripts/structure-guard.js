@@ -91,6 +91,7 @@ function loadFromCandidates(name) {
   throw new Error(`cannot locate ${name} in ${candidates.join(' | ')}`);
 }
 const R = loadFromCandidates('structure-rules.js');
+const LOCK = loadFromCandidates('structure-lock.js');
 const { RULES, loadGraph, notMeasured, judge, ratchet, planBaseline, edgeKey, shellWord, baselineCommand, designCheck, designProblem, designVersions, designId, componentOf, retiredSections, byPair } = R;
 
 function readJson(file, what) {
@@ -498,6 +499,8 @@ function main(argv) {
       extractor: args.extractor && path.resolve(args.extractor),
       baseline: path.resolve(args.baseline),
       allowGrowth,
+      lock: LOCK.lockDir(),
+      real: p => { try { return fs.realpathSync(p); } catch { return p; } },
     });
   }
 
@@ -715,6 +718,8 @@ function main(argv) {
       print(`\n  design changed since the previous baseline: ${previous.designId} → ${frame.id}`);
     plan.baseline = { designId: frame.id, ...plan.baseline };
     plan.baseline.measured = { modules: graph.modules.size, edges: graph.edges.length, written: new Date().toISOString() };
+    // A proposal written outside the lock (#791) may name a folder not made yet.
+    fs.mkdirSync(path.dirname(path.resolve(args['write-baseline'])), { recursive: true });
     fs.writeFileSync(args['write-baseline'], JSON.stringify(plan.baseline, null, 1) + '\n');
     print(`\n  baseline written: ${RULES.map(r => plan.baseline.rules[r] ? `${plan.baseline.rules[r].length} ${r}` : `${r} not measured`).join(', ')} · design ${frame.id}`);
     return 0;
