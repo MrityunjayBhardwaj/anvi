@@ -90,6 +90,30 @@ console.log('\nREFUSALS — an outcome column, never a cost');
      `a rewrite after a refusal: the guard is reopened (got ${w.code})`);
 }
 
+// ── A violation the guard reports NEW in the final tree (#793) ─────────────────────────
+// The real case: t11 replay 3 was refused, then landed the edge through the shell. Scored "reuse"
+// (or "abandon"), the judge used to pass it; the guard's own reading must reopen the guard.
+{
+  const E = 'src/engine/StrudelEngine.ts -> src/visualizers/loadedSounds.ts';
+  const clean = [rep({ guardAdded: [] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })];
+  const reuse = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ refusals: [{ outcome: 'reuse' }], guardAdded: [E] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
+  ok(reuse.code === 1 && /LANDED|landed a violation the guard had refused/.test(task(reuse.out, 't1')) && task(reuse.out, 't1').includes(E) && /REOPEN THE GUARD:\s+t1/.test(reuse.out),
+     `a violation landed after a refusal scored "reuse" reopens the guard, naming the edge (got ${reuse.code})`);
+  const aband = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ refusals: [{ outcome: 'abandon' }], guardAdded: [E] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
+  ok(aband.code === 1, `and so does one scored "abandon" (got ${aband.code})`);
+  const none = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ guardAdded: [E] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
+  ok(none.code === 1 && /a refusal that failed to fire, reopens the GUARD/.test(task(none.out, 't1')),
+     `a NEW violation with no refusal at all is a refusal that failed to fire (got ${none.code})`);
+  const zero = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ refusals: [{ outcome: 'reuse' }], guardAdded: [] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
+  ok(zero.code !== 1 && /guard NEW\s+after: 0 over 3 replay\(s\) read/.test(task(zero.out, 't1')) && !/NOT MEASURED — not 0/.test(task(zero.out, 't1')),
+     `zero NEW is said as 0 over 3 read, and does not flag (got ${zero.code})`);
+  const unread = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: steady } }), ruled(5));
+  ok(unread.code !== 1 && /guard NEW\s+after: 0 over 0 replay\(s\) read · 3 of 3 not in the report \(NOT MEASURED — not 0\)/.test(task(unread.out, 't1')),
+     `a report with no reading says NOT MEASURED, never 0 (got ${unread.code})`);
+  const bad = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ guardAdded: 1 }), ...clean.slice(1)] } }), ruled(5));
+  ok(/"guardAdded" must be a list of violation keys/.test(bad.out), 'a malformed reading is not measured, never read as a count');
+}
+
 console.log('\nTHE FIRST PLACED MEASUREMENT IS A BASELINE');
 {
   const r = runJ(report('d0', { t1: { replays: [rep({ filesEdited: 1, outOfHome: 1 }), rep({ filesEdited: 1, outOfHome: 1 }), rep({ filesEdited: 1 })] } }),
@@ -122,30 +146,6 @@ console.log('\nTHE RECORD');
   ok(r.code === 1 && J.exit === 1 && J.ruling === 'row-12' && J.before === 'd0' && J.after === 'd1' && J.smallestEffect === 2 && /^[0-9a-f]{12}$/.test(J.settingsId),
      '--json records the ruling, both designs, the settings id, the effect and the exit');
   ok(J.tasks[0].flags.some(f => f.reopen === 'ruling' && f.why === 'filesEdited ROSE'), 'and the flag with its reason');
-}
-
-// ── A violation the guard reports NEW in the final tree (#793) ─────────────────────────
-// The real case: t11 replay 3 was refused, then landed the edge through the shell. Scored "reuse"
-// (or "abandon"), the judge used to pass it; the guard's own reading must reopen the guard.
-{
-  const E = 'src/engine/StrudelEngine.ts -> src/visualizers/loadedSounds.ts';
-  const clean = [rep({ guardAdded: [] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })];
-  const reuse = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ refusals: [{ outcome: 'reuse' }], guardAdded: [E] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
-  ok(reuse.code === 1 && /LANDED|landed a violation the guard had refused/.test(task(reuse.out, 't1')) && task(reuse.out, 't1').includes(E) && /REOPEN THE GUARD:\s+t1/.test(reuse.out),
-     `a violation landed after a refusal scored "reuse" reopens the guard, naming the edge (got ${reuse.code})`);
-  const aband = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ refusals: [{ outcome: 'abandon' }], guardAdded: [E] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
-  ok(aband.code === 1, `and so does one scored "abandon" (got ${aband.code})`);
-  const none = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ guardAdded: [E] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
-  ok(none.code === 1 && /a refusal that failed to fire, reopens the GUARD/.test(task(none.out, 't1')),
-     `a NEW violation with no refusal at all is a refusal that failed to fire (got ${none.code})`);
-  const zero = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ refusals: [{ outcome: 'reuse' }], guardAdded: [] }), rep({ guardAdded: [] }), rep({ guardAdded: [] })] } }), ruled(5));
-  ok(zero.code !== 1 && /guard NEW\s+after: 0 over 3 replay\(s\) read/.test(task(zero.out, 't1')) && !/NOT MEASURED — not 0/.test(task(zero.out, 't1')),
-     `zero NEW is said as 0 over 3 read, and does not flag (got ${zero.code})`);
-  const unread = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: steady } }), ruled(5));
-  ok(unread.code !== 1 && /guard NEW\s+after: 0 over 0 replay\(s\) read · 3 of 3 not in the report \(NOT MEASURED — not 0\)/.test(task(unread.out, 't1')),
-     `a report with no reading says NOT MEASURED, never 0 (got ${unread.code})`);
-  const bad = runJ(report('d0', { t1: { replays: steady } }), report('d1', { t1: { replays: [rep({ guardAdded: 1 }), ...clean.slice(1)] } }), ruled(5));
-  ok(/"guardAdded" must be a list of violation keys/.test(bad.out), 'a malformed reading is not measured, never read as a count');
 }
 
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
