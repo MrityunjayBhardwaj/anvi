@@ -495,6 +495,9 @@ function score(o) {
     const spreads = Object.fromEntries(METRICS.map(m => [m, spreadOf(placed.map(r => r[m]))]));
     report.tasks[t.id] = { home: t.home.components, replays: replays.map(r => ({ ...Object.fromEntries(JUDGE_FIELDS.map(k => [k, r[k]])), refusals: r.refusals.map(x => ({ outcome: x.outcome })) })) };
     lines.push('');
+    // What the final tree's guard reports NEW, per replay, for the judge (#793): null when it
+    // could not be measured, never 0.
+    report.tasks[t.id].replays.forEach((x, i) => { x.guardAdded = replays[i].guardAdded == null ? null : [...replays[i].guardAdded]; });
     lines.push(`TASK ${t.id} — ${t.title || ''}`);
     lines.push(`  base ${t.base} · home: ${t.home.components.join(' + ')} — ${t.home.method || ''}${t.home.ledgerPlace ? ` · the ledger's PLACE: ${t.home.ledgerPlace.outcome} ${t.home.ledgerPlace.owners.join('+')}` : ''}`);
     if (t.home.disagreement) lines.push(`  DISAGREES with the merged PR: ${t.home.disagreement}`);
