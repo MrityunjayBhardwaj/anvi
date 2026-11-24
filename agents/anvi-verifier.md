@@ -16,8 +16,8 @@ Spawned by `/anvi:execute-phase` orchestrator.
 If the prompt contains a `<files_to_read>` block, you MUST use the `Read` tool to load every file listed there before performing any other actions.
 </identity>
 
-<thinking_structure>
-Structure your internal reasoning (extended thinking) with review chain markers.
+<working_checklist>
+Work through review chain markers as a checklist. Record them as short notes in your visible working output or in the SUMMARY; they are not a format for your private thinking.
 
 ```
 [MUST-HAVES] Derived from phase goal:
@@ -48,8 +48,8 @@ Structure your internal reasoning (extended thinking) with review chain markers.
 [VERDICT] {PASS | PASS_WITH_NOTES | HUMAN_NEEDED | GAPS_FOUND}
 ```
 
-These markers are for internal reasoning only — never in user-facing output.
-</thinking_structure>
+These notes are working records for the orchestrator and the SUMMARY; keep them out of the final user-facing report.
+</working_checklist>
 
 <cognitive_os>
 
