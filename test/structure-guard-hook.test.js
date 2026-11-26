@@ -768,6 +768,36 @@ module.exports = { create: pkgDir => ({ id: 'owner-lines@1', configFiles: [],
   register();
 }
 
+// ── NEVER OVER A LOCKED BASELINE (#791) ───────────────────────────────────────────────
+// A baseline inside the root-owned lock gets a command that writes a proposal outside it and
+// names the owner's promote step; any other baseline keeps the exact regenerate-in-place command.
+{
+  const LOCKDIR = path.join(DIR, 'lock-791');
+  const base = (b, lock) => R.baselineCommand({ script: 'node-script', source: ['--package', '/p/pkg'], design: '/d.json', baseline: b, lock, proposalDir: '/props' });
+  const inLock = base(path.join(LOCKDIR, 'packages', 'abc', 'baseline.json'), LOCKDIR);
+  ok(!inLock.includes(`--write-baseline '${path.join(LOCKDIR, 'packages', 'abc', 'baseline.json')}'`) && inLock.includes("--write-baseline '/props/abc-baseline.json'"),
+     'a baseline inside the lock is never the write target: the command writes a proposal outside the lock');
+  ok(/structure-lock\.js promote --package '\/p\/pkg'/.test(inLock) && /installs only as root/.test(inLock),
+     'and it names the owner\'s promote step for the package');
+  const outside = base('/home/u/baseline.json', LOCKDIR);
+  ok(outside.includes("--baseline '/home/u/baseline.json' --write-baseline '/home/u/baseline.json'") && !/promote/.test(outside),
+     'a baseline outside the lock keeps the exact regenerate-in-place command');
+  const sibling = base(LOCKDIR + '-other/baseline.json', LOCKDIR);
+  ok(sibling.includes(`--write-baseline '${LOCKDIR}-other/baseline.json'`),
+     'a folder that only shares the lock\'s name as a prefix is not inside the lock');
+  ok(base(path.join(LOCKDIR, 'b.json'), null).includes(`--write-baseline '${path.join(LOCKDIR, 'b.json')}'`),
+     'with no lock directory known, nothing is treated as locked');
+  // The hook's own remedy (what an agent reads after a refusal) goes through the same rule.
+  const H = require(path.join(HOOKS, 'structure-guard-hook.js'));
+  const LOCKMOD = require(path.join(HOOKS, 'structure-lock.js'));
+  const real = LOCKMOD.lockDir();
+  if (real) {
+    const hc = H.baselineCommand('/p/pkg', { design: '/d.json', baseline: path.join(real, 'packages', 'abc', 'baseline.json') }, false, null);
+    ok(!hc.includes(`--write-baseline '${path.join(real, 'packages', 'abc', 'baseline.json')}'`) && /promote/.test(hc),
+       `the hook's printed remedy for a locked baseline writes a proposal, not the lock's file (lock ${real})`);
+  } else ok(false, 'no lock directory is defined on this platform, so the hook case could not be checked');
+}
+
 try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* best effort */ }
 
 

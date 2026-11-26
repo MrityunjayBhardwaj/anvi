@@ -2029,7 +2029,10 @@ loosened until it stops firing guards nothing.
   design has no arrow to declare, so there it is the only way to keep a deliberate cycle. The refusal prints the
   exact command, built from the registry entry it judged against (`--package`, `--design`,
   `--extractor` when registered, `--baseline` and `--write-baseline` on the same file,
-  `--allow-growth`). `--package` names the registered checkout, never a worktree the edit
+  `--allow-growth`). The one exception is a baseline in the root-owned lock directory: there
+  `--write-baseline` names a proposal under `~/.claude/structure-guard-cache/baseline-proposals/`
+  instead, and a second line names the owner's `structure-lock.js promote` step, so no printed
+  line writes over the baseline the owner reviewed (#791). `--package` names the registered checkout, never a worktree the edit
   was made in (#560), and the baseline is measured from the default branch (#562), so running
   that command before the import has merged records nothing — observed: it reports "baseline
   written: 0 layer" (today: "0 divergence") and the same edit is refused again. An edit in a
