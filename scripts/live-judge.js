@@ -91,7 +91,7 @@ function compare(b, a, effect, n) {
   return { verdict: 'underpowered', why: `the spreads overlap${effect == null ? ' and the smallest effect is not ruled' : ''}`, B, A };
 }
 
-function judgeTask(name, before, after, effect) {
+function judgeTask(name, before, after, effect, radiusComparable = true) {
   const out = { task: name, flags: [], lines: [], verdicts: {} };
   const pb = taskProblem(before, 'before'), pa = taskProblem(after, 'after');
   if (pb || pa) { out.notMeasured = [pb, pa].filter(Boolean).join('; '); return out; }
@@ -132,7 +132,7 @@ function judgeTask(name, before, after, effect) {
   for (const k of COST) {
     const c = compare(rb.map(r => r[k]), ra.map(r => r[k]), effect, n);
     out.verdicts[k] = c.verdict;
-    const extra = k === 'outsideRadius' ? ` · radius ${fmt(range(rb.map(r => r.radiusSize)))} → ${fmt(range(ra.map(r => r.radiusSize)))}, widenings ${fmt(range(rb.map(r => r.widenings)))} → ${fmt(range(ra.map(r => r.widenings)))}` : '';
+    const extra = k === 'outsideRadius' ? ` · radius ${radiusComparable ? `${fmt(range(rb.map(r => r.radiusSize)))} → ${fmt(range(ra.map(r => r.radiusSize)))}` : 'NOT COMPARABLE (the two reports size it in different units)'}, widenings ${fmt(range(rb.map(r => r.widenings)))} → ${fmt(range(ra.map(r => r.widenings)))}` : '';
     out.lines.push(`${k.padEnd(18)} ${fmt(c.B)} → ${fmt(c.A)}   ${c.verdict === 'underpowered' ? `underpowered, ${n} replays` : c.verdict}${c.why ? ` (${c.why})` : ''}${extra}`);
     if (c.verdict === 'RISE') out.flags.push({ reopen: 'ruling', why: `${k} ROSE` });
   }
@@ -142,7 +142,9 @@ function judgeTask(name, before, after, effect) {
 
 function judge(before, after, effect) {
   const names = [...new Set([...Object.keys(before.tasks || {}), ...Object.keys(after.tasks || {})])].sort();
-  return names.map(n => judgeTask(n, (before.tasks || {})[n], (after.tasks || {})[n], effect));
+  // A report with no radiusUnit was scored before #785, with the radius in another unit.
+  const radiusComparable = (before.radiusUnit || null) === (after.radiusUnit || null);
+  return names.map(n => judgeTask(n, (before.tasks || {})[n], (after.tasks || {})[n], effect, radiusComparable));
 }
 
 function parse(argv) {

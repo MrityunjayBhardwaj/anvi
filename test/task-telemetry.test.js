@@ -30,7 +30,8 @@ const PKG = path.join(tmp, 'repo', 'pkg');
 const TRANSCRIPTS = path.join(tmp, 'projects');
 const METER = path.join(tmp, 'meter');
 for (const d of ['src/alpha', 'src/beta', 'src/gamma']) fs.mkdirSync(path.join(PKG, d), { recursive: true });
-for (const f of ['src/alpha/a.ts', 'src/beta/b.ts', 'src/gamma/g.ts']) fs.writeFileSync(path.join(PKG, f), 'export const x = 1;\n');
+// alpha holds two files, so a radius sized in components (1) and one sized in files (2) differ (#785).
+for (const f of ['src/alpha/a.ts', 'src/alpha/a2.ts', 'src/beta/b.ts', 'src/gamma/g.ts', 'src/scratch.ts', 'src/types.d.ts']) fs.writeFileSync(path.join(PKG, f), 'export const x = 1;\n');
 spawnSync('git', ['init', '-q', path.join(tmp, 'repo')]);
 const DESIGN = path.join(tmp, 'design.json');
 fs.writeFileSync(DESIGN, JSON.stringify({ root: 'src', components: {
@@ -86,9 +87,18 @@ for (const [i, fp] of [[1, path.join(tmp, 'gone-checkout', 'pkg', 'src', 'alpha'
 }
 fs.writeFileSync(path.join(proj, `${THIRD}.jsonl`), third.map(r => JSON.stringify(r)).join('\n') + '\n');
 
+// A fourth session edits a file the design maps to no component (a scratch file under the root).
+const FOURTH = 'eeeeeeee-0000-4000-8000-000000000005';
+const fourth = [];
+for (const [i, fp] of [[1, P('src/scratch.ts')], [2, P('src/beta/b.ts')]]) {
+  fourth.push({ type: 'assistant', timestamp: `2026-11-05T13:0${i}:00Z`, sessionId: FOURTH, message: { content: [{ type: 'tool_use', id: `s${i}`, name: 'Edit', input: { file_path: fp } }] } });
+  fourth.push({ type: 'user', timestamp: `2026-11-05T13:0${i}:00Z`, sessionId: FOURTH, message: { content: [{ type: 'tool_result', tool_use_id: `s${i}`, content: 'ok' }] } });
+}
+fs.writeFileSync(path.join(proj, `${FOURTH}.jsonl`), fourth.map(r => JSON.stringify(r)).join('\n') + '\n');
+
 // A window reads only transcripts written to since it began: date them inside it, whatever the clock says.
 const written = new Date('2026-11-05T11:00:00Z');
-for (const f of [path.join(proj, `${SID}.jsonl`), path.join(proj, `${OTHER}.jsonl`), path.join(proj, `${THIRD}.jsonl`), path.join(proj, SID, 'subagents', 'agent-x.jsonl')]) fs.utimesSync(f, written, written);
+for (const f of [path.join(proj, `${SID}.jsonl`), path.join(proj, `${OTHER}.jsonl`), path.join(proj, `${THIRD}.jsonl`), path.join(proj, `${FOURTH}.jsonl`), path.join(proj, SID, 'subagents', 'agent-x.jsonl')]) fs.utimesSync(f, written, written);
 
 // The meter's rows: the guard and the Bash hook each refused once.
 fs.writeFileSync(path.join(METER, `${SID}.jsonl`), [
@@ -113,11 +123,22 @@ console.log('1. the seeded out-of-radius edit is counted exactly once');
   ok(r.task && r.task.outside_radius === 1, `outside_radius is 1 file (got ${r.task && r.task.outside_radius})`);
   ok(r.task && r.task.outside_radius_edit_calls === 1, `from 1 applied edit call (got ${r.task && r.task.outside_radius_edit_calls})`);
   ok(r.task && r.task.outside_radius_list.length === 1 && r.task.outside_radius_list[0].file === 'src/beta/b.ts', 'the list names src/beta/b.ts once');
-  ok(/outside_radius: 1 files \(1 applied edit calls\) of 3 applied edits judged · radius_size 1 \(1 at start\) · widenings 0/.test(r.out), 'radius size and widenings print beside the count');
+  ok(/outside_radius: 1 files \(1 applied edit calls\) of 3 applied edits judged · radius_size 2 files \(2 at start\) · widenings 0/.test(r.out), `radius size, in files, and widenings print beside the count (${(r.out.match(/outside_radius:[^\n]*/) || [''])[0]})`);
+  ok(r.task && r.task.radius_size === 2, `radius_size counts the radius component's source files, not the component: alpha holds 2 (got ${r.task && r.task.radius_size})`);
   const inRadius = run('--session', SID, '--radius', 'alpha,beta');
   ok(inRadius.status === 0 && inRadius.task.outside_radius === 0, `with beta in the radius nothing is outside, exit 0 (got ${inRadius.status}, ${inRadius.task && inRadius.task.outside_radius})`);
   const byFile = run('--session', SID, '--radius', 'alpha,src/beta/b.ts');
-  ok(byFile.task && byFile.task.outside_radius === 0 && byFile.task.radius_size === 2, 'a file in the radius is matched by its path in the package');
+  ok(byFile.task && byFile.task.outside_radius === 0 && byFile.task.radius_size === 3, `a file in the radius is matched by its path in the package, and adds one file to the size (got ${byFile.task && byFile.task.radius_size})`);
+}
+
+console.log('1b. a file in no component is listed apart, never outside the radius (#785)');
+{
+  const r = run('--session', FOURTH, '--radius', 'alpha');
+  ok(r.task && r.task.outside_radius === 1 && r.task.outside_radius_list.map(o => o.file).join() === 'src/beta/b.ts',
+     `only the edit to another component is outside (got ${r.task && r.task.outside_radius}: ${r.task && JSON.stringify(r.task.outside_radius_list)})`);
+  ok(r.task && r.task.outside_radius_unjudged === 1 && r.task.outside_radius_unjudged_list[0].file === 'src/scratch.ts' && r.task.outside_radius_unjudged_list[0].component === 'in no component',
+     'the scratch file is counted apart, as in no component');
+  ok(/in no component 1 \(not judged against the radius\)/.test(r.out) && /∘ [^\n]*src\/scratch\.ts \[in no component\]/.test(r.out), 'and printed apart, by name');
 }
 
 console.log('2. no radius is never defaulted');
@@ -131,8 +152,8 @@ console.log('2. no radius is never defaulted');
 console.log('3. widening is judged at each edit\'s time and counted');
 {
   const before = run('--session', SID, '--radius', 'alpha', '--widen', '2026-11-05T10:02:30Z=beta');
-  ok(before.task && before.task.outside_radius === 0 && before.task.widenings === 1 && before.task.radius_size === 2 && before.task.radius_size_at_start === 1,
-    `widened before the edit: 0 outside, radius 1 → 2, 1 widening (got ${before.task && [before.task.outside_radius, before.task.radius_size_at_start, before.task.radius_size, before.task.widenings]})`);
+  ok(before.task && before.task.outside_radius === 0 && before.task.widenings === 1 && before.task.radius_size === 3 && before.task.radius_size_at_start === 2,
+    `widened before the edit: 0 outside, radius 2 → 3 files, 1 widening (got ${before.task && [before.task.outside_radius, before.task.radius_size_at_start, before.task.radius_size, before.task.widenings]})`);
   const after = run('--session', SID, '--radius', 'alpha', '--widen', '2026-11-05T10:03:30Z=beta');
   ok(after.task && after.task.outside_radius === 1 && after.task.widenings === 1, 'widened after the edit: still 1 outside');
 }
@@ -157,7 +178,7 @@ console.log('5. a subagent belongs to its session; another session does not leak
   ok(t.task.transcripts === 2, `2 transcripts in the task (got ${t.task.transcripts})`);
   ok(json.tasks.length === 1, 'one task for one session');
   const win = run('--since', '2026-11-05T00:00:00Z');
-  ok(win.json && win.json.tasks.length === 3, `the window holds the three sessions as three tasks (got ${win.json && win.json.tasks.length})`);
+  ok(win.json && win.json.tasks.length === 4, `the window holds the four sessions as four tasks (got ${win.json && win.json.tasks.length})`);
 }
 
 console.log('5b. a checkout that no longer exists is not the package');
