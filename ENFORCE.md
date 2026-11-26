@@ -2292,6 +2292,11 @@ Its exit code is the flag, so nobody has to read the numbers for it to fire.
   Otherwise it is **MISPLACED** and reopens the ruling.
 - **A refusal answered by a rewrite** is sprawl caused by the guard, and reopens the guard.
   Refusals are counted with their outcomes (reuse, rewrite, abandon) and never summed into cost.
+- **A violation the guard reports NEW in the final tree** reopens the guard too, whatever the
+  refusal's outcome was scored: after a refusal it landed by another door (the shell), and with
+  no refusal it is one that failed to fire (#793). The live-test report carries it per replay as
+  `guardAdded` (null when the score had no `--registry`/`--package-dir`); the judge says the
+  count every time, zero included, and counts an unread replay apart as NOT MEASURED, never 0.
 - **Principled cost only against principled cost.** A task misplaced before and placed now is a
   **BASELINE**, the first placed measurement, and is compared to nothing, even if it costs more.
 - **Cost, range against range** over the replays: files read, files edited, components touched,

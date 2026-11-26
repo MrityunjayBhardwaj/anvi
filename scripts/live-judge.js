@@ -16,6 +16,7 @@
 //          the GUARD, not the ruling, and it is never printed as an improvement;
 //        - otherwise it is MISPLACED, and it reopens the RULING.
 //   2. A refusal answered by a rewrite is sprawl caused by the guard (rule 2): a flag on the guard.
+//      So is a violation the guard reports NEW in the final tree (#793), after a refusal or with none.
 //   3. Principled cost only among placed tasks, and only against principled cost (rule 5): a task
 //      that was misplaced before and is placed now is a BASELINE — the first placed measurement —
 //      and is compared to nothing.
@@ -36,7 +37,8 @@
 //       "replays": [ { "inHome": <edits in the home>, "outOfHome": <edits writing the job elsewhere>,
 //                      "filesRead": n, "filesEdited": n, "componentsTouched": n, "attempts": n,
 //                      "outsideRadius": n, "radiusSize": n, "widenings": n,
-//                      "refusals": [ { "outcome": "reuse" | "rewrite" | "abandon" } ] }, … ] } } }
+//                      "refusals": [ { "outcome": "reuse" | "rewrite" | "abandon" } ],
+//                      "guardAdded": [ "<violation key>", … ] | null }, … ] } } }   (optional; null = not measured)
 // The two reports must hold the same tasks: the task set is fixed. A missing task, a replay
 // missing a field, or fewer than two replays is NOT MEASURED for that task, never a pass.
 //
@@ -70,6 +72,8 @@ function replayProblem(r, i) {
   if (!Array.isArray(r.refusals)) return `replay ${i + 1}: "refusals" must be a list`;
   const bad = r.refusals.find(x => !x || !OUTCOMES.has(x.outcome));
   if (bad) return `replay ${i + 1}: a refusal's outcome must be reuse, rewrite or abandon, got ${JSON.stringify(bad && bad.outcome)}`;
+  if (r.guardAdded != null && !(Array.isArray(r.guardAdded) && r.guardAdded.every(k => typeof k === 'string')))
+    return `replay ${i + 1}: "guardAdded" must be a list of violation keys, or null when not measured, got ${JSON.stringify(r.guardAdded)}`;
   return null;
 }
 function taskProblem(t, side) {
@@ -119,6 +123,24 @@ function judgeTask(name, before, after, effect, radiusComparable = true) {
   if (rewrites) {
     out.flags.push({ reopen: 'guard', why: 'REWRITE AFTER REFUSAL' });
     out.lines.push(`SPRAWL      ${rewrites} refusal(s) answered by a rewrite: sprawl caused by the guard — reopens the GUARD`);
+  }
+  // 2b. A violation the guard reports NEW in the final tree (#793). It landed although the guard
+  // exists to refuse it — through the shell after a refusal, or by a write the edit-time guard
+  // never met — so it reopens the GUARD whatever the refusal's outcome was scored. Said every
+  // time, zero included; a replay whose report has no reading is counted apart, never as 0.
+  const known = ra.filter(r => Array.isArray(r.guardAdded));
+  const unread = ra.length - known.length;
+  const landed = known.filter(r => r.guardAdded.length);
+  out.lines.push(`guard NEW   after: ${known.reduce((s, r) => s + r.guardAdded.length, 0)} over ${known.length} replay(s) read` +
+    (unread ? ` · ${unread} of ${ra.length} not in the report (NOT MEASURED — not 0)` : ''));
+  const afterRefusal = landed.filter(r => r.refusals.length), unrefused = landed.filter(r => !r.refusals.length);
+  if (afterRefusal.length) {
+    out.flags.push({ reopen: 'guard', why: 'LANDED AFTER A REFUSAL' });
+    out.lines.push(`SPRAWL      ${afterRefusal.length} replay(s) landed a violation the guard had refused (${afterRefusal.map(r => r.guardAdded.join('; ')).join(' | ')}) — reopens the GUARD, whatever the refusal's outcome was scored`);
+  }
+  if (unrefused.length) {
+    out.flags.push({ reopen: 'guard', why: 'NEW WITH NO REFUSAL' });
+    out.lines.push(`SPRAWL      ${unrefused.length} replay(s) landed a violation no refusal met (${unrefused.map(r => r.guardAdded.join('; ')).join(' | ')}) — a refusal that failed to fire, reopens the GUARD`);
   }
   if (misA) return out;                         // cost is read only among placed tasks
 
